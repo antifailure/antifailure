@@ -1,0 +1,1258 @@
+{
+ "resourceSpans": [
+  {
+   "scopeSpans": [
+    {
+     "spans": [
+      {
+       "name": "GET /health",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228000000000000",
+       "endTimeUnixNano": "1788228000001000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/health"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /health",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228000100000000",
+       "endTimeUnixNano": "1788228000102000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/health"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /health",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228000200000000",
+       "endTimeUnixNano": "1788228000203000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/health"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /health",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228000300000000",
+       "endTimeUnixNano": "1788228000301000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/health"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /health",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228000400000000",
+       "endTimeUnixNano": "1788228000402000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/health"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /health",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228000500000000",
+       "endTimeUnixNano": "1788228000503000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/health"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /health",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228000600000000",
+       "endTimeUnixNano": "1788228000601000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/health"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /health",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228000700000000",
+       "endTimeUnixNano": "1788228000702000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/health"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /health",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228000800000000",
+       "endTimeUnixNano": "1788228000803000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/health"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /health",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228000900000000",
+       "endTimeUnixNano": "1788228000901000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/health"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /health",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228001000000000",
+       "endTimeUnixNano": "1788228001002000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/health"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /health",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228001100000000",
+       "endTimeUnixNano": "1788228001103000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/health"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /health",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228001200000000",
+       "endTimeUnixNano": "1788228001201000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/health"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /health",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228001300000000",
+       "endTimeUnixNano": "1788228001302000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/health"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /health",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228001400000000",
+       "endTimeUnixNano": "1788228001403000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/health"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /health",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228001500000000",
+       "endTimeUnixNano": "1788228001501000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/health"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /health",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228001600000000",
+       "endTimeUnixNano": "1788228001602000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/health"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /health",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228001700000000",
+       "endTimeUnixNano": "1788228001703000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/health"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /health",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228001800000000",
+       "endTimeUnixNano": "1788228001801000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/health"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /health",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228001900000000",
+       "endTimeUnixNano": "1788228001902000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/health"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /health",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228002000000000",
+       "endTimeUnixNano": "1788228002003000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/health"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /health",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228002100000000",
+       "endTimeUnixNano": "1788228002101000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/health"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /health",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228002200000000",
+       "endTimeUnixNano": "1788228002202000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/health"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /health",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228002300000000",
+       "endTimeUnixNano": "1788228002303000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/health"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /health",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228002400000000",
+       "endTimeUnixNano": "1788228002401000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/health"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228002000000000",
+       "endTimeUnixNano": "1788228002010000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228002001000000",
+       "endTimeUnixNano": "1788228002013000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228002002000000",
+       "endTimeUnixNano": "1788228002016000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228002200000000",
+       "endTimeUnixNano": "1788228002210000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228002201000000",
+       "endTimeUnixNano": "1788228002213000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228002202000000",
+       "endTimeUnixNano": "1788228002216000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228002400000000",
+       "endTimeUnixNano": "1788228002410000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228002401000000",
+       "endTimeUnixNano": "1788228002413000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228002402000000",
+       "endTimeUnixNano": "1788228002416000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228002600000000",
+       "endTimeUnixNano": "1788228002610000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228002601000000",
+       "endTimeUnixNano": "1788228002613000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228002602000000",
+       "endTimeUnixNano": "1788228002616000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228002800000000",
+       "endTimeUnixNano": "1788228002810000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228002801000000",
+       "endTimeUnixNano": "1788228002813000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228002802000000",
+       "endTimeUnixNano": "1788228002816000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228003000000000",
+       "endTimeUnixNano": "1788228003010000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228003001000000",
+       "endTimeUnixNano": "1788228003013000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228003002000000",
+       "endTimeUnixNano": "1788228003016000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228003200000000",
+       "endTimeUnixNano": "1788228003210000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228003201000000",
+       "endTimeUnixNano": "1788228003213000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228003202000000",
+       "endTimeUnixNano": "1788228003216000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228003400000000",
+       "endTimeUnixNano": "1788228003410000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228003401000000",
+       "endTimeUnixNano": "1788228003413000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228003402000000",
+       "endTimeUnixNano": "1788228003416000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228003600000000",
+       "endTimeUnixNano": "1788228003610000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228003601000000",
+       "endTimeUnixNano": "1788228003613000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228003602000000",
+       "endTimeUnixNano": "1788228003616000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228003800000000",
+       "endTimeUnixNano": "1788228003810000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228003801000000",
+       "endTimeUnixNano": "1788228003813000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /capture",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228003802000000",
+       "endTimeUnixNano": "1788228003816000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/capture"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /api/projects/{id}/insights",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228005000000000",
+       "endTimeUnixNano": "1788228005400000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "http.route",
+         "value": {
+          "stringValue": "/api/projects/{id}/insights"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /api/projects/{id}/insights",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228005300000000",
+       "endTimeUnixNano": "1788228005740000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "http.route",
+         "value": {
+          "stringValue": "/api/projects/{id}/insights"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /api/projects/{id}/insights",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228005600000000",
+       "endTimeUnixNano": "1788228006080000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "http.route",
+         "value": {
+          "stringValue": "/api/projects/{id}/insights"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /api/projects/{id}/insights",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228005900000000",
+       "endTimeUnixNano": "1788228006420000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "http.route",
+         "value": {
+          "stringValue": "/api/projects/{id}/insights"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /api/projects/{id}/insights",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228006200000000",
+       "endTimeUnixNano": "1788228006760000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "http.route",
+         "value": {
+          "stringValue": "/api/projects/{id}/insights"
+         }
+        }
+       ]
+      },
+      {
+       "name": "GET /api/projects/4821/events",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228006000000000",
+       "endTimeUnixNano": "1788228006120000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "GET"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/api/projects/4821/events"
+         }
+        }
+       ]
+      },
+      {
+       "name": "POST /v1/charges",
+       "kind": "SPAN_KIND_CLIENT",
+       "startTimeUnixNano": "1788228006500000000",
+       "endTimeUnixNano": "1788228006590000000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/v1/charges"
+         }
+        }
+       ]
+      },
+      {
+       "name": "some internal work",
+       "kind": "SPAN_KIND_SERVER",
+       "startTimeUnixNano": "1788228006600000000",
+       "endTimeUnixNano": "1788228006605000000"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

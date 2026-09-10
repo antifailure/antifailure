@@ -49,6 +49,9 @@ func validate(m *schema.Manifest, doc *yaml.Node, root string) []Problem {
 	v.change(m)
 	v.github(m)
 
+	// Last, so that a hand written message wins wherever both would speak.
+	v.boundsPass()
+
 	if v.suppressed > 0 {
 		v.problems = append(v.problems, Problem{
 			Message: fmt.Sprintf("There are %d more problems, not listed.", v.suppressed),
@@ -621,7 +624,7 @@ func (v *validator) datastores(m *schema.Manifest) {
 				"Use lower case letters, digits, hyphens and underscores, for example clickhouse or elasticsearch.")
 		}
 
-		v.datastoreStance(p, d)
+		v.datastoreStance(p, d, m)
 		v.datastoreSource(p, d, m)
 
 		if d.Name == schema.PrimaryDatastore {
@@ -651,7 +654,7 @@ func (v *validator) datastores(m *schema.Manifest) {
 }
 
 // datastoreStance is the half of the check that refuses a silent default.
-func (v *validator) datastoreStance(p string, d schema.Datastore) {
+func (v *validator) datastoreStance(p string, d schema.Datastore, m *schema.Manifest) {
 	if d.Stance == "" {
 		v.add(p+".stance",
 			fmt.Sprintf("The datastore %q declares no stance.", orUnnamed(d.Name)),
@@ -679,6 +682,10 @@ func (v *validator) datastoreStance(p string, d schema.Datastore) {
 				"Name the datastore it is rebuilt from, usually primary. A search index built from the branch cannot go stale against it; a clone of one can.")
 		}
 	}
+
+	v.datastoreRebuild(p, d, m)
+	v.datastoreTopics(p, d)
+	v.datastoreIsRunBySomething(p, d, m)
 
 	if d.Stance != schema.StanceDerived && d.From != "" {
 		v.add(p+".from",
@@ -737,6 +744,148 @@ func redactURLish(value string) string {
 		return "a connection string"
 	}
 	return value
+}
+
+// datastoreRebuild refuses a derived store that names no command, and a
+// command on a store that derives from nothing.
+//
+// The rebuild is what makes derived a stance rather than a label. Without a
+// command the engine has a store declared as rebuilt from the branch and no
+// way to rebuild it, which is an empty search index in an environment whose
+// manifest says it holds one, and that is the failure the whole stance key
+// exists to stop, one level down.
+func (v *validator) datastoreRebuild(p string, d schema.Datastore, m *schema.Manifest) {
+	if d.Stance != schema.StanceDerived {
+		if d.Rebuild != nil {
+			v.add(p+".rebuild",
+				fmt.Sprintf("The datastore %q declares a rebuild and its stance is %s.", orUnnamed(d.Name), d.Stance),
+				"Only a derived store is rebuilt from another one. Either set the stance to derived or remove rebuild.")
+		}
+		return
+	}
+	if d.Rebuild == nil {
+		v.add(p+".rebuild",
+			fmt.Sprintf("The datastore %q is derived and nothing says how to rebuild it.", orUnnamed(d.Name)),
+			"Add rebuild with a service whose image the command runs in and the command itself, for example the index command your application already has. It runs once the branch is ready, inside the environment, and a non-zero exit fails the environment rather than leaving an index nobody built.")
+		return
+	}
+	if d.Rebuild.Command == "" {
+		v.add(p+".rebuild.command",
+			fmt.Sprintf("The rebuild of the datastore %q has no command.", orUnnamed(d.Name)),
+			"Write the command that builds this store from the one it reads.")
+	}
+	switch {
+	case d.Rebuild.Service == "":
+		v.add(p+".rebuild.service",
+			fmt.Sprintf("The rebuild of the datastore %q names no service.", orUnnamed(d.Name)),
+			"Name the service whose image the command runs in. It is usually the application's own, because the code that knows how to index this product's rows is the product's code.")
+	case !hasService(m, d.Rebuild.Service):
+		v.add(p+".rebuild.service",
+			fmt.Sprintf("No service is named %q.", d.Rebuild.Service),
+			"The rebuild runs in a service's image, so the name has to be one this manifest declares.")
+	}
+}
+
+// datastoreTopics refuses a broker with no declared shape, and topics on a
+// store that is not one.
+//
+// A topics_only store whose topics nobody listed is a broker the environment
+// starts and creates nothing in, which is indistinguishable from the empty
+// stance and is not what the manifest said. The stance's whole content is the
+// list.
+func (v *validator) datastoreTopics(p string, d schema.Datastore) {
+	if d.Stance != schema.StanceTopicsOnly {
+		if len(d.Topics) > 0 {
+			v.add(p+".topics",
+				fmt.Sprintf("The datastore %q declares topics and its stance is %s.", orUnnamed(d.Name), d.Stance),
+				"Only a topics_only store is created with topics. Either set the stance to topics_only or remove topics.")
+		}
+		return
+	}
+	if len(d.Topics) == 0 {
+		v.add(p+".topics",
+			fmt.Sprintf("The datastore %q is topics_only and lists no topics.", orUnnamed(d.Name)),
+			"List the topics the twin needs, with the partitions each has and the consumer groups that read it. A broker with nothing in it is the empty stance, and this one says the shape is reproduced.")
+		return
+	}
+	seen := map[string]int{}
+	for i, t := range d.Topics {
+		tp := fmt.Sprintf("%s.topics[%d]", p, i)
+		first, dup := seen[t.Name]
+		switch {
+		case t.Name == "":
+			v.add(tp+".name", "The topic has no name.",
+				"Name it the way production names it. A consumer subscribing to a name that is not there reads nothing and says nothing.")
+		case dup:
+			v.add(tp+".name", fmt.Sprintf("Two topics are both named %q.", t.Name),
+				fmt.Sprintf("The first is %s.topics[%d]. One topic is created once.", p, first))
+		default:
+			seen[t.Name] = i
+		}
+		if t.Partitions < 0 {
+			v.add(tp+".partitions",
+				fmt.Sprintf("The topic %q asks for %d partitions.", t.Name, t.Partitions),
+				"A partition count is one or more. Leave it out for one, which is what a broker does with an unspecified count.")
+		}
+		for gi, g := range t.ConsumerGroups {
+			if g == "" {
+				v.add(fmt.Sprintf("%s.consumer_groups[%d]", tp, gi),
+					fmt.Sprintf("The topic %q names a consumer group with no name.", t.Name),
+					"Name the group your consumers join, so the twin commits its offsets before they start.")
+			}
+		}
+	}
+}
+
+// datastoreIsRunBySomething refuses a store nothing in this environment brings
+// up.
+//
+// The engine provides the container for a golden store and for nothing else: a
+// cache, a broker and a search index are ordinary services running stock
+// images, which is how every compose file in the world already declares them,
+// and the datastore entry says what happens to their contents. So a store
+// declared empty, derived or topics_only with no service of its name and no
+// provider is a manifest asking the environment to hold a store and nothing
+// starting one.
+//
+// That is refused HERE rather than discovered later, because the later
+// discovery is the failure this whole key exists to remove: the run comes up
+// green, the report says the manifest declared a cache, and there is no cache.
+func (v *validator) datastoreIsRunBySomething(p string, d schema.Datastore, m *schema.Manifest) {
+	if d.Stance == schema.StanceGolden || d.Name == "" || d.Provider != "" {
+		// A golden store's container is the engine's own.
+		//
+		// A store naming a PROVIDER is left alone for a different reason, and
+		// it is a limit rather than a check. That provider is somebody else's
+		// implementation, it may be a managed store with an address the
+		// environment can already reach, and refusing it here would refuse a
+		// correct manifest for a build this one knows nothing about. What
+		// this build does with such a store is nothing: it opens a datastore
+		// provider for a golden and for no other stance, because a provider
+		// is what refreshes, masks, verifies and branches one. So the
+		// fidelity report says out loud that it could not check it, rather
+		// than this refusing it or either of them pretending.
+		return
+	}
+	if hasService(m, d.Name) {
+		return
+	}
+	v.add(p+".name",
+		fmt.Sprintf("The datastore %q declares the stance %s and nothing in this manifest runs it.", d.Name, d.Stance),
+		fmt.Sprintf("Declare a service called %s running the store's image, which is how an environment starts a store it does not hold a golden of. Naming a provider is the other way out and this build does not start one for you: the fidelity report then says it could not check the store rather than counting it. Without either, the environment comes up with the store declared and no store in it.", d.Name))
+}
+
+// hasService reports whether the manifest declares a service by that name.
+func hasService(m *schema.Manifest, name string) bool {
+	if m == nil {
+		return false
+	}
+	for i := range m.Services {
+		if m.Services[i].Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // primaryDatastore keeps the entry database: normalizes into in agreement with
@@ -1351,6 +1500,23 @@ func (v *validator) load(m *schema.Manifest) {
 			fmt.Sprintf("The load source is %s and no path is configured.", l.Source),
 			"Set source_config.path to the file the traffic is read from.")
 	}
+	if t := l.Traffic; t != nil {
+		if strings.TrimSpace(t.Profile) == "" {
+			v.add("load.traffic.profile",
+				"The traffic block names no profile.",
+				"Give the path to the committed profile, relative to the repository root, "+
+					"for example .antifailure/traffic.json. Record one with af traffic record.")
+		} else if c, ok := confine(t.Profile); !ok || c == "" {
+			v.add("load.traffic.profile",
+				fmt.Sprintf("The traffic profile %q is not a file inside the repository.", t.Profile),
+				"Use a path relative to the repository root, not the root itself and not a path outside it.")
+		}
+		if _, err := ParseDuration(t.MaxAge); err != nil {
+			v.add("load.traffic.max_age",
+				fmt.Sprintf("The maximum age %q is not a duration.", t.MaxAge),
+				"Use a number of hours or days, for example 336h or 14d.")
+		}
+	}
 	v.loadThresholds(l)
 
 	for i := range l.Scenarios {
@@ -1395,27 +1561,35 @@ func (v *validator) loadThresholds(l *schema.Load) {
 		return
 	}
 
-	// p95_increase divides a measured p95 by a per route baseline, and only a
-	// trace export carries one. A combined format log line has no duration in
-	// it, and the default shape has no production behind it, so under either
-	// every route arrives with HasBaseline false and Breaches skips all of
-	// them.
-	if t.P95Increase > 0 && declaredAt(v.doc, "load.thresholds.p95_increase") {
+	// p95_increase divides a measured p95 by a per route baseline, and the
+	// shape carries one only under a trace export. A combined format log line
+	// has no duration in it, and the default shape has no production behind
+	// it, so under either every route used to arrive with HasBaseline false
+	// and Breaches skipped all of them.
+	//
+	// A declared traffic profile is the second place a baseline can come from,
+	// and it is why this refusal is now conditional rather than absolute. The
+	// profile carries production's own p95 per route, recorded from a trace
+	// export once and committed, so a run reading an access log or no source
+	// at all can still be compared against production. Refusing the threshold
+	// there would refuse a comparison that now works.
+	hasProfile := l.Traffic != nil && strings.TrimSpace(l.Traffic.Profile) != ""
+	if t.P95Increase > 0 && !hasProfile && declaredAt(v.doc, "load.thresholds.p95_increase") {
 		switch l.Source {
 		case schema.LoadAccessLog:
 			v.add("load.thresholds.p95_increase",
 				"The load source is access_log and p95_increase is set.",
 				"A combined format log line carries no duration, so every route read from one "+
 					"arrives with no baseline and this threshold can never fire. Read the traffic "+
-					"with source: otel, which carries production's own p95 for each route, or "+
-					"remove the threshold and judge the run on error_rate.")
+					"with source: otel, or declare load.traffic.profile so the baseline comes from "+
+					"a recorded profile, or remove the threshold and judge the run on error_rate.")
 		case "", schema.LoadNone:
 			v.add("load.thresholds.p95_increase",
 				"The load source is none and p95_increase is set.",
 				"With no source the shape is a default that exercises the root, and there is no "+
 					"production behind it to be a baseline, so this threshold can never fire. Set "+
-					"source: otel to read production's own p95 for each route, or remove the "+
-					"threshold and judge the run on error_rate.")
+					"source: otel, or declare load.traffic.profile so the baseline comes from a "+
+					"recorded profile, or remove the threshold and judge the run on error_rate.")
 		}
 	}
 

@@ -45,7 +45,7 @@ personas:
     role: owner
     login: password
 workflows:
-  - name: sign in
+  - name: sign-in
     description: Sign in as the owner and check that the dashboard lists the orders.
     persona: owner
     start_path: /

@@ -175,6 +175,12 @@ import {
   limitFor, bucketFor, bodyLimitFor, servedRoute, ENDPOINT_LIMITS, type EndpointLimit,
 } from './limits.ts'
 import { createMetrics, routeLabel, statusClass, type ControlPlaneMetrics } from './metrics.ts'
+import {
+  createFailureStore,
+  failureStoreEnabledFrom,
+  providerCodeOf,
+  type FailureStore,
+} from './failures.ts'
 import { apiNotFound } from './notfound.ts'
 import { engagedReason } from './admin/controls.ts'
 import {
@@ -312,6 +318,16 @@ export interface ServerOptions {
    *  gets its own, deliberately not module state: two servers in one process
    *  sharing counters means one test passes because of another. */
   metrics?: ControlPlaneMetrics
+  /**
+   * Where the grouped record of this process's own failures goes.
+   *
+   * Supplied by boot so that one store is shared with the flush timer, and by a
+   * test that wants to read what was recorded. Unset builds one over
+   * `options.pool`, which is what a test constructing a bare server gets, and
+   * `AF_FAILURE_STORE=off` makes it a store that accepts everything and writes
+   * nothing rather than an absent one, so no error handler has to check first.
+   */
+  failures?: FailureStore
   /**
    * The key organization surrogates are computed under.
    *
@@ -563,6 +579,19 @@ export function createServer(options: ServerOptions) {
   const secure = options.secureCookies ?? true
   const trustedProxyHops = options.trustedProxyHops ?? DEFAULT_TRUSTED_PROXY_HOPS
   const metrics = options.metrics ?? createMetrics(options.version ?? 'dev')
+
+  // The grouped record of this process's own failures. Built here rather than
+  // in boot so that a server constructed directly by a test has one too: an
+  // error handler whose store is undefined is an error handler that can fail
+  // while reporting a failure.
+  const failures =
+    options.failures ??
+    createFailureStore({
+      pool: failureStoreEnabledFrom(process.env) ? options.pool : null,
+      clock,
+      version: options.version ?? 'dev',
+      counter: metrics.controlPlaneFailures,
+    })
   const hostedRequiredPlan = options.hostedRequiredPlan ?? null
   const operatorSetsPlan = options.operatorSetsPlan ?? false
   // Every cross origin route on this server reads THIS, through matchSiteOrigin
@@ -608,14 +637,33 @@ export function createServer(options: ServerOptions) {
   // anything else a caller sent. This is the same reason the tRPC formatter
   // withholds the stack, applied to the member beside it.
   app.onError((err, c) => {
-    const cause = (err as { cause?: { code?: unknown } }).cause
     const requestId = c.get('requestId') ?? 'unassigned'
+    const kind = err instanceof Error ? err.name : typeof err
+    // Walked rather than read one level down, and the log line and the grouped
+    // store take the same answer from the same function. Two readers of one
+    // field is how a log line and a table come to disagree about which failure
+    // this was; see providerCodeOf for the depths involved.
+    const providerCode = providerCodeOf(err) ?? undefined
     console.error('unhandled request error', {
       requestId,
       method: c.req.method,
       route: c.req.routePath,
-      type: err instanceof Error ? err.name : typeof err,
-      providerCode: typeof cause?.code === 'string' ? cause.code : undefined,
+      type: kind,
+      providerCode,
+    })
+    // The same five fields the line above carries, grouped and counted where an
+    // operator with no log aggregation can read them. Deliberately the SAME
+    // fields: this handler already decided what is safe to write down, and the
+    // reason is on the comment above it. The route is the declared key rather
+    // than `c.req.routePath`, so that this and af_http_requests_total name a
+    // route the same way and a count here can be read against a rate there.
+    failures.record({
+      source: 'http',
+      route: routeLabel(c.req.method, new URL(c.req.url).pathname, declaredRoutes),
+      method: c.req.method,
+      kind,
+      providerCode: providerCode ?? null,
+      requestId,
     })
     c.header('x-request-id', requestId)
     return c.json(
@@ -3489,6 +3537,32 @@ export function createServer(options: ServerOptions) {
           },
           error.cause ?? error,
         )
+        // Grouped beside the line, as on app.onError.
+        //
+        // NOT `error.cause ?? error` as the line above passes to console: that
+        // is the whole error object, and the store takes a class name. The name
+        // comes off the cause when there is one, because a TRPCError wrapping a
+        // Postgres failure is a TRPCError under every group and useless as a
+        // fingerprint, while the cause's name separates a unique violation from
+        // a connection reset.
+        //
+        // The procedure path is the route. It is bounded by the router, which
+        // is the same property routeLabel gives the HTTP side.
+        const cause = error.cause as { name?: unknown } | undefined
+        failures.record({
+          source: 'trpc',
+          route: path ?? 'unknown',
+          method: type,
+          kind: typeof cause?.name === 'string' ? cause.name : error.name,
+          // From the CAUSE and not from the error. A TRPCError carries a
+          // `code` of its own, which is the tRPC enum and is
+          // INTERNAL_SERVER_ERROR for every one of these, so walking from the
+          // error would put that constant in the driver code column of every
+          // row and the fingerprint would lose the only field separating a
+          // missing table from a connection reset.
+          providerCode: providerCodeOf(error.cause),
+          requestId: ctx?.requestId ?? null,
+        })
       },
       createContext: async (_opts, c) => {
         const token = readCookie(c.req.header('cookie'), SESSION_COOKIE)
@@ -3590,7 +3664,7 @@ export function createServer(options: ServerOptions) {
     })
   }
 
-  return { app, ingestLimiter, authLimiter, metrics, analytics }
+  return { app, ingestLimiter, authLimiter, metrics, analytics, failures }
 }
 
 /**

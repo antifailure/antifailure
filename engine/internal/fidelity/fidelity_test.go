@@ -495,12 +495,18 @@ func TestTraffic(t *testing.T) {
 	})
 
 	t.Run("an access log is production's shape", func(t *testing.T) {
+		// A shape read from a source is not the engine's default shape, which
+		// is what the arm below reports. With nothing to compare it against it
+		// is UNMEASURED rather than reproduced: a mix nothing was measured
+		// against has not been shown to reproduce anything.
 		obs := full()
 		obs.Manifest.Load = &schema.Load{Enabled: true, Source: schema.LoadAccessLog}
 		obs.Traffic = "41 routes read from ops/access.log, at 120 requests a second"
 		c := componentState(t, fidelity.Build(obs), schema.FidelityTraffic, "endpoint mix")
-		require.Equal(t, fidelity.Reproduced, c.State)
-		require.Equal(t, obs.Traffic, c.Detail)
+		require.Equal(t, fidelity.Unmeasured, c.State)
+		require.True(t, strings.HasPrefix(c.Detail, obs.Traffic),
+			"the report dropped what it read: %q", c.Detail)
+		require.Contains(t, c.Detail, "no traffic profile says what production serves")
 	})
 
 	t.Run("the default shape is not production's", func(t *testing.T) {
@@ -521,8 +527,10 @@ func TestTraffic(t *testing.T) {
 		obs.Manifest.Load = &schema.Load{Enabled: true, Source: schema.LoadOTel}
 		obs.Traffic = "18 routes read from ops/traces.jsonl, at 40 requests a second"
 		c := componentState(t, fidelity.Build(obs), schema.FidelityTraffic, "endpoint mix")
-		require.Equal(t, fidelity.Reproduced, c.State)
-		require.Equal(t, obs.Traffic, c.Detail)
+		require.Equal(t, fidelity.Unmeasured, c.State)
+		require.True(t, strings.HasPrefix(c.Detail, obs.Traffic),
+			"the report dropped what it read: %q", c.Detail)
+		require.Contains(t, c.Detail, "no traffic profile says what production serves")
 	})
 
 	t.Run("a source that produced nothing is absent with the engine's own reason", func(t *testing.T) {

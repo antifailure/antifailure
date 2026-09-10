@@ -31,7 +31,7 @@ anybody.
 | `third_party` | The hosts the egress policy names, the mode each is in, and which mock pack answers for the ones in mock mode. |
 | `auth` | Whether each declared persona actually has a row in the branch, and whether the way it signs in can be carried out here. |
 | `runtime` | Where the environment runs. |
-| `traffic` | Where the endpoint mix comes from, through the same code the load run uses. |
+| `traffic` | Which routes a load run would actually send, measured against the committed traffic profile of what production served, and how fast it sends against production's own rate. With no profile both are `unmeasured` and say so: four routes somebody wrote by hand used to report as a reproduction of production's traffic. |
 | `datastores` | Every datastore in the environment other than the primary database, and whether anything reproduced its contents. One the manifest declares `golden` and this environment branched reports what the branch holds and which golden it came from, the way `database` does. One declared `golden` that nothing branched is `absent`. The others are `unmeasured` by name. |
 | `topology` | How many instances of each service are running, against how many the manifest asked for. |
 
@@ -167,11 +167,32 @@ gap in what can be seen, so it belongs in the denominator, and the report names
 the four things that are missing: no golden, no attestation, no tables and no
 rows.
 
-A store declared `empty`, `derived` or `topics_only` is `unmeasured`, which
-keeps it out of the score in both directions. Nothing here starts a second
-store, rebuilds one from the branch or creates a topic in one, so a store
-reported reproduced because somebody declared it empty would be the report
-believing a manifest instead of an environment.
+A store declared `empty`, `derived` or `topics_only` is `substituted` when this
+environment did what the stance asks and the store is running. Not
+`reproduced`, because none of the three is production's data and the whole
+argument for the stances is that it should not be: an empty cache holds nothing
+production holds, a rebuilt index holds documents built from the branch, and a
+broker created with topics and consumer groups holds no message at all.
+`substituted` is what this report means by something that stands in and behaves
+without being the real thing.
+
+That counts, in the denominator, and the score goes down for declaring a cache
+empty. It should. The alternative is what these three used to be, `unmeasured`,
+which held them out of the number in both directions, so a twin of a product
+whose events live in Kafka scored the same whether its broker held the declared
+topics or was an empty container nobody had touched. The declared `because` is
+carried through as written beside the state, so the reader sees a position
+rather than a gap, and a store with no reason declared says so.
+
+Two things are observed rather than read off the manifest. A store whose
+service is not running is `absent`, whatever the manifest says about it: the
+manifest asked the environment to hold a store and it does not hold one. And a
+store that is running for which this environment's own run recorded no such
+job stays `unmeasured`, with the report saying to run `af up` again. That
+second one is the question a manifest cannot answer at all: an environment
+brought up by a build with no stance jobs runs the same services from the same
+file with a broker that has nothing in it, and the run journal is the only
+thing that records what a particular run actually did.
 
 That is the number going down on purpose. A stack shaped like an analytics
 product scored 100 percent before, and scores 89 after, on the same

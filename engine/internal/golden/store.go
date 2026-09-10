@@ -57,6 +57,11 @@ const (
 	KindAzureBlob Kind = "azure_blob"
 	// KindS3 is an S3 bucket, or anything that speaks the same API.
 	KindS3 Kind = "s3"
+	// KindGCS is a Google Cloud Storage bucket, addressed through the JSON
+	// API. MIT and here rather than in ee/ for the reason its two peers are:
+	// one developer with their own account and their own card is not an
+	// enterprise customer.
+	KindGCS Kind = "gcs"
 )
 
 // OpenStore builds a store from the manifest's storage and storage_url.
@@ -101,6 +106,8 @@ func OpenStore(
 		return newAzureStore(raw)
 	case KindS3:
 		return newS3Store(raw, getenv)
+	case KindGCS:
+		return newGCSStore(raw, getenv)
 	default:
 		// Consulted after the built-in kinds and never before them, so a
 		// registration adds a place to publish and can never take over one of
@@ -135,7 +142,9 @@ func OpenStore(
 // otherwise told the name is wrong by a message that does not mention the
 // store it has.
 func storageKinds(reg *extension.Registry) []string {
-	out := []string{string(KindLocal), string(KindAzureBlob), string(KindS3)}
+	out := []string{
+		string(KindLocal), string(KindAzureBlob), string(KindS3), string(KindGCS),
+	}
 	return append(out, reg.GoldenStoreNames()...)
 }
 

@@ -479,15 +479,57 @@ test-site-beacon:
 # enterprise package added later is covered without editing this or CI. Naming
 # them by hand is how two of them ended up untested.
 test-ee:
-    cd ee/engine && GOWORK=off go build ./... && GOWORK=off go vet ./... && GOWORK=off go test ./... -race -count=1 -timeout 15m
-    # web first, because ee/web's packages resolve @antifailure/db and
-    # @antifailure/api out of web/ with file: dependencies, and `npm ci` in
-    # ee/web with web absent succeeds and leaves a tree whose typecheck fails
-    # inside web/packages/db/src/schema.ts.
+    # The control plane's dependencies BEFORE the Go tests, and that order is
+    # now load bearing rather than incidental.
+    #
+    # Two suites under ee/engine/compliance can only run with them present. The
+    # audit chain drift guard re-runs web/packages/db/src/audit.ts and requires
+    # it to still produce the recorded vectors. The pack suite seeds a real
+    # control plane, applying the real migrations and appending every audit
+    # entry through the real appendAudit, and then runs the SOC 2 and HIPAA
+    # packs against it. Both used to sit behind this line, so both skipped in
+    # the one place that has a Postgres to run them against. A suite that skips
+    # wherever it could have run is a suite nothing schedules.
+    #
+    # web comes first of the two installs because ee/web's packages resolve
+    # @antifailure/db and @antifailure/api out of web/ with file: dependencies,
+    # and `npm ci` in ee/web with web absent succeeds and leaves a tree whose
+    # typecheck fails inside web/packages/db/src/schema.ts.
     go run ./tools/installcheck . web || npm --prefix web ci --no-audit --no-fund
+    cd ee/engine && GOWORK=off go build ./... && GOWORK=off go vet ./... && GOWORK=off AF_COMPLIANCE_EVIDENCE_DIR="{{justfile_directory()}}/{{reports}}/compliance" go test ./... -race -count=1 -timeout 15m
     go run ./tools/installcheck . ee/web || npm --prefix ee/web ci --no-audit --no-fund
     npm --prefix ee/web run typecheck
     npm --prefix ee/web test
+
+# The SOC 2 and HIPAA packs, run against a real Postgres, publishing what they
+# found.
+#
+# WHY THIS EXISTS SEPARATELY from `just test-ee`, which already runs it. Row
+# 13.12 of docs/plan/STATUS.md claimed a run against a real control plane that
+# nobody could repeat, and the repair is not only that a job runs it. Somebody
+# told the packs are proven needs one command to type and a document to read
+# afterwards. This is that command. It writes soc2.md, hipaa.md, their JSON
+# forms and a coverage note saying what the run did NOT check into
+# {{reports}}/compliance.
+#
+# It needs a Postgres and it needs web/'s dependencies, because the audit chain
+# it verifies has to be written by the control plane's own appendAudit rather
+# than by the verifier. Point AF_TEST_DATABASE_URL at your own server: it
+# creates a database of its own there and drops it afterwards, so it never
+# reads or writes the one you name. With no server at all it SKIPS and says so,
+# unless AF_TEST_DATABASE_URL or AF_REQUIRE_DATABASE=1 states that one was
+# supposed to be there, which turns the skip into a failure.
+#
+# The SOC 2 and HIPAA packs against a real Postgres, publishing what they found.
+compliance:
+    go run ./tools/installcheck . web || npm --prefix web ci --no-audit --no-fund
+    cd ee/engine && GOWORK=off AF_COMPLIANCE_EVIDENCE_DIR="{{justfile_directory()}}/{{reports}}/compliance" go test ./compliance -count=1 -v -timeout 10m
+    @echo
+    @if [ -f "{{reports}}/compliance/coverage.md" ]; then \
+      cat "{{reports}}/compliance/coverage.md"; \
+     else \
+      echo "No evidence was published, so the suite skipped. It says why above."; \
+     fi
 
 # The numbers this repository is allowed to quote.
 #
@@ -497,6 +539,24 @@ test-ee:
 # the pitch: "here is the number, here is the harness, run it on your data" is
 # a claim a slide cannot make. A number older than the code that produced it is
 # withdrawn rather than rounded, so each run writes a dated report.
+# The GCP emulator surface: what an unmodified vendor SDK reaches, which hosts
+# it needs before its first call, and what each pinned image costs to pull.
+#
+# Separate from `benchmark` above because it needs node and python rather than
+# a database, and because the half of it that needs Docker can be run on its
+# own. CONTAINERS=1 runs the storage half against the real fake-gcs-server
+# instead of against the observer that only records what the client asked for.
+# Without it, the container half is NOT measured and the report says so rather
+# than filling the row with an estimate.
+benchmark-emulators:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    stamp=$(date -u +%Y-%m-%d)
+    out="$(pwd)/benchmarks/${stamp}-gcp-emulator-probe.md"
+    mkdir -p benchmarks
+    AF_PROBE_OUT="$out" engine/pkg/emulator/testdata/probe/run.sh
+    echo "wrote benchmarks/${stamp}-gcp-emulator-probe.md"
+
 benchmark:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -527,6 +587,15 @@ benchmark:
     AF_VOLUME_BENCHMARK_OUT="$(cd .. && pwd)/benchmarks/${stamp}-volume-share.md" \
       go test ./internal/fidelity -run TestBenchmarkTheShareOfProductionInTheTwin -count=1
     echo "wrote benchmarks/${stamp}-volume-share.md"
+    # The share of production's traffic a load run actually sends. Its before
+    # half is the report the instrument at bfa35d94 printed for the same
+    # observation, which called four hand written routes a reproduction of
+    # production's traffic while a migration held nine relations locked
+    # underneath a run that reported nothing wrong. It writes into benchmarks/
+    # for the same reason the volume half does.
+    AF_TRAFFIC_BENCHMARK_OUT="$(cd .. && pwd)/benchmarks/${stamp}-traffic-coverage.md" \
+      go test ./internal/fidelity -run TestBenchmarkTheShareOfProductionTheRunSends -count=1
+    echo "wrote benchmarks/${stamp}-traffic-coverage.md"
     # The database providers, which is a different question and a different
     # report: how long the first golden takes per gigabyte and how long a
     # branch takes, per provider. It is slow on purpose, because it creates
@@ -561,6 +630,14 @@ benchmark:
     # AF_TEST_CLICKHOUSE_URL, it starts the machine's managed server.
     AF_BENCHMARK=1 go test ./internal/datastore/clickhouse -run TestBenchmarkEventsInTheTwin \
       -v -count=1 -timeout 60m
+    # The Aurora provider, which is a different question again: what a BRANCH
+    # costs, at a volume the control plane reports as one gigabyte and at one
+    # it reports as a terabyte. It publishes the control plane calls and the
+    # database connections, and it prints UNMEASURED for the wall clock,
+    # because that number belongs to AWS and no test here has an account. It
+    # is its own module, so GOWORK is off.
+    (cd ../ee/engine && AF_BENCHMARK=1 GOWORK=off go test ./db/aurora \
+      -run TestBenchmarkBranchIsFlatInTheSizeOfTheVolume -v -count=1 -timeout 30m)
     # What one documentation answer costs an agent, against what the whole
     # documentation set would cost it. It is the one benchmark here that needs
     # no database, no daemon and no network: the corpus is compiled into the
@@ -1499,7 +1576,8 @@ fuzz-engine seconds="60":
 # refuses a changed path no generator claims, and can do that because it runs
 # on a clean checkout. The property either way is the same: what is generated
 # matches what it is generated from.
-# docsembed runs LAST of these on purpose.
+# docsembed runs LAST of these on purpose, and the order now lives in the
+# ledger in tools/gendrift rather than in this recipe.
 #
 # It EMBEDS every documentation page into engine/internal/docs/pages.gen.go,
 # and six of those pages are themselves generated: errors.md by errgen,
@@ -1510,24 +1588,21 @@ fuzz-engine seconds="60":
 # every generator just reported success. Measured rather than reasoned: with
 # docsembed before schemadoc, a one line schema edit left pages.gen.go with a
 # different checksum than a second docsembed produced. After it, the two
-# match.
+# match. ci.yml ran docsembed FOURTH of twelve while this recipe ran it last,
+# which is the same disagreement as the missing generators and was invisible
+# for the same reason.
 _generated:
     #!/usr/bin/env bash
     set -euo pipefail
-    go run ./tools/errgen
-    go run ./tools/lintgen
-    go run ./tools/proxysrc
-    go run ./tools/schemadoc .
-    go run ./tools/notices -out THIRD_PARTY_NOTICES.md
-    (cd engine && go test ./internal/policy -update-vectors)
-    (cd engine && go test ./internal/mockpack -update-vectors)
-    (cd engine && go test ./internal/webhook -update-vectors)
-    (cd engine && go test ./internal/cli -update-reference)
-    (cd engine && go test ./internal/events -update-schema)
-    go run ./tools/eventcheck -freeze .
-    (cd engine && go test ./internal/masking -update-transforms)
-    (cd engine && go test ./internal/hud -update-frames)
-    go run ./tools/docsembed
+    # The generators are NOT written out here any more, and that is the point.
+    # They were written out three times: in tools/gendrift's ledger, here, and
+    # in ci.yml. The ledger named fifteen, this recipe ran fifteen, and ci.yml
+    # ran twelve, so three generated files could only ever be compared by
+    # somebody running this command on a laptop. One of them,
+    # engine/internal/manifest/manifest.v1.json, sat stale on main for thirteen
+    # commits with CI green throughout. Both callers run the ledger now, so the
+    # two lists cannot disagree because there is one list.
+    go run ./tools/gendrift -generate .
     # The OpenAPI artifact is generated too, and its generator is TypeScript
     # rather than Go. Its own --check mode is the comparison, so it is run in
     # the same form and the same directory CI runs it in: a gate is the command
@@ -1544,6 +1619,11 @@ _generated:
     #
     # No -strict here, unlike CI. You are always in the middle of an edit, and
     # a gate that fails on your uncommitted work is a gate you learn to skip.
+    #
+    # This refuses unless the -generate above ran in this checkout, which is
+    # why running it on its own now fails rather than reporting a clean tree.
+    # Without that step it compares the committed bytes against themselves and
+    # prints the sentence a rebuilt tree prints.
     go run ./tools/gendrift .
 
 # Every manifest field either does something or is refused.
@@ -1593,7 +1673,8 @@ capacityplan cpu memory manifest="antifailure.yaml":
       -node-cpu "{{cpu}}" -node-memory "{{memory}}"
 
 # Regenerate and keep the result.
-# docsembed runs LAST of these on purpose.
+# docsembed runs LAST of these on purpose, and the order now lives in the
+# ledger in tools/gendrift rather than in this recipe.
 #
 # It EMBEDS every documentation page into engine/internal/docs/pages.gen.go,
 # and six of those pages are themselves generated: errors.md by errgen,
@@ -1604,24 +1685,16 @@ capacityplan cpu memory manifest="antifailure.yaml":
 # every generator just reported success. Measured rather than reasoned: with
 # docsembed before schemadoc, a one line schema edit left pages.gen.go with a
 # different checksum than a second docsembed produced. After it, the two
-# match.
+# match. ci.yml ran docsembed FOURTH of twelve while this recipe ran it last,
+# which is the same disagreement as the missing generators and was invisible
+# for the same reason.
 generate:
-    go run ./tools/errgen
-    go run ./tools/lintgen
     go run ./tools/installcheck . web || npm --prefix web ci --no-audit --no-fund
     npm --prefix web run openapi --workspace apps/api
-    go run ./tools/proxysrc
-    go run ./tools/schemadoc .
-    go run ./tools/notices -out THIRD_PARTY_NOTICES.md
-    cd engine && go test ./internal/policy -update-vectors
-    cd engine && go test ./internal/mockpack -update-vectors
-    cd engine && go test ./internal/webhook -update-vectors
-    cd engine && go test ./internal/cli -update-reference
-    cd engine && go test ./internal/events -update-schema
-    go run ./tools/eventcheck -freeze .
-    cd engine && go test ./internal/masking -update-transforms
-    cd engine && go test ./internal/hud -update-frames
-    go run ./tools/docsembed
+    # Every Go generator, from the one ledger, in the one order. It is not a
+    # list here for the same reason it is not a list in ci.yml: three copies of
+    # it disagreed and nothing could say so.
+    go run ./tools/gendrift -generate .
 
 # This machine's own credential store, against the real thing.
 #

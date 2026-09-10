@@ -44,6 +44,15 @@ type EnvironmentRequest struct {
 	EgressHosts []string
 	// EgressModes is the mode each host is permitted in, keyed by host.
 	EgressModes map[string]string
+	// EgressDefault is the mode a host with no rule gets. Empty means block.
+	//
+	// Separate from EgressModes, and its absence was a hole rather than a
+	// simplification. A manifest can reach the whole internet with no rules at
+	// all: `egress: {default: allow}` and an empty rule list is valid, the
+	// validator only warns about it, and a hook reading only EgressModes sees
+	// an empty map and finds nothing to refuse. The organization policy's
+	// allowed_modes rule had the same blind spot.
+	EgressDefault string
 	// Provider is the database provider the environment will use.
 	Provider string
 	// Region is where it will run, when the runtime reports one.
@@ -514,6 +523,21 @@ type EmulatorContainer struct {
 	Port int
 	// Env is what the container is started with.
 	Env map[string]string
+	// Command replaces the image's own command, and it is empty for an image
+	// whose entrypoint is already the emulator.
+	//
+	// It exists because not every cloud ships one image per emulator. Google
+	// ships FOUR of its five official emulators inside a single image, the
+	// Google Cloud CLI, and which emulator a container is running is decided
+	// by the command it was started with rather than by its image, its port
+	// or its environment. Without this field those four are four identical
+	// containers that run a command line tool and answer nothing, and the
+	// declaration reads as though it started them.
+	//
+	// A slice rather than a string, because a string would be run through a
+	// shell and an emulator's arguments carry addresses and ports that a
+	// shell would be free to reinterpret.
+	Command []string
 }
 
 // Emulator is a third party service answered inside the environment.
@@ -726,6 +750,32 @@ func (r *Registry) databaseNames() []string {
 	return out
 }
 
+func (r *Registry) ReplaceDatabaseProvider(p DatabaseProvider) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, existing := range r.databases {
+		if existing.Name() == p.Name() {
+			r.databases[i] = p
+			return true
+		}
+	}
+	return false
+}
+
+// ReplaceDatabaseProvider substitutes the provider registered under a name,
+// and reports whether there was one.
+//
+// It exists for one purpose and this comment names it rather than leaving a
+// general mutator on a registry: the enterprise edition puts a licence gate in
+// front of every registered cloud provider, and a decorator has to take the
+// registration's PLACE rather than sit beside it. Two providers under one name
+// are refused by Validate, and if they were not, the engine would use whichever
+// was registered first, which is the ungated one.
+//
+// A name that is not already registered is NOT added, and false says so. Adding
+// it would turn a typo inside a decorator into a provider a manifest can name
+// and nobody wrote, which is the opposite of what a decorator is for.
+
 // AddDatastoreProvider registers a provider for a store other than the
 // environment's primary Postgres.
 func (r *Registry) AddDatastoreProvider(p DatastoreProvider) {
@@ -793,6 +843,21 @@ func (r *Registry) runtimeNames() []string {
 		out = append(out, p.Name())
 	}
 	return out
+}
+
+// ReplaceRuntimeProvider substitutes the runtime registered under a name, and
+// reports whether there was one. See ReplaceDatabaseProvider for why this
+// exists and why a name that is not registered is not added.
+func (r *Registry) ReplaceRuntimeProvider(p RuntimeProvider) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, existing := range r.runtimes {
+		if existing.Name() == p.Name() {
+			r.runtimes[i] = p
+			return true
+		}
+	}
+	return false
 }
 
 // AddGoldenStore registers somewhere else a published golden can live.

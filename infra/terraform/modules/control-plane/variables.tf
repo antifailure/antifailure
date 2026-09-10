@@ -499,6 +499,25 @@ variable "analytics_retention_days" {
   description = "Delete raw analytics events older than this many days. Null keeps them forever, because retention is an operator's decision."
 }
 
+# The grouped record of the control plane's own failures.
+#
+# Both of these have a working default in the image, so neither is here to make
+# the feature run. They are here because a variable a deployment cannot set is a
+# switch an operator cannot reach: the store is on by default, and an operator
+# who wants it off has to be able to say so where they deploy rather than by
+# rebuilding an image.
+variable "failure_store" {
+  type        = bool
+  default     = true
+  description = "Record the control plane's own failures, grouped, for the operator portal. False writes nothing and the Logs page says so rather than showing an empty list."
+}
+
+variable "failure_retention_days" {
+  type        = number
+  default     = null
+  description = "Delete a grouped failure this many days after its LAST occurrence. Null takes the image's default of 30. Applied only when the maintenance pass can run, because the application role holds no DELETE on that table."
+}
+
 # Every origin the marketing site is served from, for the three things a
 # browser on it calls cross origin: the analytics beacon, the enterprise lead
 # form and the careers application form.

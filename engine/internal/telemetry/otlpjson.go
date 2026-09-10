@@ -18,6 +18,8 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 )
 
 // An OTLP exporter written here rather than imported, and the reason is the
@@ -65,7 +67,7 @@ func newOTLPJSONExporter(endpoint string, headers map[string]string, client *htt
 		return nil, fmt.Errorf("telemetry: %q is not a URL: %w", endpoint, err)
 	}
 	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second}
+		client = airgap.Client(airgap.SiteTelemetry, 10*time.Second)
 	}
 	return &otlpJSONExporter{endpoint: endpoint, headers: headers, client: client}, nil
 }

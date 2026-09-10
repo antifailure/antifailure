@@ -428,6 +428,21 @@ rather than held idle between them.
 | `AF_MAINTENANCE_DATABASE_URL` | falls back to `AF_MIGRATION_DATABASE_URL` | The role that creates and drops partitions. When neither is set, this process logs a warning at startup and does not keep the partitions ahead. Something else must. |
 | `AF_EVENT_RETENTION_MONTHS` | unset | Drop event partitions entirely older than this many whole months. Unset keeps everything forever, which is the default because retention is an operator's decision. A value that is not a whole number of months at least 1 stops the process at startup rather than silently keeping everything. |
 | `AF_EVENT_ARCHIVE_DIR` | unset | Write a month out as newline delimited JSON here before dropping it. |
+| `AF_FAILURE_RETENTION_DAYS` | 30 | How long a group in `control_plane_failures` survives past its LAST occurrence, not its first: a failure first seen in March and last seen this morning is the most interesting row on the page, and sweeping by its age would delete exactly the long running failure an operator is trying to date. Applied only when this maintenance pass can run, because the application role is granted no `DELETE` on that table on purpose. A value that is not a whole number of days at least 1 stops the process at startup. |
+
+### The store of the control plane's own failures
+
+Both error handlers write what they caught to standard output and to a grouped
+table, so an installation with no log aggregation can still answer "what is
+failing right now" from the operator portal. A row is a fingerprint over the
+declared route, the method, the error class and the driver code, with a count,
+so the table's size is set by the code and not by traffic. It holds at most 500
+groups and never a message, a stack, a payload or an organization. See
+[operations](/docs/self-hosting/operations) for what it can and cannot answer.
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `AF_FAILURE_STORE` | on | `off`, `0` or `false` records nothing. The Logs page then says nothing is being recorded, rather than showing an empty list that reads as a healthy day. The default is on because the table is bounded by the code, the writes are one statement per distinct group per ten seconds rather than one per failure, and a healthy installation writes nothing at all. |
 
 ### What a pass does, in order
 

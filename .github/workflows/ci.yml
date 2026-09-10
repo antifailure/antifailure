@@ -171,19 +171,23 @@ jobs:
         # list and the jobs API return, and three lanes went to look at the
         # wrong thing. That is what a step name asserting more than the step
         # reached costs.
-        run: |
-          go run ./tools/errgen
-          go run ./tools/lintgen
-          go run ./tools/proxysrc
-          go run ./tools/docsembed
-          go run ./tools/schemadoc .
-          go run ./tools/notices -out THIRD_PARTY_NOTICES.md
-          (cd engine && go test ./internal/policy -update-vectors)
-          (cd engine && go test ./internal/cli -update-reference)
-          (cd engine && go test ./internal/events -update-schema)
-          go run ./tools/eventcheck -freeze .
-          (cd engine && go test ./internal/masking -update-transforms)
-          (cd engine && go test ./internal/hud -update-frames)
+        #
+        # The commands themselves used to be written out here, and that is the
+        # defect this line exists to remove. tools/gendrift named FIFTEEN
+        # generators, `just _generated` ran fifteen, and this step ran TWELVE.
+        # The three it never ran included
+        # `cp schemas/manifest.v1.json engine/internal/manifest/manifest.v1.json`,
+        # so on a clean checkout that file was never rewritten, never showed as
+        # changed, and could never be reported by the step below, whose only
+        # question is `git status`. It sat stale on main for thirteen commits
+        # with this job green on every one of them. A developer running
+        # `just gate` caught it and CI structurally could not, and both reported
+        # under the same words.
+        #
+        # The order was wrong here too, and for a reason the ledger records:
+        # docsembed EMBEDS six pages that other generators write, so it has to
+        # run last or a single pass cannot converge. This step ran it fourth.
+        run: go run ./tools/gendrift -generate .
 
       - name: Generated files are current
         # Now this step fails for one reason and says which generator to run.
@@ -201,6 +205,14 @@ jobs:
         # does not claim means something writes an artifact that nothing
         # compares. `just gate` runs the same tool without it, because a
         # developer is always in the middle of an edit.
+        #
+        # It also refuses to answer at all unless the step above actually ran.
+        # That step leaves a receipt naming the commit and the ledger it ran,
+        # and without a matching one this fails saying nothing was compared.
+        # Delete or reorder the step above and this goes red rather than
+        # printing "21 generated paths match their generators" about a tree
+        # nobody rebuilt, which is the sentence that covered thirteen stale
+        # commits.
         run: go run ./tools/gendrift -strict .
 
       - name: The engine's parsers survive arbitrary input
@@ -437,6 +449,32 @@ jobs:
         # allowed to use. It compiled here, reviewed as correct, and would have
         # failed on the first line of the first real provider anybody wrote.
         run: go run ./tools/surfacecheck .
+
+      - name: Every extension point is implementable and consulted
+        # The same question as the step above, asked about the other surface,
+        # and it ran nowhere until now. `just gate` has called `socketcheck`
+        # since it was written and no workflow ever did, so the property was
+        # held by whoever remembered to run the command rather than by anything
+        # that could stop a pull request. tools/gatecheck found it the day it
+        # learned to compare in this direction.
+        #
+        # A socket is a promise to two people and only one of them is visible
+        # to the compiler. The implementer is outside this module and cannot
+        # import engine/internal, so a signature naming a type from there is a
+        # socket nobody can implement. extension.AuditSink has an interface, a
+        # registry, an Add and a forwarding method that nothing in the engine
+        # has ever called.
+        run: go run ./tools/socketcheck .
+
+      - name: Every manifest field is read or refused
+        # Also new here, and out of a workflow for the same reason
+        # socketcheck was: `just gate` ran it and CI did not.
+        #
+        # replicas, resources.cpu, resources.memory and workflows[].tags were
+        # all in the schema, all documented, and read by nothing, so a manifest
+        # asking for three instances of a worker got one and the run went green
+        # having never started a second one.
+        run: go run ./tools/fieldsweep -root . -ambiguous
 
       - name: Vet
         run: cd engine && go vet ./...
@@ -737,7 +775,15 @@ jobs:
         working-directory: runner
 
       - name: Test
-        run: node --experimental-strip-types --test test/*.test.ts
+        # `npm test` rather than the command spelled out, so runner/package.json
+        # is the one place that says what the runner's tests are. It ran the
+        # command directly and the justfile ran `npm --prefix runner test`, and
+        # two spellings of one gate are exactly what tools/gatecheck exists to
+        # catch: it could not pair them, and reported the runner's tests as a
+        # gate no workflow runs. The script is this command with a guard in
+        # front of it, `ls test/*.test.ts > /dev/null &&`, which fails rather
+        # than passing when the glob matches nothing.
+        run: npm test
         working-directory: runner
 
   www:
@@ -1403,20 +1449,80 @@ jobs:
         with:
           go-version-file: engine/go.mod
 
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Install the control plane's dependencies
+        # BEFORE the Go tests, and the order is the whole point of this step
+        # existing on its own.
+        #
+        # Two suites under ee/engine/compliance need them. The audit chain
+        # drift guard re-runs web/packages/db/src/audit.ts and requires it to
+        # still produce the recorded vectors. The pack suite seeds a real
+        # control plane, applying the real migrations and appending every audit
+        # entry through the real appendAudit, then runs the SOC 2 and HIPAA
+        # packs against it and publishes what they found.
+        #
+        # Both used to sit behind the enterprise web step below, which runs
+        # after the Go tests, so both skipped in the ONE job on this repository
+        # that has a Postgres to run them against. A suite that skips wherever
+        # it could have run is a suite nothing schedules, and that is the exact
+        # finding that made docs/plan/STATUS.md row 13.12 written rather than
+        # proven.
+        run: npm --prefix web ci --no-audit --no-fund
+
       - name: Build and test the enterprise module
         # Its own module, deliberately outside the workspace, so GOWORK is off.
         # The community build cannot resolve these import paths at all, which is
         # a stronger boundary than a lint rule: a mistaken import fails to
         # compile on the machine that wrote it.
+        env:
+          # Outside the checkout, so an untracked directory never reaches a
+          # gate that walks the working tree. One of them has already refused a
+          # fully pinned tree after reading a scratch file.
+          AF_COMPLIANCE_EVIDENCE_DIR: ${{ runner.temp }}/compliance-evidence
         run: |
           cd ee/engine
           GOWORK=off go build ./...
           GOWORK=off go vet ./...
           GOWORK=off go test ./... -race -count=1 -timeout 15m
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: The compliance packs published what they found
+        # The evidence, checked for rather than assumed. A green suite that
+        # wrote nothing and an upload step that silently found nothing look
+        # identical from the summary view, and an assertion whose failure mode
+        # is silence is always satisfied by silence.
+        #
+        # The suite writes these only when it actually ran against a Postgres.
+        # This job supplies one and sets AF_REQUIRE_DATABASE, so their absence
+        # here means the suite skipped where it was told not to.
+        env:
+          # Through the environment rather than through an expression inside the
+          # script, which is the shape that keeps a workflow value out of the
+          # shell it is interpolated into.
+          AF_COMPLIANCE_EVIDENCE_DIR: ${{ runner.temp }}/compliance-evidence
+        run: |
+          set -euo pipefail
+          dir="$AF_COMPLIANCE_EVIDENCE_DIR"
+          for f in soc2.md soc2.json hipaa.md hipaa.json coverage.md; do
+            if [ ! -s "$dir/$f" ]; then
+              echo "::error::$dir/$f is missing or empty, so the compliance packs"
+              echo "::error::did not run against the Postgres this job supplies."
+              exit 1
+            fi
+          done
+          echo "published:"
+          ls -l "$dir"
+          cat "$dir/coverage.md"
+          cat "$dir/coverage.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the compliance evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          node-version: '24'
+          name: compliance-evidence
+          path: ${{ runner.temp }}/compliance-evidence
+          if-no-files-found: error
 
       - name: Build and test the enterprise web packages
         # Its own npm workspace, outside the community one, so a community
@@ -1429,8 +1535,10 @@ jobs:
         # later was neither typechecked nor tested and this job went green
         # having not run it. That is the silent gap this repository keeps
         # finding, in the gate meant to catch it.
+        #
+        # web/ is installed by its own step above, before the Go tests, so it
+        # is not repeated here.
         run: |
-          npm --prefix web ci --no-audit --no-fund
           npm --prefix ee/web install --no-audit --no-fund
           npm --prefix ee/web run typecheck
           npm --prefix ee/web test

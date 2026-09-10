@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 )
 
 // Options configure a run.
@@ -37,6 +38,12 @@ type Options struct {
 	Clock clock.Clock
 	// Progress receives a line every second, and may be nil.
 	Progress func(Progress)
+	// Baselines says where the per route p95 comparisons came from, when they
+	// did not come from the shape itself. It is carried into the result and
+	// printed, because a threshold that fires has to be able to say what it
+	// fired against, and a baseline recorded on another day is a different
+	// claim from one measured in the same file the traffic came from.
+	Baselines string
 }
 
 // Progress is how far along a run is.
@@ -76,6 +83,9 @@ type Result struct {
 	ErrorRate float64 `json:"error_rate"`
 	// Overall is every request together.
 	Overall Latency `json:"overall"`
+	// Baselines says where the per route p95 comparisons came from, empty when
+	// they came from the shape itself.
+	Baselines string `json:"baselines,omitempty"`
 }
 
 // RouteResult is one route's measurement.
@@ -128,26 +138,31 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	}
 	rate := opts.Shape.RequestsPerSecond * opts.Scale
 
+	transport := airgap.Transport(airgap.SiteLoadTest)
+	transport.MaxIdleConnsPerHost = opts.Concurrency
+	// Compression off, so the numbers measure the application rather than the
+	// transport's ability to compress its output.
+	transport.DisableCompression = true
 	client := &http.Client{
 		Timeout: 30 * time.Second,
 		// A response cannot authorize traffic outside the selected safe route.
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
-		Transport: &http.Transport{
-			MaxIdleConnsPerHost: opts.Concurrency,
-			// Compression off, so the numbers measure the application rather
-			// than the transport's ability to compress its output.
-			DisableCompression: true,
-		},
+		Transport:     transport,
 	}
 
 	// A finished run does not keep its sockets. Both transports here are
-	// private to the run and set no IdleConnTimeout, so every keep alive
-	// connection the run opened stays open after the last request, with its
-	// readLoop and writeLoop goroutines still parked on it. In production that
-	// is a run holding file descriptors it no longer uses. In the tests it is
-	// why this package goes red at random: `goleak.VerifyTestMain` in
-	// goleak_test.go sees those two goroutines per connection and cannot know
-	// they are idle.
+	// private to the run, so every keep alive connection the run opened stays
+	// open after the last request, with its readLoop and writeLoop goroutines
+	// still parked on it. In production that is a run holding file descriptors
+	// it no longer uses. In the tests it is why this package goes red at
+	// random: `goleak.VerifyTestMain` in goleak_test.go sees those two
+	// goroutines per connection and cannot know they are idle.
+	//
+	// The transport now comes from airgap.Transport, which clones the standard
+	// library's default and therefore does carry a 90 second IdleConnTimeout
+	// where the hand built transport this replaced carried none. That shortens
+	// the window rather than closing it, and 90 seconds is long after a run has
+	// returned, so the explicit close below stays.
 	//
 	// WHAT IS PROVEN AND WHAT IS NOT. Proven: the CI failure is
 	// nondeterministic rather than caused by the commit it appeared on. The
@@ -331,6 +346,7 @@ func finish(m *meter, opts Options, started time.Time) *Result {
 	elapsed := opts.Clock.Since(started)
 	res := &Result{
 		Source:     opts.Shape.Source,
+		Baselines:  opts.Baselines,
 		TargetRate: opts.Shape.RequestsPerSecond * opts.Scale,
 		Sent:       m.sent, Duration: elapsed,
 		Overall: percentiles(m.all),

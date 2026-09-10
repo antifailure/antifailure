@@ -31,6 +31,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 )
 
 // httpTimeout bounds a single request.
@@ -53,7 +55,7 @@ const maxBody = 1 << 20
 // several lookups a single af up makes. The timeout is deliberately longer than
 // httpTimeout: the per-request context is the real bound, and a client timeout
 // that fired first would produce a less specific error.
-var client = &http.Client{Timeout: 30 * time.Second}
+var client = airgap.Client(airgap.SiteCloudAuth, 30*time.Second)
 
 // Request is one call to a cloud endpoint.
 type Request struct {

@@ -19,6 +19,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	"github.com/antifailure/antifailure/engine/internal/envcert"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 )
 
@@ -226,7 +227,7 @@ func (r *Runtime) startInstance(
 		return id, nil
 	}
 
-	created, err := r.create(ctx, spec, s, nets, proxyIP, name, "")
+	created, err := r.create(ctx, spec, s, nets, proxyIP, name, "", []string{s.Name})
 	if err != nil {
 		return "", err
 	}
@@ -280,6 +281,7 @@ func (r *Runtime) create(
 	proxyIP string,
 	name string,
 	overrideCmd string,
+	aliases []string,
 ) (string, error) {
 	labels := r.managed(dockerutil.KindService, spec.EnvID)
 	labels[dockerutil.LabelService] = s.Name
@@ -335,13 +337,20 @@ func (r *Runtime) create(
 		},
 	}
 
+	// The service name resolves inside the environment, so a manifest can say
+	// http://worker:8080 and mean it.
+	//
+	// A one shot job passes NONE, and that is not tidiness. A stance job runs
+	// in the store's own image, so a broker's topic creation would otherwise
+	// carry the alias the broker itself answers to, and for the seconds it
+	// lives the name would resolve to two containers: the resolver would hand
+	// the job's own connection to whichever it picked, and a topic created
+	// against a container that is exiting is a topic nobody has. Two
+	// containers behind one name is the failure this runtime already refuses
+	// everywhere else.
 	netCfg := &network.NetworkingConfig{
 		EndpointsConfig: map[string]*network.EndpointSettings{
-			nets.inner: {
-				// The service name resolves inside the environment, so a
-				// manifest can say http://worker:8080 and mean it.
-				Aliases: []string{s.Name},
-			},
+			nets.inner: {Aliases: aliases},
 		},
 	}
 
@@ -667,11 +676,35 @@ func (r *Runtime) runOnce(
 	command string,
 	journal func(string, string) error,
 ) error {
-	name := containerName(spec.EnvID, s.Name+"-migrate", 1)
+	return r.runOnceAs(ctx, spec, s, nets, proxyIP, command,
+		s.Name+"-migrate", s.Name+" migration", []string{s.Name}, journal)
+}
+
+// runOnceAs is runOnce with the name and the words it fails in.
+//
+// The suffix is part of the container's name and the role is what a failure
+// calls the thing that failed. They are arguments rather than constants
+// because a migration is no longer the only command an environment runs to
+// completion: a datastore's stance can be a rebuild or a topic creation, and
+// naming either of those "migration" in the container list and in the error
+// sends somebody to look at their schema.
+func (r *Runtime) runOnceAs(
+	ctx context.Context,
+	spec provider.EnvSpec,
+	s provider.ServiceSpec,
+	nets networks,
+	proxyIP string,
+	command string,
+	suffix string,
+	role string,
+	aliases []string,
+	journal func(string, string) error,
+) error {
+	name := containerName(spec.EnvID, suffix, 1)
 	if err := journal(kindContainer, name); err != nil {
 		return err
 	}
-	id, err := r.create(ctx, spec, s, nets, proxyIP, name, command)
+	id, err := r.create(ctx, spec, s, nets, proxyIP, name, command, aliases)
 	if err != nil {
 		return err
 	}
@@ -687,17 +720,17 @@ func (r *Runtime) runOnce(
 
 	if err := r.cli.ContainerStart(ctx, id, container.StartOptions{}); err != nil {
 		return aferrors.Wrap(err, aferrors.AFRUN040,
-			"detail", fmt.Sprintf("starting the %s migration: %v", s.Name, err))
+			"detail", fmt.Sprintf("starting the %s: %v", role, err))
 	}
 	code, waitErr := dockerutil.AwaitExit(ctx, r.cli, id)
 	if waitErr != nil {
 		return aferrors.Wrap(waitErr, aferrors.AFRUN040,
-			"detail", fmt.Sprintf("waiting for the %s migration: %v", s.Name, waitErr))
+			"detail", fmt.Sprintf("waiting for the %s: %v", role, waitErr))
 	}
 	if code != 0 {
 		output = r.lastLogLines(ctx, id)
 		return aferrors.Coded(aferrors.AFRUN005,
-			"service", s.Name+" migration",
+			"service", role,
 			"code", strconv.FormatInt(code, 10)+"\n"+output)
 	}
 	return nil
@@ -720,7 +753,7 @@ func (r *Runtime) waitReady(
 	}
 
 	deadline := r.clock.Now().Add(timeout)
-	hc := &http.Client{Timeout: 5 * time.Second}
+	hc := airgap.Client(airgap.SiteServiceProbe, 5*time.Second)
 	attempt := 0
 	for {
 		if err := r.confirmStillRunning(ctx, s, id); err != nil {
@@ -774,7 +807,7 @@ func (r *Runtime) probe(ctx context.Context, hc *http.Client, s provider.Service
 		// A service that speaks something other than HTTP still counts as
 		// ready once it accepts a connection, so the port is tried directly
 		// before giving up on this round.
-		conn, dialErr := net.DialTimeout("tcp",
+		conn, dialErr := airgap.Dial(airgap.SiteServiceProbe, "tcp",
 			net.JoinHostPort("127.0.0.1", strconv.Itoa(hostPort)), 2*time.Second)
 		if dialErr != nil {
 			return false

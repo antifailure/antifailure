@@ -222,6 +222,79 @@ export interface LogsOverview {
   truncated: { failures: boolean; workflows: boolean; eventTypes: boolean };
   limit: number;
 }
+/**
+ * One group of failures the control plane caught in ITSELF.
+ *
+ * Not the engine's exceptions, which this product still does not record and
+ * which would need the engine to report them. These are the failures the
+ * control plane's own two error handlers already catch, already log, and until
+ * now threw away everywhere except a container's stdout.
+ *
+ * Every field is one those handlers had already decided was safe to write
+ * down. There is no message, no stack, no payload and no organization, and the
+ * reasons are in migration 0042 and web/apps/api/src/failures.ts. The page
+ * prints what is missing rather than leaving the reader to infer it.
+ */
+export interface ControlPlaneFailure {
+  fingerprint: string;
+  /** Which handler caught it: the HTTP one or the tRPC one. */
+  source: string;
+  /** The declared route key, never the path that matched it. */
+  route: string;
+  method: string;
+  /** The error's class name. Code, not data. */
+  kind: string;
+  /** The driver's own code, when the cause carried one. */
+  providerCode: string | null;
+  occurrences: number;
+  firstSeen: string;
+  lastSeen: string;
+  firstSeenVersion: string;
+  lastSeenVersion: string;
+  /** The id the 500 response handed the caller. The join to `af logs web`. */
+  lastRequestId: string | null;
+}
+
+/**
+ * What the store is doing, which is what stops the list above being read as
+ * complete when it is not.
+ */
+export interface FailureStoreStatus {
+  /** Whether the replica that answered is recording. */
+  recording: boolean;
+  /** Groups held, across all time rather than the window. */
+  groups: number;
+  cap: number;
+  atCap: boolean;
+  /** Null when nothing on this installation sweeps, which is a different
+   *  statement from a retention of zero. */
+  retentionDays: number | null;
+}
+
+export interface FailureStoreView {
+  hours: number;
+  from: string;
+  at: string;
+  status: FailureStoreStatus;
+  truncated: boolean;
+  limit: number;
+  failures: ControlPlaneFailure[];
+}
+
+/**
+ * Whether a group has only ever been produced by one build.
+ *
+ * This is the deploy overlay, and it is a comparison rather than a chart
+ * because there is no deployment table in this product and drawing a line for
+ * one would be inventing the data. Equal versions mean the failure appeared and
+ * has stayed inside a single build, which is the reading an operator wants when
+ * asking whether a deploy caused it. Different versions mean it survived at
+ * least one.
+ */
+export function startedInOneBuild(f: ControlPlaneFailure): boolean {
+  return f.firstSeenVersion === f.lastSeenVersion;
+}
+
 export interface EventRow {
   id: string;
   occurredAt: string;

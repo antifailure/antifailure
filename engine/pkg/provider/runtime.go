@@ -153,12 +153,96 @@ type EnvSpec struct {
 	CACertPEM string
 	// CAKeyPEM is the matching private key, which goes to the sidecar alone.
 	CAKeyPEM secret.Value
+	// StanceJobs are commands the runtime runs to completion INSIDE the
+	// environment, once every service is up, to bring a declared datastore to
+	// the state its stance asks for.
+	//
+	// Inside rather than from the caller's machine, because that is the only
+	// place the store has an address: a broker and a search index are
+	// ordinary services on the environment's network with no published port,
+	// and the whole point of the environment is that nothing outside it can
+	// reach in. A job runs in a service's own image, on the same network,
+	// with the same variables that service receives, which is what lets the
+	// command be the product's own index command rather than something
+	// written for this.
+	//
+	// After every service, because a job talks to one: creating a topic needs
+	// the broker listening, and rebuilding a search index needs both the
+	// index and whatever it reads. A failure here fails the environment. An
+	// index nobody built and a broker with no topics look exactly like a
+	// working twin until something reads them.
+	StanceJobs []StanceJob
 	// Journal records a resource before it is created. A runtime must call it
 	// and must respect an error from it, because a resource created before it
 	// was recorded is a resource teardown cannot find.
 	Journal func(kind, id string) error
 	// Progress receives human readable progress, already redacted.
 	Progress func(line string)
+}
+
+// StanceJobName is what a runtime calls the one shot job that realizes a
+// store's stance, and it is a contract rather than a convenience.
+//
+// A run records every resource it is about to create in the journal, and the
+// journal is the only thing in this product that says what a PARTICULAR run
+// did. The fidelity report reads it back to answer a question the manifest
+// cannot: whether the environment in front of somebody was brought up by a
+// build that creates topics, or by one that did not and left a broker with the
+// same name, the same image and nothing in it.
+//
+// So the name a runtime journals has to be one the report can recognise, and
+// composing it here rather than in each runtime is what keeps the two ends
+// from drifting apart silently. A runtime that names it something else is not
+// wrong in any way a test would catch: the environment comes up, the job runs,
+// and the report quietly says unmeasured forever.
+func StanceJobName(store string) string { return store + StanceJobSuffix }
+
+// StanceJobSuffix is what StanceJobName appends, exported on its own because a
+// runtime that keeps its one shot jobs around has to recognise them again.
+//
+// The Kubernetes runtime leaves the Job behind so that its logs still explain
+// what happened, and Status then has to exclude it: a pod labelled bus-stance
+// reported as a running service would put a container that has already exited
+// into af status, into the fidelity report's services dimension, and into the
+// count of what came up.
+const StanceJobSuffix = "-stance"
+
+// StanceJob is one command that realizes a datastore's declared stance.
+//
+// It carries the store rather than only the command so that a failure names
+// the store somebody has to look at. "the search datastore could not be
+// rebuilt" is a sentence a person acts on; a non-zero exit from a container
+// called api-2 is not.
+type StanceJob struct {
+	// Store is the datastore in the manifest.
+	Store string
+	// Stance is what was declared for it, for the message.
+	Stance string
+	// Service names the service whose image and variables the command runs
+	// with. The runtime looks it up in Services and refuses a name that is
+	// not there rather than inventing a container.
+	Service string
+	// Command runs to completion. A non-zero exit fails the environment.
+	Command string
+}
+
+// Line is what a run says it is doing about one store, and it lives here so
+// that both runtimes say the same thing.
+//
+// A person reading `af up` on Docker and the same manifest on Kubernetes is
+// entitled to the same sentence, and two runtimes each writing their own would
+// diverge the first time one of them was edited. The default arm names the
+// stance rather than guessing at it, because a stance this build does not
+// recognise is a manifest written by a newer one.
+func (j StanceJob) Line() string {
+	switch schema.DatastoreStance(j.Stance) {
+	case schema.StanceTopicsOnly:
+		return "creating the declared topics and consumer groups, with no messages"
+	case schema.StanceDerived:
+		return "rebuilding it from the branch"
+	default:
+		return "applying the " + j.Stance + " stance"
+	}
 }
 
 // ServiceSpec is one container to run.

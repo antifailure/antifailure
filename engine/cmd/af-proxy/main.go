@@ -101,21 +101,24 @@ func main() {
 		// Read from this process's environment rather than from the
 		// configuration file, so a key never passes through something the
 		// engine wrote to disk.
-		synth: synthFromEnvironment(os.Getenv),
-		transport: &http.Transport{
-			MaxIdleConnsPerHost: 16,
-			IdleConnTimeout:     60 * time.Second,
-			// The origin's certificate is verified normally. Reading inside a
-			// connection is not a licence to stop checking who is on the other
-			// end of it; if anything it makes the check more important,
-			// because the client can no longer do it itself.
-			TLSHandshakeTimeout: 20 * time.Second,
-		},
+		synth:       synthFromEnvironment(os.Getenv),
+		transport:   newForwardTransport(nil),
+		transportH2: newForwardTransport(h2ALPN()),
+		// Three transports rather than one, because the protocol the client
+		// spoke is the protocol its answer has to be framed in. A gRPC status
+		// travels in HTTP/2 trailers and an HTTP/1.1 forward would drop it,
+		// and an HTTP/2 response written onto an HTTP/1.1 connection carries
+		// its own version into the status line. Which one is used follows the
+		// connection the request arrived on and nothing else.
+		transportH2C: newForwardTransport(h2cPriorKnowledge()),
 	}
 	// Set after construction because the dialer is a method on the proxy it
 	// belongs to. Every re-originated request goes through it, so the address
-	// guard applies to the inspected path as well as to the tunnelled one.
+	// guard applies to the inspected path as well as to the tunnelled one, and
+	// to every protocol rather than to the one that existed first.
 	p.transport.DialContext = p.dialGuarded
+	p.transportH2.DialContext = p.dialGuarded
+	p.transportH2C.DialContext = p.dialGuarded
 
 	packs, err := mockpack.Builtin()
 	if err != nil {
@@ -345,8 +348,14 @@ type proxy struct {
 	// to read inside. Nil when the environment has no authority, in which
 	// case every TLS connection is tunnelled.
 	ca *certAuthority
-	// transport re-originates inspected requests.
+	// transport re-originates inspected requests over HTTP/1.1.
 	transport *http.Transport
+	// transportH2 re-originates a request that arrived over HTTP/2 inside a
+	// terminated TLS connection, negotiating h2 with the origin.
+	transportH2 *http.Transport
+	// transportH2C re-originates a request that arrived over cleartext
+	// HTTP/2, which has no handshake to negotiate in.
+	transportH2C *http.Transport
 	// credentials are the sandbox values, by the name a rule refers to.
 	credentials map[string]string
 	// mocks answers requests for hosts set to mock.

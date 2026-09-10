@@ -114,7 +114,7 @@ the same scrypt parameters the API verifies against, so the password the runner
 types and the hash in the row agree.
 
 Two workflows need it, and they are the first here that hold two sessions in
-one browser. `an-operator-who-is-also-a-customer-can-mark-an-application-reviewed`
+one browser. `an-operator-who-is-also-a-customer-marks-an-application-reviewed`
 is the mirror image: the same browser, acting as the operator, marks a seeded
 application reviewed, which the CUSTOMER gate used to refuse for want of the
 product token. `an-operator-who-is-also-a-customer-can-start-checkout` It signs in to the

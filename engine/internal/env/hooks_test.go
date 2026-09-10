@@ -133,6 +133,25 @@ func TestUp_TellsThePolicyHookWhatItNeedsToDecide(t *testing.T) {
 	require.NotEmpty(t, hook.seen.Provider)
 }
 
+func TestUp_TellsThePolicyHookTheEgressDefault(t *testing.T) {
+	registry := extension.NewRegistry()
+	hook := &refusingHook{err: errors.New("no")}
+	registry.AddPolicy(hook)
+
+	_, _ = newOrchestrator(t, registry).Up(context.Background())
+	require.NotNil(t, hook.seen)
+
+	// Its own test rather than one more line in the one above, because it
+	// closes a hole the rules alone could not. A manifest can reach the whole
+	// internet with NO rules at all: `egress: {default: allow}` is valid and
+	// the validator only warns about it, so EgressModes is empty and a hook
+	// reading only the rules would call that environment contained. The air
+	// gapped hook and the organization policy's allowed_modes rule both had
+	// that blind spot.
+	require.Equal(t, "block", hook.seen.EgressDefault,
+		"the mode every host with no rule gets is part of what a policy decides on")
+}
+
 func TestUp_RefusesBeforeItCreatesAnything(t *testing.T) {
 	// A policy control that leaves a database branch behind every time it
 	// refuses is a resource leak wearing a security feature's clothes. The

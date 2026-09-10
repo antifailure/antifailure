@@ -2,7 +2,7 @@
 title: Any Postgres
 description: Using any reachable Postgres as the database provider, what it creates on your server, and what branching costs there.
 sidebar:
-  order: 5
+  order: 6
 ---
 
 Every other provider here is a provider for one product. `pgurl` is the one for

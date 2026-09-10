@@ -23,6 +23,7 @@ import assert from "node:assert/strict";
 import {
   FINDING_LABEL,
   STANDING_LABEL,
+  startedInOneBuild,
   WINDOWS,
   toneForStanding,
   toneForVerdict,
@@ -92,4 +93,28 @@ test("every window offered is one the routes accept", () => {
     assert.ok(accepted.has(w.value), `${w.value} hours is not a window the route accepts`);
     assert.ok(w.label.length > 0);
   }
+});
+
+test("a failure group says whether it has only ever come from one build", () => {
+  // The deploy overlay, and it is a comparison rather than a chart because
+  // there is no deployment table in this product and drawing a line for one
+  // would be inventing the data. Both directions asserted: a check that has
+  // only been seen say yes has not been shown to be able to say no, and this
+  // one is what an operator reads to decide whether a deploy caused a failure.
+  const group = {
+    fingerprint: "a".repeat(64),
+    source: "trpc",
+    route: "environments.list",
+    method: "query",
+    kind: "DrizzleQueryError",
+    providerCode: "42P01",
+    occurrences: 3,
+    firstSeen: "2026-09-08T00:00:00.000Z",
+    lastSeen: "2026-09-09T00:00:00.000Z",
+    firstSeenVersion: "1.3.4",
+    lastSeenVersion: "1.3.4",
+    lastRequestId: null,
+  };
+  assert.equal(startedInOneBuild(group), true);
+  assert.equal(startedInOneBuild({ ...group, firstSeenVersion: "1.3.2" }), false);
 });

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
@@ -107,6 +108,7 @@ var runtimeBehaviors = []Behavior{
 	{"Up_ReportsACycleRatherThanHanging", "A dependency cycle fails with AF-RUN-041 instead of deadlocking.", ""},
 	{"Up_ReportsAMissingDependency", "Depending on a service that was never declared fails with AF-RUN-042.", ""},
 	{"Up_DoesNotStartAServiceWhoseMigrationFailed", "A failed migration stops the service it belongs to from starting at all.", ""},
+	{"Up_FailsWhenAStanceJobFails", "A datastore stance job that exits non-zero fails the environment rather than leaving a store nobody filled.", ""},
 	{"Up_LeavesAFailedServiceFindable", "A service that exits immediately is still reported, so teardown can remove it and logs can explain it.", ""},
 	{"Up_CreatesNothingTheJournalRefused", "When the journal refuses, Up fails and the environment holds no resources.", ""},
 	{"Up_JournalsResourcesTeardownCanFind", "Every name the runtime journals identifies a resource the inventory reports.", ""},
@@ -401,6 +403,8 @@ func runRuntimeBehavior(
 		h.upReportsAMissingDependency(ctx)
 	case "Up_DoesNotStartAServiceWhoseMigrationFailed":
 		h.upDoesNotStartAServiceWhoseMigrationFailed(ctx)
+	case "Up_FailsWhenAStanceJobFails":
+		h.upFailsWhenAStanceJobFails(ctx)
 	case "Up_LeavesAFailedServiceFindable":
 		h.upLeavesAFailedServiceFindable(ctx)
 	case "Up_CreatesNothingTheJournalRefused":
@@ -938,6 +942,28 @@ func (h *rtHarness) upDoesNotStartAServiceWhoseMigrationFailed(ctx context.Conte
 		if s.Name == "web" && s.Ready {
 			h.t.Error("the service started even though its migration failed")
 		}
+	}
+}
+
+func (h *rtHarness) upFailsWhenAStanceJobFails(ctx context.Context) {
+	id := h.envID("stance1")
+	_, err := h.up(ctx, provider.EnvSpec{
+		EnvID: id,
+		Services: []provider.ServiceSpec{{
+			Name: "bus", Image: h.opts.ShellImage, Kind: "worker", Command: "sleep 60",
+		}},
+		StanceJobs: []provider.StanceJob{{
+			Store: "bus", Stance: "topics_only", Service: "bus", Command: "exit 4",
+		}},
+	})
+	// The property is not the error text, it is that the environment does not
+	// come up. A broker with no topics in it and a search index nobody built
+	// look exactly like a working twin: the containers are running, the report
+	// says the manifest declared them, and the first thing that reads either
+	// one gets nothing. An environment reported up in that state is worse than
+	// one that failed, because somebody trusts it.
+	if err == nil {
+		h.t.Fatal("a stance job that failed was reported as an environment that came up")
 	}
 }
 
@@ -1769,10 +1795,15 @@ func (h *rtHarness) logsReturnWhatAServiceWrote(ctx context.Context) {
 // behaviour passed and the package still failed, which is a confusing way to
 // learn that a test helper left a socket open.
 func shortLivedClient(timeout time.Duration) *http.Client {
-	return &http.Client{
-		Timeout:   timeout,
-		Transport: &http.Transport{DisableKeepAlives: true},
-	}
+	t := airgap.Transport(airgap.SiteConformance)
+	t.DisableKeepAlives = true
+	// And HTTP/2 off with it. airgap.Transport clones the standard library's
+	// default, which attempts h2 over TLS, and an h2 connection keeps its own
+	// goroutines regardless of DisableKeepAlives. That is the exact leak the
+	// paragraph above is about, so the clone's one inherited difference from
+	// the transport this replaced is undone here rather than discovered later.
+	t.ForceAttemptHTTP2 = false
+	return &http.Client{Timeout: timeout, Transport: t}
 }
 
 // requireInternet skips when this machine cannot reach what an egress behavior

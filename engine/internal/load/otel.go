@@ -54,6 +54,27 @@ type TraceRead struct {
 	Spans int
 	// Skipped counts what was read and not used, by reason.
 	Skipped map[string]int
+	// Requests is how many server spans each route carried, keyed by the same
+	// "METHOD /path" a Route renders as.
+	//
+	// The same figure Route.Weight holds today, written down as a count rather
+	// than left implicit in a weight. A weight is a relative number a picker
+	// divides by its own total, and a traffic profile that read one as a
+	// request count would be silently wrong the day anything reweights a
+	// shape. This says what it is.
+	Requests map[string]int
+	// Start and End are the first and last timestamps the export held, which
+	// is the window every rate here is divided by.
+	Start, End time.Time
+	// PeakConcurrency is the largest number of server spans that were in
+	// flight at the same moment.
+	//
+	// The peak rather than the mean, because they answer different questions
+	// and only one of them fills a connection pool. A service averaging four
+	// requests a second that arrives in bursts of ninety has a pool problem an
+	// average rate cannot see, and reproducing the average would never find
+	// it.
+	PeakConcurrency int
 }
 
 // FromOTLP reads a shape out of an OpenTelemetry trace export.
@@ -76,6 +97,7 @@ func FromOTLP(data []byte) (TraceRead, error) {
 		durations []float64
 	}
 	buckets := map[string]*bucket{}
+	var spans []otlpSpan
 	var first, last uint64
 
 	for _, doc := range docs {
@@ -99,6 +121,7 @@ func FromOTLP(data []byte) (TraceRead, error) {
 					}
 					b.durations = append(b.durations, otlpDurationMs(span))
 					read.Spans++
+					spans = append(spans, span)
 
 					start, end := uint64(span.Start), uint64(span.End)
 					if start > 0 && (first == 0 || start < first) {
@@ -121,11 +144,20 @@ func FromOTLP(data []byte) (TraceRead, error) {
 		Source:            "otel",
 		RequestsPerSecond: float64(read.Spans) / otlpWindow(first, last).Seconds(),
 	}
+	read.Requests = map[string]int{}
+	if first > 0 {
+		read.Start = time.Unix(0, int64(first)).UTC()
+	}
+	if last > 0 {
+		read.End = time.Unix(0, int64(last)).UTC()
+	}
+	read.PeakConcurrency = peakConcurrency(spans)
 	for _, b := range buckets {
 		r := Route{Method: b.method, Path: b.path, Weight: float64(len(b.durations))}
 		if len(b.durations) >= minBaselineSamples {
 			r.P95Ms = percentiles(b.durations).P95Ms
 		}
+		read.Requests[r.String()] = len(b.durations)
 		read.Shape.Routes = append(read.Shape.Routes, r)
 	}
 	sort.Slice(read.Shape.Routes, func(i, j int) bool {
@@ -153,6 +185,50 @@ func otlpWindow(first, last uint64) time.Duration {
 		return time.Second
 	}
 	return d
+}
+
+// peakConcurrency is the most server spans that overlapped at one moment.
+//
+// A sweep over the starts and the ends rather than a sample: an export is
+// already the complete record of a window, so the peak in it is a count rather
+// than an estimate, and sampling a file would be inventing uncertainty that is
+// not there.
+//
+// Ends are processed before starts at the same instant. A request that ends at
+// the exact nanosecond another begins was never in flight beside it, and
+// counting it would report a concurrency of two for a service that only ever
+// handled one request at a time.
+func peakConcurrency(spans []otlpSpan) int {
+	type event struct {
+		at    uint64
+		delta int
+	}
+	events := make([]event, 0, len(spans)*2)
+	for _, s := range spans {
+		if s.Start == 0 || s.End < s.Start {
+			// A span with no start, or one whose clock ran backwards, cannot
+			// be placed on the line at all. Left out rather than clamped,
+			// because a clamped span would be counted as in flight for the
+			// whole window.
+			continue
+		}
+		events = append(events, event{at: uint64(s.Start), delta: 1})
+		events = append(events, event{at: uint64(s.End), delta: -1})
+	}
+	sort.Slice(events, func(i, j int) bool {
+		if events[i].at != events[j].at {
+			return events[i].at < events[j].at
+		}
+		return events[i].delta < events[j].delta
+	})
+	peak, live := 0, 0
+	for _, e := range events {
+		live += e.delta
+		if live > peak {
+			peak = live
+		}
+	}
+	return peak
 }
 
 // otlpDocuments splits an export into the documents it holds.

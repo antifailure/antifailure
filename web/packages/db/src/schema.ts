@@ -1615,3 +1615,36 @@ export const enterpriseLeads = pgTable('enterprise_leads', {
   handledBy: uuid('handled_by'),
   handledNote: text('handled_note'),
 })
+
+/* ---------------------------------------------------------------------------
+ * The control plane's own failures, one row per fingerprint.
+ *
+ * Not a log line store. A row is a GROUP: the declared route, the method, the
+ * error class and the driver code, with a count and the first and last time it
+ * was seen. Its size is bounded by the code rather than by how badly the
+ * installation is behaving, which is the property that makes it safe to leave
+ * on by default on a self hoster's small machine.
+ *
+ * Nothing that could carry a payload is in this list. See migration 0042 for
+ * the column-by-column reasoning and for where the boundary is enforced, which
+ * is `recordFailure` and not a policy here.
+ * ------------------------------------------------------------------------ */
+
+export const controlPlaneFailures = pgTable(
+  'control_plane_failures',
+  {
+    fingerprint: text('fingerprint').primaryKey(),
+    source: text('source').notNull(),
+    route: text('route').notNull(),
+    method: text('method').notNull(),
+    kind: text('kind').notNull(),
+    providerCode: text('provider_code'),
+    occurrences: bigint('occurrences', { mode: 'number' }).notNull().default(0),
+    firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).notNull(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull(),
+    firstSeenVersion: text('first_seen_version').notNull(),
+    lastSeenVersion: text('last_seen_version').notNull(),
+    lastRequestId: text('last_request_id'),
+  },
+  (t) => [index('control_plane_failures_last_seen_idx').on(t.lastSeenAt)],
+)

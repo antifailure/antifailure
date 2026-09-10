@@ -28,11 +28,16 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/antifailure/antifailure/ee/engine/airgapped"
 	"github.com/antifailure/antifailure/ee/engine/auditsink"
+	"github.com/antifailure/antifailure/ee/engine/cloudgate"
 	"github.com/antifailure/antifailure/ee/engine/compliance"
+	"github.com/antifailure/antifailure/ee/engine/db/aurora"
 	"github.com/antifailure/antifailure/ee/engine/feature"
 	"github.com/antifailure/antifailure/ee/engine/license"
 	"github.com/antifailure/antifailure/ee/engine/policyenforce"
+	"github.com/antifailure/antifailure/ee/engine/runtime/aca"
+	"github.com/antifailure/antifailure/ee/engine/runtime/cloudrun"
 	"github.com/antifailure/antifailure/ee/engine/runtime/ecs"
 	"github.com/antifailure/antifailure/ee/engine/secrets"
 	"github.com/antifailure/antifailure/engine/pkg/afcli"
@@ -64,6 +69,27 @@ func main() {
 	// licence, and the command needs rendered text it can print without
 	// importing any enterprise code.
 	ctx = edition.With(ctx, describe(status))
+
+	// The air gap is sealed FIRST, before anything else registers and before
+	// any command runs, because everything below this line can open a
+	// connection: a secret source reaches its store at startup to report
+	// whether it is usable, and the policy file could name a host. A seal
+	// applied after them would be a seal with a hole in it exactly at the
+	// moment nobody is watching, which is the shape of every failure this
+	// feature exists to prevent.
+	//
+	// It exits rather than warning. AF_AIR_GAPPED set without a licence for it
+	// would otherwise produce an installation that reaches the internet while
+	// its operator believes it does not, and the belief is the part that does
+	// the damage.
+	if _, notes, err := airgapped.RegisterFromEnvironment(ctx, extension.Default, os.Getenv); err != nil {
+		fmt.Fprintf(os.Stderr, "af: %v\n", err)
+		os.Exit(3)
+	} else {
+		for _, note := range notes {
+			fmt.Fprintf(os.Stderr, "af: %s\n", note)
+		}
+	}
 
 	registered, err := secrets.RegisterFromEnvironment(extension.Default, os.Getenv)
 	if err != nil {
@@ -131,6 +157,33 @@ func main() {
 	// ee/engine/runtime/ecs/runtime.go for why there is no runtime behind it.
 	extension.Default.AddRuntimeProvider(ecs.NewProvider())
 
+	// The Cloud Run runtime, registered so that a manifest naming it is
+	// answered by the package that knows why it cannot have one, rather than
+	// by the engine's generic "this build has local and kubernetes" message.
+	//
+	// Registered even though it refuses every Open, and the refusal is the
+	// point. A person who writes runtime.provider: cloudrun has a question,
+	// and the two possible answers are a list of the runtimes that exist,
+	// which tells them nothing, or ten enumerated egress paths with the four
+	// that are not closed named individually. The second is the deliverable.
+	// See ee/engine/runtime/cloudrun/runtime.go for why there is no runtime
+	// behind it.
+	extension.Default.AddRuntimeProvider(cloudrun.NewProvider())
+
+	// The Azure Container Apps runtime, registered so that a manifest naming
+	// it is answered by the package that knows why it cannot have one, rather
+	// than by the engine's generic "this build has local and kubernetes"
+	// message.
+	//
+	// Registered even though it refuses every Open, and the refusal is the
+	// point. A person who writes runtime.provider: aca has a question, and the
+	// two possible answers are a list of the runtimes that already exist,
+	// which tells them nothing, or twelve enumerated egress paths with the
+	// four that are not closed named individually. The second is the
+	// deliverable. See ee/engine/runtime/aca/runtime.go for why there is no
+	// runtime behind it.
+	extension.Default.AddRuntimeProvider(aca.NewProvider())
+
 	// The audit sinks, into the same registry and refused at startup for the
 	// same reason. This registration is the whole of what the audit_stream
 	// feature does, and until it existed there was nothing to register: the
@@ -160,6 +213,52 @@ func main() {
 		// facts and only one of them is visible from the receiving end.
 		fmt.Fprintf(os.Stderr, "af: audit sink: configured, and audit_stream is not licensed "+
 			"on this installation, so nothing is forwarded\n")
+	}
+	// The database providers this edition adds, in the same registry and for
+	// the same reason as the registrations above: a provider that is written,
+	// tested and never registered is the shippable gap this file's header
+	// describes, and the engine's own switch only asks the registry for names
+	// it does not have itself.
+	//
+	// Unconditional rather than gated on the licence. Selecting one is a
+	// manifest saying database.provider is aurora, and a build whose licence
+	// lapsed should refuse at the point of use with a sentence about the
+	// licence rather than disappear from the list of providers this build has
+	// and answer "which this build does not have".
+	aurora.Register(extension.Default)
+
+	// The licence gate on the managed cloud providers, and it goes LAST,
+	// after every registration above, because it wraps what is registered at
+	// the moment it runs and cannot see a registration made after it. Every
+	// MIT provider is built into the engine and reached by the engine's own
+	// switch, which never consults the registry, so a database or runtime
+	// provider that arrives through the registry is by the editions rule one
+	// that needed an organization: that is what makes "registered" the
+	// definition of "cloud" here rather than a list of vendor names somebody
+	// has to keep in step.
+	//
+	// NOTHING IN THIS REPOSITORY CATCHES THE WRONG ORDER, which is why this
+	// paragraph exists rather than the sentence above being left to carry it.
+	// A registration placed BELOW this call is silently ungated: the binary
+	// compiles, go vet is clean, every symbol still appears exactly once with
+	// its import so a keep both merge resolution reviews as correct, and the
+	// registration tests still pass, because the provider genuinely IS
+	// registered. Only the gating is gone, and no gate here can see the
+	// difference between the two orders. It was found resolving a conflict
+	// between a new provider's registration and this call, where the right
+	// answer and a licence bypass were both green on every instrument in the
+	// tree. TestTheCloudGateWrapsLast is the only thing that says no, so put
+	// a new registration ABOVE this call.
+	//
+	// Unconditional rather than under a licence, for the reason the policy
+	// hook above gives: the gate asks the licence per call, so a licence that
+	// lapses mid process stops enforcement without a restart, and gating the
+	// installation instead would mean a process that started before a renewal
+	// never enforces again.
+	if wrapped := cloudgate.Wrap(extension.Default); wrapped > 0 {
+		fmt.Fprintf(os.Stderr,
+			"af: %d cloud providers are behind the cloud_database and cloud_runtime "+
+				"features\n", wrapped)
 	}
 	if warning := status.Warning; warning != "" {
 		fmt.Fprintf(os.Stderr, "af: %s\n", warning)

@@ -74,6 +74,10 @@ export interface ApiHarness {
   /** The same recorder the server's own producers use, so a test asserts
    *  against what shipped rather than against a second one it built. */
   analytics: ReturnType<typeof createServer>['analytics']
+  /** The same grouped failure store the server's own error handlers write to,
+   *  for the same reason `analytics` is the real one: a suite asserting against
+   *  a store it built itself proves nothing about the store that ships. */
+  failures: ReturnType<typeof createServer>['failures']
   admin: postgres.Sql
   pool: Pool
   /**
@@ -260,7 +264,7 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
   const clock = new FakeClock()
   const github = new FakeGitHub(clock)
   const mailer = new RecordingMailer()
-  const { app, analytics } = createServer({
+  const { app, analytics, failures } = createServer({
     pool,
     adminPool,
     github,
@@ -311,6 +315,7 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
   return {
     app,
     analytics,
+    failures,
     admin,
     pool,
     adminPool,

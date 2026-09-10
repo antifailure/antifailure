@@ -1,0 +1,19 @@
+# Everything this harness generates. The authority and the key are made fresh
+# per run and are worthless outside it, and a committed certificate is a
+# certificate somebody eventually trusts by accident.
+ca.crt
+ca.key
+ca.srl
+leaf.crt
+leaf.key
+leaf.csr
+leaf.ext
+sa.key
+sa.json
+node_modules/
+package.json
+package-lock.json
+.venv/
+*-observed.json
+sidecar*.json
+probe-report.md

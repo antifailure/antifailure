@@ -15,6 +15,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 )
 
@@ -172,6 +173,9 @@ func isNoSpace(err error) bool {
 func (p *Provider) ensureImage(ctx context.Context, ref string) error {
 	if _, err := p.cli.ImageInspect(ctx, ref); err == nil {
 		return nil
+	}
+	if err := airgap.CheckImage(airgap.SiteImagePull, ref); err != nil {
+		return fmt.Errorf("db.docker: %s is not present locally and cannot be pulled: %w", ref, err)
 	}
 	rc, err := p.cli.ImagePull(ctx, ref, image.PullOptions{})
 	if err != nil {

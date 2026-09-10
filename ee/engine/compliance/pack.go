@@ -47,7 +47,17 @@ import (
 func init() {
 	// Recorded so that a feature which is sold and never checked shows up as
 	// such. See ee/engine/feature.
-	feature.Declare(license.FeatureCompliance, "ee/engine/compliance.Pack.Evaluate")
+	//
+	// It names command.go rather than anything in this file, and that is the
+	// correction rather than a quirk. This site used to read
+	// "ee/engine/compliance.Pack.Evaluate", which is not where the licence is
+	// checked and could not be: Evaluate takes an Evidence and no context, so
+	// it has nothing to ask. The declaration was true about the package and
+	// wrong about the call, and nothing could tell, because the string was only
+	// ever compared against itself. The catalogue's form is path:symbol and the
+	// test opens that file and requires a feature.Enabled naming this feature
+	// in it, which is what turned a comfortable name into a checkable claim.
+	feature.Declare(license.FeatureCompliance, "compliance/command.go:Command")
 }
 
 // State is what the evidence showed about one control.

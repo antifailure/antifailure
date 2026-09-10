@@ -233,7 +233,7 @@ exported on the laptop that started it.
 
 | Key | Notes |
 | --- | --- |
-| `provider` | `docker` (default), `neon`, `supabase`, `dblab`, or `pgurl`. |
+| `provider` | `docker` (default), `neon`, `supabase`, `dblab`, `pgurl`, or `aurora`. `aurora` is in the enterprise edition; a community build names it and refuses it. |
 | `version` | Postgres major, 14 through 18, default 17. Match it to production: a golden on a different major is an environment running a Postgres your application does not. |
 | `url_env` | The variable services receive the connection string in. |
 | `source_url_env` | Names the variable holding production's read only URL. |
@@ -342,10 +342,18 @@ datastores:
     engine: elasticsearch
     stance: derived
     from: primary
+    rebuild:
+      service: api
+      command: bin/reindex --all
 
   - name: bus
     engine: kafka
     stance: topics_only
+    topics:
+      - name: events
+        partitions: 12
+        consumer_groups: [ingest, enrich]
+      - name: alerts
 ```
 
 | Key | Notes |
@@ -356,7 +364,17 @@ datastores:
 | `stance` | Required. See below. |
 | `because` | Why that stance was chosen, carried into the fidelity report as written. Required for `empty`. |
 | `from` | The store a `derived` one is rebuilt from. Required for `derived` and refused for the rest. |
+| `rebuild` | The `service` whose image the rebuild command runs in and the `command` itself. Required for `derived` and refused for the rest. |
+| `topics` | Each topic's `name`, its `partitions` and the `consumer_groups` created against it. Required for `topics_only` and refused for the rest. |
 | `source_url_env` | The NAME of the variable holding this store's production connection string, which a `golden` is copied from and which the cross store check reads the schema from. Never the connection string itself, which is refused. Omitted, the golden holds no rows and every refresh says so. |
+
+A store whose stance is not `golden` is started by a **service of its own
+name**, which is how every compose file in the world already declares a cache
+or a broker, and the datastore entry says what happens to its contents. The
+engine provides the container for a `golden` and for nothing else, so a store
+declared `empty`, `derived` or `topics_only` with no service of its name and no
+`provider` is refused: it is a manifest asking the environment to hold a store
+while nothing starts one.
 
 The `database` block above is not replaced and does not move. It normalizes
 into the entry named `primary`, so a manifest that declares only `database:`
@@ -398,11 +416,44 @@ stores; the verification scanner reads the second store back with the same
 detectors, and a golden that fails it is never published and can never be
 branched.
 
-Every other stance, and every other engine, is still declaration only: the
-validator refuses a store with no stance and the
-[component inventory](/docs/concepts/inventory) names each one, and nothing here
-starts an `empty` store, runs a `derived` rebuild or creates a topic. A store
-whose engine this build cannot mask is REFUSED rather than published unmasked.
+**An `empty` store is its own service's container and nothing else.** That is
+already the state the stance asks for: a cache that came up empty is correct,
+and copying one would be copying noise and calling it fidelity. What `af up`
+adds is that it says so, with the declared reason attached, and the fidelity
+report says it again afterwards. What is refused is a store declared `empty`
+that nothing in the manifest starts.
+
+**A `derived` store is rebuilt by its own `rebuild.command`,** run to
+completion inside the environment once every service is up, in the image and
+with the variables of `rebuild.service`. A non-zero exit fails the environment
+rather than leaving an index nobody built. This is the point of the stance: a
+search index cloned from production is stale against the branch the moment the
+branch is masked, because the documents in it name people who do not exist in
+the twin's Postgres, and an index built from the branch cannot be stale against
+it.
+
+**A `topics_only` store is created with the topics and consumer groups it
+declares, and no messages.** The commands are the broker's own, run in the
+broker's own image, and the job waits for the broker to answer a metadata
+request before it uses it. The three things a consumer needs, and none of them
+exists in an empty broker: the topic, because subscribing to a name that is not
+there reads nothing and reports nothing; the partition count, because ordering
+is per partition and a group with more members than partitions leaves members
+idle; and the group, because a consumer joining a group nobody created reads
+from the END and silently skips everything the twin's own producers wrote
+before it started. This build creates topics for `kafka`. A broker running
+anything else is REFUSED by name rather than started with nothing in it, which
+would be the `empty` stance under a different word.
+
+A store whose engine this build cannot mask is REFUSED rather than published
+unmasked.
+
+Every one of the four appears in the [component
+inventory](/docs/concepts/inventory) as a distinct position rather than as an
+absence. `empty`, `derived` and `topics_only` are reported `substituted`, which
+counts against the score, because none of the three is production's data and
+the whole argument for them is that it should not be. The declared `because` is
+carried through as written, and a store with no reason declared says so.
 
 ### Checking that one person is one person in both stores
 
@@ -497,6 +548,44 @@ refused at the line rather than treated as the weakest one.
 
 See [verdicts](/docs/concepts/verdicts) for what each level does to the run
 and to the exit code.
+## `load`
+
+The whole block is in [Load](/docs/concepts/load). One key is here because it
+is the counterpart of `database.volume` above.
+
+### `traffic`
+
+```yaml
+load:
+  traffic:
+    profile: .antifailure/traffic.json
+    max_age: 336h
+```
+
+The committed record of what production actually serves. Without it
+`safe_routes` is a list written from memory and nothing says how much of
+production it misses. Measured on this repository on 2026-09-06: a migration
+held an exclusive lock on nine relations for thirty seconds and the run over
+four hand written routes reported 0.0 percent failed, because none of the four
+reads the locked table.
+
+`af traffic record` writes the profile from an OpenTelemetry trace export or a
+combined format access log, both files a collector or a reverse proxy already
+wrote. It carries the endpoint mix, the arrival rate, production's p95 per
+route and the peak concurrency, and no request body, header, query string or
+identifier. Nothing in it opens a socket and no application code changes, which
+is why the result is safe to commit, which it has to be: the check running on a
+pull request cannot reach production.
+
+With a profile, the traffic dimension states what fraction of production's
+requests the run actually sends and names the heaviest route it never touches,
+the arrival rate is stated beside production's own, and `p95_increase` becomes
+able to fire under a source that carries no durations of its own.
+
+A profile past `max_age` is refused rather than quoted. Fourteen days by
+default, where the volume profile's is thirty: an endpoint mix moves at the rate
+a team ships, and a volume profile at the rate a business grows.
+
 ## `fidelity`
 
 | Key | Notes |

@@ -61,6 +61,8 @@ helm	value	database.secretKeys.migrationUrl	string	optional
 helm	value	database.secretKeys.url	string	optional
 helm	value	database.url	string	optional
 helm	value	extraEnv	list	optional
+helm	value	failureStore.enabled	bool	optional
+helm	value	failureStore.retentionDays	string	optional
 helm	value	fullnameOverride	string	optional
 helm	value	github.apiBase	string	optional
 helm	value	github.appId	string	optional
@@ -205,6 +207,8 @@ terraform:modules/control-plane	variable	diagnostics_enabled	bool	optional
 terraform:modules/control-plane	variable	dns_zone_name	string	optional
 terraform:modules/control-plane	variable	dns_zone_resource_group	string	optional
 terraform:modules/control-plane	variable	event_retention_months	number	optional
+terraform:modules/control-plane	variable	failure_retention_days	number	optional
+terraform:modules/control-plane	variable	failure_store	bool	optional
 terraform:modules/control-plane	variable	geo_redundant_backup	bool	optional
 terraform:modules/control-plane	variable	github_api_base	string	optional
 terraform:modules/control-plane	variable	github_app_id	string	optional

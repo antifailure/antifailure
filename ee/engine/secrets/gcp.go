@@ -121,10 +121,45 @@ func (g *GCPBackend) Describe() string {
 	return where
 }
 
-// Reach acquires a token, which is the thing that actually fails.
+// Reach acquires a token and then proves Secret Manager itself answers.
+//
+// Both halves are needed and for a while this did only the first, with a
+// comment saying the token was "the thing that actually fails". It is not, and
+// this is the same fault the first live Key Vault run found in the Azure
+// adapter: Google's token endpoint is a different host from Secret Manager, so
+// a project whose Secret Manager API is not enabled, a VPC Service Controls
+// perimeter, a typo in the project id, or a DNS failure all still hand back a
+// perfectly good OAuth token. Reach then reported the source usable, Available
+// said nothing was wrong, and AF-SEC-001 listed Secret Manager as a place the
+// value could have come from while nothing there could be read.
+//
+// The local server standing in for Google could not have caught it, and the
+// reason is worth keeping: the fake is one process serving both the token
+// endpoint and the API, and the conformance harness pointed BOTH halves at the
+// same dead address, so they broke together and the token failure hid the API
+// failure. TestGCPReachIsNotSatisfiedByATokenAlone splits the two hosts, which
+// is the only arrangement in which this defect is visible offline.
+//
+// ANY answer from the API proves it is reachable, including a refusal, and that
+// distinction is the whole point of the second call. The probe is deliberately
+// unauthenticated: it is a list, the roles this source is meant to run under
+// (secretmanager.secretAccessor) cannot list, so the answer would be a refusal
+// either way, and sending a bearer token to an address that is unreachable
+// BECAUSE IT IS A TYPO would hand a live credential to whoever owns that name.
+// Whether a credential is refused is Fetch's question and it is answered per
+// variable, because a principal may hold one secret and not another.
 func (g *GCPBackend) Reach(ctx context.Context) error {
-	_, err := g.tokens.Token(ctx)
-	return err
+	if _, err := g.tokens.Token(ctx); err != nil {
+		return err
+	}
+	if _, err := cloudauth.Do(ctx, cloudauth.Request{
+		Method: "GET",
+		URL:    g.cfg.Endpoint + "/v1/projects/" + g.cfg.Project + "/secrets",
+		Query:  map[string]string{"pageSize": "1"},
+	}); err != nil {
+		return fmt.Errorf("cannot be reached: %s", err)
+	}
+	return nil
 }
 
 // Refresh discards the token so the next lookup acquires a new one.

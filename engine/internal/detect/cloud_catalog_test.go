@@ -195,6 +195,69 @@ var cloudEndpoints = []string{
 	"shopfront.file.core.windows.net",
 	"shopfront.documents.azure.com",
 	"shopfront.vault.azure.net",
+
+	// The rest of each cloud. Every one of these was a request no rule named
+	// before, so the sidecar refused it with "no rule matches" and the
+	// developer had no way to learn which service they had just been stopped
+	// from reaching. The AWS half is worse than that: it matched the mail
+	// wildcard, so it was answered 200 with an empty body.
+	//
+	// The spellings are the vendor's, deliberately, because that is the point
+	// of the table. AWS calls Step Functions states, CloudWatch Logs logs and
+	// CloudWatch itself monitoring, and a host derived from the package name
+	// would be sfn, cloudwatch-logs and cloudwatch, none of which resolve.
+	"lambda.us-east-1.amazonaws.com",
+	"logs.us-east-1.amazonaws.com",
+	"monitoring.us-east-1.amazonaws.com",
+	"kms.eu-west-1.amazonaws.com",
+	"states.us-east-1.amazonaws.com",
+	"athena.us-east-1.amazonaws.com",
+	"bedrock-runtime.us-east-1.amazonaws.com",
+	"cognito-idp.us-east-1.amazonaws.com",
+	"cognito-identity.us-east-1.amazonaws.com",
+	"apigateway.us-east-1.amazonaws.com",
+	"abcd1234.execute-api.us-east-1.amazonaws.com",
+	"firehose.us-east-1.amazonaws.com",
+	"bigquery.googleapis.com",
+	"bigquerystorage.googleapis.com",
+	"logging.googleapis.com",
+	"monitoring.googleapis.com",
+	"bigtable.googleapis.com",
+	"bigtableadmin.googleapis.com",
+	"spanner.googleapis.com",
+	"aiplatform.googleapis.com",
+	"run.googleapis.com",
+	// The token endpoint every Google client calls before it calls anything
+	// else. An unnamed refusal here is the FIRST thing a Google application
+	// sees, and it says nothing about Google.
+	"oauth2.googleapis.com",
+	"accounts.google.com",
+	"iamcredentials.googleapis.com",
+	// The Azure peer of those three.
+	"login.microsoftonline.com",
+	"login.windows.net",
+	"shopfront.openai.azure.com",
+	"shopfront.search.windows.net",
+	"dc.services.visualstudio.com",
+	"shopfront.in.applicationinsights.azure.com",
+	"shopfront.livediagnostics.monitor.azure.com",
+	"shopfront.azconfig.io",
+}
+
+// statedCloudGaps are cloud endpoints this catalog deliberately does NOT
+// name, with the reason, kept beside the corpus rather than in a comment
+// somebody has to find.
+//
+// A star in an egress pattern stands for one whole label. Vertex AI's regional
+// endpoint is us-central1-aiplatform.googleapis.com, where the region and the
+// service share a label, so no pattern short of *.googleapis.com covers it and
+// that is the wildcard L0.3 removed. The request is therefore still refused,
+// because the default is block, and its refusal says no rule matches rather
+// than naming Vertex. A gap that is stated and measured beats a gap that is
+// closed by a wildcard.
+var statedCloudGaps = []string{
+	"us-central1-aiplatform.googleapis.com",
+	"europe-west4-aiplatform.googleapis.com",
 }
 
 // everyCloudSDK is a repository that reaches all three clouds.
@@ -214,7 +277,21 @@ func everyCloudSDK() map[string]string {
 			"@azure/storage-blob":"12.0.0","@azure/storage-queue":"12.0.0",
 			"@azure/service-bus":"7.0.0","@azure/cosmos":"4.0.0",
 			"@azure/data-tables":"13.0.0","@azure/storage-file-share":"12.0.0",
-			"@azure/keyvault-secrets":"4.0.0"}}`,
+			"@azure/keyvault-secrets":"4.0.0",
+			"@aws-sdk/client-lambda":"3.0.0","@aws-sdk/client-cloudwatch-logs":"3.0.0",
+			"@aws-sdk/client-cloudwatch":"3.0.0","@aws-sdk/client-kms":"3.0.0",
+			"@aws-sdk/client-sfn":"3.0.0","@aws-sdk/client-athena":"3.0.0",
+			"@aws-sdk/client-bedrock-runtime":"3.0.0",
+			"@aws-sdk/client-cognito-identity-provider":"3.0.0",
+			"@aws-sdk/client-cognito-identity":"3.0.0",
+			"@aws-sdk/client-api-gateway":"3.0.0","@aws-sdk/client-firehose":"3.0.0",
+			"@google-cloud/bigquery":"7.0.0","@google-cloud/logging":"11.0.0",
+			"@google-cloud/monitoring":"4.0.0","@google-cloud/bigtable":"5.0.0",
+			"@google-cloud/spanner":"7.0.0","@google-cloud/aiplatform":"3.0.0",
+			"@google-cloud/run":"1.0.0","google-auth-library":"9.0.0",
+			"@azure/identity":"4.0.0","@azure/openai":"2.0.0",
+			"@azure/search-documents":"12.0.0","@azure/monitor-opentelemetry":"1.0.0",
+			"@azure/app-configuration":"1.0.0"}}`,
 		".env.example": "SES_SMTP_USERNAME=\nSES_SMTP_PASSWORD=\n",
 	}
 }
@@ -276,4 +353,31 @@ func TestCatalog_TheNumber(t *testing.T) {
 		"nothing may be answered as a success by a rule that did not name it")
 	require.Positive(t, bInvented,
 		"the before figure has to be non zero or this measures nothing")
+}
+
+// TestCatalog_TheStatedGapsAreStillGaps holds the catalog to its own admission.
+//
+// A gap the code claims is deliberate and a gap nobody noticed look identical
+// from the outside, and the only difference that survives a year is whether
+// something measures it. If a later entry closes one of these, this test goes
+// red and the comment claiming it is unreachable has to be deleted in the same
+// commit. If somebody closes it with *.googleapis.com, TestCatalog_TheNumber
+// goes red instead, because the wildcard would answer for the whole of Google.
+func TestCatalog_TheStatedGapsAreStillGaps(t *testing.T) {
+	t.Parallel()
+	res := run(t, "shopfront", everyCloudSDK())
+	e, err := policy.New(res.Draft.Egress)
+	require.NoError(t, err)
+
+	for _, host := range statedCloudGaps {
+		d := e.Evaluate(policy.Request{Host: host, TLS: true, Path: "/", Method: "POST"})
+		require.False(t, d.Matched(),
+			"%s is named by a rule now, so the comment calling it an unreachable gap is wrong", host)
+	}
+	for _, r := range res.Draft.Egress.Rules {
+		require.NotEqual(t, "*.googleapis.com", r.Host,
+			"one wildcard cannot be allowed to decide BigQuery, Firestore and the token endpoint together")
+		require.NotEqual(t, "*.amazonaws.com", r.Host)
+		require.NotEqual(t, "*.windows.net", r.Host)
+	}
 }

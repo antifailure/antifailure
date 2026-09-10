@@ -36,8 +36,12 @@ var aws = &Emulator{
 	Vendor:       "AWS",
 	Project:      "LocalStack",
 	ProjectURL:   "https://github.com/localstack/localstack",
-	Image:        awsImage,
-	Port:         AWSPort,
+	// LocalStack is a community and commercial project and is not shipped by
+	// Amazon. Recorded rather than left to a reader's inference, for the
+	// reason the field's own comment gives.
+	Official: false,
+	Image:    awsImage,
+	Port:     AWSPort,
 	Env: map[string]string{
 		// The allowlist, and the reason it is one. SERVICES alone only
 		// decides what is loaded eagerly; STRICT_SERVICE_LOADING makes it the

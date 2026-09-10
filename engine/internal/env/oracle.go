@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +15,7 @@ import (
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/oracle"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -165,7 +165,7 @@ func (o *Orchestrator) Oracle(ctx context.Context, opts OracleOptions) (*OracleR
 	}
 
 	o.progress("sending " + plural(len(cfg.Probes), "request", "requests") + " to both versions")
-	driver := &oracle.Driver{Clock: o.opts.Clock, Client: &http.Client{Timeout: 60 * time.Second}}
+	driver := &oracle.Driver{Clock: o.opts.Clock, Client: airgap.Client(airgap.SiteOracle, 60*time.Second)}
 	probes := oracle.Drive(ctx, driver, baseEnv.URL, candidate.URL, toProbes(cfg.Probes), opts.Progress)
 	in.Probes = probes
 

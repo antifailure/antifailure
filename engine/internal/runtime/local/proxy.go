@@ -25,6 +25,7 @@ import (
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/proxyimage"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -296,6 +297,10 @@ func (r *Runtime) ensureProxyImage(ctx context.Context, progress func(string)) e
 	tag := proxyimage.Tag()
 	if _, err := r.cli.ImageInspect(ctx, tag); err == nil {
 		return nil
+	}
+	if err := airgap.Refuse(airgap.SiteImageBuild,
+		"building the sidecar image "+tag+", whose base image comes from Docker Hub"); err != nil {
+		return aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
 	}
 	progress("building the egress proxy (once per version)")
 
@@ -689,7 +694,7 @@ func (r *Runtime) Deliver(
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	resp, err := (&http.Client{Timeout: 60 * time.Second}).Do(req)
+	resp, err := airgap.Client(airgap.SiteWebhookDelivery, 60*time.Second).Do(req)
 	if err != nil {
 		return Delivery{}, aferrors.Wrap(err, aferrors.AFNET012,
 			"service", target.Name, "detail", err.Error())

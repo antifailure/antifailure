@@ -1,0 +1,3 @@
+bus	unmeasured	a kafka declared topics_only, and nothing here created a topic, so the broker is a declaration rather than a shape
+cache	unmeasured	a redis declared empty, because a cache is rebuilt from the primary and a copy would be noise, and nothing here started it, so the declaration is recorded and unchecked
+events	absent	a clickhouse declared golden, and nothing here built one: no golden, no attestation, no tables and no rows. af golden refresh makes a golden of this store and af up branches it, and this environment holds neither

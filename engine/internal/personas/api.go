@@ -14,6 +14,7 @@ import (
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -86,7 +87,7 @@ type APIOptions struct {
 func NewAPIAdapter(h Hosted, opts APIOptions) *APIAdapter {
 	client := opts.HTTP
 	if client == nil {
-		client = &http.Client{Timeout: 60 * time.Second}
+		client = airgap.Client(airgap.SitePersonas, 60*time.Second)
 	}
 	return &APIAdapter{hosted: h, http: client, token: opts.Token, sandbox: opts.Sandbox}
 }

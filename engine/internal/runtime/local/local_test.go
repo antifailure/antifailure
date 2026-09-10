@@ -123,7 +123,15 @@ func requireRuntimeWith(t *testing.T, opts local.Options) *local.Runtime {
 		skipped.Add(1)
 		t.Skipf("skipped: no Docker daemon is reachable: %v", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Ninety seconds, not ten. This is the probe that decides whether the
+	// whole package skips, and ten seconds is shorter than a loaded daemon
+	// takes to answer. Measured on this machine with 250 containers on the
+	// daemon: a trivial docker run took 21 seconds. At that latency every
+	// test here skipped, TestMain refused the run for proving nothing, and
+	// the containment suite reported a machine condition as though the
+	// daemon were absent. A guard whose budget is shorter than the thing it
+	// measures does not detect a missing daemon, it manufactures one.
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	if _, err := r.Inventory(ctx); err != nil {
 		_ = r.Close()

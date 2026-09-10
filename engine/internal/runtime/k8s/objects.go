@@ -721,12 +721,76 @@ func (r *Runtime) deploymentFor(
 func (r *Runtime) migrationJob(
 	spec provider.EnvSpec, s provider.ServiceSpec, namespace, resolverIP string,
 ) *batchv1.Job {
+	// The true is what selects the migration's own command and the migration
+	// database URL, which bypasses a transaction pooler because a schema
+	// migration uses session level features one does not support.
+	return r.oneShotJob(spec, namespace, resolverIP,
+		s.Name+"-migrate", "migrate", oneShotContainer(spec, s, s.Migrate, true))
+}
+
+// stanceJob builds the Job that brings one datastore to its declared stance.
+//
+// Named after the STORE rather than after the service whose image it runs in,
+// which is the same decision the local runtime's container name makes and for
+// the same two reasons. A failure has to name the store somebody looks at: a
+// derived index and a topic creation both run in somebody else's image, and a
+// Job called api-migrate failing sends a person to their schema. And the
+// fidelity report reads that name back out of the journal to say whether this
+// environment's own run did the thing the stance asks for, so the two ends
+// compose it from pkg/provider rather than each writing it out.
+func (r *Runtime) stanceJob(
+	spec provider.EnvSpec, s provider.ServiceSpec, job provider.StanceJob,
+	namespace, resolverIP string,
+) *batchv1.Job {
+	// migration false, so the pod receives the ordinary database URL. The
+	// bypass exists because a schema migration uses session level features a
+	// transaction pooler does not support; a rebuild reads the branch the way
+	// the application reads it, and handing it the direct connection instead
+	// would be one job talking to the database through a door nothing else
+	// uses.
+	return r.oneShotJob(spec, namespace, resolverIP,
+		provider.StanceJobName(job.Store), "stance",
+		oneShotContainer(spec, s, job.Command, false))
+}
+
+// oneShotContainer is a service's image running one command to completion.
+//
+// The ports and the readiness probe are dropped, and that is not tidiness. A
+// Job pod that declares a container port joins nothing and answers nothing on
+// it, and a readiness probe on a pod that is meant to exit makes a successful
+// run look unhealthy for as long as it lives.
+func oneShotContainer(
+	spec provider.EnvSpec, s provider.ServiceSpec, command string, migration bool,
+) corev1.Container {
+	c := containerFor(spec, s, migration)
+	c.Ports = nil
+	c.ReadinessProbe = nil
+	if command != "" {
+		// Set again rather than left to containerFor, which reads the
+		// service's own command for anything that is not a migration. A
+		// stance job runs in the store's image and must not start the store a
+		// second time.
+		c.Command = []string{"/bin/sh", "-c", command}
+	}
+	return c
+}
+
+// oneShotJob is the Job every command that runs to completion is placed in.
+//
+// The service label is the JOB's name rather than the service's, which is what
+// keeps the pod out of the Service object's selector. That selector is how a
+// name resolves inside the namespace, so a one shot pod carrying the store's
+// own service label would put two pods behind one name for as long as it runs,
+// and a topic created against the one that is exiting is a topic nobody has.
+func (r *Runtime) oneShotJob(
+	spec provider.EnvSpec,
+	namespace, resolverIP, name, containerName string, container corev1.Container,
+) *batchv1.Job {
 	labels := labelsFor(spec.EnvID, ComponentService)
-	labels[LabelService] = s.Name + "-migrate"
+	labels[LabelService] = name
 
 	dnsPolicy, dnsConfig := podDNS(namespace, resolverIP)
-	container := containerFor(spec, s, true)
-	container.Name = "migrate"
+	container.Name = containerName
 
 	pod := corev1.PodSpec{
 		AutomountServiceAccountToken: falseRef(),
@@ -745,7 +809,7 @@ func (r *Runtime) migrationJob(
 	}
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: s.Name + "-migrate", Namespace: namespace, Labels: labels,
+			Name: name, Namespace: namespace, Labels: labels,
 		},
 		Spec: batchv1.JobSpec{
 			// Never retried. A migration that failed has to be reported as

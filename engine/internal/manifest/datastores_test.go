@@ -1,6 +1,7 @@
 package manifest_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -59,6 +60,13 @@ func TestParse_AcceptsEveryStanceTheEngineDeclares(t *testing.T) {
 	// The control that makes the two refusals above mean something. A check
 	// that says no to everything says nothing, and this is also what holds the
 	// closed set to the values the validator will actually take.
+	//
+	// Each stance is written out COMPLETE, with the service that runs the
+	// store and the declaration its stance requires. That is more yaml than
+	// the first version of this test had, and it is the point: a stance is now
+	// a thing the environment does, so a manifest that declares one without
+	// saying what to do or what runs it is refused, and a control that stopped
+	// at the word would go green on manifests af up cannot keep.
 	for _, stance := range schema.AllDatastoreStances() {
 		stance := stance
 		t.Run(string(stance), func(t *testing.T) {
@@ -69,6 +77,17 @@ func TestParse_AcceptsEveryStanceTheEngineDeclares(t *testing.T) {
 				body += "    because: a cache is rebuilt from the primary\n"
 			case schema.StanceDerived:
 				body += "    from: primary\n"
+				body += "    rebuild:\n      service: web\n      command: bin/reindex\n"
+			case schema.StanceTopicsOnly:
+				body += "    topics:\n      - name: orders\n"
+			}
+			if stance != schema.StanceGolden {
+				// The engine provides the container for a golden and for
+				// nothing else, so every other stance needs a service of the
+				// store's name to run it.
+				body = strings.Replace(body,
+					"  - name: web\n    port: 3000\n",
+					"  - name: web\n    port: 3000\n  - name: events\n    kind: worker\n", 1)
 			}
 			m := mustParse(t, body)
 			require.Equal(t, stance, m.Datastores[0].Stance)
@@ -120,11 +139,16 @@ name: shop
 services:
   - name: web
     port: 3000
+  - name: search
+    kind: worker
 datastores:
   - name: search
     engine: elasticsearch
     stance: derived
     from: events
+    rebuild:
+      service: web
+      command: bin/reindex --all
   - name: events
     engine: clickhouse
     stance: golden

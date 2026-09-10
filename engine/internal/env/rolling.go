@@ -417,10 +417,23 @@ func (o *Orchestrator) previousSpec(
 		services = append(services, svc)
 	}
 
+	// The previous release's OWN stances, from the previous release's own
+	// manifest. Its migrate command is dropped above because the branch is the
+	// one thing this experiment holds fixed; a broker and a search index are
+	// not the branch. They are this environment's own, they come up with
+	// nothing in them, and a comparison in which both releases processed no
+	// messages because neither broker had a topic would report the two as
+	// agreeing.
+	stanceJobs, err := prev.stanceJobsFor(in.manifest)
+	if err != nil {
+		return provider.EnvSpec{}, err
+	}
+
 	spec := provider.EnvSpec{
 		EnvID: in.envID, Branch: o.opts.Branch, Services: services,
 		Egress:      in.manifest.Egress,
 		DatabaseURL: direct,
+		StanceJobs:  stanceJobs,
 		Journal: func(kind, id string) error {
 			_, jerr := s.journal.Intent(ctx, in.envID, s.runtime.Name(),
 				journal.Kind(kind), id, nil)

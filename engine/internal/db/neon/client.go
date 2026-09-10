@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/antifailure/antifailure/engine/internal/secrets"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 )
 
 // DefaultBaseURL is Neon's API root.
@@ -182,7 +183,7 @@ func (c *Client) httpClient() *http.Client {
 	if c.HTTP != nil {
 		return c.HTTP
 	}
-	return &http.Client{Timeout: 60 * time.Second}
+	return airgap.Client(airgap.SiteNeon, 60*time.Second)
 }
 
 func (c *Client) sleep(ctx context.Context, d time.Duration) error {

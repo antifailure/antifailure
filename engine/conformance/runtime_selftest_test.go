@@ -56,6 +56,7 @@ const (
 	flawOneInstancePretendsToBeMany = "one-instance-pretends-to-be-many"
 	flawIgnoresResources            = "ignores-resources"
 	flawSizeNeverApplied            = "size-never-applied"
+	flawIgnoresAFailedStanceJob     = "ignores-a-failed-stance-job"
 )
 
 // negativeControls pairs each flaw with the behavior that has to notice it.
@@ -80,6 +81,7 @@ var negativeControls = []struct {
 	{flawIgnoresMissingDependency, "--- FAIL: TestRuntimeSuiteChild/Up_ReportsAMissingDependency"},
 	{flawStartsAfterFailedMigration, "--- FAIL: TestRuntimeSuiteChild/Up_DoesNotStartAServiceWhoseMigrationFailed"},
 	{flawRollsBackFailedService, "--- FAIL: TestRuntimeSuiteChild/Up_LeavesAFailedServiceFindable"},
+	{flawIgnoresAFailedStanceJob, "--- FAIL: TestRuntimeSuiteChild/Up_FailsWhenAStanceJobFails"},
 	{flawIgnoresJournalRefusal, "--- FAIL: TestRuntimeSuiteChild/Up_CreatesNothingTheJournalRefused"},
 	{flawJournalsUnfindableNames, "--- FAIL: TestRuntimeSuiteChild/Up_JournalsResourcesTeardownCanFind"},
 	{flawJournalsAfterCreating, "--- FAIL: TestRuntimeSuiteChild/Up_JournalsBeforeCreating"},

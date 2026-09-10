@@ -606,8 +606,22 @@ func bodyFor(given, own string) (string, error) {
 }
 
 // prose refuses the characters this repository bans in a commit message.
+//
+// CODE SPANS ARE STRIPPED FIRST, and this function is the one that forgot to.
+// The comment on `fenced` and `code` says both are removed before a text is
+// judged, and names prosecheck's punctuation exemption as the precedent for
+// doing so, but only attributionIn actually did it. So within one file the
+// attribution rule could tell a mention from a use and the punctuation rule
+// could not, and the punctuation rule is the one that blocks the merge.
+//
+// It refused a pull request whose subject was the double hyphen gate, for the
+// four characters `git grep "x" -- path` inside a code span, which CLAUDE.md
+// permits in as many words and which prosecheck accepts. A repository whose
+// merge tool cannot describe its own rules in a commit message is one where the
+// rules get described somewhere nobody reads.
 func prose(what, text string) []string {
 	var problems []string
+	text = code.ReplaceAllString(fenced.ReplaceAllString(text, ""), "")
 	for _, b := range banned {
 		if b.pattern.MatchString(text) {
 			problems = append(problems, fmt.Sprintf(

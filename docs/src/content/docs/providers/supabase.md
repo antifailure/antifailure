@@ -2,7 +2,7 @@
 title: Supabase
 description: Using Supabase as the database provider, what a branch really is, and what it costs.
 sidebar:
-  order: 3
+  order: 4
 ---
 
 A Supabase branch is a whole separate project: its own Postgres, its own API

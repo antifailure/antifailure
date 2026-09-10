@@ -204,6 +204,8 @@ const (
 	// This manifest declares {count} placement targets and {feature} is
 	// not licensed here.
 	AFEE011 Code = "AF-EE-011"
+	// The provider {provider} needs the {feature} feature: {reason}
+	AFEE012 Code = "AF-EE-012"
 
 	// Extensions
 	// This build cannot honor one of its own extension registrations:
@@ -766,7 +768,7 @@ var catalog = map[Code]Entry{
 		Area:      "DB",
 		Message:   "The database provider {provider} is not registered in this build.",
 		NextStep:  "Set database.provider to one of: {available}.",
-		Docs:      "providers/overview",
+		Docs:      "providers/databases",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
 	},
@@ -775,7 +777,7 @@ var catalog = map[Code]Entry{
 		Area:      "DB",
 		Message:   "The source database at {host} could not be reached.",
 		NextStep:  "Check that the host is reachable from this machine and that the connection string names the right port.",
-		Docs:      "providers/overview",
+		Docs:      "providers/databases",
 		Retryable: true,
 		ExitCode:  ExitProvider,
 	},
@@ -784,7 +786,7 @@ var catalog = map[Code]Entry{
 		Area:      "DB",
 		Message:   "The source database is Postgres {found}, and this provider supports {supported}.",
 		NextStep:  "Set database.version to one of {supported} if the source is one of those, or point database.provider at one that handles Postgres {found}. The docker provider builds a golden in the stock postgres image, so it handles every major that image is published for.",
-		Docs:      "providers/overview",
+		Docs:      "providers/databases",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
 	},
@@ -829,7 +831,7 @@ var catalog = map[Code]Entry{
 		Area:      "DB",
 		Message:   "The database provider {provider} at {endpoint} rejected the configured credential.",
 		NextStep:  "Check the value of the variable named by database.api_key_env; the provider answered 401, so the credential reached it and was refused rather than being missing.",
-		Docs:      "providers/overview",
+		Docs:      "providers/databases",
 		Retryable: false,
 		ExitCode:  ExitAuth,
 	},
@@ -1156,6 +1158,15 @@ var catalog = map[Code]Entry{
 		Docs:      "enterprise/runtimes",
 		Retryable: false,
 		ExitCode:  ExitAuth,
+	},
+	AFEE012: {
+		Code:      AFEE012,
+		Area:      "EE",
+		Message:   "The provider {provider} needs the {feature} feature: {reason}",
+		NextStep:  "Install a licence that includes {feature}, or use a provider built into the engine. Nothing was created, and removing what already exists is never refused for this reason.",
+		Docs:      "enterprise/licensing",
+		Retryable: false,
+		ExitCode:  ExitPolicyDenied,
 	},
 	AFEXT001: {
 		Code:      AFEXT001,

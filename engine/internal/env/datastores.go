@@ -110,6 +110,21 @@ func (o *Orchestrator) openDatastores(ctx context.Context, s *session, mustExist
 	}
 	stores := make([]*datastoreHandle, 0, len(decls))
 	for _, ds := range decls {
+		if ds.Stance != schema.StanceGolden {
+			// A provider is what makes a GOLDEN: it refreshes one, masks it,
+			// verifies it, branches it and destroys the branch again. A store
+			// declared empty, derived or topics_only has none of those things
+			// done to it, and every user of s.stores below is one of them.
+			//
+			// Skipped here rather than at each of those five call sites,
+			// because opening is what refuses. newDatastoreProvider knows how
+			// to provide clickhouse and nothing else, so a Kafka declared
+			// topics_only used to fail `af up` outright with a message about
+			// there being no provider for kafka, which is true and is beside
+			// the point: nothing was ever going to branch it. Its container is
+			// the service of its own name, which validation now requires.
+			continue
+		}
 		h, err := o.newDatastoreProvider(ctx, ds, mustExist)
 		if err != nil {
 			for _, opened := range stores {
@@ -186,9 +201,10 @@ func (o *Orchestrator) newDatastoreProvider(
 			"path", o.opts.Root+"/antifailure.yaml",
 			"detail", fmt.Sprintf(
 				"the datastore %q declares the engine %q and this build has no provider for "+
-					"it. The engines it can provide are: clickhouse. Remove the datastore, or "+
+					"it. The engines it can provide are: %s. Remove the datastore, or "+
 					"register a provider for %q and name it in the datastore's provider key",
-				ds.Name, ds.Engine, ds.Engine))
+				ds.Name, ds.Engine,
+				strings.Join(provider.BuiltInDatastoreEngines(), ", "), ds.Engine))
 	}
 }
 
@@ -217,17 +233,11 @@ func (o *Orchestrator) datastores(
 	vars = map[string]secrets.Value{}
 
 	for _, h := range s.stores {
-		if h.decl.Stance != schema.StanceGolden {
-			// Every other stance is a lane of its own and none of them is
-			// this one. Said out loud rather than skipped silently, because
-			// an undeclared empty store is the failure the stance key exists
-			// to prevent and an unimplemented one that says nothing is the
-			// same failure wearing a manifest entry.
-			o.progress(fmt.Sprintf(
-				"the datastore %s declares %s, and this build brings up the golden stance "+
-					"only, so nothing here started it", h.decl.Name, h.decl.Stance))
-			continue
-		}
+		// Every handle here is a golden. openDatastores opens a provider for
+		// that stance alone, because a provider is what refreshes, masks,
+		// verifies, branches and destroys one, and the other three stances
+		// have none of those done to them. They are jobs instead, built by
+		// stanceJobs and run by the runtime once every service is up.
 		url, err := o.datastoreGolden(ctx, s, h)
 		if err != nil {
 			return nil, nil, err

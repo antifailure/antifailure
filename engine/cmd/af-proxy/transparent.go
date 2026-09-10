@@ -39,6 +39,17 @@ func (p *proxy) serveTransparentHTTP(conn net.Conn) {
 	_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 
 	br := bufio.NewReader(conn)
+	// Before the HTTP/1.1 reader, because a cleartext HTTP/2 connection opens
+	// with a preface that reads as a request whose method is PRI and which
+	// carries no Host header at all. That was refused for naming no host,
+	// which was true about what the reader saw and said nothing about what had
+	// happened, and it is how every gRPC client built with insecure
+	// credentials met this sidecar.
+	if looksLikeH2C(br) {
+		_ = conn.SetReadDeadline(time.Time{})
+		p.serveTransparentH2C(conn, br)
+		return
+	}
 	req, err := http.ReadRequest(br)
 	if err != nil {
 		return
@@ -337,7 +348,11 @@ func parseServerName(b []byte) (string, error) {
 
 // writeRefusalRaw writes the refusal onto a connection that is not being
 // served by net/http.
-func writeRefusalRaw(conn net.Conn, d policy.Decision, req policy.Request) {
+//
+// An io.Writer rather than a net.Conn because the HTTP/2 path relays what this
+// writes rather than handing it a socket, and one refusal that both paths use
+// is what keeps them from disagreeing about what a refusal says.
+func writeRefusalRaw(conn io.Writer, d policy.Decision, req policy.Request) {
 	body := refusalBody(d, req)
 	// Not checked: the refusal is best effort on a connection that is about
 	// to be closed either way.

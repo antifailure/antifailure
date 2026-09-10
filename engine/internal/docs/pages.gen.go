@@ -1817,7 +1817,7 @@ anybody.
 | ` + "`" + `third_party` + "`" + ` | The hosts the egress policy names, the mode each is in, and which mock pack answers for the ones in mock mode. |
 | ` + "`" + `auth` + "`" + ` | Whether each declared persona actually has a row in the branch, and whether the way it signs in can be carried out here. |
 | ` + "`" + `runtime` + "`" + ` | Where the environment runs. |
-| ` + "`" + `traffic` + "`" + ` | Where the endpoint mix comes from, through the same code the load run uses. |
+| ` + "`" + `traffic` + "`" + ` | Which routes a load run would actually send, measured against the committed traffic profile of what production served, and how fast it sends against production's own rate. With no profile both are ` + "`" + `unmeasured` + "`" + ` and say so: four routes somebody wrote by hand used to report as a reproduction of production's traffic. |
 | ` + "`" + `datastores` + "`" + ` | Every datastore in the environment other than the primary database, and whether anything reproduced its contents. One the manifest declares ` + "`" + `golden` + "`" + ` and this environment branched reports what the branch holds and which golden it came from, the way ` + "`" + `database` + "`" + ` does. One declared ` + "`" + `golden` + "`" + ` that nothing branched is ` + "`" + `absent` + "`" + `. The others are ` + "`" + `unmeasured` + "`" + ` by name. |
 | ` + "`" + `topology` + "`" + ` | How many instances of each service are running, against how many the manifest asked for. |
 
@@ -1953,11 +1953,32 @@ gap in what can be seen, so it belongs in the denominator, and the report names
 the four things that are missing: no golden, no attestation, no tables and no
 rows.
 
-A store declared ` + "`" + `empty` + "`" + `, ` + "`" + `derived` + "`" + ` or ` + "`" + `topics_only` + "`" + ` is ` + "`" + `unmeasured` + "`" + `, which
-keeps it out of the score in both directions. Nothing here starts a second
-store, rebuilds one from the branch or creates a topic in one, so a store
-reported reproduced because somebody declared it empty would be the report
-believing a manifest instead of an environment.
+A store declared ` + "`" + `empty` + "`" + `, ` + "`" + `derived` + "`" + ` or ` + "`" + `topics_only` + "`" + ` is ` + "`" + `substituted` + "`" + ` when this
+environment did what the stance asks and the store is running. Not
+` + "`" + `reproduced` + "`" + `, because none of the three is production's data and the whole
+argument for the stances is that it should not be: an empty cache holds nothing
+production holds, a rebuilt index holds documents built from the branch, and a
+broker created with topics and consumer groups holds no message at all.
+` + "`" + `substituted` + "`" + ` is what this report means by something that stands in and behaves
+without being the real thing.
+
+That counts, in the denominator, and the score goes down for declaring a cache
+empty. It should. The alternative is what these three used to be, ` + "`" + `unmeasured` + "`" + `,
+which held them out of the number in both directions, so a twin of a product
+whose events live in Kafka scored the same whether its broker held the declared
+topics or was an empty container nobody had touched. The declared ` + "`" + `because` + "`" + ` is
+carried through as written beside the state, so the reader sees a position
+rather than a gap, and a store with no reason declared says so.
+
+Two things are observed rather than read off the manifest. A store whose
+service is not running is ` + "`" + `absent` + "`" + `, whatever the manifest says about it: the
+manifest asked the environment to hold a store and it does not hold one. And a
+store that is running for which this environment's own run recorded no such
+job stays ` + "`" + `unmeasured` + "`" + `, with the report saying to run ` + "`" + `af up` + "`" + ` again. That
+second one is the question a manifest cannot answer at all: an environment
+brought up by a build with no stance jobs runs the same services from the same
+file with a broker that has nothing in it, and the run journal is the only
+thing that records what a particular run actually did.
 
 That is the number going down on purpose. A stack shaped like an analytics
 product scored 100 percent before, and scores 89 after, on the same
@@ -2169,6 +2190,9 @@ load:
   duration: 5m
   safe_routes: ["GET /**", "POST /api/search"]
   unsafe_routes: ["POST /api/payments/**", "DELETE /**"]
+  traffic:
+    profile: .antifailure/traffic.json
+    max_age: 336h
   thresholds:
     p95_increase: 0.25
     error_rate: 0.01
@@ -2253,6 +2277,63 @@ Everything else works: the mix, the relative weights and the arrival rate,
 which is counted from the timestamps rather than assumed. When no line carries
 a readable timestamp the report says the arrival rate was assumed rather than
 presenting a guess as production's number.
+
+## What production actually serves
+
+` + "`" + "`" + "`" + `yaml
+load:
+  traffic:
+    profile: .antifailure/traffic.json
+    max_age: 336h
+` + "`" + "`" + "`" + `
+
+A route list written by hand cannot know which routes touch which tables.
+Measured on the Antifailure repository on 2026-09-06: a migration held an
+` + "`" + `ACCESS EXCLUSIVE` + "`" + ` lock on nine relations for thirty seconds, ` + "`" + `pg_locks` + "`" + `
+confirmed it from a second connection, and ` + "`" + `af load smoke` + "`" + ` ran through the
+whole window reporting 0.0 percent failed with p95 improving from 41 ms to
+17 ms. None of its four ` + "`" + `safe_routes` + "`" + ` reads the locked table. It was not a
+weak result. It was a green one.
+
+` + "`" + `af traffic record` + "`" + ` counts what production served, from an OpenTelemetry trace
+export or a combined format access log that a collector or a reverse proxy
+already wrote, and writes a profile you commit beside the manifest:
+
+| It records | From a trace export | From an access log |
+| --- | --- | --- |
+| The endpoint mix, per route | yes | yes |
+| The arrival rate, over the window it saw | yes | yes |
+| Production's p95, per route | yes | no, a log line carries no duration |
+| Peak concurrency | yes | no |
+
+It carries no request body, no header, no query string and no identifier: a
+path with an identifier in it collapses to ` + "`" + `/users/{id}` + "`" + ` before it is counted,
+so what lands in the file is a route and a number. Nothing here opens a socket,
+there is no agent, and no application code changes. The file is one you already
+have.
+
+` + "`" + "`" + "`" + `
+af traffic record --from telemetry/traces.json
+af traffic show
+` + "`" + "`" + "`" + `
+
+` + "`" + `af traffic show` + "`" + ` prints what production serves, busiest route first, with a
+mark against every route your run reaches, and prints the ` + "`" + `safe_routes` + "`" + ` lines
+that would cover the ones it does not. It prints them. It does not write them:
+this measures and states, and the manifest confirms it. A route being served in
+production is not a promise that sending it a thousand times is safe.
+
+With a profile, three things change. The fidelity report's traffic dimension
+states the fraction of production's requests your run actually sends and names
+the heaviest route it never touches, instead of reporting any shape at all as
+a reproduction. The arrival rate is stated beside production's own. And
+` + "`" + `p95_increase` + "`" + ` becomes able to fire under ` + "`" + `access_log` + "`" + ` and ` + "`" + `none` + "`" + `, because the
+profile carries the baseline the source could not.
+
+A profile older than ` + "`" + `max_age` + "`" + ` is refused rather than quoted, the way a stale
+golden is refused rather than branched. Fourteen days by default, where the
+volume profile's is thirty: an endpoint mix moves at the rate a team ships, and
+a volume profile at the rate a business grows.
 
 ## Safe and unsafe routes
 
@@ -2393,11 +2474,17 @@ source, so a route the source could not measure is never a breach. Absolute
 numbers are deliberately not used: they fail on a slow CI runner and tell you
 nothing about the change.
 
-Which means the threshold needs a source that carries durations, and only
-` + "`" + `otel` + "`" + ` does. Setting it under ` + "`" + `access_log` + "`" + ` or ` + "`" + `none` + "`" + ` is refused by the
-manifest, and the default is not applied there either: a threshold the report
-lists and no route can be measured against is a check everybody believes is
-running.
+Which means the threshold needs durations from somewhere, and the traffic
+source carries them only under ` + "`" + `otel` + "`" + `. Setting it under ` + "`" + `access_log` + "`" + ` or ` + "`" + `none` + "`" + `
+with nothing else to compare against is refused by the manifest, and the
+default is not applied there either: a threshold the report lists and no route
+can be measured against is a check everybody believes is running.
+
+The second place a baseline can come from is a recorded traffic profile, which
+carries production's own p95 per route. Declare ` + "`" + `load.traffic.profile` + "`" + ` and the
+threshold is allowed under any source, because the comparison now has something
+on the other side of it. The run says which routes took their baseline from the
+profile, and says so when none could.
 
 ` + "`" + "`" + "`" + `
 AF-LOD-016 The p95_increase threshold proved nothing: no baseline for any of
@@ -4354,6 +4441,214 @@ If your provider talks to a hosted service, say in the pull request which
 behaviours you ran against the real thing and which you did not. ` + "`" + `written` + "`" + ` and
 ` + "`" + `proven` + "`" + ` are different words here and the distinction is kept on purpose.
 `,
+	"enterprise/air-gapped.md": `---
+title: Air gapped
+description: An installation that reaches nothing outside your own network, with the list of every call site it refuses and what is deliberately not covered.
+sidebar:
+  order: 10
+---
+
+An air gapped installation reaches nothing outside your own network. Not the
+licence server, because there is not one. Not a telemetry endpoint, not a
+release check, not a model provider, not Docker Hub, and not the third party
+APIs your application calls.
+
+This page is deliberately specific about what that means, because a partial air
+gap described as complete is worse than no feature at all. The buyer who needs
+this is the buyer who cannot tolerate being wrong about it.
+
+## Turning it on
+
+` + "`" + "`" + "`" + `sh
+export AF_LICENSE_KEY=...
+export AF_ORG=acme
+export AF_AIR_GAPPED=1
+export AF_AIR_GAPPED_ALLOW='registry.example.com:5000,10.4.0.0/16,vault.example.com'
+af up
+` + "`" + "`" + "`" + `
+
+` + "`" + `AF_AIR_GAPPED_ALLOW` + "`" + ` is your own network, and it is empty by default. Each
+entry is a hostname, a hostname and port, an IP address or a CIDR. A bare
+hostname permits every port on it; an entry that names a port permits that port
+and no other.
+
+**A private range is not permitted implicitly.** An internal registry on
+` + "`" + `10.0.0.0/8` + "`" + ` is reachable because you named it, not because the range looked
+harmless. A flat corporate network would otherwise widen the air gap for
+everybody on it, silently.
+
+**Loopback and unix sockets are always permitted.** The sidecar, a local
+Postgres and the Docker daemon are addressed there, and an installation that
+could not reach them could not run at all.
+
+**An entry that is not an address stops the binary.** ` + "`" + `https://registry.example.com/v2/` + "`" + `
+is refused rather than ignored, because an allow list with a typo in it is one
+that is quietly narrower than you believe, and you find that out at three in the
+morning.
+
+## What happens without the licence
+
+` + "`" + `AF_AIR_GAPPED` + "`" + ` set on an installation whose licence does not include
+` + "`" + `air_gapped` + "`" + ` **does not start**. It does not warn and carry on unsealed.
+
+The failure this feature exists to prevent is an installation that believes it
+is air gapped and makes one call it did not expect, and the belief is the part
+that does the damage. An operator who asked for an air gap and got an open
+network plus a line on standard error is in a worse position than one who got an
+error and fixed it.
+
+For the same reason there is no way to unseal a running process. Everywhere else
+in this product a licence is asked per call, so that a lapse degrades a feature
+rather than requiring a restart. This one is the opposite on purpose: the
+expensive direction of the mistake is not "the air gap stopped working", it is
+"the machine in the secure facility started talking to the internet because a
+purchase order was slow".
+
+## What it refuses
+
+Every outbound client in the engine dials through one guard. Sealed, each of
+these is refused unless the address is in your allow list, and each refusal is
+recorded with the site that made it.
+
+| What | Where it would have gone |
+| --- | --- |
+| the release check | ` + "`" + `api.github.com` + "`" + `, and the release download ` + "`" + `af update` + "`" + ` fetches |
+| the telemetry exporter | ` + "`" + `OTEL_EXPORTER_OTLP_ENDPOINT` + "`" + ` |
+| the model key probe | your model provider, from ` + "`" + `af model test` + "`" + ` and from the MCP server |
+| the workflow oracle | the two deployments ` + "`" + `af oracle` + "`" + ` compares |
+| the identity provider seeding | Clerk, Auth0, WorkOS |
+| the control plane client | the control plane |
+| the control plane identity discovery | the control plane's OIDC endpoint |
+| the device authorization login | the control plane |
+| the load generator | the application under test |
+| the S3 golden store | AWS |
+| the Azure Blob golden store | Azure |
+| the GCS golden store | Google Cloud Storage |
+| the Neon control API | ` + "`" + `console.neon.tech` + "`" + ` |
+| the Supabase management API | ` + "`" + `api.supabase.com` + "`" + ` |
+| the Database Lab API | your DBLab server |
+| the Aurora control API | AWS, to create and branch an Aurora cluster |
+| the ClickHouse HTTP interface | your ClickHouse server |
+| the service readiness probe | the environment, over loopback |
+| the webhook delivery | a service in the environment |
+| the doctor reachability check | whatever it was asked about |
+| the cloud credential path | AWS, GCP, Azure or Vault, for every secret store and every managed database provider |
+| the audit stream sink | your syslog receiver, your webhook endpoint, or the object store the audit stream is dropped into |
+| the runtime conformance suite | the internet, on purpose, which is why it is here |
+| the container image pull | the registry the image reference names |
+| the container image build | Docker Hub, for the sidecar's base image |
+
+Three of those are worth naming separately.
+
+**Name resolution.** ` + "`" + `af doctor` + "`" + ` resolves a host without dialing it, and a
+resolver query is an outbound packet carrying exactly the name an air gapped
+installation was not supposed to be interested in. It does not look like a
+connection, which is why it is the one that gets missed. The guard also refuses
+a hostname **before** resolving it, so a refused connection does not put the
+name on the wire on its way to being refused.
+
+**Container images.** A pull happens in the Docker daemon, over a socket the
+guard never sees, so it is checked against the registry the reference names
+before the daemon is asked. Both callers look for the image locally first, so an
+installation that loaded its images from a tarball or an internal registry runs
+untouched. What is refused is the silent reach for Docker Hub.
+
+**The sidecar image.** Its Dockerfile begins ` + "`" + `FROM golang:1.25-alpine` + "`" + `, so
+building it on demand is a pull from Docker Hub on the path of every ` + "`" + `af up` + "`" + `.
+Under an air gap it is refused outright rather than pointed somewhere else:
+publish the image to your own registry and load it, and the build is never
+reached.
+
+## Which database you may use
+
+An environment is refused before it is created when its ` + "`" + `database.provider` + "`" + ` has
+a control plane outside your network.
+
+| Provider | Air gapped |
+| --- | --- |
+| ` + "`" + `docker` + "`" + ` | permitted, a container on this machine |
+| ` + "`" + `dblab` + "`" + ` | permitted, a Database Lab Engine you host |
+| ` + "`" + `pgurl` + "`" + ` | permitted, a connection string you supplied |
+| ` + "`" + `neon` + "`" + ` | **refused**, creating a branch means ` + "`" + `console.neon.tech` + "`" + ` |
+| ` + "`" + `supabase` + "`" + ` | **refused**, creating a branch means ` + "`" + `api.supabase.com` + "`" + ` |
+
+The permitted side is the list, not the refused side. A provider added to this
+product later is refused here until somebody decides which side of the line it
+is on, which is one bad afternoon for whoever adds it and is better than an air
+gapped installation quietly reaching a cloud nobody had classified.
+
+## What your application may do
+
+The largest outbound path in a preview environment is not the engine, it is the
+application. Egress rules decide that, and an air gapped installation refuses an
+environment whose rules would leave your network, **before** it is created,
+naming every rule.
+
+| Mode | Air gapped |
+| --- | --- |
+| ` + "`" + `block` + "`" + ` | permitted, the request is refused inside the environment |
+| ` + "`" + `capture` + "`" + ` | permitted, the message is recorded and the provider's success shape returned |
+| ` + "`" + `mock` + "`" + ` | permitted, answered from a pack in your repository |
+| ` + "`" + `allow` + "`" + ` | **refused**, it forwards the request to the real host |
+| ` + "`" + `sandbox` + "`" + ` | **refused**, it substitutes a test credential and still forwards to the real host |
+| ` + "`" + `synth` + "`" + ` | **refused**, it asks a model provider to invent the response |
+
+The same applies to ` + "`" + `egress.default` + "`" + `, which is the mode every host no rule names
+gets. A manifest with ` + "`" + `default: allow` + "`" + ` and no rules at all reaches the whole
+internet, and it is refused for exactly that.
+
+` + "`" + `sandbox` + "`" + ` is the one people are surprised by. Substituting a test credential
+does not stop the connection being made or the request leaving; it changes what
+the request carries.
+
+The environment is refused rather than quietly downgraded. An environment
+switched from ` + "`" + `allow` + "`" + ` to ` + "`" + `block` + "`" + ` behind your back would come up, go green, and
+report that it tested a code path it never reached.
+
+## What is not covered, and why
+
+Three things sit outside the guard, and it is better to read them here than to
+discover them.
+
+**Building your application's image.** ` + "`" + `docker build` + "`" + ` runs in the daemon and in
+BuildKit, and what it fetches is a base image and whatever your package manager
+resolves. None of that passes through this process. Governing it is the daemon's
+job: build on a machine whose registry mirror and package mirror are internal,
+or use ` + "`" + `build.strategy: image` + "`" + ` and supply a prebuilt image, which an air gapped
+installation usually already does.
+
+**The Postgres connection.** Connections made by the database drivers go to the
+URL you supply, through a driver the guard does not sit on. Two things close the
+ordinary way of getting such a URL. The cloud providers' own control APIs, which
+is how a Neon or Supabase branch is created in the first place, are guarded and
+refused. And the environment itself is refused before it is created when its
+` + "`" + `database.provider` + "`" + ` is one whose control plane is somebody else's.
+
+**The Kubernetes runtime.** ` + "`" + `af` + "`" + ` talks to whatever cluster your kubeconfig names.
+That is your cluster by definition, and the guard does not sit on the client.
+
+**The Docker daemon.** ` + "`" + `af` + "`" + ` talks to the daemon ` + "`" + `DOCKER_HOST` + "`" + ` names, which is a
+unix socket on the machine by default and is permitted for that reason. Pointing
+it at a remote daemon over TCP is a connection the guard does not sit on.
+
+## Proving it
+
+The count that matters is not a list of call sites, it is what a real run does.
+` + "`" + `engine/internal/runtime/local` + "`" + ` carries a test that seals the guard and then
+performs a complete lifecycle, bringing an environment up on real Docker,
+serving a request through it, and tearing it down. It asserts that the ledger
+contains **zero refusals**, and separately that the ledger contains the readiness
+probe, because zero refusals out of zero observations is not a measurement.
+
+` + "`" + `engine/pkg/airgap` + "`" + ` carries a second test that walks the source of both modules
+looking for an outbound client that does not go through the guard. It has its
+own test that it can say no, pointed at a fixture that reaches the network six
+different ways, because a walk that silently skipped every path would report a
+clean repository in exactly the same words. And a third test compares the table
+above against the guard's own source in both directions, so a site added without
+a row here, or a row here naming a refusal that does not happen, is a failure
+rather than a slow drift.
+`,
 	"enterprise/audit-stream.md": `---
 title: Audit stream
 description: Privileged actions forwarded to the SIEM your security team already reads.
@@ -4697,6 +4992,37 @@ control it belonged to:
 
 A control reported as "not evidenced" because a query failed must not be
 mistaken for one where there was genuinely nothing to show.
+
+## How this is proved
+
+Every claim on this page is checked on every pull request, against a real
+Postgres rather than a fixture.
+
+The suite creates a database of its own, applies every control plane migration
+with the control plane's own runner, and appends every audit entry through
+` + "`" + `appendAudit` + "`" + `, which is the implementation that wrote every hash in your
+installation. The Go verifier that recomputes those hashes is therefore checked
+against a chain it did not write; a verifier checked against its own output
+agrees with itself, and a disagreement of one byte would report every clean
+audit log as tampered.
+
+It then runs both packs and requires four things to be reported, each with the
+break restored afterwards so no case depends on running before another:
+
+- an entry altered with a privileged connection, named at its own sequence
+  number;
+- an entry deleted with one, named as a broken link at the entry that followed
+  it;
+- a table carrying an ` + "`" + `org_id` + "`" + ` with row level security switched off, named in
+  the failing control, and no longer named once it is switched on;
+- an application role granted ` + "`" + `UPDATE` + "`" + ` on the audit log, naming the privilege.
+
+The number of tables carrying an ` + "`" + `org_id` + "`" + ` is never asserted. It is a property of
+the schema on the day it runs, so what is checked is that none of them has row
+level security disabled.
+
+The reports that run produces, and a note saying what it did not check, are kept
+as a build artifact. Run it yourself with ` + "`" + `just compliance` + "`" + `.
 `,
 	"enterprise/issuing-licenses.md": `---
 title: Issuing a license
@@ -4796,9 +5122,10 @@ A JSON file describing what was bought.
 | ` + "`" + `grace_days` + "`" + ` | How long after expiry features keep working. Defaults to 14. |
 | ` + "`" + `trial` + "`" + ` | Marks an evaluation license, which shows a banner. |
 
-The features are ` + "`" + `air_gapped` + "`" + `, ` + "`" + `audit_stream` + "`" + `, ` + "`" + `billing` + "`" + `, ` + "`" + `compliance_packs` + "`" + `,
-` + "`" + `enterprise_dashboard` + "`" + `, ` + "`" + `enterprise_secrets` + "`" + `, ` + "`" + `multi_runtime` + "`" + `,
-` + "`" + `policy_enforcement` + "`" + `, ` + "`" + `rbac` + "`" + `, ` + "`" + `scim` + "`" + `, ` + "`" + `sso` + "`" + ` and ` + "`" + `support_access` + "`" + `. Anything else
+The features are ` + "`" + `air_gapped` + "`" + `, ` + "`" + `audit_stream` + "`" + `, ` + "`" + `billing` + "`" + `, ` + "`" + `cloud_database` + "`" + `,
+` + "`" + `cloud_runtime` + "`" + `, ` + "`" + `compliance_packs` + "`" + `, ` + "`" + `enterprise_dashboard` + "`" + `,
+` + "`" + `enterprise_secrets` + "`" + `, ` + "`" + `multi_runtime` + "`" + `, ` + "`" + `policy_enforcement` + "`" + `, ` + "`" + `rbac` + "`" + `, ` + "`" + `scim` + "`" + `,
+` + "`" + `sso` + "`" + ` and ` + "`" + `support_access` + "`" + `. Anything else
 is refused at issue time, because the verifier cannot refuse it: a license
 issued for a newer release names features an older binary has never heard of,
 and rejecting the whole license over one unknown name would take away the
@@ -4807,6 +5134,26 @@ acting on it, and the generator is the only place the set can be closed.
 
 Before that check existed, ` + "`" + `"features": ["ssoo"]` + "`" + ` signed cleanly, verified
 cleanly, reported the license active, and permitted nothing.
+
+## Features that are issued with a warning
+
+` + "`" + `rbac` + "`" + ` and ` + "`" + `air_gapped` + "`" + ` are issued, and the generator prints a warning naming
+them beside the key. Both are real: the custom roles library is written and
+tested, and air gapped operation is a property every installation already has.
+What is not true of either is that the license is what grants it, so withdrawing
+the license would not withdraw the capability, and a renewal conversation that
+treats one of them as a thing being bought is a conversation about nothing.
+
+That is a warning rather than a refusal on purpose. Refusing would refuse a
+customer something they can have, and a refusal placed where somebody has
+already promised the feature is a refusal that acquires an override flag within
+a week. The person who needs the sentence is the one issuing the key, before
+they answer a question about it, which is where it prints.
+
+The two lists are different answers and the generator keeps them apart.
+` + "`" + `billing` + "`" + ` and ` + "`" + `enterprise_dashboard` + "`" + ` are not built, so they cannot be sold.
+These two are built and are not gated, so they can be sold and should not be
+described as something the license turns on.
 
 ## Features that cannot be issued
 
@@ -5052,11 +5399,52 @@ license leaves you with it rather than with nothing.
 
 ## What is in ` + "`" + `ee/` + "`" + `
 
-` + "`" + `sso` + "`" + `, ` + "`" + `scim` + "`" + `, ` + "`" + `rbac` + "`" + `, ` + "`" + `audit_stream` + "`" + `, ` + "`" + `policy_enforcement` + "`" + `, ` + "`" + `multi_runtime` + "`" + `,
-` + "`" + `enterprise_secrets` + "`" + `, ` + "`" + `billing` + "`" + `, ` + "`" + `enterprise_dashboard` + "`" + `, ` + "`" + `support_access` + "`" + `,
-` + "`" + `compliance_packs` + "`" + `, ` + "`" + `air_gapped` + "`" + `.
+<!-- entitlement-names:start -->
+The features a license can name are ` + "`" + `air_gapped` + "`" + `, ` + "`" + `audit_stream` + "`" + `, ` + "`" + `billing` + "`" + `, ` + "`" + `cloud_database` + "`" + `, ` + "`" + `cloud_runtime` + "`" + `, ` + "`" + `compliance_packs` + "`" + `, ` + "`" + `enterprise_dashboard` + "`" + `, ` + "`" + `enterprise_secrets` + "`" + `, ` + "`" + `multi_runtime` + "`" + `, ` + "`" + `policy_enforcement` + "`" + `, ` + "`" + `rbac` + "`" + `, ` + "`" + `scim` + "`" + `, ` + "`" + `sso` + "`" + ` and ` + "`" + `support_access` + "`" + `.
+<!-- entitlement-names:end -->
 
-Each is named in the license, so a license permits exactly what was bought.
+<!-- entitlement-count:start -->
+Of the 14 features a license can carry, **10 are refused when the license does not name them**, 8 by the engine and 2 by the control plane. The rest are listed here anyway, with what actually happens without each one, because a feature that is sold and never checked is worth knowing about and the number is only useful if it can come back unflattering.
+<!-- entitlement-count:end -->
+
+The table is generated from ` + "`" + `ee/engine/feature/catalogue.go` + "`" + `, which is the one
+place this product records what a license permits. Every row saying a feature is
+refused names the file that refuses it, and a test opens that file and requires
+the call that actually refuses: ` + "`" + `feature.Enabled` + "`" + ` for a row the enterprise
+engine gates, ` + "`" + `edition.Permits` + "`" + ` for one the community engine gates by name. So a
+row cannot claim an enforcement it does not have. Which of the two is required
+is decided by the row's own state and never by the shape of the path, because a
+check that guessed from the path would accept an enterprise file for a community
+gate and never notice that the mechanism claimed is not the mechanism there.
+
+Rows that say nothing changes are the honest answer rather than an omission: a
+feature that is sold and never checked is a gap worth publishing, and this page
+is where it gets published.
+
+<!-- entitlements:start -->
+| Feature | What it is | Without it |
+| --- | --- | --- |
+| ` + "`" + `air_gapped` + "`" + ` | An installation that reaches nothing outside the operator's own network. | Withheld. ` + "`" + `airgapped/airgapped.go:RegisterFromEnvironment` + "`" + ` asks the license, and the feature is off when the answer is no. |
+| ` + "`" + `audit_stream` + "`" + ` | Privileged actions forwarded to the organization's own SIEM. | Withheld. ` + "`" + `auditsink/auditsink.go:auditsink.permitted` + "`" + ` asks the license, and the feature is off when the answer is no. |
+| ` + "`" + `billing` + "`" + ` | Subscriptions, invoices and the plan an organization is on. | Nothing changes, because the capability is not built yet. |
+| ` + "`" + `cloud_database` + "`" + ` | Managed cloud database providers, the ones that need an organization behind them rather than a developer's own card. | Withheld. ` + "`" + `cloudgate/cloudgate.go:gatedDatabase.Branch` + "`" + ` asks the license, and the feature is off when the answer is no. |
+| ` + "`" + `cloud_runtime` + "`" + ` | Managed cloud runtime providers, on the same rule as the databases. | Withheld. ` + "`" + `cloudgate/cloudgate.go:gatedRuntime.Up` + "`" + ` asks the license, and the feature is off when the answer is no. |
+| ` + "`" + `compliance_packs` + "`" + ` | SOC 2 and ISO 27001 evidence gathered from the control plane's own records. | Withheld. ` + "`" + `compliance/command.go:Command` + "`" + ` asks the license, and the feature is off when the answer is no. |
+| ` + "`" + `enterprise_dashboard` + "`" + ` | The console: environments, masking, egress, audit and workloads. | Nothing changes, because the capability is not built yet. |
+| ` + "`" + `enterprise_secrets` + "`" + ` | Declared variables resolved from Vault or a cloud secret manager. | Withheld. ` + "`" + `secrets/source.go:Source.Available` + "`" + ` asks the license, and the feature is off when the answer is no. |
+| ` + "`" + `multi_runtime` + "`" + ` | Placing an environment across several runtimes at once, by requirement and by tag. | Withheld. ` + "`" + `engine/internal/env/env.go:Orchestrator.placement` + "`" + ` asks the license, and the feature is off when the answer is no. |
+| ` + "`" + `policy_enforcement` + "`" + ` | Organization policy that refuses an environment the manifest would have allowed. | Withheld. ` + "`" + `policyenforce/policyenforce.go:Hook.Check` + "`" + ` asks the license, and the feature is off when the answer is no. |
+| ` + "`" + `rbac` + "`" + ` | Roles, and a permission on every route. | Nothing changes. It is implemented and deliberately available to everyone. |
+| ` + "`" + `scim` + "`" + ` | Directory provisioning, so joiners and leavers arrive from the identity provider. | Withheld by the control plane. ` + "`" + `ee/web/scim/src/routes.ts:guard` + "`" + ` asks the license, and an unlicensed installation is answered 402 naming the feature rather than 404. |
+| ` + "`" + `sso` + "`" + ` | Single sign on against the organization's own identity provider. | Withheld by the control plane. ` + "`" + `ee/web/sso/src/store.ts:connectionByHandle` + "`" + ` asks the license, and an unlicensed installation is answered 402 naming the feature rather than 404. |
+| ` + "`" + `support_access` + "`" + ` | A supported way for the vendor to see what a customer sees. | Nothing changes. It is implemented and deliberately available to everyone. |
+<!-- entitlements:end -->
+
+The distinction in the third column between a feature that is refused and one
+the hosted control plane covers under its plan is the one worth reading twice. A
+license carries fourteen names and the hosted plan gate carries one boolean, so
+a license naming a feature and a plan that does not are not reconcilable by
+anything. Both are real refusals and only the first is keyed on what was bought.
 
 ### Two of those cannot be sold
 
@@ -5073,23 +5461,48 @@ working feature from every direction and is harder to find than the gap it
 covers. A feature nobody can buy and nobody can be granted cannot be mistaken
 for one that ships.
 
-` + "`" + `rbac` + "`" + ` is a third case and a different one. The custom roles library is complete
-and tested, and nothing stores a role model, so an organization has no way to
-have one. It is reported and not enforced, and it is written down here rather
-than gated for the same reason: a check on a path nothing reaches is worse than
-no check.
+### One more is not enforced
 
-Both lists are held to the code by a test rather than by a habit. ` + "`" + `notShipped` + "`" + `
-in ` + "`" + `ee/engine/license/license.go` + "`" + ` is the single place either statement lives,
-and this page, the generator and the enterprise feature registry are all checked
-against it in both directions.
+A third case, and a different one from the two above: ` + "`" + `rbac` + "`" + `. It names something
+real, and the license is not what provides it.
+
+The custom roles library is complete and tested, and nothing stores a role
+model, so an organization has no way to have one.
+
+It is reported and not enforced, and that is written down rather than gated, for
+the reason the paragraph above gives: a check on a path nothing reaches is worse
+than no check. Unlike ` + "`" + `billing` + "`" + ` and ` + "`" + `enterprise_dashboard` + "`" + ` it is not refused at
+issue, because refusing it would refuse a customer a capability they can have.
+` + "`" + `tools/licensegen` + "`" + ` prints a warning naming it beside the key it signs instead,
+so that whoever issues it reads what the license does and does not grant before
+a customer asks.
+
+` + "`" + `air_gapped` + "`" + ` was in this state and said so nowhere until 2026-09-08. Every
+occurrence of the name in the repository was a copy of the catalogue, the
+license vectors, a line of documentation, or a test, so a license naming it
+verified, reported itself active, printed in ` + "`" + `af license status` + "`" + `, and granted
+nothing. It is no longer in this state and this page said it was for a day
+longer than it was true: the paragraph naming it stayed here while the gate that
+made it false landed in another pull request, which is the same stale sentence
+this catalogue exists to refuse and is why the row above is generated from the
+code rather than written beside it. The table now reads Withheld for
+` + "`" + `air_gapped` + "`" + `, and the site it names is the one that asks.
+
+All three lists are held to the code by a test rather than by a habit.
+` + "`" + `notShipped` + "`" + ` and ` + "`" + `unenforced` + "`" + ` in ` + "`" + `ee/engine/license/license.go` + "`" + ` are the single
+place each statement lives, and this page, the generator and the enterprise
+feature registry are all checked against them in both directions. A fourth
+check asks the question none of those could: that every feature a license can
+grant is refused, recorded as unenforced, or gated at a real site in one half of
+the product or the other.
 
 ## Contributing
 
 Contributions are under the DCO, not a CLA. You keep your copyright. See
 ` + "`" + `CONTRIBUTING.md` + "`" + `.
 
-Related: [policy](/docs/enterprise/policy), [runtimes](/docs/enterprise/runtimes).
+Related: [policy](/docs/enterprise/policy), [runtimes](/docs/enterprise/runtimes),
+[air gapped](/docs/enterprise/air-gapped).
 `,
 	"enterprise/policy.md": `---
 title: Policy enforcement
@@ -6898,6 +7311,124 @@ piece, and the page opens by saying what still works without it, which is all
 of it. Read that one when you want environments that outlive a workflow run, a
 shared address for them, or a record across repositories.
 `,
+	"guides/azure-container-apps.md": `---
+title: Why there is no Azure Container Apps runtime
+description: What a containment claim on Container Apps would have to say, and why Microsoft's own documentation refuses it.
+sidebar:
+  order: 22
+---
+
+Antifailure runs on AKS. It does not run on raw Azure Container Apps, and
+` + "`" + `runtime.provider: aca` + "`" + ` in a manifest exits with the reason rather than with a
+list of the runtimes that do exist.
+
+This page is that reason. It is here rather than in a release note because
+"Container Apps is not supported" reads like a roadmap item, and this is not
+one. Two of the three things a containment claim on Container Apps would have
+to say are contradicted by Microsoft's own documentation.
+
+## The rule this is measured against
+
+A runtime earns its place here by proving containment before it runs anything.
+The Kubernetes runtime creates its own NetworkPolicy objects and then starts one
+pod under them that tries to escape four ways, refusing the environment with
+` + "`" + `AF-RUN-043` + "`" + ` when any attempt succeeds. The order matters: a NetworkPolicy is a
+request to whatever network plugin the cluster runs, several plugins accept the
+object and enforce nothing, and only a packet can tell those apart.
+
+A runtime that assumes containment instead of proving it is worth less than no
+runtime at all, because from the outside the two look identical.
+
+## An environment cannot be built with the door closed
+
+Microsoft's firewall guidance for Container Apps lists four names under the
+scenario "All scenarios":
+
+- ` + "`" + `mcr.microsoft.com` + "`" + ` and ` + "`" + `*.data.mcr.microsoft.com` + "`" + `, for Microsoft Artifact
+  Registry
+- ` + "`" + `packages.aks.azure.com` + "`" + ` and ` + "`" + `acs-mirror.azureedge.net` + "`" + `, which the underlying
+  Azure Kubernetes Service cluster uses to download and install its Kubernetes
+  and container network interface binaries
+
+The same guidance offers the private endpoint escape for your own registry and
+your own key vault, and offers nothing like it for those four. So the subnet
+must have a route to the public internet before an environment exists at all.
+
+**This is worse on Container Apps than on AWS Fargate, and it is worth being
+precise about why.** On Fargate the registry, the image layers and the log push
+are all reachable through endpoints inside the VPC, so a task can start in a
+subnet with no route out. On Container Apps two of the four required names are
+public content delivery endpoints for the platform's own cluster binaries, and
+no configuration reaches them. "A network security group that denies" is not a
+tighter setting here. It is a configuration that builds nothing.
+
+## Internal governs ingress, not egress
+
+An internal environment has no public endpoint and its virtual IP is an internal
+load balancer address. That is a real property and it is worth having. It is not
+containment.
+
+Microsoft's billing note for a virtual network integrated environment reads "One
+standard static public IP for egress if you're using an internal or external
+environment, plus one standard static public IP for ingress if you're using an
+external environment". An internal environment is provisioned with a public
+egress address. Reading ` + "`" + `internal` + "`" + ` as "no outbound path" is the specific mistake
+this page exists to prevent.
+
+## The resolver, which is different on every cloud
+
+A name lookup is a data channel. The question in a DNS query is chosen by
+whatever sends it, so a resolver that answers recursively is an upload with a
+packet budget. Every containment argument has to say what happens to it, and the
+answer is different on all three clouds:
+
+- On **Kubernetes** a NetworkPolicy closes the resolver along with everything
+  else, which is why an argument carried over from Kubernetes is wrong
+  everywhere else.
+- On **AWS** the resolver cannot be filtered at all. The VPC user guide states
+  that you cannot filter traffic to or from the Amazon DNS server using network
+  ACLs or security groups, so only a Route 53 Resolver DNS Firewall rule group
+  closes it.
+- On **Azure** a network security group **can** filter it, through the
+  ` + "`" + `AzurePlatformDNS` + "`" + ` service tag. And then the Container Apps page says: "Don't
+  explicitly deny the Azure DNS address 168.63.129.16 in the outgoing NSG rules.
+  If you do, your Container Apps environment doesn't function."
+
+Azure DNS is also "a virtual IP of the host node and as such it isn't subject to
+user defined routes", so a firewall the default route points at never sees the
+query.
+
+Two clouds, the same verdict, opposite mechanisms. That is why the enumeration
+behind this page reports three values and not two.
+
+## What is shipped instead
+
+` + "`" + `runtime.provider: aca` + "`" + ` reaches an enumeration of twelve egress paths out of a
+Container Apps replica, each with a verdict of ` + "`" + `closed` + "`" + `, ` + "`" + `open` + "`" + ` or ` + "`" + `unproven` + "`" + `,
+and a refusal carrying the whole report. **Eight are closed by the configuration
+the runtime would generate, three are open, and one is unproven.**
+
+` + "`" + `unproven` + "`" + ` is never counted as ` + "`" + `closed` + "`" + `. The instance metadata address at
+` + "`" + `169.254.169.254` + "`" + ` is the example: the generated configuration writes the one
+rule Azure documents for it, an outbound deny to the ` + "`" + `AzurePlatformIMDS` + "`" + ` service
+tag, and the verdict is still ` + "`" + `unproven` + "`" + `, because no Container Apps page states
+that the address answers a replica and no page states that it does not. Those
+are different claims, and settling it needs one request from one running
+replica.
+
+Every verdict is computed from configuration that has never been applied to an
+Azure subscription. A ` + "`" + `closed` + "`" + ` verdict means the generated configuration removes
+the path. It does not mean Azure was seen enforcing it.
+
+## What to use
+
+Use ` + "`" + `runtime.provider: kubernetes` + "`" + ` against AKS. It is the same containment
+argument as any other cluster, it is proved by a probe that runs before any
+application image starts, and AKS is where most organisations on Azure already
+run containers.
+
+See [The Kubernetes runtime](/docs/guides/kubernetes-runtime).
+`,
 	"guides/azure.md": `---
 title: Azure
 description: The Azure services an environment answers for, the ones it refuses, and what each costs.
@@ -7409,6 +7940,324 @@ Make it reversible. A migration nobody dares run twice is a migration nobody
 runs.
 
 Related: [building services](/docs/guides/build), [masking](/docs/concepts/masking).
+`,
+	"guides/gcp.md": `---
+title: Google Cloud in an environment
+description: Which Google Cloud services an environment answers for, which emulator answers each one, which of those Google actually ships, and what is refused.
+sidebar:
+  order: 24
+---
+
+## Google does not ship a Cloud Storage emulator
+
+Read this first, because finding it out from a failing test is worse than
+reading it here.
+
+Google publishes emulators for five of its services: Pub/Sub, Firestore,
+Datastore, Bigtable and Spanner. It publishes **none for Cloud Storage**. There
+is no ` + "`" + `gcloud emulators storage` + "`" + `, there never has been, and the gap is old
+enough that the community filled it.
+
+So Cloud Storage in an environment is answered by
+[fake-gcs-server](https://github.com/fsouza/fake-gcs-server), which is
+Francisco Souza's project, is BSD 2-Clause licensed, and **has no affiliation
+with Google**. It is a good emulator and it is not Google's. Every table on
+this page says which of the two you are looking at, in a column, because the
+distinction changes what a passing test is worth: a Pub/Sub test that passes
+here passed against the code Google ships to its own customers for local
+development, and a Cloud Storage test that passes here passed against a third
+party reimplementation of a published API.
+
+Nothing on this page presents fake-gcs-server as Google's, and if you find a
+sentence that reads that way, it is a defect.
+
+## The surface
+
+**The table is the surface.** A Google host that is not in it is not routed to
+an emulator at all. It falls through to the environment's egress policy, whose
+default is block, so it is refused rather than answered. That is deliberate and
+it is the expensive half of this feature: a silent wrong answer from an
+emulator is worse than a refusal, because a refusal sends you to look at the
+rule and a wrong answer gets believed.
+
+| Service | Hosts answered | Emulator | Shipped by | Transport |
+| --- | --- | --- | --- | --- |
+| Cloud Storage | ` + "`" + `storage.googleapis.com` + "`" + `, ` + "`" + `*.storage.googleapis.com` + "`" + ` | fake-gcs-server | **Third party** | REST over HTTP/1.1 |
+| Cloud Pub/Sub | ` + "`" + `pubsub.googleapis.com` + "`" + ` | Google Cloud CLI | Google | gRPC over HTTP/2 |
+| Cloud Firestore | ` + "`" + `firestore.googleapis.com` + "`" + ` | Google Cloud CLI | Google | gRPC over HTTP/2 |
+| Cloud Datastore | ` + "`" + `datastore.googleapis.com` + "`" + ` | Google Cloud CLI | Google | gRPC over HTTP/2 |
+| Cloud Bigtable | ` + "`" + `bigtable.googleapis.com` + "`" + `, ` + "`" + `bigtableadmin.googleapis.com` + "`" + ` | Google Cloud CLI | Google | gRPC over HTTP/2 |
+| Cloud Spanner | ` + "`" + `spanner.googleapis.com` + "`" + ` | Cloud Spanner Emulator | Google | gRPC over HTTP/2 |
+
+Six services and **six containers**, which is the first thing that differs from
+the AWS surface. LocalStack answers nine AWS services on one gateway port, so
+an AWS environment starts one emulator. Google ships nothing of that shape, so
+a Google environment starts one container per service it asks for, and the cost
+is a sum rather than a constant. The sums are measured further down.
+
+Bigtable answers for two hostnames rather than one on purpose. Creating a table
+is an admin call against ` + "`" + `bigtableadmin.googleapis.com` + "`" + `, so a surface holding
+only the data plane fails at the first setup step of every test with an error
+naming the wrong service, and the person reading it goes looking at their row
+writes.
+
+## What is refused, and why each one
+
+| Refused | Why |
+| --- | --- |
+| ` + "`" + `oauth2.googleapis.com` + "`" + `, ` + "`" + `accounts.google.com` + "`" + `, ` + "`" + `iamcredentials.googleapis.com` + "`" + `, ` + "`" + `sts.googleapis.com` + "`" + ` | The credential path. No emulator here implements Google's token endpoint, and answering it with a fabricated token would be this project writing an emulator for the one service where a wrong answer is a security claim. See "Credentials" below. |
+| ` + "`" + `www.googleapis.com` + "`" + ` | It serves the Cloud Storage JSON API and dozens of other Google APIs on the same name. Routing it to a storage emulator would answer for every other API on that host with a storage 404. |
+| ` + "`" + `storage.<location>.rep.googleapis.com` + "`" + ` | The regional and dual region Cloud Storage endpoints. fake-gcs-server matches on the Host header against exactly one public host, so routing a second spelling here produces a 404 from inside the emulated surface, which reads as a missing object rather than as an unsupported endpoint. |
+| ` + "`" + `<location>-pubsub.googleapis.com` + "`" + ` | The Pub/Sub regional endpoints. The emulator has no notion of a region, so answering for a regional spelling would emulate a property it does not have. |
+| ` + "`" + `secretmanager.googleapis.com` + "`" + `, ` + "`" + `cloudtasks.googleapis.com` + "`" + `, ` + "`" + `bigquery.googleapis.com` + "`" + `, ` + "`" + `run.googleapis.com` + "`" + `, ` + "`" + `cloudfunctions.googleapis.com` + "`" + `, ` + "`" + `logging.googleapis.com` + "`" + `, ` + "`" + `compute.googleapis.com` + "`" + ` and every other Google API | Outside the surface. No emulator, so a refusal. |
+| ` + "`" + `169.254.169.254` + "`" + ` | The instance metadata endpoint, which hands out the node's own credentials. Link local, so the sidecar's destination guard refuses it before any rule is consulted, and a name that resolves there is refused with it. See "Containment" below. |
+
+Firestore's emulator is the ` + "`" + `gcloud` + "`" + ` one and not the Firebase Local Emulator
+Suite. Security rules, indexes, Firebase Authentication, the Realtime Database
+and Hosting are a different program and are not here. Datastore in Firestore
+mode is served by Firestore and is emulated by the Firestore emulator, not by
+the Datastore one; they are two containers for that reason.
+
+## What the emulators do not implement
+
+An emulator that is trusted where it is wrong is worse than no emulator, so
+each project's own stated gaps are repeated here rather than left to be found.
+
+- **Cloud Spanner.** Google documents that the emulator does not check whether
+  a statement is partitionable, so a partitioned DML statement or a
+  ` + "`" + `partitionQuery` + "`" + ` can pass here and fail in production with a
+  non-partitionable statement error. It also has no query plans in ` + "`" + `PLAN` + "`" + ` or
+  ` + "`" + `PROFILE` + "`" + ` mode, no ` + "`" + `ANALYZE` + "`" + `, no audit logging and no monitoring. **A twin is
+  not a substitute for a plan review on Spanner.**
+- **Cloud Bigtable.** The emulator holds one unnamed instance in memory.
+  Replication, app profiles and instance or cluster administration are not
+  emulated, and the admin API answers for table level calls only.
+- **Cloud Storage.** fake-gcs-server does not validate signed URL query
+  parameters at all: neither the signature nor the expiry is checked. A test
+  that proves a signed URL works here has proved that the URL was formed, not
+  that it was signed correctly.
+- **Cloud Firestore.** No security rules and no composite index enforcement, so
+  a query that the emulator answers can be refused in production for want of an
+  index.
+
+## The claim, and the one number that carries it
+
+The point of answering these hosts inside the environment is that **the
+application is not changed to reach them**. No ` + "`" + `apiEndpoint` + "`" + `, no ` + "`" + `baseUrl` + "`" + `, no
+` + "`" + `STORAGE_EMULATOR_HOST` + "`" + `, no ` + "`" + `PUBSUB_EMULATOR_HOST` + "`" + `, no client construction that
+exists only in tests. Every name resolves to the sidecar, the sidecar
+terminates TLS with a certificate authority the environment already trusts, and
+it answers for ` + "`" + `storage.googleapis.com` + "`" + ` itself. The unmodified production code
+path runs against the emulator.
+
+Google's client libraries do read ` + "`" + `STORAGE_EMULATOR_HOST` + "`" + `, ` + "`" + `PUBSUB_EMULATOR_HOST` + "`" + `,
+` + "`" + `FIRESTORE_EMULATOR_HOST` + "`" + `, ` + "`" + `DATASTORE_EMULATOR_HOST` + "`" + `, ` + "`" + `BIGTABLE_EMULATOR_HOST` + "`" + `
+and ` + "`" + `SPANNER_EMULATOR_HOST` + "`" + `, and pointing a client at an emulator with one of
+them is the ordinary way to do this. **Antifailure does not set any of them, and
+setting one would make the claim meaningless**: those variables change how the
+client library builds its endpoint and, for several of them, switch off
+authentication as well, so the code under test stops being the code that ships.
+If you ever see one of those variables in an environment this tool built, that
+is a bug in this tool and not a shortcut.
+
+**Today that claim holds for one of the six services, and even that one has a
+gap in front of it.** Both halves are measured below rather than reasoned
+about.
+
+### What was run
+
+A stand in for the sidecar's inspected path, built to match
+` + "`" + `engine/cmd/af-proxy/mitm.go` + "`" + ` in the places that decide the answer: it answers
+` + "`" + `CONNECT` + "`" + `, terminates TLS with an authority carrying the same extensions the
+engine's own authority sets in ` + "`" + `engine/internal/envcert/envcert.go` + "`" + `, sets no
+ALPN, and then reads HTTP/1.1 requests out of the terminated connection. The
+clients are the vendor's own, unmodified, reached through ` + "`" + `HTTPS_PROXY` + "`" + ` and a
+trusted authority and nothing else.
+
+### Cloud Storage: both languages complete every call, with no override
+
+| Client | Version | Create bucket | Upload | Download | List |
+| --- | --- | --- | --- | --- | --- |
+| ` + "`" + `@google-cloud/storage` + "`" + ` | 8.0.1 | 502 ms | 208 ms | 24 ms | 28 ms |
+| ` + "`" + `google-cloud-storage` + "`" + `, Python | 3.13.1 | 126 ms | 18 ms | 7 ms | 10 ms |
+
+Both preserved the Host header as ` + "`" + `storage.googleapis.com` + "`" + ` on every request,
+which is what lets fake-gcs-server route them at all, and both sent
+` + "`" + `Authorization: Bearer` + "`" + `. No ` + "`" + `apiEndpoint` + "`" + `, no ` + "`" + `STORAGE_EMULATOR_HOST` + "`" + ` and no
+client option was set in either.
+
+### The credential path is a real gap, and it is not the same in two languages
+
+Before its first storage call, each client exchanged its service account key
+for an access token. **The host it exchanged at is outside the surface, and it
+is a different host in each language.**
+
+| Client | Token request observed |
+| --- | --- |
+| ` + "`" + `@google-cloud/storage` + "`" + ` 8.0.1 | ` + "`" + `POST www.googleapis.com/oauth2/v4/token` + "`" + ` |
+| ` + "`" + `google-cloud-storage` + "`" + ` 3.13.1, Python | ` + "`" + `POST oauth2.googleapis.com/token` + "`" + ` |
+
+Python takes that host from the ` + "`" + `token_uri` + "`" + ` in the key file, so an environment
+that supplies the key controls it. **Node does not.** ` + "`" + `gtoken` + "`" + `, which
+` + "`" + `google-auth-library` + "`" + ` uses for a service account key, holds
+` + "`" + `https://www.googleapis.com/oauth2/v4/token` + "`" + ` as a constant and ignores
+` + "`" + `token_uri` + "`" + `, so nothing an environment supplies can move it.
+
+No emulator on this page implements Google's token endpoint, and this project
+does not write emulators, least of all for the one surface where a wrong
+answer is a security claim. So both hosts stay refused, and **Cloud Storage
+with a service account key does not run end to end inside an environment
+today**. That is a gap in the credential path rather than in the storage
+surface. It is the Google shaped version of the reason the AWS surface answers
+for STS, and it is stated here because a user meeting it as a failure would go
+looking at their bucket.
+
+### The other five: gRPC does not survive an HTTP/1.1 proxy
+
+Three runs of the same unmodified ` + "`" + `@google-cloud/pubsub` + "`" + ` 6.0.1 client against
+the same stand in, with one thing changed each time.
+
+| The stand in | What the client got | Wall clock |
+| --- | --- | --- |
+| Reads HTTP/1.1, no ALPN. This is what af-proxy does. | ` + "`" + `14 UNAVAILABLE` + "`" + `, after 9 connection attempts | 80.5 s, which is the client's own 60 s deadline plus its retries |
+| Reads HTTP/1.1, offers ALPN ` + "`" + `h2` + "`" + ` | ` + "`" + `14 UNAVAILABLE` + "`" + ` | 77.0 s |
+| Forwards the terminated socket to an HTTP/2 backend | ` + "`" + `12 UNIMPLEMENTED` + "`" + `, which is the backend answering | **2.6 s**, of which 0.46 s is the call the client itself timed |
+
+The proxy's own log says why. On both HTTP/1.1 runs it recorded
+` + "`" + `Parse Error: Pause on PRI/Upgrade` + "`" + `, which is an HTTP/1.1 parser meeting the
+HTTP/2 connection preface. So the failure is not in the TLS handshake, which
+succeeds, and not in ALPN, which changes nothing on its own. It is the first
+frame after the handshake.
+
+The third row is the useful one. With the socket forwarded to an HTTP/2
+backend instead of parsed, the unmodified client reached the server in 456
+milliseconds by its own clock and came back with a real gRPC status. **The transport, the
+proxy, the certificate and the credentials all work for a gRPC client with
+zero endpoint overrides.** The only thing missing is that the sidecar reads
+HTTP/1.1 where it would have to forward HTTP/2. That is one property of one
+file, and it is what stands between this surface and five of its six services.
+
+Worth recording beside it: the gRPC clients made **no token request at all**.
+Google's gRPC client stack signs a self signed JWT locally, so the credential
+gap above is specific to the REST client and does not apply to the other five.
+
+The honest form of this is narrower than "gRPC did not work", and the narrower
+version is worse. gRPC did work through the sidecar in exactly one case.
+` + "`" + `serveTransparentTLS` + "`" + ` terminates a connection only when the rule names paths
+or methods, or the mode is capture, mock, sandbox or synth, so a plain ` + "`" + `allow` + "`" + `
+rule with no paths is tunnelled untouched. gRPC flowed there, with a decision
+made on the hostname alone: no path, no method and no live credential
+tripwire. It broke the moment anybody wrote a rule that looked inside. So the
+state before this work was not that gRPC was unsupported. It was that gRPC
+worked only where the policy made no decision beyond the name.
+
+## What it costs per environment
+
+Six services and six containers, so the cost is a sum. These are the
+compressed download sizes read from each registry's own manifest, per
+architecture, for the digests this build pins.
+
+| Image | linux/arm64 | linux/amd64 | Answers |
+| --- | --- | --- | --- |
+| ` + "`" + `fsouza/fake-gcs-server` + "`" + ` 1.56.1 | 24.2 MB | 25.4 MB | Cloud Storage |
+| ` + "`" + `google-cloud-cli` + "`" + ` 583.0.0-emulators | 356.4 MB | 447.2 MB | Pub/Sub, Firestore, Datastore, Bigtable |
+| ` + "`" + `cloud-spanner-emulator` + "`" + ` 1.5.57 | **none published** | 71.2 MB | Spanner |
+
+Three images and not six, because the four ` + "`" + `gcloud` + "`" + ` emulators are four
+containers of one image and its layers are pulled once. A manifest asking for
+all six pulls about 452 MB on arm64 and 544 MB on amd64, and then runs six
+processes, four of which are JVMs.
+
+**The Spanner emulator publishes no arm64 image.** Its manifest is a single
+` + "`" + `linux/amd64` + "`" + ` image rather than a multi architecture index, so on an Apple
+Silicon machine it runs under emulation. That is stated rather than hidden
+because it is the one entry here whose start time and memory will not resemble
+anything a reader measures on a Linux runner.
+
+### Every one of these starts with no account
+
+Worth checking rather than assuming, because it is where an emulator surface
+fails silently. ` + "`" + `localstack/localstack` + "`" + ` now exits with code 55 on licence
+activation before it binds a port, with no environment set at all, so an image
+that pulls is not an image that starts, and a container that never binds looks
+exactly like a routing fault. Section 7 of the plan is not a preference here:
+no cloud account may be required to run the community suite, and a token is an
+account.
+
+All of these were started on real Docker with no token, no credential and no
+login.
+
+| Emulator | Ready after | Memory at first bind |
+| --- | --- | --- |
+| Cloud Storage, fake-gcs-server | 23.4 s | 20.0 MiB |
+| Spanner | 17.7 s | 37.2 MiB |
+| Pub/Sub | 45.4 s | 10.2 MiB |
+| Firestore | 27.2 s | 17.8 MiB |
+| Datastore | 48.6 s | 18.8 MiB |
+| Bigtable | 51.5 s | 29.5 MiB |
+
+Six containers, so a manifest asking for all six pays about **3.9 minutes of
+start time and 134 MiB** before its own application starts, on this machine
+under this load. The four ` + "`" + `gcloud` + "`" + ` emulators are the expensive half of both
+numbers and they are the four that share one image, so a manifest asking for
+Cloud Storage and Spanner alone pays 41 seconds and 57 MiB.
+
+**Read those numbers with their caveats or do not read them.** They were taken
+on a laptop at load average 30 with other work running, so the times are an
+upper bound rather than a typical figure. And the memory is read at the moment
+the port first accepted a connection, not at steady state, so for the four
+JVM backed emulators it is a lower bound: those numbers grow once the emulator
+is actually serving. The harness that produced them is
+` + "`" + `just benchmark-emulators` + "`" + ` with ` + "`" + `CONTAINERS=1` + "`" + `, and a number older than the
+code that produced it is withdrawn rather than rounded.
+
+## Containment, checked against Google's documentation rather than assumed
+
+Emulator containers attach to the environment's **inner** network only, which
+Docker creates with ` + "`" + `internal: true` + "`" + `. So an emulator having no route out is a
+property of the network rather than a promise made by this page, and the number
+of ways out of it is zero.
+
+Two things about Google Cloud are worth stating here, because a containment
+argument carried over from another cloud gets them wrong.
+
+- **The metadata server cannot be closed with a firewall rule.** Google's own
+  VPC firewall documentation says of the metadata server at ` + "`" + `169.254.169.254` + "`" + `
+  and ` + "`" + `fd20:ce::254` + "`" + `: "This server is essential to the operation of the
+  instance, so the instance can access it regardless of any firewall rules that
+  you configure." That is a stronger statement than the equivalent one on AWS,
+  and it holds for IPv6 as well, which reasoning carried over from AWS misses
+  entirely.
+- **On Google Cloud the metadata server is also the resolver.** A VM's
+  ` + "`" + `resolv.conf` + "`" + ` names the metadata server as its nameserver, and Google
+  documents that a lookup that no private zone answers is then looked for in a
+  public zone. So on a Compute Engine VM, DNS resolution and the identity
+  endpoint are the same unfilterable address, and closing one closes the other.
+
+Neither of those changes what an environment does, because an environment's
+emulators sit on an internal Docker network with no route to a metadata server
+of any kind, and the sidecar refuses a link local destination before consulting
+any rule. They are recorded because they are the facts that would decide the
+question if Antifailure ever ran an environment on a Compute Engine VM
+directly, and because the answer is not the same as the AWS one.
+
+## Licences
+
+Every image is pinned by digest and every licence is recorded in
+` + "`" + `THIRD_PARTY_NOTICES.md` + "`" + `, generated from the same declaration the engine starts
+the container from, so a bumped digest cannot leave a stale licence behind.
+
+| Emulator | Licence | Holder |
+| --- | --- | --- |
+| fake-gcs-server | BSD 2-Clause License | Francisco Souza. **Not affiliated with Google.** |
+| Google Cloud CLI | Apache License 2.0 | Google LLC |
+| Cloud Spanner Emulator | Apache License 2.0 | Google LLC |
+
+The Google Cloud CLI's licence was read from ` + "`" + `/google-cloud-sdk/LICENSE` + "`" + ` inside
+the image rather than from a page about installing it. Its second clause is
+worth knowing: using the CLI against a Google Cloud product is additionally
+governed by that product's own terms. Nothing here reaches a Google Cloud
+product, because the emulator has no route out.
 `,
 	"guides/github.md": `---
 title: GitHub
@@ -11220,11 +12069,431 @@ page as Markdown is [` + "`" + `/docs/index.md` + "`" + `](/docs/index.md).
   }
 </style>
 `,
+	"providers/aurora.md": `---
+title: Amazon Aurora
+description: Cloning an Aurora PostgreSQL cluster for each environment, what it costs, and the half of the speed claim that is not the clone.
+sidebar:
+  order: 7
+---
+
+Aurora can clone a cluster. The clone shares the source's storage volume and
+diverges a page at a time as either side writes, so making one moves no data
+and takes about as long for a terabyte as for a hundred rows.
+
+That is the whole reason this provider exists, and it comes with a second
+sentence that belongs beside it rather than in a footnote.
+
+**The storage is there in seconds and nobody can connect to storage.** A clone
+has no instances. A preview environment needs one, and provisioning a writer
+takes minutes. The flat part of this is real and it is the storage; the wall
+clock to an open connection is dominated by an instance coming up, which is
+also flat in the size of the database and is measured in minutes. This provider
+declares an expected branch latency in minutes for that reason, and the
+benchmark in ` + "`" + `benchmarks/` + "`" + ` publishes the two halves separately.
+
+This provider is in the enterprise edition. Reaching a production Aurora
+cluster needs an IAM role somebody with an organization grants, which is the
+line the editions are drawn on.
+
+` + "`" + "`" + "`" + `yaml
+database:
+  provider: aurora
+  project: acme-production
+  api_key_env: AF_AURORA_BRANCH_KEY
+` + "`" + "`" + "`" + `
+
+` + "`" + `project` + "`" + ` is the Aurora PostgreSQL **DB cluster identifier** that goldens are
+cloned from. It is not an instance identifier and not an endpoint hostname, and
+a value that names one of those is refused with a sentence saying so rather
+than reported as a cluster that does not exist.
+
+There is no ` + "`" + `source_url_env` + "`" + `, and that is the difference between this provider
+and every other one here. Nothing connects to production. The copy is made by
+the storage layer from the cluster you named, so the data never crosses a
+network this tool is on and no credential for the production database is ever
+held, read, or asked for.
+
+## What it creates in your account
+
+| Name | What it is |
+| --- | --- |
+| ` + "`" + `af-g-<digest>` + "`" + ` | A golden: a clone of the source, masked, verified, and then left with no instance attached. |
+| ` + "`" + `af-b-<digest>` + "`" + ` | One environment's branch: a clone of a golden, with one writer instance. |
+
+Every cluster carries an ` + "`" + `antifailure` + "`" + ` tag, and that tag is what the provider
+reads before it deletes anything. A cluster whose name matches the scheme and
+whose tag does not is left alone, not adopted and not deleted. Names collide,
+and a provider that trusted the prefix would eventually destroy a cluster it
+never created.
+
+**A published golden keeps its writer instance, and that costs you money.** The
+obvious saving is to delete it: a cluster's volume exists whether or not an
+instance is attached, cloning is a cluster level operation, and a golden that
+cost storage and no compute would make keeping several of them cheap. It ought
+to work. Nobody who wrote this provider has an Aurora account, the only thing
+here that could say whether it does is a fake this repository also wrote, and a
+fake agreeing with the assumption that produced it is not evidence. An untested
+cost saving that silently breaks branching is worse than the standing cost, so
+the instance stays until somebody with an account has run it. If that is you,
+the measurement is worth more to us than the saving is to you.
+
+## Credentials
+
+Two things are read, both through the engine's own resolution chain rather than
+out of the process environment, so every credential this provider uses is
+declared and appears in the same audit trail as the rest.
+
+` + "`" + `AWS_REGION` + "`" + ` says which region the cluster is in. A cluster in ` + "`" + `eu-west-1` + "`" + ` does
+not exist in ` + "`" + `us-east-1` + "`" + `, and asking the wrong region answers that the cluster
+is not there, which is a confusing way to learn about a typo.
+
+**The source cluster's own password is never read.** Not at startup, not during
+a refresh, not to connect to a clone, not anywhere. That is the sentence to
+check first if you are reviewing this for security, and the rest of this section
+is how it is true.
+
+` + "`" + `AF_AURORA_BRANCH_KEY` + "`" + `, or whatever ` + "`" + `api_key_env` + "`" + ` names, is **not the source
+cluster's password**. A clone inherits the master credential of the cluster it
+came from, so a provider that did nothing here would hand production's database
+password to every preview environment. This one rotates each clone's master
+password before anything connects, to a keyed hash of that variable and the
+clone's own identifier. Three things follow. The value is deterministic, so a
+later command rebuilds a connection string without anything having stored a
+password. It is distinct per cluster, so a preview's credential opens the
+preview and nothing else. And the source cluster's own password is never read
+and never needed. Any high entropy string will do, and changing it changes
+every branch's password.
+
+The AWS credentials themselves come from the environment, an ECS or EKS Pod
+Identity credential endpoint, or an EC2 instance role, in that order, and
+version 2 of the instance metadata service only. A profile in ` + "`" + `~/.aws` + "`" + ` and a
+web identity token file are not read, and a run that finds nothing says which
+places it looked in rather than only that it found nothing.
+
+The IAM actions needed are ` + "`" + `rds:RestoreDBClusterToPointInTime` + "`" + ` on the source
+cluster, and ` + "`" + `rds:CreateDBInstance` + "`" + `, ` + "`" + `rds:ModifyDBCluster` + "`" + `,
+` + "`" + `rds:AddTagsToResource` + "`" + `, ` + "`" + `rds:DescribeDBClusters` + "`" + `, ` + "`" + `rds:DescribeDBInstances` + "`" + `,
+` + "`" + `rds:DeleteDBInstance` + "`" + ` and ` + "`" + `rds:DeleteDBCluster` + "`" + ` on the clones.
+
+## What this provider will not do
+
+**It will not fall back to a snapshot restore.** If the cluster you name is not
+Aurora PostgreSQL, the provider refuses at startup and says which provider
+handles that engine instead. A snapshot restore would work and would copy every
+byte, and a flat cost quietly becoming a linear one is worse than a refusal,
+because nobody measures a thing that still appears to work.
+
+**It does not implement ` + "`" + `reset` + "`" + `.** Aurora's only rewind is Backtrack and that
+is Aurora MySQL. Destroying the clone and cloning again would work, and it is
+exactly what the reset capability is defined not to be, so the capability is
+declared false and the conformance suite skips that behaviour by name.
+
+**It does not implement pooled connection strings.** The pooled endpoint on RDS
+is a proxy, which is a separate resource with its own identity and its own
+subnet group, and this provider does not create one. Handing back the direct
+string under a second name would be a pool that is not one.
+
+**It does not implement IAM database authentication.** Aurora supports it, it
+would be the better credential, and it is not here. It is named because a
+capability that is named and not built is worse than one that is absent.
+
+## Air gapped installations
+
+**Aurora is refused under ` + "`" + `AF_AIR_GAPPED` + "`" + `, deliberately.** The permitted
+providers there are ` + "`" + `docker` + "`" + `, ` + "`" + `dblab` + "`" + ` and ` + "`" + `pgurl` + "`" + `, all three of which the
+operator hosts or supplies. Cloning an Aurora cluster needs ` + "`" + `rds.amazonaws.com` + "`" + `,
+which an air gapped network by definition cannot reach, so permitting it would
+produce an environment that failed at its first API call rather than at
+validation.
+
+The refusal happens before the environment is created and it names the manifest
+line, which is the difference that matters: the same installation used to get
+three minutes into an ` + "`" + `af up` + "`" + ` and fail on a refused connection, and one of those
+tells you what to change while the other tells you the network is broken.
+
+## What the tests prove, and what they do not
+
+The conformance suite runs against a fake RDS control plane on localhost backed
+by a real Postgres, in ` + "`" + `ee/engine/db/aurora/fakerds` + "`" + `. No test needs an AWS
+account and none should.
+
+That proves the provider's logic: that a clone is requested copy on write and
+never any other way, that a golden is masked before it is verified and
+published only if verification passed, that a branch holds the golden's rows
+and is isolated from the golden and from other branches, and that nothing
+leaks across a whole run. It also proves the requests are signed correctly for
+the region and service they are sent to, because the fake recomputes the
+signature and refuses one that does not match.
+
+It does not prove that AWS accepts those requests, and it cannot produce a wall
+clock for a real clone. The benchmark says ` + "`" + `UNMEASURED` + "`" + ` in those cells rather
+than carrying a number from somewhere else.
+
+Copy on write itself is therefore reported as ` + "`" + `UNPROVEN` + "`" + ` rather than as a pass.
+The conformance suite decides that claim with a stopwatch, and over a fake
+control plane on one local Postgres the only way to hand back a branch carrying
+the golden's data is ` + "`" + `CREATE DATABASE ... TEMPLATE` + "`" + `, which copies files. A
+stopwatch pointed at that is timing Postgres, so the suite withholds the verdict
+instead of publishing either answer. ` + "`" + `UNPROVEN` + "`" + ` is not a pass and the run prints
+it as its own line. Deciding it needs a run against a real Aurora, and the same
+suite produces a measured verdict there without changing.
+`,
+	"providers/databases.md": `---
+title: Database providers
+description: What a database provider is, which ones ship, how to choose, and what every one of them guarantees.
+sidebar:
+  order: 2
+---
+
+A database provider is what creates the copy of production each environment
+gets. It is the extension point most repositories care about first, and it is
+meant to be written by people outside this repository.
+
+` + "`" + "`" + "`" + `yaml
+database:
+  provider: docker   # or neon, supabase, dblab, pgurl, or aurora
+  version: 17
+` + "`" + "`" + "`" + `
+
+## What ships
+
+| Provider | Where the data lives | Branch time | Needs |
+| --- | --- | --- | --- |
+| ` + "`" + `docker` + "`" + ` | A container on the machine running ` + "`" + `af` + "`" + ` | Flat, because the daemon's storage driver shares layers | A Docker daemon |
+| [` + "`" + `neon` + "`" + `](/docs/providers/neon) | A Neon project | Flat, because branches share storage | A Neon project and an API key |
+| [` + "`" + `dblab` + "`" + `](/docs/providers/dblab) | A Database Lab Engine you run | Flat, because clones are copy on write | A Database Lab Engine, ZFS, and its verification token |
+| [` + "`" + `supabase` + "`" + `](/docs/providers/supabase) | A Supabase branch, which is a whole separate project | Grows with the database, because a Supabase branch is created empty | A Supabase project on a paid plan and an access token |
+| [` + "`" + `pgurl` + "`" + `](/docs/providers/pgurl) | A database on any Postgres server you name | Grows with the database, because a branch is a server side file copy | A reachable Postgres and a role that may create databases |
+| [` + "`" + `aurora` + "`" + `](/docs/providers/aurora) | A clone of an Amazon Aurora PostgreSQL cluster | Flat, because a clone shares the source's storage volume | An Aurora PostgreSQL cluster, an IAM role, and the enterprise edition |
+
+` + "`" + `docker` + "`" + ` is the default and needs nothing. Its branch time is flat, measured
+rather than assumed: the conformance suite branches an 8 MiB golden and a 512 MiB
+one and the daemon's storage driver shares the layers, so the two cost the same.
+What is not flat is building the golden, because that commits an image. This row
+said "Grows with the database" until somebody ran the measurement, which is the
+whole argument for having one.
+
+` + "`" + `neon` + "`" + ` is the right choice when it is. Neon branches are copy on write, so
+creating one takes about as long for a hundred gigabytes as for a hundred rows.
+
+` + "`" + `dblab` + "`" + ` is the same property without the account. A Database Lab Engine holds
+one full size copy of production on ZFS and hands out thin clones of it, on
+your hardware, with nothing leaving your network. The cost is that you run it:
+it needs ZFS, a machine large enough to hold production once, and its own data
+retrieval configured against your source.
+
+` + "`" + `pgurl` + "`" + ` is the one for every Postgres nobody wrote a provider for: a self
+hosted cluster, a machine at a host with no API, a managed Postgres whose
+vendor is not in this list. It needs no account and no vendor at all, only a
+server it may create databases on. Branch time is not flat there, and the
+measured seconds per gigabyte are published in ` + "`" + `benchmarks/` + "`" + ` rather than
+described.
+
+` + "`" + `supabase` + "`" + ` is the right choice when your application already lives there.
+Branch time is not flat, because Supabase creates a branch with no data in it
+and the golden has to be copied in, but what you get back is a real Supabase
+project with the Auth, Storage and Realtime services your application is
+calling, which neither of the others can offer. A branch is billed by the hour.
+
+` + "`" + `aurora` + "`" + ` is the flat one for a production that already runs on Aurora
+PostgreSQL, and it is in the enterprise edition, because it needs an IAM role
+somebody in an organization has to grant. A branch is an Aurora clone, so
+branching moves no data whatever the size. What it does not give you is
+seconds: a clone has no instances, a preview environment needs one, and
+provisioning a writer takes minutes. That number is flat in the size too, and
+the provider page says so before you buy rather than after.
+
+A provider named in the manifest and neither built into this binary nor
+registered with it is refused at startup rather than substituted. Falling back
+to ` + "`" + `docker` + "`" + ` would hand somebody an empty preview with no reason for it. The
+refusal names every provider the build does have, registered ones included, so
+a misspelling is answered rather than merely rejected.
+
+A build outside this repository can add its own without forking the engine.
+[Writing a provider](/docs/contributing/provider-authoring) has the
+registration, which is four lines around ` + "`" + `engine/pkg/afcli` + "`" + `.
+
+## What every provider guarantees
+
+These are not documentation. They are a conformance suite that any
+implementation runs, so that "conformant" is something a test decides rather
+than something a maintainer judges.
+
+- A refresh masks, then verifies, and publishes nothing if verification fails.
+- An unverified golden cannot be branched. This is the product's central
+  promise and it is enforced in the provider, not in a checklist.
+- Branching twice for one environment returns one branch. The engine retries
+  after timeouts, and a retry that creates a second resource is how an orphan
+  is made.
+- Destroying something already destroyed succeeds, because teardown retries.
+- A connection string is a secret: it renders as ` + "`" + `[redacted]` + "`" + ` everywhere text
+  is produced.
+- Every resource the provider holds can be enumerated, so the leak detector has
+  something to compare the journal against.
+- A capability a provider does not have is skipped by name in the suite output,
+  never silently.
+
+## Direct and pooled connections
+
+A provider may offer a pooled endpoint. Where it does, services receive the
+pooled connection string and migrations receive the direct one, because a
+transaction pooler does not support the session level features migrations use.
+Where it does not, both receive the same string.
+
+Nothing has to be configured for this. The engine asks based on what the
+provider declares.
+
+## Writing one
+
+Implement ` + "`" + `provider.Database` + "`" + ` and run the suite:
+
+` + "`" + "`" + "`" + `go
+func TestMyProvider(t *testing.T) {
+    conformance.RunDatabase(t, factory, conformance.Options{})
+}
+` + "`" + "`" + "`" + `
+
+Declare only the capabilities you actually have. Declaring one you do not makes
+the suite run a behaviour it should have skipped, which fails, which is the
+intended outcome: a capability is a promise the suite checks.
+
+Register it under a name this build does not already have. ` + "`" + `docker` + "`" + `, ` + "`" + `neon` + "`" + `,
+` + "`" + `supabase` + "`" + `, ` + "`" + `dblab` + "`" + ` and ` + "`" + `pgurl` + "`" + ` are reserved, and a registration under one of
+them is refused at validation rather than accepted and then never consulted.
+`,
+	"providers/datastores.md": `---
+title: Datastore providers
+description: Every store an environment holds other than the primary Postgres, the stance each one declares, and why there is no default.
+sidebar:
+  order: 9
+---
+
+A datastore is a store the environment holds that is not the primary Postgres:
+a ClickHouse, a Redis, a Kafka, an Elasticsearch, a Mongo.
+
+Before the ` + "`" + `datastores` + "`" + ` list existed there was one golden, one masking pass,
+one verification scan and one branch, all of them Postgres, and every other
+store a manifest declared came up as an empty container that no part of the
+fidelity report mentioned. For a stack whose events live in ClickHouse, that
+means a twin holding masked Postgres metadata and zero events, with the
+instrument whose job is to tell you your twin is not production reporting it as
+faithful.
+
+` + "`" + "`" + "`" + `yaml
+datastores:
+  - name: events
+    engine: clickhouse
+    stance: golden
+    source_url_env: CLICKHOUSE_PRODUCTION_URL
+
+  - name: cache
+    engine: redis
+    stance: empty
+    because: "a cache is rebuilt from the primary and a copy would be noise"
+` + "`" + "`" + "`" + `
+
+The ` + "`" + `database:` + "`" + ` block normalizes into the entry named ` + "`" + `primary` + "`" + `, so a manifest
+that declares only a database already has this list and does not have to write
+it. ` + "`" + `primary` + "`" + ` is reserved for that entry.
+
+## The stance is the feature
+
+**Not every datastore should be cloned, and pretending otherwise is its own
+failure.** A Redis used purely as a cache is CORRECT to start empty, and a plan
+that copied it would be copying noise and calling it fidelity. Kafka usually
+wants topics and consumer groups rather than a replay of production traffic. An
+Elasticsearch index is often better rebuilt from the Postgres branch than
+cloned, because a clone can be stale against the branch in a way a rebuild
+cannot.
+
+So what an environment does with a store's contents is DECLARED per store:
+
+| Stance | What it means | Also needs |
+| --- | --- | --- |
+| ` + "`" + `golden` + "`" + ` | A masked, verified copy that environments branch from | ` + "`" + `source_url_env` + "`" + `, the variable holding production's connection string |
+| ` + "`" + `empty` + "`" + ` | Starts with nothing in it, on purpose | ` + "`" + `because` + "`" + `, in the words of whoever chose it |
+| ` + "`" + `derived` + "`" + ` | Rebuilt from another store once that one is ready | ` + "`" + `from` + "`" + `, naming that store |
+| ` + "`" + `topics_only` + "`" + ` | Topics and consumer groups, with no messages | |
+
+**There is no default, and a datastore that declares no stance is refused at
+validation.** That is the whole design. An empty store nobody chose and an
+empty store somebody decided on look identical in a running environment, and a
+silent default is exactly how somebody ends up trusting a blank ClickHouse.
+
+` + "`" + `because` + "`" + ` is required for ` + "`" + `empty` + "`" + ` and is carried into the fidelity report as
+written. It is the only thing that tells the two empties apart afterwards.
+
+## Every stance is visible in the fidelity report
+
+Which is what makes this honest rather than convenient. ` + "`" + `empty` + "`" + ` is a legitimate
+answer; an INVISIBLE ` + "`" + `empty` + "`" + ` is not. The report names every declared store with
+the stance somebody chose, so a store that holds nothing appears in the
+denominator rather than outside the fraction.
+
+## What a stance does today
+
+The ` + "`" + `golden` + "`" + ` stance is brought up: the store is refreshed, masked, verified,
+attested and branched like the primary database. Any other stance is validated,
+carried into the report, and announced at ` + "`" + `af up` + "`" + ` as a store this build did not
+start, by name and by stance. It is said out loud rather than skipped silently,
+because an unimplemented stance that says nothing is the same failure as an
+undeclared empty store wearing a manifest entry.
+
+## What ships
+
+| Provider | Engine | Mechanism | Holds a golden | Branch shares storage |
+| --- | --- | --- | --- | --- |
+| ` + "`" + `clickhouse` + "`" + ` | ` + "`" + `clickhouse` + "`" + ` | ` + "`" + `ATTACH PARTITION FROM` + "`" + ` against a local ClickHouse the engine starts | yes | usually |
+
+ClickHouse branch time is the interesting column and the answer is measured
+rather than assumed in either direction. ` + "`" + `ATTACH PARTITION FROM` + "`" + ` hardlinks the
+golden's parts when the source and the destination sit on one disk, and a
+branch of ten thousand rows and a branch of a million then take the same few
+hundred milliseconds. What the provider cannot see from the client is the
+server's storage policy: with a multi disk policy, or a source and a
+destination on different volumes, ClickHouse copies the parts instead and
+branch time becomes proportional to size. So the capability is declared false
+and the fast case is a bonus rather than a promise.
+
+` + "`" + `engine` + "`" + ` is an open string in the manifest rather than a closed list, which is
+deliberate: a manifest naming an engine this build has no provider for is
+refused BY NAME by the provider lookup, and that says more than an unknown
+enum value would. The refusal lists the engines the build can provide.
+
+## Choosing a provider for an engine
+
+` + "`" + `provider` + "`" + ` selects an implementation where more than one thing can provide an
+engine. Omit it for the engine's own default. A registered provider is
+consulted after the built in one and never before it, so a registration adds an
+implementation and can never take one over.
+
+## Writing one
+
+Implement ` + "`" + `provider.Datastore` + "`" + ` and declare ` + "`" + `DatastoreCaps` + "`" + `: the engine name,
+whether an environment can get its own copy, whether the store can hold a
+masked verified copy at all, and whether a branch shares storage with its
+golden.
+
+**Declaring ` + "`" + `Golden: false` + "`" + ` is a legitimate answer rather than a missing
+feature.** A cache that is correct to start empty says so, and the conformance
+suite then skips the golden behaviours by name instead of running behaviours
+the provider never claimed.
+
+` + "`" + "`" + "`" + `go
+func TestMyDatastore(t *testing.T) {
+    conformance.RunDatastore(t, factory, conformance.DatastoreOptions{})
+}
+` + "`" + "`" + "`" + `
+
+The datastore suite ships with a broken fake and a self test in the same
+commit, which breaks the fake one behaviour at a time and requires each break
+to turn the suite red.
+`,
 	"providers/dblab.md": `---
 title: DBLab
 description: Using a self hosted Database Lab Engine as the database provider, how to stand one up, and what it does with your data.
 sidebar:
-  order: 4
+  order: 5
 ---
 
 A Database Lab Engine holds one full size copy of production on ZFS and hands
@@ -11559,11 +12828,108 @@ is named ` + "`" + `af-` + "`" + `, and it ignores clones and snapshots that are
 shared with somebody's real work is one where a leak report eventually gets
 ignored.
 `,
+	"providers/emulators.md": `---
+title: Emulators
+description: How a third party API is answered inside an environment, why Antifailure writes none of them, and what a declaration has to carry.
+sidebar:
+  order: 11
+---
+
+An emulator is a third party API answered inside the environment: an S3, a
+queue, a pub/sub topic, a blob store. It is the fifth extension point and the
+only one with nothing built in, which is deliberate rather than unfinished.
+
+## Antifailure does not write emulators
+
+No hand written S3, no hand written SQS, no blob store core, no queue core. If
+a future change proposes one, this paragraph is the answer.
+
+LocalStack, Azurite, the Microsoft Service Bus and Cosmos emulators, the
+` + "`" + `gcloud` + "`" + ` emulators and ` + "`" + `fake-gcs-server` + "`" + ` exist, are mature, and carry years of
+fidelity work. S3 alone has a decade of edge cases in it. A hand written
+replacement would be worse on day one and probably for two years, and nobody
+buys this product because its S3 emulator is good.
+
+**What this engine adds is the part people hate about those emulators.** Using
+LocalStack normally means changing the application: an endpoint override, an
+` + "`" + `AWS_ENDPOINT_URL` + "`" + `, a client construction that only exists in tests. That makes
+the test prove less, because the code under test is not the code that ships.
+Here none of that is needed. Every name resolves to the environment's sidecar,
+the sidecar terminates TLS with a certificate authority the environment already
+trusts, and it answers for ` + "`" + `s3.amazonaws.com` + "`" + ` itself. The unmodified production
+code path runs against the emulator. The emulator is a commodity; making it
+invisible is not.
+
+How a request actually gets there is the egress subsystem's job and the mode in
+the manifest decides it. See [egress](/docs/concepts/egress), which is the page
+that says what each mode does with a request.
+
+## What a declaration carries
+
+` + "`" + "`" + "`" + `go
+type Emulator interface {
+    Name() string                    // what an egress rule names it by
+    Hosts() []string                 // the hostnames it answers for
+    Container() EmulatorContainer    // the image, the port, the environment
+}
+` + "`" + "`" + "`" + `
+
+Two things are refused at validation rather than accepted, and both were
+refusals somebody wanted later:
+
+- **An emulator that answers for no hosts is refused.** No request could ever
+  reach it, so a registration with an empty host list is a registration that
+  does nothing, and doing nothing quietly is what this whole extension system
+  is built to avoid.
+- **An image pinned by a tag rather than by a digest is refused.** An emulator
+  is the thing answering for a production API. A tag that moves changes what an
+  environment was tested against with nothing in the repository changing, and
+  then the run that passes yesterday and fails today has no diff to blame.
+  ` + "`" + `@sha256:` + "`" + ` or it does not register.
+
+Two emulators registered under one name, or one registered with no name at all,
+are refused for the same reason every other extension point refuses them.
+
+## Costs that are named rather than hidden
+
+Each of these is a real cost of using somebody else's emulator, and the rule is
+that they are stated rather than discovered:
+
+- **Coverage belongs to whoever integrates one.** The covered surface is
+  recorded and anything outside it is refused with the provider's own error
+  shape. A silent wrong answer from an emulator is worse than a refusal,
+  because it will be trusted.
+- **Weight.** The Azure Service Bus emulator wants an MSSQL container beside
+  it. That is measured and said out loud rather than absorbed.
+- **Licensing and supply chain.** Every image is pinned by digest, recorded in
+  ` + "`" + `THIRD_PARTY_NOTICES.md` + "`" + `, and given the same no egress treatment as any other
+  container in the environment.
+- **There is no official Cloud Storage emulator.** Google ships them for
+  Pub/Sub, Firestore, Datastore, Bigtable and Spanner and none for Cloud
+  Storage, so ` + "`" + `fsouza/fake-gcs-server` + "`" + ` is the de facto choice and is community
+  maintained. Stated plainly here rather than left for somebody to find.
+
+## A bad emulator is not tolerated either
+
+The commodity argument runs both ways. Not writing emulators does not mean
+putting up with a wrong one. Where an integration is wrong in a way that
+matters, the fix is upstream or a documented refusal. It is not a fork, and it
+is not a locally patched image that nobody else can reproduce.
+
+## Writing one
+
+Implement ` + "`" + `extension.Emulator` + "`" + ` and register it with ` + "`" + `AddEmulator` + "`" + `. Give it the
+hostnames the vendor's own SDK resolves, pin the image by digest, and declare
+what it covers.
+
+Nothing is reserved here, because no emulator is built into this binary. A
+registration can shadow nothing.
+`,
 	"providers/limits.md": `---
 title: Provider limits
 description: What happens when a provider runs out of branches, and what to do about it.
 sidebar:
-  order: 6
+  order: 12
 ---
 
 Every hosted provider has a ceiling on how many databases exist at once, and it
@@ -11634,7 +13000,7 @@ this tool's, and the provider's documentation is where the current numbers are.
 title: Neon
 description: Using Neon as the database provider, what it does well, and what it costs.
 sidebar:
-  order: 2
+  order: 3
 ---
 
 Neon branches share storage with their parent, so creating one takes about as
@@ -11767,120 +13133,154 @@ left nothing behind. If a run is killed, ` + "`" + `AF_NEON_SWEEP=1 go test
 ./engine/internal/db/neon -run TestSweepLeftovers` + "`" + ` removes what it made.
 `,
 	"providers/overview.md": `---
-title: Database providers
-description: What a provider is, which ones ship, and how to choose.
+title: Extension points
+description: The five things a build can add without forking the engine, what ships for each, and which edition each one belongs to.
 sidebar:
   order: 1
 ---
 
-A database provider is what creates the copy of production each environment
-gets. It is the main extension point, and it is meant to be written by people
-outside this repository.
+An environment is assembled out of parts, and five of those parts are things
+somebody outside this repository can supply. This page is the map of all five.
+Each has its own page under Providers with the detail, the capabilities and
+the refusals.
 
-` + "`" + "`" + "`" + `yaml
-database:
-  provider: docker   # or neon, supabase, dblab, or pgurl
-  version: 17
-` + "`" + "`" + "`" + `
-
-## What ships
-
-| Provider | Where the data lives | Branch time | Needs |
+| Extension point | What it supplies | What ships | Where the detail is |
 | --- | --- | --- | --- |
-| ` + "`" + `docker` + "`" + ` | A container on the machine running ` + "`" + `af` + "`" + ` | Flat, because the daemon's storage driver shares layers | A Docker daemon |
-| [` + "`" + `neon` + "`" + `](/docs/providers/neon) | A Neon project | Flat, because branches share storage | A Neon project and an API key |
-| [` + "`" + `dblab` + "`" + `](/docs/providers/dblab) | A Database Lab Engine you run | Flat, because clones are copy on write | A Database Lab Engine, ZFS, and its verification token |
-| [` + "`" + `supabase` + "`" + `](/docs/providers/supabase) | A Supabase branch, which is a whole separate project | Grows with the database, because a Supabase branch is created empty | A Supabase project on a paid plan and an access token |
-| [` + "`" + `pgurl` + "`" + `](/docs/providers/pgurl) | A database on any Postgres server you name | Grows with the database, because a branch is a server side file copy | A reachable Postgres and a role that may create databases |
+| Database provider | The environment's primary Postgres, and the branch of the golden it runs on | ` + "`" + `docker` + "`" + `, ` + "`" + `neon` + "`" + `, ` + "`" + `supabase` + "`" + `, ` + "`" + `dblab` + "`" + `, ` + "`" + `pgurl` + "`" + ` | [Database providers](/docs/providers/databases) |
+| Datastore provider | Every other store the manifest declares, and what its stance does to the contents | ` + "`" + `clickhouse` + "`" + ` | [Datastore providers](/docs/providers/datastores) |
+| Runtime | Where the containers actually run | ` + "`" + `local` + "`" + `, ` + "`" + `kubernetes` + "`" + ` | [Runtimes](/docs/providers/runtimes) |
+| Golden store | Where a golden's dump and its attestation live | ` + "`" + `local` + "`" + `, ` + "`" + `s3` + "`" + `, ` + "`" + `azure_blob` + "`" + `, ` + "`" + `gcs` + "`" + ` | [Golden stores](/docs/providers/stores) |
+| Emulator | A third party API answered inside the environment | nothing built in | [Emulators](/docs/providers/emulators) |
 
-` + "`" + `docker` + "`" + ` is the default and needs nothing. Its branch time is flat, measured
-rather than assumed: the conformance suite branches an 8 MiB golden and a 512 MiB
-one and the daemon's storage driver shares the layers, so the two cost the same.
-What is not flat is building the golden, because that commits an image. This row
-said "Grows with the database" until somebody ran the measurement, which is the
-whole argument for having one.
+The interfaces are in ` + "`" + `engine/pkg/extension` + "`" + `, which is a public package for
+exactly this reason: an interface declared in an internal package is one a
+build outside the module cannot name, let alone implement.
 
-` + "`" + `neon` + "`" + ` is the right choice when it is. Neon branches are copy on write, so
-creating one takes about as long for a hundred gigabytes as for a hundred rows.
+## The three rules that hold for all five
 
-` + "`" + `dblab` + "`" + ` is the same property without the account. A Database Lab Engine holds
-one full size copy of production on ZFS and hands out thin clones of it, on
-your hardware, with nothing leaving your network. The cost is that you run it:
-it needs ZFS, a machine large enough to hold production once, and its own data
-retrieval configured against your source.
+**A registration adds a choice and can never replace one.** The engine
+consults its own built in providers first and the registry afterwards. So a
+registration under a built in name would never be used, and it is refused at
+validation rather than ignored. The alternative is a build somebody believes
+overrides the Docker provider and which silently does not.
 
-` + "`" + `pgurl` + "`" + ` is the one for every Postgres nobody wrote a provider for: a self
-hosted cluster, a machine at a host with no API, a managed Postgres whose
-vendor is not in this list. It needs no account and no vendor at all, only a
-server it may create databases on. Branch time is not flat there, and the
-measured seconds per gigabyte are published in ` + "`" + `benchmarks/` + "`" + ` rather than
-described.
+**A name in the manifest that this build does not have is refused, and the
+refusal lists what there is.** It is never substituted. Falling back to
+` + "`" + `docker` + "`" + ` would hand somebody an empty preview with no reason for it, and a
+datastore quietly starting empty is how somebody ends up trusting a blank
+ClickHouse. The refusal names registered providers too, so a misspelling is
+answered rather than merely rejected.
 
-` + "`" + `supabase` + "`" + ` is the right choice when your application already lives there.
-Branch time is not flat, because Supabase creates a branch with no data in it
-and the golden has to be copied in, but what you get back is a real Supabase
-project with the Auth, Storage and Realtime services your application is
-calling, which neither of the others can offer. A branch is billed by the hour.
+**A capability is a promise a suite checks.** Every point declares what it can
+do, and the conformance suite runs a behaviour only where it was declared and
+skips it BY NAME where it was not. Declaring a capability you do not have
+makes the suite run a behaviour it should have skipped, which fails, which is
+the intended outcome.
 
-A provider named in the manifest and neither built into this binary nor
-registered with it is refused at startup rather than substituted. Falling back
-to ` + "`" + `docker` + "`" + ` would hand somebody an empty preview with no reason for it. The
-refusal names every provider the build does have, registered ones included, so
-a misspelling is answered rather than merely rejected.
+## Which edition an extension point belongs to
 
-A build outside this repository can add its own without forking the engine.
-[Writing a provider](/docs/contributing/provider-authoring) has the
-registration, which is four lines around ` + "`" + `engine/pkg/afcli` + "`" + `.
+One rule decides it, and it is about who the value is for rather than about
+how hard the code was:
 
-## What every provider guarantees
+> A provider goes in the enterprise edition when it needs an ORGANIZATION to
+> exist. One developer with their own account and their own card gets MIT, in
+> the engine, next to ` + "`" + `supabase` + "`" + `.
 
-These are not documentation. They are a conformance suite that any
-implementation runs, so that "conformant" is something a test decides rather
-than something a maintainer judges.
+What follows from it:
 
-- A refresh masks, then verifies, and publishes nothing if verification fails.
-- An unverified golden cannot be branched. This is the product's central
-  promise and it is enforced in the provider, not in a checklist.
-- Branching twice for one environment returns one branch. The engine retries
-  after timeouts, and a retry that creates a second resource is how an orphan
-  is made.
-- Destroying something already destroyed succeeds, because teardown retries.
-- A connection string is a secret: it renders as ` + "`" + `[redacted]` + "`" + ` everywhere text
-  is produced.
-- Every resource the provider holds can be enumerated, so the leak detector has
-  something to compare the journal against.
-- A capability a provider does not have is skipped by name in the suite output,
-  never silently.
+- **Anything with an MIT peer in the engine stays MIT.** The ` + "`" + `s3` + "`" + ` and
+  ` + "`" + `azure_blob` + "`" + ` golden stores are MIT, so ` + "`" + `gcs` + "`" + ` is, and it lives in
+  ` + "`" + `engine/internal/golden` + "`" + ` beside them rather than in ` + "`" + `ee/` + "`" + `.
+- **All emulation is MIT**, and **all datastore support is MIT**. Neither is
+  an upsell. They are what makes ` + "`" + `af up` + "`" + ` work for ordinary software.
+- What is licensed sits above them: cross account goldens, residency
+  placement, federated identity, running more than one runtime at once, and
+  the managed database providers that need an IAM role somebody in an
+  organization has to grant.
 
-## Direct and pooled connections
+The community edition is the whole product minus ` + "`" + `ee/` + "`" + `. An expired licence
+leaves you with it rather than with nothing.
 
-A provider may offer a pooled endpoint. Where it does, services receive the
-pooled connection string and migrations receive the direct one, because a
-transaction pooler does not support the session level features migrations use.
-Where it does not, both receive the same string.
+## The matrix
 
-Nothing has to be configured for this. The engine asks based on what the
-provider declares.
+Every provider this build has, what it actually does underneath, and what it
+declares. Capabilities are read from the provider's own ` + "`" + `Capabilities()` + "`" + `
+rather than described here twice, so the column is the value the conformance
+suite tests against.
+
+### Database providers
+
+| Provider | Mechanism | Branch shares storage | Reset in place | Pooled endpoint | Subsetting | Edition |
+| --- | --- | --- | --- | --- | --- | --- |
+| ` + "`" + `docker` + "`" + ` | A container per branch on the local daemon, from an image with the golden committed into it | yes, the daemon's storage driver | yes | no | yes | MIT |
+| ` + "`" + `neon` + "`" + ` | A Neon branch of the golden branch | yes | yes | yes | no | MIT |
+| ` + "`" + `supabase` + "`" + ` | A Supabase branch, which is a whole separate project, with the golden copied in | no | yes | yes | no | MIT |
+| ` + "`" + `dblab` + "`" + ` | A ZFS clone handed out by a Database Lab Engine you run | yes | yes | no | no | MIT |
+| ` + "`" + `pgurl` + "`" + ` | A ` + "`" + `CREATE DATABASE ... TEMPLATE` + "`" + ` on any Postgres you can reach | no | yes | no | yes | MIT |
+
+` + "`" + `neon` + "`" + ` and ` + "`" + `dblab` + "`" + ` are the two where a branch is a copy on write clone of a
+full size copy of production, which is the whole reason to choose either.
+` + "`" + `docker` + "`" + ` declares the same capability for a different reason and it is worth
+knowing which: a branch there is a container over the golden image's shared
+layers, so nothing is copied when one is made, and the time in that provider
+goes into building the image rather than into branching it.
+
+The [database providers](/docs/providers/databases) page agrees, and it did not
+always. It published ` + "`" + `docker` + "`" + ` branch time as growing with the database until
+the conformance suite branched an 8 MiB golden and a 512 MiB one against a real
+daemon and the two cost the same. This matrix asserted the shared layers and
+that page asserted the opposite, and the measurement is what settled which of
+them was writing down an assumption.
+
+### Datastore providers
+
+| Provider | Engine | Mechanism | Holds a golden | Branch shares storage | Edition |
+| --- | --- | --- | --- | --- | --- |
+| ` + "`" + `clickhouse` + "`" + ` | ` + "`" + `clickhouse` + "`" + ` | ` + "`" + `ATTACH PARTITION FROM` + "`" + ` against a local server the engine starts | yes | usually, and it depends on the server's storage policy rather than on this provider | MIT |
+
+### Runtimes
+
+| Runtime | Mechanism | Reachable from the machine that ran ` + "`" + `af` + "`" + ` | Logs | Can attach a local database container | Edition |
+| --- | --- | --- | --- | --- | --- |
+| ` + "`" + `local` + "`" + ` | Containers on the local Docker daemon, with a port forwarder per web service | yes | yes | yes | MIT |
+| ` + "`" + `kubernetes` + "`" + ` | A Deployment, Service and Ingress per web service | only with a domain to publish under | yes | no | MIT |
+
+Running more than one runtime from one control plane is the ` + "`" + `multi_runtime` + "`" + `
+licensed feature. Running either one on its own is not.
+
+### Golden stores
+
+| Store | Mechanism | Credential | Edition |
+| --- | --- | --- | --- |
+| ` + "`" + `local` + "`" + ` | A directory, written beside and renamed into place | none | MIT |
+| ` + "`" + `s3` + "`" + ` | The S3 REST API, signed with Signature Version 4 written here | ` + "`" + `AWS_ACCESS_KEY_ID` + "`" + ` and ` + "`" + `AWS_SECRET_ACCESS_KEY` + "`" + ` | MIT |
+| ` + "`" + `azure_blob` + "`" + ` | The Blob REST API | a container shared access signature carried in the URL | MIT |
+| ` + "`" + `gcs` + "`" + ` | The Cloud Storage JSON API | a service account key, or the metadata server | MIT |
+
+` + "`" + `s3` + "`" + ` also addresses Cloudflare R2, MinIO, Backblaze B2, DigitalOcean Spaces
+and Wasabi. What is proved about each is on the [golden
+stores](/docs/providers/stores) page, including which of them is proved end to
+end and which are proved only to be addressed correctly.
+
+### Emulators
+
+Nothing is built in, and that is deliberate rather than unfinished.
+Antifailure does not write emulators: LocalStack, Azurite and the vendors' own
+emulators exist and carry years of fidelity work a hand written replacement
+would not have. What the engine adds is that the application needs no endpoint
+override to reach one. See [Emulators](/docs/providers/emulators).
 
 ## Writing one
 
-Implement ` + "`" + `provider.Database` + "`" + ` and run the suite:
-
-` + "`" + "`" + "`" + `go
-func TestMyProvider(t *testing.T) {
-    conformance.RunDatabase(t, factory, conformance.Options{})
-}
-` + "`" + "`" + "`" + `
-
-Declare only the capabilities you actually have. Declaring one you do not makes
-the suite run a behaviour it should have skipped, which fails, which is the
-intended outcome: a capability is a promise the suite checks.
+[Writing a provider](/docs/contributing/provider-authoring) has the
+registration, which is four lines around ` + "`" + `engine/pkg/afcli` + "`" + `, and the
+conformance suite each point runs.
 `,
 	"providers/pgurl.md": `---
 title: Any Postgres
 description: Using any reachable Postgres as the database provider, what it creates on your server, and what branching costs there.
 sidebar:
-  order: 5
+  order: 6
 ---
 
 Every other provider here is a provider for one product. ` + "`" + `pgurl` + "`" + ` is the one for
@@ -12020,11 +13420,277 @@ string, because this provider does not declare pooled endpoints. A skip is
 always named: a silent one is how a provider ends up claiming conformance it
 does not have.
 `,
+	"providers/runtimes.md": `---
+title: Runtimes
+description: Where an environment's containers actually run, what each runtime declares it can do, and why a runtime says no rather than reporting an address that does not resolve.
+sidebar:
+  order: 10
+---
+
+A runtime is where an environment's containers actually run. Everything above
+it, the manifest, the golden, the masking, the sidecar, the fidelity report, is
+the same whichever one is chosen.
+
+` + "`" + "`" + "`" + `yaml
+runtime:
+  provider: local   # or kubernetes
+` + "`" + "`" + "`" + `
+
+## What ships
+
+| Runtime | An environment is | Detail |
+| --- | --- | --- |
+| ` + "`" + `local` + "`" + ` | A network on the local Docker daemon, one container per service, plus a port forwarder per web service | [The local runtime](/docs/guides/local-runtime) |
+| ` + "`" + `kubernetes` + "`" + ` | A namespace, with a Deployment and a Service per service and an Ingress per web service | [The Kubernetes runtime](/docs/guides/kubernetes-runtime) |
+
+Both are MIT and both are in the engine. Running one is not an enterprise
+feature. Running SEVERAL from one control plane, and placing an environment on
+the right one, is the ` + "`" + `multi_runtime` + "`" + ` licensed feature, because deciding which
+pool an environment belongs in is a question only an organization has:
+residency, an isolated pool for regulated repositories, a pool with more
+memory. See [multiple runtimes](/docs/enterprise/runtimes).
+
+## What a runtime declares
+
+Three capabilities, and each of them exists because the honest answer is
+sometimes no.
+
+| Capability | ` + "`" + `local` + "`" + ` | ` + "`" + `kubernetes` + "`" + ` |
+| --- | --- | --- |
+| Reachable from the machine that ran ` + "`" + `af` + "`" + ` | yes | only with a ` + "`" + `domain` + "`" + ` to publish under |
+| Logs | yes | yes |
+| Can attach a database container from the local daemon | yes | no |
+
+**Reachability is not a formality.** The Kubernetes runtime declares it only
+when a domain is configured, because without one there is no Ingress and no
+address a caller could reach, and declaring otherwise would mean ` + "`" + `af up` + "`" + `
+printing a URL that resolves to nothing.
+
+**Attaching a local database is the one that decides your database provider.** A
+database container on the machine that ran ` + "`" + `af` + "`" + ` is not reachable from a
+cluster, so on Kubernetes the database has to be one the environment can
+already reach: ` + "`" + `neon` + "`" + `, ` + "`" + `supabase` + "`" + `, ` + "`" + `dblab` + "`" + ` or ` + "`" + `pgurl` + "`" + ` pointed at a server the
+cluster can route to. A runtime that declared this true when it was not would
+make the engine attach a branch no pod can connect to.
+
+## Containment is the runtime's job
+
+Whichever runtime is chosen, an environment reaches nothing it was not given.
+The egress policy, the sidecar that terminates TLS with a certificate the
+environment already trusts, and the network rules that make the sidecar the
+only way out are all built by the runtime. A runtime that cannot enforce that
+is not a runtime this engine will ship, whatever else it can do. See
+[egress](/docs/concepts/egress).
+
+## Writing one
+
+Implement ` + "`" + `provider.Runtime` + "`" + ` and run the suite:
+
+` + "`" + "`" + "`" + `go
+func TestMyRuntime(t *testing.T) {
+    conformance.RunRuntime(t, factory, conformance.RuntimeOptions{})
+}
+` + "`" + "`" + "`" + `
+
+The runtime suite ships with a deliberately BROKEN fake and a self test that
+proves the suite fails against it, one behaviour at a time. That is the
+standard every extension point here is held to, and it is not a formality: a
+conformance suite nobody has proved can fail is a suite that proves nothing,
+and a declared behaviour means nothing until somebody has watched it say no.
+
+A behaviour a runtime cannot support is skipped EXPLICITLY, naming the missing
+capability. A silent skip is how an implementation ends up claiming
+conformance it does not have, and the skip line is what a reviewer reads.
+
+` + "`" + `local` + "`" + ` and ` + "`" + `kubernetes` + "`" + ` are reserved names. A registration under one of them
+is refused at validation rather than accepted and then never consulted, because
+the built in runtimes are looked up first.
+`,
+	"providers/stores.md": `---
+title: Golden stores
+description: Where a golden's dump and its attestation live, the four stores that ship, and exactly what is proved about the services that speak the S3 API.
+sidebar:
+  order: 8
+---
+
+A golden store is where a golden's dump and its attestation live when they
+live somewhere other than the machine that made them.
+
+The reason to have one at all: a golden made on a laptop cannot be branched by
+a runner, and a fleet that refreshes production once per runner is a fleet that
+reads production once per runner. One machine refreshes and publishes; the rest
+pull what it published.
+
+` + "`" + "`" + "`" + `yaml
+database:
+  golden:
+    storage: gcs                      # or local, s3, azure_blob
+    storage_url: $AF_GOLDEN_STORE_URL
+` + "`" + "`" + "`" + `
+
+The attestation travels beside the dump and is checked before the dump is used.
+That ordering is the point: a dump on its own is a database somebody could have
+put anything in, and the signed statement of what the verification scan found
+is what makes it a golden rather than a file.
+
+## What ships
+
+| Store | ` + "`" + `storage_url` + "`" + ` | Credential | Comes from |
+| --- | --- | --- | --- |
+| ` + "`" + `local` + "`" + ` | a directory, or ` + "`" + `file:///path` + "`" + ` | none | the filesystem |
+| ` + "`" + `s3` + "`" + ` | ` + "`" + `s3://bucket/prefix` + "`" + `, or ` + "`" + `https://host/bucket/prefix` + "`" + ` for a server that is not AWS | ` + "`" + `AWS_ACCESS_KEY_ID` + "`" + `, ` + "`" + `AWS_SECRET_ACCESS_KEY` + "`" + `, optionally ` + "`" + `AWS_SESSION_TOKEN` + "`" + ` and ` + "`" + `AWS_REGION` + "`" + ` | the environment |
+| ` + "`" + `azure_blob` + "`" + ` | the container's https URL with a shared access signature | the signature, in the URL | the environment |
+| ` + "`" + `gcs` + "`" + ` | ` + "`" + `gs://bucket/prefix` + "`" + `, or ` + "`" + `https://host/bucket/prefix` + "`" + ` for a server that is not Google | ` + "`" + `GOOGLE_APPLICATION_CREDENTIALS` + "`" + `, or the metadata server | the environment |
+
+All four are MIT and all four are in the engine. The editions rule says
+anything with an MIT peer in the engine stays MIT, and these are each other's
+peers.
+
+## The credential never lives in the manifest
+
+A ` + "`" + `storage_url` + "`" + ` written as ` + "`" + `$VARIABLE` + "`" + ` or ` + "`" + `${VARIABLE}` + "`" + ` is read from the
+environment. That is what lets a container shared access signature or a bucket
+URL with a credential in it stay out of a file that is committed. It is the
+same rule ` + "`" + `source_url_env` + "`" + ` follows, in the form a URL can carry.
+
+The ` + "`" + `s3` + "`" + ` and ` + "`" + `gcs` + "`" + ` stores go further and take no credential from the URL at
+all. They read it from the environment by the names the vendor's own tools
+already use, so a machine already set up for the AWS CLI or for ` + "`" + `gcloud` + "`" + ` needs
+nothing else.
+
+A message about a URL never prints its credential back out. A shared access
+signature is a query string and a bucket URL can carry a user info section, so
+both are stripped before a URL reaches an error.
+
+## ` + "`" + `local` + "`" + `
+
+A directory, and the right answer more often than it sounds: a shared runner
+with a volume, a CI cache, an NFS mount. Objects are written beside their final
+name and renamed into place, so a reader never sees a half written dump and a
+crash leaves a temporary file rather than a truncated one wearing the real name.
+
+## ` + "`" + `s3` + "`" + `, and the five other services that speak it
+
+Signature Version 4 is implemented in this repository rather than taken from
+the AWS SDK, for the same reason the Blob store speaks REST: three operations
+against a stable, fully specified protocol are not worth a dependency tree in a
+binary otherwise built from a handful of libraries.
+
+A ` + "`" + `s3://bucket/prefix` + "`" + ` URL addresses AWS virtual hosted, as
+` + "`" + `bucket.s3.<region>.amazonaws.com` + "`" + `. A full ` + "`" + `https://host/bucket/prefix` + "`" + ` URL
+addresses a server that is not AWS PATH STYLE, because a bucket prefixed onto
+an endpoint that is an address, or onto a regional host that does not serve
+wildcard subdomains, is a hostname that does not resolve.
+
+| Service | ` + "`" + `storage_url` + "`" + ` | ` + "`" + `AWS_REGION` + "`" + ` |
+| --- | --- | --- |
+| Amazon S3 | ` + "`" + `s3://your-bucket/goldens` + "`" + ` | your region |
+| Cloudflare R2 | ` + "`" + `https://<account>.r2.cloudflarestorage.com/your-bucket/goldens` + "`" + ` | ` + "`" + `auto` + "`" + ` |
+| MinIO | ` + "`" + `http://<minio-host>:9000/your-bucket/goldens` + "`" + ` | ` + "`" + `us-east-1` + "`" + ` |
+| Backblaze B2 | ` + "`" + `https://s3.<region>.backblazeb2.com/your-bucket/goldens` + "`" + ` | that region, such as ` + "`" + `us-west-004` + "`" + ` |
+| DigitalOcean Spaces | ` + "`" + `https://<region>.digitaloceanspaces.com/your-bucket/goldens` + "`" + ` | that region, such as ` + "`" + `nyc3` + "`" + ` |
+| Wasabi | ` + "`" + `https://s3.<region>.wasabisys.com/your-bucket/goldens` + "`" + ` | that region, such as ` + "`" + `us-east-2` + "`" + ` |
+
+**Set ` + "`" + `AWS_REGION` + "`" + `.** Signature Version 4 pins the region into the credential
+scope, so a request signed for ` + "`" + `us-east-1` + "`" + ` against a bucket in ` + "`" + `us-west-004` + "`" + ` is
+refused, and it is refused with a 403 that reads exactly like a wrong secret
+key. The default when the variable is unset is ` + "`" + `us-east-1` + "`" + `, which is right for
+AWS in that region and for MinIO and is wrong for the rest.
+
+### What is proved, and what is not
+
+This matters more than the table. "Works with R2, B2, Spaces and Wasabi" is
+the kind of sentence that turns out to be wrong, so here is the split:
+
+- **MinIO is proved end to end**, by a suite that runs the four operations
+  against a real MinIO. It is the store's own signing that is under test there:
+  a wrong signature is indistinguishable from a right one until a server
+  rejects it, and a fixture cannot reject anything.
+- **The other four are proved to be ADDRESSED correctly and are not proved to
+  answer.** A test asserts, for each of them, the host the request goes to, the
+  path style addressing, and a credential scope naming that vendor's region.
+  What it cannot assert is that Cloudflare, Backblaze, DigitalOcean and Wasabi
+  accept the result, because that needs an account with each and no test in
+  this repository may require a cloud account.
+
+If one of the four does not work for you, that is a bug worth reporting rather
+than a limitation to work around. The protocol is the same one MinIO answers.
+
+## ` + "`" + `azure_blob` + "`" + `
+
+The ` + "`" + `storage_url` + "`" + ` is the CONTAINER's URL carrying a shared access signature,
+which is what the portal and the CLI both produce. Nothing here ever sees an
+account key. Scope the signature to one container with read, write, delete and
+list, give it an expiry, and put the whole URL in the environment variable the
+manifest names.
+
+A 403 from this store is almost always the signature: expired, scoped to the
+wrong container, or missing one of the four permissions. The message says so,
+because a bare 403 sends somebody to look at their network.
+
+## ` + "`" + `gcs` + "`" + `
+
+The Cloud Storage JSON API, spoken directly for the same reason as the other
+two. Two ways to get a token, matching where this actually runs:
+
+- **The metadata server**, which is what a Cloud Run service, a GKE workload
+  and a Compute Engine instance all have, and which needs no key material at
+  all. This is the better path wherever it exists.
+- **A service account key**, signed here into an RS256 assertion and exchanged
+  for an access token. This is what a CI runner outside Google has. Point
+  ` + "`" + `GOOGLE_APPLICATION_CREDENTIALS` + "`" + ` at the key file, or put the document itself
+  in ` + "`" + `GOOGLE_APPLICATION_CREDENTIALS_JSON` + "`" + `.
+
+The key is parsed when the store is opened, so a key that is not a key is
+reported before anything depends on the answer. The metadata server is NOT
+probed then: off Google that name does not resolve, and paying a second for
+that on every command would be a second on every command. A ` + "`" + `gs://` + "`" + ` URL with no
+credential anywhere therefore opens and then refuses at the first request,
+naming the variable that fixes it.
+
+An endpoint that is not Google's with no credential configured sends no
+` + "`" + `Authorization` + "`" + ` header at all. That is what lets a Cloud Storage emulator be
+reached with no Google account anywhere. A ` + "`" + `gs://` + "`" + ` URL never gets that
+treatment: an unauthenticated request to Google is a 401, and refusing with the
+variable named beats a 401 twenty minutes into a refresh.
+
+The service account needs ` + "`" + `storage.objects` + "`" + ` on the bucket. A 401 from this
+store is the token and a 403 is the grant, and the message distinguishes them,
+because they have different fixes and the same digit count.
+
+### There is no official Cloud Storage emulator
+
+Google ships emulators for Pub/Sub, Firestore, Datastore, Bigtable and Spanner,
+and none for Cloud Storage. ` + "`" + `fsouza/fake-gcs-server` + "`" + ` is the de facto choice and
+is community maintained. The suite for this store runs against it, and what
+that proves is the four operations against the JSON API. It does not prove
+authentication, because that server verifies none. The two token paths are
+covered separately, against a server the test stands up, which is as close as a
+machine with no Google account gets.
+
+## Writing one
+
+Implement ` + "`" + `extension.GoldenStore` + "`" + `, which opens an ` + "`" + `extension.ObjectStore` + "`" + ` with
+` + "`" + `Name` + "`" + `, ` + "`" + `Put` + "`" + `, ` + "`" + `Get` + "`" + `, ` + "`" + `List` + "`" + ` and ` + "`" + `Delete` + "`" + `.
+
+Two details decide whether it works rather than nearly works:
+
+- **Return ` + "`" + `extension.ErrObjectNotFound` + "`" + ` for an object that is not there.** A
+  store outside this module cannot name the engine's own sentinel, so a store
+  that returns some other error turns every "no golden published yet" into "the
+  store is broken". They are the same HTTP status on more than one service.
+- **Removing what is not there must succeed.** Teardown retries, and a retry
+  that fails on the work it already did is a teardown that never finishes.
+
+` + "`" + `local` + "`" + `, ` + "`" + `azure_blob` + "`" + `, ` + "`" + `s3` + "`" + ` and ` + "`" + `gcs` + "`" + ` are reserved names and a registration
+under one of them is refused at validation rather than accepted and then never
+consulted, because the built in stores are looked up first.
+`,
 	"providers/supabase.md": `---
 title: Supabase
 description: Using Supabase as the database provider, what a branch really is, and what it costs.
 sidebar:
-  order: 3
+  order: 4
 ---
 
 A Supabase branch is a whole separate project: its own Postgres, its own API
@@ -14825,6 +16491,106 @@ af token rm afe_1a2b3c4d
 | --- | --- | --- |
 | ` + "`" + `--control-plane` + "`" + ` | - | The control plane to use (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
 
+### ` + "`" + `af traffic` + "`" + `
+
+What production serves, and how much of it a load run actually sends.
+
+A load run sends the routes safe_routes names. Without a traffic profile
+nothing says how much of production that is, so four routes written by hand
+report in the same words and with the same verdict as a mix read from a week of
+production telemetry.
+
+That is not a cosmetic gap. Measured on this repository on 2026-09-06: a
+migration held an exclusive lock on nine relations for thirty seconds and the
+load run over four hand written routes reported 0.0 percent failed, because
+none of the four reads the locked table. A hand written route list cannot know
+which routes touch which tables.
+
+A profile is the endpoint mix, the arrival rate, the peak concurrency and the
+per route p95, counted from telemetry a team already has. It carries no request
+body, no header, no query string and no identifier. It is a count per route,
+which is what makes it safe to commit beside the manifest, and committing it is
+the point: the check running on a pull request cannot reach production.
+
+Declare where it lives under load.traffic.profile, and how old it may be under
+load.traffic.max_age. A profile past that age is refused rather than quoted.
+
+` + "`" + "`" + "`" + `
+af traffic
+` + "`" + "`" + "`" + `
+
+` + "`" + "`" + "`" + `
+af traffic show
+` + "`" + "`" + "`" + `
+
+Subcommands:
+
+- [` + "`" + `af traffic record` + "`" + `](#af-traffic-record) Count what production served from a trace export or an access log.
+- [` + "`" + `af traffic show` + "`" + `](#af-traffic-show) Print what production serves and which of it this run sends.
+
+### ` + "`" + `af traffic record` + "`" + `
+
+Count what production served from a trace export or an access log.
+
+Reads the file load.source_config.path names, which --from overrides, and
+writes the profile to the path load.traffic.profile names, which --out
+overrides.
+
+Two sources, both of them a file. An OpenTelemetry trace export in OTLP/JSON
+answers every question the profile asks, because a span carries a start and an
+end: the mix, the rate, the per route p95 a threshold compares against, and the
+peak concurrency. A combined format access log answers the mix and the rate,
+and says in the profile that it could answer neither of the others.
+
+Nothing here opens a socket, and there is no agent to install. The file is one
+a collector or a reverse proxy already wrote.
+
+` + "`" + "`" + "`" + `
+af traffic record [flags]
+` + "`" + "`" + "`" + `
+
+` + "`" + "`" + "`" + `
+# Counts an OpenTelemetry export or an access log a collector already
+# wrote. Nothing here opens a socket and there is no agent to install.
+af traffic record
+af traffic record --from telemetry/traces.json --out .antifailure/traffic.json
+` + "`" + "`" + "`" + `
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| ` + "`" + `--branch` + "`" + ` | - | Branch context to use, defaulting to the checked out one. |
+| ` + "`" + `--from` + "`" + ` | - | Read this file instead of the one load.source_config.path names. |
+| ` + "`" + `--out` + "`" + ` | - | Write the profile here instead of where the manifest says. |
+
+### ` + "`" + `af traffic show` + "`" + `
+
+Print what production serves and which of it this run sends.
+
+Reads the profile the manifest names and prints it, busiest route first, with a
+mark against every route a load run would actually send.
+
+The routes with no mark are the finding. They are what production serves and
+this run never touches, so they are what a green run says nothing about, and
+the safe_routes lines that would cover them are printed at the end for somebody
+to read and paste. Nothing is written for you: this measures and states, and
+the manifest confirms it.
+
+A profile older than load.traffic.max_age is REFUSED rather than printed with a
+warning beside it. A stale denominator is not a smaller number, it is an
+unknown one.
+
+` + "`" + "`" + "`" + `
+af traffic show [flags]
+` + "`" + "`" + "`" + `
+
+` + "`" + "`" + "`" + `
+af traffic show
+` + "`" + "`" + "`" + `
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| ` + "`" + `--branch` + "`" + ` | - | Branch context to use, defaulting to the checked out one. |
+
 ### ` + "`" + `af up` + "`" + `
 
 Create an environment for the current branch.
@@ -15493,6 +17259,21 @@ rather than held idle between them.
 | ` + "`" + `AF_MAINTENANCE_DATABASE_URL` + "`" + ` | falls back to ` + "`" + `AF_MIGRATION_DATABASE_URL` + "`" + ` | The role that creates and drops partitions. When neither is set, this process logs a warning at startup and does not keep the partitions ahead. Something else must. |
 | ` + "`" + `AF_EVENT_RETENTION_MONTHS` + "`" + ` | unset | Drop event partitions entirely older than this many whole months. Unset keeps everything forever, which is the default because retention is an operator's decision. A value that is not a whole number of months at least 1 stops the process at startup rather than silently keeping everything. |
 | ` + "`" + `AF_EVENT_ARCHIVE_DIR` + "`" + ` | unset | Write a month out as newline delimited JSON here before dropping it. |
+| ` + "`" + `AF_FAILURE_RETENTION_DAYS` + "`" + ` | 30 | How long a group in ` + "`" + `control_plane_failures` + "`" + ` survives past its LAST occurrence, not its first: a failure first seen in March and last seen this morning is the most interesting row on the page, and sweeping by its age would delete exactly the long running failure an operator is trying to date. Applied only when this maintenance pass can run, because the application role is granted no ` + "`" + `DELETE` + "`" + ` on that table on purpose. A value that is not a whole number of days at least 1 stops the process at startup. |
+
+### The store of the control plane's own failures
+
+Both error handlers write what they caught to standard output and to a grouped
+table, so an installation with no log aggregation can still answer "what is
+failing right now" from the operator portal. A row is a fingerprint over the
+declared route, the method, the error class and the driver code, with a count,
+so the table's size is set by the code and not by traffic. It holds at most 500
+groups and never a message, a stack, a payload or an organization. See
+[operations](/docs/self-hosting/operations) for what it can and cannot answer.
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| ` + "`" + `AF_FAILURE_STORE` + "`" + ` | on | ` + "`" + `off` + "`" + `, ` + "`" + `0` + "`" + ` or ` + "`" + `false` + "`" + ` records nothing. The Logs page then says nothing is being recorded, rather than showing an empty list that reads as a healthy day. The default is on because the table is bounded by the code, the writes are one statement per distinct group per ten seconds rather than one per failure, and a healthy installation writes nothing at all. |
 
 ### What a pass does, in order
 
@@ -16323,7 +18104,7 @@ The source database at {host} could not be reached.
 | --- | --- |
 | Exit code | ` + "`" + `5` + "`" + ` |
 | Retryable | Yes. The engine retries automatically where it can. |
-| More | [providers/overview](/docs/providers/overview) |
+| More | [providers/databases](/docs/providers/databases) |
 
 ### AF-DB-003
 
@@ -16335,7 +18116,7 @@ The source database is Postgres {found}, and this provider supports {supported}.
 | --- | --- |
 | Exit code | ` + "`" + `3` + "`" + ` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [providers/overview](/docs/providers/overview) |
+| More | [providers/databases](/docs/providers/databases) |
 
 ### AF-DB-004
 
@@ -16395,7 +18176,7 @@ The database provider {provider} at {endpoint} rejected the configured credentia
 | --- | --- |
 | Exit code | ` + "`" + `4` + "`" + ` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [providers/overview](/docs/providers/overview) |
+| More | [providers/databases](/docs/providers/databases) |
 
 ### AF-DB-009
 
@@ -16772,6 +18553,18 @@ This manifest declares {count} placement targets and {feature} is not licensed h
 | Exit code | ` + "`" + `4` + "`" + ` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [enterprise/runtimes](/docs/enterprise/runtimes) |
+
+### AF-EE-012
+
+The provider {provider} needs the {feature} feature: {reason}
+
+**What to do.** Install a licence that includes {feature}, or use a provider built into the engine. Nothing was created, and removing what already exists is never refused for this reason.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `6` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [enterprise/licensing](/docs/enterprise/licensing) |
 
 ## Extensions
 
@@ -18021,7 +19814,7 @@ exported on the laptop that started it.
 
 | Key | Notes |
 | --- | --- |
-| ` + "`" + `provider` + "`" + ` | ` + "`" + `docker` + "`" + ` (default), ` + "`" + `neon` + "`" + `, ` + "`" + `supabase` + "`" + `, ` + "`" + `dblab` + "`" + `, or ` + "`" + `pgurl` + "`" + `. |
+| ` + "`" + `provider` + "`" + ` | ` + "`" + `docker` + "`" + ` (default), ` + "`" + `neon` + "`" + `, ` + "`" + `supabase` + "`" + `, ` + "`" + `dblab` + "`" + `, ` + "`" + `pgurl` + "`" + `, or ` + "`" + `aurora` + "`" + `. ` + "`" + `aurora` + "`" + ` is in the enterprise edition; a community build names it and refuses it. |
 | ` + "`" + `version` + "`" + ` | Postgres major, 14 through 18, default 17. Match it to production: a golden on a different major is an environment running a Postgres your application does not. |
 | ` + "`" + `url_env` + "`" + ` | The variable services receive the connection string in. |
 | ` + "`" + `source_url_env` + "`" + ` | Names the variable holding production's read only URL. |
@@ -18130,10 +19923,18 @@ datastores:
     engine: elasticsearch
     stance: derived
     from: primary
+    rebuild:
+      service: api
+      command: bin/reindex --all
 
   - name: bus
     engine: kafka
     stance: topics_only
+    topics:
+      - name: events
+        partitions: 12
+        consumer_groups: [ingest, enrich]
+      - name: alerts
 ` + "`" + "`" + "`" + `
 
 | Key | Notes |
@@ -18144,7 +19945,17 @@ datastores:
 | ` + "`" + `stance` + "`" + ` | Required. See below. |
 | ` + "`" + `because` + "`" + ` | Why that stance was chosen, carried into the fidelity report as written. Required for ` + "`" + `empty` + "`" + `. |
 | ` + "`" + `from` + "`" + ` | The store a ` + "`" + `derived` + "`" + ` one is rebuilt from. Required for ` + "`" + `derived` + "`" + ` and refused for the rest. |
+| ` + "`" + `rebuild` + "`" + ` | The ` + "`" + `service` + "`" + ` whose image the rebuild command runs in and the ` + "`" + `command` + "`" + ` itself. Required for ` + "`" + `derived` + "`" + ` and refused for the rest. |
+| ` + "`" + `topics` + "`" + ` | Each topic's ` + "`" + `name` + "`" + `, its ` + "`" + `partitions` + "`" + ` and the ` + "`" + `consumer_groups` + "`" + ` created against it. Required for ` + "`" + `topics_only` + "`" + ` and refused for the rest. |
 | ` + "`" + `source_url_env` + "`" + ` | The NAME of the variable holding this store's production connection string, which a ` + "`" + `golden` + "`" + ` is copied from and which the cross store check reads the schema from. Never the connection string itself, which is refused. Omitted, the golden holds no rows and every refresh says so. |
+
+A store whose stance is not ` + "`" + `golden` + "`" + ` is started by a **service of its own
+name**, which is how every compose file in the world already declares a cache
+or a broker, and the datastore entry says what happens to its contents. The
+engine provides the container for a ` + "`" + `golden` + "`" + ` and for nothing else, so a store
+declared ` + "`" + `empty` + "`" + `, ` + "`" + `derived` + "`" + ` or ` + "`" + `topics_only` + "`" + ` with no service of its name and no
+` + "`" + `provider` + "`" + ` is refused: it is a manifest asking the environment to hold a store
+while nothing starts one.
 
 The ` + "`" + `database` + "`" + ` block above is not replaced and does not move. It normalizes
 into the entry named ` + "`" + `primary` + "`" + `, so a manifest that declares only ` + "`" + `database:` + "`" + `
@@ -18186,11 +19997,44 @@ stores; the verification scanner reads the second store back with the same
 detectors, and a golden that fails it is never published and can never be
 branched.
 
-Every other stance, and every other engine, is still declaration only: the
-validator refuses a store with no stance and the
-[component inventory](/docs/concepts/inventory) names each one, and nothing here
-starts an ` + "`" + `empty` + "`" + ` store, runs a ` + "`" + `derived` + "`" + ` rebuild or creates a topic. A store
-whose engine this build cannot mask is REFUSED rather than published unmasked.
+**An ` + "`" + `empty` + "`" + ` store is its own service's container and nothing else.** That is
+already the state the stance asks for: a cache that came up empty is correct,
+and copying one would be copying noise and calling it fidelity. What ` + "`" + `af up` + "`" + `
+adds is that it says so, with the declared reason attached, and the fidelity
+report says it again afterwards. What is refused is a store declared ` + "`" + `empty` + "`" + `
+that nothing in the manifest starts.
+
+**A ` + "`" + `derived` + "`" + ` store is rebuilt by its own ` + "`" + `rebuild.command` + "`" + `,** run to
+completion inside the environment once every service is up, in the image and
+with the variables of ` + "`" + `rebuild.service` + "`" + `. A non-zero exit fails the environment
+rather than leaving an index nobody built. This is the point of the stance: a
+search index cloned from production is stale against the branch the moment the
+branch is masked, because the documents in it name people who do not exist in
+the twin's Postgres, and an index built from the branch cannot be stale against
+it.
+
+**A ` + "`" + `topics_only` + "`" + ` store is created with the topics and consumer groups it
+declares, and no messages.** The commands are the broker's own, run in the
+broker's own image, and the job waits for the broker to answer a metadata
+request before it uses it. The three things a consumer needs, and none of them
+exists in an empty broker: the topic, because subscribing to a name that is not
+there reads nothing and reports nothing; the partition count, because ordering
+is per partition and a group with more members than partitions leaves members
+idle; and the group, because a consumer joining a group nobody created reads
+from the END and silently skips everything the twin's own producers wrote
+before it started. This build creates topics for ` + "`" + `kafka` + "`" + `. A broker running
+anything else is REFUSED by name rather than started with nothing in it, which
+would be the ` + "`" + `empty` + "`" + ` stance under a different word.
+
+A store whose engine this build cannot mask is REFUSED rather than published
+unmasked.
+
+Every one of the four appears in the [component
+inventory](/docs/concepts/inventory) as a distinct position rather than as an
+absence. ` + "`" + `empty` + "`" + `, ` + "`" + `derived` + "`" + ` and ` + "`" + `topics_only` + "`" + ` are reported ` + "`" + `substituted` + "`" + `, which
+counts against the score, because none of the three is production's data and
+the whole argument for them is that it should not be. The declared ` + "`" + `because` + "`" + ` is
+carried through as written, and a store with no reason declared says so.
 
 ### Checking that one person is one person in both stores
 
@@ -18285,6 +20129,44 @@ refused at the line rather than treated as the weakest one.
 
 See [verdicts](/docs/concepts/verdicts) for what each level does to the run
 and to the exit code.
+## ` + "`" + `load` + "`" + `
+
+The whole block is in [Load](/docs/concepts/load). One key is here because it
+is the counterpart of ` + "`" + `database.volume` + "`" + ` above.
+
+### ` + "`" + `traffic` + "`" + `
+
+` + "`" + "`" + "`" + `yaml
+load:
+  traffic:
+    profile: .antifailure/traffic.json
+    max_age: 336h
+` + "`" + "`" + "`" + `
+
+The committed record of what production actually serves. Without it
+` + "`" + `safe_routes` + "`" + ` is a list written from memory and nothing says how much of
+production it misses. Measured on this repository on 2026-09-06: a migration
+held an exclusive lock on nine relations for thirty seconds and the run over
+four hand written routes reported 0.0 percent failed, because none of the four
+reads the locked table.
+
+` + "`" + `af traffic record` + "`" + ` writes the profile from an OpenTelemetry trace export or a
+combined format access log, both files a collector or a reverse proxy already
+wrote. It carries the endpoint mix, the arrival rate, production's p95 per
+route and the peak concurrency, and no request body, header, query string or
+identifier. Nothing in it opens a socket and no application code changes, which
+is why the result is safe to commit, which it has to be: the check running on a
+pull request cannot reach production.
+
+With a profile, the traffic dimension states what fraction of production's
+requests the run actually sends and names the heaviest route it never touches,
+the arrival rate is stated beside production's own, and ` + "`" + `p95_increase` + "`" + ` becomes
+able to fire under a source that carries no durations of its own.
+
+A profile past ` + "`" + `max_age` + "`" + ` is refused rather than quoted. Fourteen days by
+default, where the volume profile's is thirty: an endpoint mix moves at the rate
+a team ships, and a volume profile at the rate a business grows.
+
 ## ` + "`" + `fidelity` + "`" + `
 
 | Key | Notes |
@@ -19502,7 +21384,7 @@ This page is generated from ` + "`" + `schemas/manifest.v1.json` + "`" + `. Edit
 | ` + "`" + `policy` + "`" + ` | [Policy](#policy) | no | What each class of finding does to the pull request check. |
 | ` + "`" + `runtime` + "`" + ` | [Runtime](#runtime) | no | Where and how long the environment runs. |
 | ` + "`" + `services` + "`" + ` | list of [Service](#service) | no | Every process the environment runs: web servers, API servers, background workers, and scheduled jobs. Min items 1, max items 50. |
-| ` + "`" + `version` + "`" + ` | ` + "`" + `1` + "`" + ` | **yes** | The manifest schema version. Increment only for a breaking change; the engine refuses a version it does not understand rather than guessing. |
+| ` + "`" + `version` + "`" + ` | ` + "`" + `1` + "`" + ` | no | The manifest schema version. Increment only for a breaking change; the engine refuses a version it does not understand rather than guessing. |
 | ` + "`" + `workflows` + "`" + ` | list of [Workflow](#workflow) | no | What the agents do, written as sentences. A workflow is a goal, not a script: the runner decides the actions and verifies the outcome. Max items 200. |
 
 ## auth
@@ -19582,7 +21464,7 @@ Where the environment's Postgres comes from, and how the production copy is made
 | ` + "`" + `max_branches` + "`" + ` | integer | no | The plan's concurrent branch limit, where the provider has one it cannot read from its own API. Reaching it fails with AF-DB-006 rather than hanging. Minimum 1. |
 | ` + "`" + `migrations` + "`" + ` | [Migrations](#migrations) | no | Where the project's own SQL migrations live, for a project whose migrate command is its own script rather than a tool the rehearsal recognises. |
 | ` + "`" + `project` + "`" + ` | string | no | The account-side project a hosted provider creates branches in, such as a Neon project. Not a secret, which is why it lives here and the key that reaches it does not. |
-| ` + "`" + `provider` + "`" + ` | ` + "`" + `docker` + "`" + `, ` + "`" + `neon` + "`" + `, ` + "`" + `supabase` + "`" + `, ` + "`" + `dblab` + "`" + `, ` + "`" + `pgurl` + "`" + ` | no | Which provider creates branches. docker is local and needs nothing; neon, supabase, and dblab talk to a service; pgurl is any reachable Postgres, which is where the goldens and the branches are kept as databases on a server you name. Defaults to ` + "`" + `docker` + "`" + `. |
+| ` + "`" + `provider` + "`" + ` | string | no | Which provider creates branches. docker is local and needs nothing; neon, supabase, and dblab talk to a service; pgurl is any reachable Postgres, which is where the goldens and the branches are kept as databases on a server you name. aurora clones an Amazon Aurora PostgreSQL cluster and is in the enterprise edition, so a community build names it here and refuses it when a manifest selects it. Defaults to ` + "`" + `docker` + "`" + `. |
 | ` + "`" + `seed` + "`" + ` | string | no | Command that fills the golden with data, for a project with no production database yet. It runs once per refresh with DATABASE_URL set, and every branch is a copy of what it made, so the cost is paid once rather than per environment. Mutually exclusive with source_url_env. Max length 1024. |
 | ` + "`" + `source_url_env` + "`" + ` | string | no | Name of the environment variable holding the read only connection string of the production database. The value is read once, during a golden refresh, on the operator's machine or runner, and never stored. Max length 128, matches ` + "`" + `^[A-Za-z_][A-Za-z0-9_]*$` + "`" + `. |
 | ` + "`" + `subset` + "`" + ` | [Subset](#subset) | no | Take a production shaped slice rather than the whole database. |
@@ -19601,8 +21483,29 @@ One store the environment holds. Database is a single struct and it is Postgres,
 | ` + "`" + `from` + "`" + ` | string | no | The datastore a derived store is rebuilt from, named. Required for the derived stance and refused for the others. Max length 40, matches ` + "`" + `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$` + "`" + `. |
 | ` + "`" + `name` + "`" + ` | string | **yes** | Unique within the manifest. The name primary is reserved for the entry the database: block normalizes into. Max length 40, matches ` + "`" + `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$` + "`" + `. |
 | ` + "`" + `provider` + "`" + ` | string | no | Which implementation provides the engine, for an engine more than one thing can provide. Omit it for the engine's own default. Max length 64. |
+| ` + "`" + `rebuild` + "`" + ` | [Datastore rebuild](#datastore-rebuild) | no | How a derived store is built from the one named in from. Required for that stance and refused for the others. |
 | ` + "`" + `source_url_env` + "`" + ` | string | no | The NAME of the variable holding this store's production connection string, which is what a golden of it is copied from. A variable name rather than a URL, because the value is a credential for production and a manifest is checked in. Omitted, the golden is EMPTY and every refresh says so: that is the same answer database.source_url_env gives a project that has not connected production yet, and it is not a refusal because a store whose tables are made by migrations is still worth branching. A connection string written here rather than a variable name is refused, and the refusal does not print it back. Max length 128, matches ` + "`" + `^[A-Za-z_][A-Za-z0-9_]*$` + "`" + `. |
 | ` + "`" + `stance` + "`" + ` | ` + "`" + `golden` + "`" + `, ` + "`" + `empty` + "`" + `, ` + "`" + `derived` + "`" + `, ` + "`" + `topics_only` + "`" + ` | **yes** | What happens to this store's contents. golden is a masked, verified copy environments branch from. empty starts it with nothing, on purpose, and because says why. derived rebuilds it from the store named in from, once that one is ready, which is how a search index is built from the Postgres branch rather than cloned and left stale against it. topics_only creates topics and consumer groups with no messages. There is no default: a datastore that declares no stance is refused, because a silent default is how somebody ends up trusting a blank ClickHouse. |
+| ` + "`" + `topics` + "`" + ` | list of [Datastore topic](#datastore-topic) | no | The topics a topics_only broker is created with, and the consumer groups created against them. Required for that stance and refused for the others. Declared rather than discovered, because there is nothing to discover: a broker's topics live in production and copying the messages in them is what this stance exists to refuse. What a twin needs is the SHAPE, and the shape is something only the person writing the manifest knows. Max items 200. |
+
+## Datastore rebuild
+
+How a derived store is built from the one it reads. A command rather than a copy, and that is the whole argument for the stance: a search index cloned from production is stale against the branch the moment the branch is masked, because the documents in it name people who do not exist in the twin's Postgres. An index BUILT from the branch cannot be stale against it.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| ` + "`" + `command` + "`" + ` | string | **yes** | What rebuilds the store. It runs once, to completion, inside the environment, after every service is up, and a non-zero exit fails the environment rather than leaving an index nobody built. Max length 1024. |
+| ` + "`" + `service` + "`" + ` | string | **yes** | The service whose image the command runs in, and whose variables it receives. It is the application's own in almost every case, because the code that knows how to index this product's rows is the product's code. Max length 40, matches ` + "`" + `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$` + "`" + `. |
+
+## Datastore topic
+
+One topic a topics_only broker is created with. An empty broker is not a twin of a broker: a consumer subscribing to a name that is not there reads nothing and reports nothing, and the run goes green having tested one poll loop against a name that will only exist in production.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| ` + "`" + `consumer_groups` + "`" + ` | list of string | no | The groups created against this topic, with their offsets committed to the earliest message and nothing behind them. Created rather than left to appear on their own, because a consumer joining a group nobody created reads from the END by default, so the twin's first run of a consumer silently skips everything the twin's own producers wrote before it started. Max items 100. |
+| ` + "`" + `name` + "`" + ` | string | **yes** | The topic, named the way production names it. Unique within the store. Max length 249, matches ` + "`" + `^[a-zA-Z0-9._-]{1,249}$` + "`" + `. |
+| ` + "`" + `partitions` + "`" + ` | integer | no | How many partitions the topic is created with. Not cosmetic: ordering is per partition and a consumer group with more members than partitions leaves members idle, so a twin whose topic has one partition where production has twelve cannot reproduce a reordering bug at all. Defaults to ` + "`" + `1` + "`" + `. Minimum 1, maximum 10000. |
 
 ## Egress
 
@@ -19637,7 +21540,7 @@ One variable a service needs. The manifest declares the name and where the value
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | ` + "`" + `from` + "`" + ` | string | no | Where to read the value: a secrets adapter name, or the name of a different variable to copy. Max length 256. |
-| ` + "`" + `name` + "`" + ` | string | **yes** | Max length 128, matches ` + "`" + `^[A-Za-z_][A-Za-z0-9_]*$` + "`" + `. |
+| ` + "`" + `name` + "`" + ` | string | **yes** | Max length 128, matches ` + "`" + `^[A-Za-z_][A-Za-z0-9_.]*$` + "`" + `. |
 | ` + "`" + `required` + "`" + ` | boolean | no | Whether the environment fails to start without it. Defaults to true, because a service silently missing configuration is the failure this product exists to prevent. Defaults to ` + "`" + `true` + "`" + `. |
 | ` + "`" + `sandbox` + "`" + ` | boolean | no | Marks a credential that must be a sandbox one. The secrets subsystem refuses a value carrying a known live prefix, and the proxy trips a wire if one reaches the network anyway. Defaults to ` + "`" + `false` + "`" + `. |
 | ` + "`" + `value` + "`" + ` | string | no | A literal value for a variable that is configuration rather than a secret, such as a feature flag or a public URL. A value that looks like a credential is rejected. Max length 2048. |
@@ -19691,10 +21594,10 @@ The masked, verified copy every environment branches from.
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| ` + "`" + `max_age` + "`" + ` | string | no | How stale a golden may be before af up refreshes it first. Defaults to ` + "`" + `168h` + "`" + `. Matches ` + "`" + `^[0-9]+(h\|d)$` + "`" + `. |
+| ` + "`" + `max_age` + "`" + ` | string | no | How stale a golden may be before af up refreshes it first. Defaults to ` + "`" + `168h` + "`" + `. Matches ` + "`" + `^[0-9]+(ms\|s\|m\|h\|d)$` + "`" + `. |
 | ` + "`" + `retain` + "`" + ` | integer | no | How many versions to keep. A referenced version is never collected regardless of this. Defaults to ` + "`" + `5` + "`" + `. Minimum 1, maximum 100. |
 | ` + "`" + `schedule` + "`" + ` | string | no | Cron expression for automatic refreshes, with an optional CRON_TZ prefix. A refresh that would overlap a running one is skipped with an event rather than queued. Max length 128. |
-| ` + "`" + `storage` + "`" + ` | ` + "`" + `local` + "`" + `, ` + "`" + `azure_blob` + "`" + `, ` + "`" + `s3` + "`" + ` | no | Where dumps and attestations live. Defaults to ` + "`" + `local` + "`" + `. |
+| ` + "`" + `storage` + "`" + ` | ` + "`" + `local` + "`" + `, ` + "`" + `azure_blob` + "`" + `, ` + "`" + `s3` + "`" + `, ` + "`" + `gcs` + "`" + ` | no | Where dumps and attestations live. Defaults to ` + "`" + `local` + "`" + `. |
 | ` + "`" + `storage_url` + "`" + ` | string | no | Container or bucket URL for a remote store. Credentials come from the secrets subsystem, never from this URL. Max length 1024. |
 
 ## Insights
@@ -19736,6 +21639,7 @@ Traffic shaped like production, compared between the base branch and this one. R
 | ` + "`" + `source` + "`" + ` | ` + "`" + `none` + "`" + `, ` + "`" + `otel` + "`" + `, ` + "`" + `access_log` + "`" + ` | no | Where the endpoint mix comes from. An OpenTelemetry trace export or a combined format access log, both read from a file named in source_config.path. Defaults to ` + "`" + `none` + "`" + `. |
 | ` + "`" + `source_config` + "`" + ` | object | no | Adapter specific settings. Both sources take a path: the OTLP/JSON trace export, or the access log. Credentials come from the secrets subsystem. Max properties 20. |
 | ` + "`" + `thresholds` + "`" + ` | object | no | Deltas that fail the run. Applied to the difference against the base branch, never to absolute numbers. |
+| ` + "`" + `traffic` + "`" + ` | [Traffic](#traffic) | no | The committed record of what production actually serves, which is the denominator every route in a load run is measured against. |
 | ` + "`" + `unsafe_routes` + "`" + ` | list of string | no | Routes that mutate state destructively. They are included only against a fresh branch that is reset afterwards. Max items 500. |
 
 ## Load scenario
@@ -19877,12 +21781,12 @@ Where and how long the environment runs. The provider decides the machinery; the
 | ` + "`" + `domain` + "`" + ` | string | no | Wildcard domain for environment hostnames. Defaults to localhost, which needs no DNS at all. Defaults to ` + "`" + `localhost` + "`" + `. Max length 253. |
 | ` + "`" + `idle_sleep` + "`" + ` | string | no | How long an environment may sit idle before it is scaled to zero. It wakes on the next request. Defaults to ` + "`" + `30m` + "`" + `. Matches ` + "`" + `^[0-9]+(m\|h)$` + "`" + `. |
 | ` + "`" + `kubeconfig_context` + "`" + ` | string | no | Which kubeconfig context to use. Naming it prevents an environment landing on whatever cluster happened to be current. Max length 253. |
-| ` + "`" + `max_ttl` + "`" + ` | string | no | The furthest af env extend may push an environment's expiry, measured from when it was created. A lifetime that can be extended forever is not a lifetime, and this is the bound. Defaults to ` + "`" + `168h` + "`" + `. Matches ` + "`" + `^[0-9]+(h\|d)$` + "`" + `. |
+| ` + "`" + `max_ttl` + "`" + ` | string | no | The furthest af env extend may push an environment's expiry, measured from when it was created. A lifetime that can be extended forever is not a lifetime, and this is the bound. Defaults to ` + "`" + `168h` + "`" + `. Matches ` + "`" + `^[0-9]+(ms\|s\|m\|h\|d)$` + "`" + `. |
 | ` + "`" + `namespace_prefix` + "`" + ` | string | no | Prefix for Kubernetes namespaces. Defaults to ` + "`" + `af` + "`" + `. Max length 40. |
 | ` + "`" + `provider` + "`" + ` | string | no | Which runtime places the environment. local and kubernetes are built in. Open rather than a fixed list, for the reason datastore.engine is: a build registers the runtimes it carries, so a manifest naming one this build has no runtime for is refused by the provider lookup, by name, against the runtimes that build actually has, which says more than an unknown value would. Defaults to ` + "`" + `local` + "`" + `. Max length 64. |
 | ` + "`" + `requires` + "`" + ` | object | no | What a target must offer for this repository to be placed on it, as attribute equals value matched against a target's tags. Empty means anywhere. A requirement no declared target satisfies is refused at validation, because both are in this file. Max properties 16. |
 | ` + "`" + `targets` + "`" + ` | list of [Runtime target](#runtime-target) | no | The places an environment may be placed, in preference order. Empty means the single runtime the provider names, which is every manifest written before placement existed. Max items 32. |
-| ` + "`" + `ttl` + "`" + ` | string | no | How long an environment lives before the reaper tears it down. Extend one you are still using with af env extend, up to max_ttl. Defaults to ` + "`" + `24h` + "`" + `. Matches ` + "`" + `^[0-9]+(h\|d)$` + "`" + `. |
+| ` + "`" + `ttl` + "`" + ` | string | no | How long an environment lives before the reaper tears it down. Extend one you are still using with af env extend, up to max_ttl. Defaults to ` + "`" + `24h` + "`" + `. Matches ` + "`" + `^[0-9]+(ms\|s\|m\|h\|d)$` + "`" + `. |
 
 ## Runtime target
 
@@ -19904,7 +21808,7 @@ One process the environment runs. A service is built from the repository, given 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | ` + "`" + `build` + "`" + ` | [Build](#build) | no | How to turn the service directory into an image. |
-| ` + "`" + `command` + "`" + ` | string | no | Command that starts the service, overriding the image's own. Executed with an argument vector, never through a shell. Max length 1024. |
+| ` + "`" + `command` + "`" + ` | string | no | Command that starts the service, overriding the image's own. Executed with an argument vector, never through a shell. Max length 4096. |
 | ` + "`" + `depends_on` + "`" + ` | list of string | no | Services that must be ready first. A cycle is rejected at validation. Max items 50. |
 | ` + "`" + `env` + "`" + ` | list of [Environment variable](#environment-variable) | no | Names of environment variables this service needs. Names only. Values come from the secrets subsystem, and a name with no value anywhere fails with AF-SEC-001 rather than starting a service that will misbehave. Max items 200. |
 | ` + "`" + `health_path` + "`" + ` | string | no | HTTP path that reports readiness. A service is not considered up until this returns a 2xx or 3xx status. Defaults to ` + "`" + `/` + "`" + `. Max length 512. |
@@ -19931,13 +21835,22 @@ Take a production shaped slice rather than the whole database. The closure is co
 | ` + "`" + `seed_where` + "`" + ` | string | no | A SQL predicate selecting the seed rows, for example created_at > now() - interval '90 days'. Max length 2048. |
 | ` + "`" + `virtual_relationships` + "`" + ` | list of object | no | Relationships the schema does not declare as foreign keys but the application relies on. Without these, a subset can look complete and still break the application. Max items 200. |
 
+## Traffic
+
+The committed record of what production actually serves, which is the denominator every route in a load run is measured against. Without one safe_routes is a list written from memory and nothing says how much of production it misses. Measured on this repository on 2026-09-06: a migration held an exclusive lock on nine relations for thirty seconds and the run over four hand written routes reported 0.0 percent failed, because none of the four reads the locked table.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| ` + "`" + `max_age` + "`" + ` | string | no | How old the profile may be before it is refused. A stale profile is not a smaller number, it is an unknown one, so it is refused the way a stale golden is rather than quoted. Fourteen days by default rather than the volume profile's thirty, because an endpoint mix moves at the rate a team ships rather than at the rate a business grows. Defaults to ` + "`" + `336h` + "`" + `. Max length 32, matches ` + "`" + `^[0-9]+(ms\|s\|m\|h\|d)$` + "`" + `. |
+| ` + "`" + `profile` + "`" + ` | string | **yes** | The profile file, relative to the repository root. Written by af traffic record from an OpenTelemetry trace export or a combined format access log, and committed, because the machine that reads it on a pull request cannot reach production. It carries the endpoint mix, the arrival rate, the peak concurrency and the per route p95, and no request body, header, query string or identifier. Max length 512. |
+
 ## Volume
 
 The committed record of what production holds, which is the denominator every row count in a report is measured against. Without one the fidelity report says a branch holds twelve tables over a hundred thousand rows and has nothing to compare that against, so a golden built from a staging database with two hundred rows in it reports as reproducing a production holding four billion.
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| ` + "`" + `max_age` + "`" + ` | string | no | How old the profile may be before it is refused. A stale profile is not a smaller number, it is an unknown one, so it is refused the way a stale golden is rather than quoted. Thirty days by default rather than the golden's seven, because a profile is the shape of the data rather than the data. Defaults to ` + "`" + `720h` + "`" + `. Max length 32. |
+| ` + "`" + `max_age` + "`" + ` | string | no | How old the profile may be before it is refused. A stale profile is not a smaller number, it is an unknown one, so it is refused the way a stale golden is rather than quoted. Thirty days by default rather than the golden's seven, because a profile is the shape of the data rather than the data. Defaults to ` + "`" + `720h` + "`" + `. Max length 32, matches ` + "`" + `^[0-9]+(ms\|s\|m\|h\|d)$` + "`" + `. |
 | ` + "`" + `profile` + "`" + ` | string | **yes** | The profile file, relative to the repository root. Written by af volume record from a read only connection to production or a replica, and committed, because the machine that reads it on a pull request cannot reach production. It carries counts, sizes, partition shape and key cardinality, and no data. Max length 512. |
 
 ## Workflow
@@ -22501,6 +24414,13 @@ down by ` + "`" + `code` + "`" + ` answers this. One error code across many orga
 platform fault. Many codes in one organization is that organization's
 repository, and is not your problem tonight.
 
+**And what actually failed?** Open **Operations, Logs & Error Explorer** in the
+operator portal. The first card is the control plane's own failures, grouped, in
+a table it writes to its own Postgres. You need no Prometheus, no Grafana and no
+log aggregation to read it, which is the point: without it, a 5xx count going up
+is the whole of what a self hosted installation can see. See [What the control
+plane records about its own failures](#what-the-control-plane-records-about-its-own-failures).
+
 ## What the alerts mean
 
 Every rule in ` + "`" + `observability/alerts/antifailure.rules.yml` + "`" + ` links back here. They
@@ -22901,6 +24821,82 @@ per-caller rate limits did, for a single caller sending across every route at
 once. An operator sizing a real deployment should raise ` + "`" + `AF_POOL_MAX` + "`" + ` to match
 expected concurrent callers rather than assuming the rate limiter is the only
 ceiling in the system.
+
+## What the control plane records about its own failures
+
+The control plane catches every unexpected failure of its own in two handlers,
+one for HTTP and one for tRPC procedures. Both write a line to standard output.
+On a deployment with log aggregation that line is searchable; on a self hosted
+one it is a line in ` + "`" + `docker logs` + "`" + `, which is no count, no first seen and no
+grouping. So the same fields are also written to a table, and the operator
+portal reads it.
+
+**What a row is.** One GROUP, not one occurrence. The fingerprint is the
+declared route key, the HTTP method, the error class name and the driver's own
+code, and it carries a count, the first and last time it was seen, the build
+running at each of those, and the request id of the most recent occurrence.
+
+**What bounds it.** The cardinality of a row's five fields is set by the code
+rather than by traffic: the routes come from the endpoint table that ships in
+the container, the procedure paths from the router, and a class name is a
+JavaScript identifier. A bad day adds occurrences to existing rows and no rows.
+On top of that the table holds at most 500 groups, and the page says out loud
+when it is at that cap rather than quietly showing you fewer failures than are
+happening.
+
+**What it costs in storage.** At most 500 rows of about 200 bytes, so on the
+order of 100 kilobytes, whatever happens. The writes are one statement per
+distinct group per ten seconds rather than one per failure, and an installation
+that is not failing writes nothing at all.
+
+**What never goes in it.** No error message, no stack, no request body, no query
+string, no parameters, no payload, no organization, no user and no email. That
+is a boundary and not an oversight: a query failure from this stack renders as
+the whole statement with its parameters after it, so an error message here can
+carry a tenant's data. It is enforced by the signature of ` + "`" + `recordFailure` + "`" + ` in
+` + "`" + `web/apps/api/src/failures.ts` + "`" + `, which takes five bounded strings and has no
+parameter that could carry one of those values.
+
+**What it therefore cannot tell you.** How many tenants a control plane failure
+touched. Answering that means writing an organization identifier next to a
+failure, which turns a small operational table into tenant data. The Failures by
+code card on the same page answers the per tenant question for the engine side,
+where it is normally asked.
+
+**What you configure.**
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| ` + "`" + `AF_FAILURE_STORE` + "`" + ` | on | Set to ` + "`" + `off` + "`" + ` to record nothing. The page then says nothing is being recorded, rather than showing an empty list that reads as a healthy day. |
+| ` + "`" + `AF_FAILURE_RETENTION_DAYS` + "`" + ` | 30 | How long a group survives past its LAST occurrence. Only applied when the maintenance pass can run. |
+
+Retention rides the daily maintenance pass, which needs
+` + "`" + `AF_MAINTENANCE_DATABASE_URL` + "`" + ` or ` + "`" + `AF_MIGRATION_DATABASE_URL` + "`" + `. The application
+role is deliberately granted no ` + "`" + `DELETE` + "`" + ` on this table, so a role reached
+through a request path cannot erase the record of what it did to get there. With
+no administrative connection string configured, nothing sweeps: the table stays
+bounded by the cap regardless, and the portal says that no retention is in
+force so you read the dates rather than assuming a row is current.
+
+The page updates itself every ten seconds while the tab is in front. It polls
+rather than holding a stream open, because the control plane runs more than one
+replica behind one ingress and a held connection pins you to one of them and
+dies on every deploy, which is exactly when you are watching. A refresh that
+does not land leaves the last good numbers on screen and says how old they are.
+
+Three counters say when the store itself is the thing that is failing, and two
+alert rules watch them:
+` + "`" + `af_control_plane_failures_total{outcome="capped"}` + "`" + ` for a new group refused,
+` + "`" + `{outcome="dropped"}` + "`" + ` for the in-process buffer full, and ` + "`" + `{outcome="failed"}` + "`" + `
+for a write that raised and will be retried. Anything above zero on those means
+the page is counting fewer failures than happened.
+
+### What is still not recorded
+
+Nothing records an exception, a stack trace or a log line from a customer's
+RUN. Those happen in the engine, in an environment the control plane does not
+own, and would need the engine to report them. ` + "`" + `af logs web` + "`" + ` and the run
+outcomes on the same page are what you have for that side.
 
 ## Where the numbers come from
 

@@ -33,6 +33,9 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -79,6 +82,9 @@ var ledger = []generator{
 	{"go run ./tools/notices -out THIRD_PARTY_NOTICES.md", []string{
 		"THIRD_PARTY_NOTICES.md",
 	}},
+	{"cp schemas/manifest.v1.json engine/internal/manifest/manifest.v1.json", []string{
+		"engine/internal/manifest/manifest.v1.json",
+	}},
 	{"cd engine && go test ./internal/policy -update-vectors", []string{
 		"schemas/policy-vectors.json",
 	}},
@@ -109,19 +115,322 @@ var ledger = []generator{
 	}},
 }
 
+// receiptName is the file `-generate` leaves behind to say it ran, and the
+// only evidence `run` will accept that anything was rebuilt.
+//
+// The failure it exists for is the one that survived #363. That change made
+// both callers run the ledger, so the three lists cannot disagree any more.
+// It did not couple the two halves: `go run ./tools/gendrift .` on its own
+// still ran no generator and still printed "N generated paths match their
+// generators", which is a sentence about committed bytes compared against
+// themselves. Drop or reorder the `-generate` step in ci.yml and the gate
+// goes back to printing that line about a tree nobody rebuilt, which is
+// exactly the state main was in for the thirteen commits
+// engine/internal/manifest/manifest.v1.json sat stale.
+//
+// So "I could not check" is now a different answer from "I checked and it is
+// clean", and it is a failure rather than a pass. A gate whose reassuring
+// sentence can be true of a tree it never looked at is worse than no gate,
+// because the sentence is what stops anybody asking.
+//
+// It is ignored by git and skipped by changedPaths, for two independent
+// reasons that would each be enough: a receipt in a diff is noise, and a
+// receipt reported as drift by the tool that wrote it is a gate arguing with
+// itself.
+const receiptName = ".gendrift-receipt.json"
+
+// receiptVersion invalidates every receipt written by an older shape of this
+// file. A field added here without it would be read as its zero value out of
+// an old receipt and compared as if somebody had checked it.
+const receiptVersion = 1
+
+// receipt is what one complete run of `-generate` attests to.
+//
+// Head and Ledger are what make it about THIS tree rather than about some
+// earlier one. A receipt left by a run at another commit says nothing about
+// this one, and a ledger that gained a row since is a ledger whose new
+// generator has never run, which is the whole defect one layer up.
+type receipt struct {
+	Version int    `json:"version"`
+	Head    string `json:"head"`
+	Ledger  string `json:"ledger"`
+}
+
+// ledgerFingerprint is a hash over every command and every path, in order.
+//
+// Order is included on purpose. docsembed has to run last or a single pass
+// cannot converge, so a reordered ledger is a ledger that produces different
+// bytes, and a receipt from before the reorder is not evidence about after it.
+func ledgerFingerprint() string {
+	var lines []string
+	for _, g := range ledger {
+		lines = append(lines, g.command)
+		for _, p := range g.paths {
+			lines = append(lines, "\t"+p)
+		}
+	}
+	sum := sha256.Sum256([]byte(strings.Join(lines, "\n")))
+	return hex.EncodeToString(sum[:])
+}
+
+// headSHA is the commit the generators ran against.
+//
+// A failure to read it is returned rather than swallowed. A receipt carrying
+// an empty head would match another receipt carrying an empty head, so
+// "git could not answer" would quietly become a passing comparison, which is
+// the shape of every defect this tool is about.
+func headSHA(root string) (string, error) {
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("reading HEAD, which a receipt has to name: %w", err)
+	}
+	sha := strings.TrimSpace(string(out))
+	if sha == "" {
+		return "", fmt.Errorf("git named no commit, so there is nothing a receipt could be about")
+	}
+	return sha, nil
+}
+
+// writeReceipt records a completed run of every generator in the ledger.
+func writeReceipt(root string) error {
+	head, err := headSHA(root)
+	if err != nil {
+		return err
+	}
+	body, err := json.MarshalIndent(receipt{
+		Version: receiptVersion,
+		Head:    head,
+		Ledger:  ledgerFingerprint(),
+	}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(root, receiptName), append(body, '\n'), 0o644)
+}
+
+// removeReceipt drops any earlier receipt.
+//
+// It runs BEFORE the generators rather than after a failure, and the ordering
+// is the point. A run that dies at the eighth of fifteen generators leaves a
+// half written tree, and if an earlier receipt survived that, the comparison
+// would answer with full confidence about it. There is no ordering in which
+// this file exists and the generators have not just finished.
+func removeReceipt(root string) error {
+	err := os.Remove(filepath.Join(root, receiptName))
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("clearing the previous receipt: %w", err)
+	}
+	return nil
+}
+
+// requireReceipt refuses to compare a tree no generator has rebuilt.
+//
+// The three refusals say different things because they are different facts,
+// and this repository has been bitten every time two of those were printed
+// under one sentence.
+//
+// Reading the exit status of this tool through a pipe defeats all three, and
+// that is worth knowing before trusting a report that quotes one. `gendrift
+// -strict . | head -3` exits 0 while gendrift exits 1, because the status
+// belongs to the last stage. Measure it unpiped, or the refusal below is read
+// as the pass it was written to replace.
+func requireReceipt(root string) error {
+	body, err := os.ReadFile(filepath.Join(root, receiptName))
+	if err != nil {
+		return fmt.Errorf("no generator has run in this checkout, so NOTHING has been compared.\n" +
+			"      `go run ./tools/gendrift -generate .` leaves a receipt naming the commit and\n" +
+			"      the ledger it ran against, and this refuses to answer without one. Run it,\n" +
+			"      or `just generate`, and then run this again.\n" +
+			"      Without that step the comparison is the committed bytes against themselves,\n" +
+			"      and it prints the same sentence a rebuilt clean tree prints. That sentence\n" +
+			"      was printed on thirteen commits while\n" +
+			"      engine/internal/manifest/manifest.v1.json sat stale on main")
+	}
+
+	var r receipt
+	if err := json.Unmarshal(body, &r); err != nil {
+		return fmt.Errorf("the receipt at %s is not readable, so it says nothing about this tree: %w",
+			receiptName, err)
+	}
+	if r.Version != receiptVersion {
+		return fmt.Errorf("the receipt at %s was written by version %d of this tool and this is version %d,\n"+
+			"      so what it attests to is not what is being asked. Run `-generate` again",
+			receiptName, r.Version, receiptVersion)
+	}
+
+	head, err := headSHA(root)
+	if err != nil {
+		return err
+	}
+	if r.Head != head {
+		return fmt.Errorf("the generators last ran against commit %s and this tree is at %s,\n"+
+			"      so the receipt is about a different tree. Run `-generate` again",
+			short(r.Head), short(head))
+	}
+	if r.Ledger != ledgerFingerprint() {
+		return fmt.Errorf("the ledger has changed since the generators last ran, so at least one\n" +
+			"      generator in it has never run here and the file it writes has never been\n" +
+			"      compared. Run `-generate` again")
+	}
+	return nil
+}
+
+func short(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
+}
+
 func main() {
 	strict := flag.Bool("strict", false,
 		"also fail on a changed path no generator owns, for a clean checkout")
+	generate := flag.Bool("generate", false,
+		"run every generator in the ledger, in order, and compare nothing")
 	flag.Parse()
 	root := "."
 	if args := flag.Args(); len(args) > 0 {
 		root = args[0]
 	}
 
+	if *generate {
+		if err := generateAll(root, os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "gendrift: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	if err := run(root, *strict, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "gendrift: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// generateAll runs every generator the ledger names, in the order it names
+// them, and compares nothing.
+//
+// This mode exists because the list of generators was written out three times.
+// The ledger below named fifteen; `just _generated` ran fifteen; ci.yml ran
+// TWELVE. Three of the ledger's rows had no generator on the CI side, so on a
+// clean checkout the files those rows name were never rewritten, never showed
+// as changed, and could never be reported. `engine/internal/manifest/manifest.v1.json`
+// was one of them, and it sat stale on main for thirteen commits while the
+// step called "Generated files are current" passed on every one of them: the
+// ledger row was decorative, because gendrift only ever asked `git status` and
+// something else had to have done the writing.
+//
+// A ledger that names a generator and a workflow that runs a different set is
+// the disagreement no gate here could see, and the way to make it unsayable is
+// to stop saying it twice. Both callers run this now, so a row added to the
+// ledger is a generator BOTH of them run, and the only remaining way to have a
+// generated file nothing compares is to leave it out of the ledger entirely,
+// which -strict is what catches.
+//
+// It stops at the first failure and says which command failed, because a
+// generator that did not finish leaves a tree the comparison would read as
+// drift. That is the reading that sent three lanes to the wrong file on
+// 2026-09-08, and it is the reason this is a separate mode rather than a step
+// folded into the comparison: the two answer different questions and must be
+// able to fail with different words.
+//
+// # What the one list costs, measured rather than guessed
+//
+// Fifteen generators in one invocation is the direct consequence of the
+// consolidation above, and it is worth knowing the price before anybody
+// reverses it. This machine serializes Go builds behind one lock, and on
+// 2026-09-09 a single `-generate` held that lock for 12 minutes 33.63 seconds
+// with seven lanes waiting.
+//
+// That run FAILED rather than completing, so the figure is a floor and not a
+// total: the cost of a SUCCESSFUL sweep on this machine has not been measured,
+// and a number that says so is worth more than one that quietly reads as a
+// total. An earlier 8m23s reading of the same run was a snapshot taken while
+// it was still going, reported as if it were the end. Both numbers are of the
+// same run and neither is its duration.
+//
+// The obvious repair is for this function to take and release the lock around
+// each generator, so the fifteen interleave with other lanes instead of
+// blocking them. Do not, and the reason is in the paragraph above rather than
+// in simplicity. Interleaving lets another lane's `go test` observe the tree
+// between generator eight and generator nine, and the tree at that instant is
+// precisely the half written one whose misreading sent three lanes to the
+// wrong file. A stated cost is cheaper than a window in which the tree is
+// briefly a lie.
+//
+// # A generator can HANG, which is a third answer
+//
+// The 2026-09-09 failure above was `cd engine && go test ./internal/masking
+// -update-transforms`, and the shape of it belongs here because the mode
+// reports it as a generator that did not finish, which is right, and because
+// the reason it did not finish is one this repository had not yet catalogued.
+//
+// That package holds tests that start real containers. Docker was wedged, not
+// absent. Both tests are written to SKIP when no daemon answers, and against a
+// wedged daemon they never reach the skip: the pull is allowed five minutes
+// and the server is then allowed ninety seconds to answer, while the Go
+// toolchain panics the whole package at ten. So a test that intended to say
+// "skipped, nothing was reachable" emitted a panic trace and FAIL instead.
+//
+// A skip that has not finished deciding to skip is indistinguishable from a
+// test that failed. That is the same sentence as the one this tool exists for,
+// one layer down: "I could not look" and "I looked and it is broken" arriving
+// under one word. AF_SKIP_DOCKER=1 is the mitigation and the reason it was not
+// set is the point, because the daemon looked alive. `docker ps | head -3`
+// exits 0 on a wedged daemon, since the status belongs to `head`, and #370 is
+// the same confusion again in a precondition that read "the daemon did not
+// answer" as "no image".
+//
+// The pipeline half of that was hit by the person writing this comment, in the
+// session whose whole subject was a tool printing a clean answer about a check
+// it had not made. Not an apology, evidence: the reader most primed to see it
+// did not, which is the argument for a tool that CANNOT say it over a person
+// asked to remember.
+func generateAll(root string, out io.Writer) error {
+	// Before anything, so that there is no window in which a stale receipt
+	// vouches for a tree this run is part way through rewriting.
+	if err := removeReceipt(root); err != nil {
+		return err
+	}
+	for _, g := range ledger {
+		if _, err := fmt.Fprintf(out, "  %s\n", g.command); err != nil {
+			return err
+		}
+		cmd := exec.Command("bash", "-c", g.command)
+		cmd.Dir = root
+		cmd.Stdout = out
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			// The explanation goes to the writer and the error stays one
+			// line. staticcheck's ST1005 refuses an error string that ends in
+			// punctuation or a newline, and main prints this as
+			// `gendrift: <err>`, which a paragraph does not sit under anyway.
+			//
+			// The write is returned rather than discarded, for the reason the
+			// clean case below gives: the whole value of this sentence is that
+			// somebody reads it, so a write that did not arrive has to be
+			// noticed rather than swallowed.
+			if _, werr := fmt.Fprintf(out,
+				"\nThat is a generator that did not finish, and NOT a stale file. Nothing\n"+
+					"has been compared. Fix the failure above and run this again before\n"+
+					"reading anything into what the tree looks like now.\n\n"); werr != nil {
+				return werr
+			}
+			return fmt.Errorf("the generator `%s` failed: %w", g.command, err)
+		}
+	}
+	// Only now, with every generator finished. This is what the comparison
+	// reads, and it is the difference between "I checked and it is clean" and
+	// "I could not check", which printed the same sentence until it existed.
+	if err := writeReceipt(root); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintf(out, "gendrift: ran %d %s over %d generated %s, receipt in %s\n",
+		len(ledger), plural(len(ledger), "generator", "generators"),
+		countPaths(), plural(countPaths(), "path", "paths"), receiptName)
+	return err
 }
 
 // run compares the working tree against HEAD and reports drift.
@@ -135,6 +444,18 @@ func main() {
 // could previously ask different questions, and naming it is what keeps them
 // asking the same one.
 func run(root string, strict bool, out io.Writer) error {
+	// First, because every other answer below is a statement about a tree the
+	// generators have just rewritten, and without this there is nothing
+	// saying they did. checkLedger and the comparison both go on producing
+	// confident output on a checkout where no generator ever ran.
+	//
+	// In both modes. A developer running this by hand is comparing committed
+	// bytes against themselves exactly as CI would be, and a local pass that
+	// means less than the CI pass is how the two gates start disagreeing
+	// again.
+	if err := requireReceipt(root); err != nil {
+		return err
+	}
 	if err := checkLedger(root); err != nil {
 		return err
 	}
@@ -240,7 +561,16 @@ func changedPaths(root string) ([]string, error) {
 		if i := strings.Index(p, " -> "); i >= 0 {
 			p = p[i+4:]
 		}
-		paths = append(paths, strings.Trim(p, `"`))
+		p = strings.Trim(p, `"`)
+		// The tool's own receipt is not an artifact anybody generated, and
+		// -strict would otherwise report it as a changed path no generator
+		// claims. It is in .gitignore as well, so this is the second of two
+		// independent reasons it stays out of the comparison rather than the
+		// only one.
+		if p == receiptName {
+			continue
+		}
+		paths = append(paths, p)
 	}
 	return paths, nil
 }

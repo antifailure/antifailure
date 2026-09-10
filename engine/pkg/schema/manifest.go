@@ -233,6 +233,7 @@ const (
 	StorageLocal     GoldenStorage = "local"
 	StorageAzureBlob GoldenStorage = "azure_blob"
 	StorageS3        GoldenStorage = "s3"
+	StorageGCS       GoldenStorage = "gcs"
 )
 
 // Golden configures the masked, verified copy environments branch from.
@@ -356,6 +357,61 @@ type Datastore struct {
 	// tables are created by migrations is still worth branching, and refusing
 	// would make the first `af up` on a new project impossible.
 	SourceURLEnv string `json:"source_url_env,omitempty" yaml:"source_url_env,omitempty"`
+	// Topics are the topics a topics_only broker is created with, and the
+	// consumer groups created against them. Required for that stance and
+	// refused for the others.
+	//
+	// Declared rather than discovered, because there is nothing to discover:
+	// a broker's topics live in production and copying the messages in them
+	// is the thing this stance exists to refuse. What a twin needs is the
+	// SHAPE, so that a consumer subscribing to a topic finds it and a
+	// producer writing to one is not creating it by accident, and the shape
+	// is something only the person writing the manifest knows.
+	Topics []DatastoreTopic `json:"topics,omitempty" yaml:"topics,omitempty"`
+	// Rebuild is the command that builds a derived store from the one named
+	// in From. Required for that stance and refused for the others.
+	Rebuild *DatastoreRebuild `json:"rebuild,omitempty" yaml:"rebuild,omitempty"`
+}
+
+// DatastoreTopic is one topic a topics_only broker is created with.
+type DatastoreTopic struct {
+	// Name is the topic.
+	Name string `json:"name" yaml:"name"`
+	// Partitions is how many the topic is created with. Zero means one,
+	// which is what a broker does with an unspecified count.
+	//
+	// It is here because a partition count is not cosmetic: a consumer group
+	// with more members than partitions leaves members idle, and ordering is
+	// per partition, so a twin whose topic has one partition where production
+	// has twelve cannot reproduce a reordering bug at all.
+	Partitions int `json:"partitions,omitempty" yaml:"partitions,omitempty"`
+	// ConsumerGroups are the groups created against this topic, with their
+	// offsets committed and no messages behind them.
+	//
+	// A group is created rather than left to appear on its own because a
+	// consumer that joins a group nobody created reads from the end by
+	// default, so the twin's first run of a consumer silently skips whatever
+	// the twin's own producers wrote before it started.
+	ConsumerGroups []string `json:"consumer_groups,omitempty" yaml:"consumer_groups,omitempty"`
+}
+
+// DatastoreRebuild is how a derived store is built from the one it reads.
+//
+// A command rather than a copy, and that is the whole argument for the stance.
+// A search index cloned from production is stale against the branch the moment
+// the branch is masked: the documents in it name people who do not exist in
+// the twin's Postgres, so a search returns a row a join cannot resolve. An
+// index BUILT from the branch cannot be stale against it, because the branch
+// is what it read.
+type DatastoreRebuild struct {
+	// Service names the service whose image the command runs in. It is the
+	// application's own image in almost every case, because the code that
+	// knows how to index this product's rows is the product's code.
+	Service string `json:"service" yaml:"service"`
+	// Command is what rebuilds the store. It runs once, to completion, inside
+	// the environment, after every service is up, and a non-zero exit fails
+	// the environment rather than leaving an index nobody built.
+	Command string `json:"command" yaml:"command"`
 }
 
 // Mode is what happens to an outbound request.
@@ -806,6 +862,33 @@ type Load struct {
 	UnsafeRoutes []string          `json:"unsafe_routes,omitempty" yaml:"unsafe_routes,omitempty"`
 	Scenarios    []LoadScenario    `json:"scenarios,omitempty" yaml:"scenarios,omitempty"`
 	Thresholds   *LoadThresholds   `json:"thresholds,omitempty" yaml:"thresholds,omitempty"`
+	// Traffic names the committed profile of what production serves, which is
+	// the denominator every route in a load run is measured against.
+	Traffic *Traffic `json:"traffic,omitempty" yaml:"traffic,omitempty"`
+}
+
+// Traffic names the committed record of what production actually serves.
+//
+// Without one, safe_routes is a list somebody wrote from memory and nothing
+// can say how much of production it misses. Measured on this repository on
+// 2026-09-06: a migration held AccessExclusiveLock on nine relations for
+// thirty seconds and the load run over four hand written routes reported 0.0
+// percent failed, because none of the four read the locked table. The profile
+// is what turns that list into a fraction of production's requests.
+//
+// It is a path rather than a collector endpoint, deliberately, and for the
+// same reason database.volume is. The profile is recorded once from telemetry
+// a team already has, and committed; every machine that reads it afterwards,
+// including a pull request check that can reach nothing, reads a file. Nothing
+// here reports from inside a running application.
+type Traffic struct {
+	// Profile is the artifact, relative to the repository root. Written by
+	// af traffic record and read by everything that needs a denominator.
+	Profile string `json:"profile" yaml:"profile"`
+	// MaxAge is how old the profile may be before it is refused. A stale
+	// profile is not a smaller number, it is an unknown one, so it is refused
+	// the way a stale golden is rather than quoted.
+	MaxAge string `json:"max_age,omitempty" yaml:"max_age,omitempty"`
 }
 
 // LoadScenario points at a journey document and says how hard to run it.

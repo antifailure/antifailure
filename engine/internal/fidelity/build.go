@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/antifailure/antifailure/engine/internal/traffic"
 	"github.com/antifailure/antifailure/engine/internal/volume"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
@@ -81,6 +82,24 @@ type Observation struct {
 	// says why the configured source produced nothing.
 	Traffic       string
 	TrafficReason string
+	// Sent is every route a load run would actually send at this environment,
+	// which is the shape after the safe list has refused what it refuses. Not
+	// the shape and not the safe list: a route the shape carries and the safe
+	// list refuses is never sent, and a pattern in the safe list that no
+	// source produces sends nothing.
+	Sent []traffic.Endpoint
+	// SentRate is how many requests a second the run would send, which is the
+	// shape's rate times the manifest's scale.
+	SentRate float64
+	// TrafficProfile is what production actually served, read from the
+	// committed profile, and TrafficProfileReason says why there is none.
+	//
+	// A nil profile with a reason is the case this exists for. Which routes a
+	// run sends was always readable and was always reported as a reproduction
+	// of production's traffic; what was never available was the list to
+	// compare it against.
+	TrafficProfile       *traffic.Profile
+	TrafficProfileReason string
 
 	// Stores describes each declared datastore this environment BRANCHED, as
 	// that store's own provider answered for it.
@@ -91,6 +110,12 @@ type Observation struct {
 	// has none. Only a store the environment actually holds appears, and only
 	// then does the dimension report what is in it.
 	Stores []Store
+
+	// Stances describes what this environment did about each store declared
+	// with a stance other than golden. A store with no entry here is one
+	// nothing asked about, which is a different answer from one that was asked
+	// about and is not running.
+	Stances []Stance
 
 	// CrossStore is what the cross store masking check found, and
 	// CrossStoreReason says why it could not be run. Nil with an empty reason
@@ -189,6 +214,52 @@ type Store struct {
 	BranchReason string
 }
 
+// Stance is what this environment DID about one store the manifest declares
+// with a stance other than golden.
+//
+// Separate from Store above, which is a branch and its provenance, because
+// these three stances have neither. A store declared empty, derived or
+// topics_only has no golden, no attestation and no branch, and reporting it
+// through a struct built for those would answer four questions about it that
+// nobody asked and none of which apply.
+//
+// What it carries instead is the two things a reader needs in order to tell a
+// deliberate position from an omission: whether the store is actually running
+// in this environment, and whether this environment's own run did the thing
+// the stance asks for. The manifest's declaration is not one of them. The
+// manifest is already in the observation, and a report built from a
+// declaration alone is the report believing a manifest instead of an
+// environment, which is the failure the datastores dimension was written to
+// stop one level up.
+type Stance struct {
+	// Store is the datastore's name in the manifest.
+	Store string
+	// Running reports that a service of the store's name is up in this
+	// environment, and RunningReason says why nothing could be asked when
+	// that could not be established.
+	//
+	// A store the environment does not hold is ABSENT whatever its stance
+	// says, and that is the case this field exists for: a manifest declaring
+	// a cache empty and an environment with no cache in it are not the same
+	// result, and before this they read identically.
+	Running       bool
+	RunningReason string
+	// Ran reports that this environment's own run recorded the job the stance
+	// asks for, and RanReason says what was found when it did not.
+	//
+	// Read from the journal rather than assumed from the manifest. An
+	// environment brought up by a build that had no stance jobs is running the
+	// same containers, from the same manifest, with a broker that has no topic
+	// in it, and the manifest cannot tell those apart. The journal is the only
+	// thing in this product that records what a particular run actually did.
+	//
+	// It is not consulted for the empty stance, which has no job: the store
+	// starting and holding nothing IS the stance, and there is nothing for a
+	// run to have done beyond starting it.
+	Ran       bool
+	RanReason string
+}
+
 // There is deliberately no Empty field here, unlike the primary database's.
 // Whether a store declares a source is in its own manifest entry, the manifest
 // is part of this observation, and the dimension reads it from there. A copy
@@ -218,7 +289,7 @@ func Build(obs Observation) Inventory {
 			thirdParty(obs),
 			auth(obs),
 			runtime(obs),
-			traffic(obs),
+			trafficDimension(obs),
 			datastores(obs),
 			topology(obs),
 		},
@@ -622,34 +693,6 @@ func runtime(obs Observation) Dimension {
 		NotApplicable: "the environment runs on " + where +
 			", and nothing in the manifest says what production runs on, so there is nothing to compare it against",
 	}
-}
-
-func traffic(obs Observation) Dimension {
-	d := Dimension{Name: schema.FidelityTraffic}
-	l := obs.Manifest.Load
-	if l == nil || !l.Enabled {
-		d.NotApplicable = "the manifest does not ask for traffic, so there is none to reproduce"
-		return d
-	}
-	c := Component{Name: "endpoint mix"}
-	switch {
-	case obs.TrafficReason != "":
-		c.State, c.Detail = Absent, obs.TrafficReason
-	// Keyed on whether a shape was actually read, not on which source the
-	// manifest named. This arm used to test l.Source == LoadAccessLog, which
-	// was every connected source at the time it was written. OpenTelemetry
-	// became a real source afterwards, and an otel run would have fallen to
-	// the default arm below and been reported as the engine's own shape while
-	// carrying production's routes and production's rate. A report that calls
-	// real traffic a default is worse than one that says nothing.
-	case obs.Traffic != "":
-		c.State, c.Detail = Reproduced, obs.Traffic
-	default:
-		c.State = Absent
-		c.Detail = "the traffic is the engine's own default shape, not production's"
-	}
-	d.Components = append(d.Components, c)
-	return d
 }
 
 func orUnknown(s string) string {

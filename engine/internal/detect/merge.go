@@ -21,7 +21,7 @@ import (
 // When two analyzers disagree, the stronger evidence wins and the
 // disagreement becomes a question, because a conflict is exactly the case
 // where a silent choice is most likely to be wrong.
-func Merge(findings []Finding, root string) (*schema.Manifest, []Question) {
+func Merge(findings []Finding, root string) (*schema.Manifest, []Question, Proposals) {
 	m := &schema.Manifest{
 		Version: schema.ManifestVersion,
 		Name:    sanitizeServiceName(path.Base(root)),
@@ -40,7 +40,14 @@ func Merge(findings []Finding, root string) (*schema.Manifest, []Question) {
 	}
 
 	m.Database = mergeDatabase(findings, services, &questions)
-	m.Egress = mergeEgress(findings)
+	// A store beside the primary, with the stance detection proposes for it.
+	// Only the ones this build can bring up reach the draft; the rest are
+	// returned so af init can name them, because a manifest declaring an
+	// engine no provider serves is a manifest af up refuses, and af init
+	// promises the opposite.
+	var proposals Proposals
+	proposals.Datastores, m.Datastores = mergeDatastores(findings, hasPostgresFinding(findings))
+	m.Egress, proposals.Emulators = mergeEgress(findings)
 	m.Personas = defaultPersonas()
 	m.Auth = mergeAuth(findings)
 	m.Workflows = suggestedWorkflows(findings)
@@ -54,7 +61,40 @@ func Merge(findings []Finding, root string) (*schema.Manifest, []Question) {
 		return m.Services[i].Name < m.Services[j].Name
 	})
 	sort.SliceStable(questions, func(i, j int) bool { return questions[i].ID < questions[j].ID })
-	return m, questions
+	return m, questions, proposals
+}
+
+// Proposals are the things detection found and could not simply write into the
+// manifest.
+//
+// They are separate from the draft because each one needs a sentence rather
+// than a line: a datastore this build has no provider for would make a
+// manifest af up refuses, and an emulator is evidence about the manifest
+// rather than a part of it. Before this existed both were dropped on the
+// floor by Merge, which is why a compose file running ClickHouse and
+// LocalStack produced a manifest that mentioned neither.
+type Proposals struct {
+	// Datastores are the stores found beside the primary database, both the
+	// ones written into the draft and the ones this build cannot bring up.
+	Datastores []ProposedDatastore
+	// Emulators are the cloud emulators the repository runs in its own
+	// compose file, and the rules each one produced.
+	Emulators []DetectedEmulator
+}
+
+// hasPostgresFinding reports whether anything in the repository said Postgres.
+//
+// It is what tells a Mongo that IS the application's database apart from a
+// Mongo sitting beside a Postgres as a second store. mergeDatabase already
+// asks about the first case by name, and proposing a stance for it as well
+// would be one fact stated twice in two vocabularies.
+func hasPostgresFinding(findings []Finding) bool {
+	for _, f := range OfKind(findings, KindDatabase) {
+		if f.Subject == "postgres" {
+			return true
+		}
+	}
+	return false
 }
 
 // primaryServiceName picks the name the application should carry: the first
@@ -795,7 +835,7 @@ func isDatabaseURLName(name string) bool {
 	return false
 }
 
-func mergeEgress(findings []Finding) *schema.Egress {
+func mergeEgress(findings []Finding) (*schema.Egress, []DetectedEmulator) {
 	e := &schema.Egress{Default: schema.ModeBlock}
 	seen := map[string]bool{}
 	// A provider's webhook path belongs on the host that serves its API, not
@@ -834,8 +874,73 @@ func mergeEgress(findings []Finding) *schema.Egress {
 		}
 		e.Rules = append(e.Rules, rule)
 	}
+	emulators := mergeEmulators(findings, e, seen)
 	sort.SliceStable(e.Rules, func(i, j int) bool { return e.Rules[i].Host < e.Rules[j].Host })
-	return e
+	return e, emulators
+}
+
+// mergeEmulators turns a cloud emulator running in the repository's own
+// compose file into the egress rules for the cloud it answers for.
+//
+// An emulator's own configuration is better evidence about which services an
+// application uses than its dependency list is, because somebody configured it
+// rather than installed it: LocalStack with SERVICES=s3,sqs,sns is a developer
+// stating that this application calls exactly those three. It is also the
+// thing this product replaces, since reaching an emulator costs an endpoint
+// override and the override means the code under test is not the code that
+// ships. So the emulator is read as the roster, and every service on it gets
+// the catalog's rule for the real host, with the catalog's own reason.
+//
+// A host the dependency scan already claimed is left alone rather than added
+// twice. Two rules for one host is a manifest the validator refuses, and the
+// first one carries the same reason as the second would.
+//
+// The mode is the catalog's, which today is block for every cloud service
+// this can reach. That is the honest answer while nothing answers for the
+// service in the environment: a rule promising something else would be a
+// promise the engine cannot keep.
+func mergeEmulators(findings []Finding, e *schema.Egress, seen map[string]bool) []DetectedEmulator {
+	found := OfKind(findings, KindEmulator)
+	if len(found) == 0 {
+		return nil
+	}
+	out := make([]DetectedEmulator, 0, len(found))
+	for _, f := range found {
+		em := DetectedEmulator{
+			Product:  f.Extra["product"],
+			Cloud:    f.Subject,
+			Service:  f.Extra["service"],
+			Image:    f.Value,
+			Evidence: f.Evidence,
+			Services: emulatorTokens(f.Extra["services"]),
+		}
+		for _, tp := range thirdPartiesForCloud(em.Cloud, em.Services) {
+			for _, host := range tp.Hosts {
+				if seen[host] {
+					continue
+				}
+				seen[host] = true
+				em.Hosts = append(em.Hosts, host)
+				e.Rules = append(e.Rules, schema.EgressRule{
+					Host: host,
+					Mode: schema.Mode(tp.Mode),
+					Note: tp.Why,
+				})
+			}
+		}
+		em.Unnamed = unclaimedTokens(em.Cloud, em.Services)
+		out = append(out, em)
+	}
+	// Findings arrive sorted, but two emulators in one compose file must not
+	// swap places between runs because a map iteration inside the analyzer
+	// changed, and the note is read by a person who runs af init twice.
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Evidence != out[j].Evidence {
+			return out[i].Evidence < out[j].Evidence
+		}
+		return out[i].Service < out[j].Service
+	})
+	return out
 }
 
 // mergeAuth turns the authentication finding into the manifest's auth block.

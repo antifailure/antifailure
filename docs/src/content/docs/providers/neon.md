@@ -2,7 +2,7 @@
 title: Neon
 description: Using Neon as the database provider, what it does well, and what it costs.
 sidebar:
-  order: 2
+  order: 3
 ---
 
 Neon branches share storage with their parent, so creating one takes about as

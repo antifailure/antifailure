@@ -197,7 +197,7 @@ func run(root string, out io.Writer) error {
 	report("modecheck: %d files scanned for prose about the egress modes (%s)\n",
 		len(files), strings.Join(modes, ", "))
 	report("modecheck: %d markdown files scanned for reference table cells that "+
-		"claim to list a closed set the schema declares\n", tables)
+		"claim to list the values the schema publishes\n", tables)
 	report("modecheck: %d false enumerations\n", len(found))
 
 	if len(found) > 0 {

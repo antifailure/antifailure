@@ -224,6 +224,13 @@ var commandExamples = map[string]string{
 		"af token create ci\n" +
 		"af token create ci --control-plane https://app.antifailure.dev",
 	"af token rm": "af token rm afe_1a2b3c4d",
+	"af traffic":  "af traffic show",
+	"af traffic record": "" +
+		"# Counts an OpenTelemetry export or an access log a collector already\n" +
+		"# wrote. Nothing here opens a socket and there is no agent to install.\n" +
+		"af traffic record\n" +
+		"af traffic record --from telemetry/traces.json --out .antifailure/traffic.json",
+	"af traffic show": "af traffic show",
 	"af up": "" +
 		"af up\n" +
 		"af up --rebuild --hud",

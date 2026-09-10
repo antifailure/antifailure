@@ -1540,12 +1540,21 @@ func reservedProviderNames() map[string][]string {
 		extension.SocketDatabaseProvider: {
 			string(schema.DBDocker), string(schema.DBNeon),
 			string(schema.DBSupabase), string(schema.DBDBLab),
+			// pgurl was missing from this list while being a case in the
+			// switch below, which is the precise failure the list exists to
+			// prevent: a build registering a provider called pgurl would have
+			// validated cleanly, been consulted only after the built in
+			// switch, and never once been used. Found by writing down the
+			// five extension points, and the reason there is now a test that
+			// reads the schema's constants rather than trusting this slice.
+			string(schema.DBPgURL),
 		},
 		extension.SocketRuntimeProvider: {
 			string(schema.RuntimeLocal), string(schema.RuntimeKubernetes),
 		},
 		extension.SocketGoldenStore: {
-			string(golden.KindLocal), string(golden.KindAzureBlob), string(golden.KindS3),
+			string(golden.KindLocal), string(golden.KindAzureBlob),
+			string(golden.KindS3), string(golden.KindGCS),
 		},
 	}
 }
@@ -1592,6 +1601,9 @@ func (o *Orchestrator) checkPolicy(ctx context.Context) error {
 		req.Provider = string(m.Database.Provider)
 	}
 	if m.Egress != nil {
+		// The default first, because a manifest with no rules at all still has
+		// one and it decides every host nothing names.
+		req.EgressDefault = string(m.Egress.Default)
 		req.EgressModes = make(map[string]string, len(m.Egress.Rules))
 		for _, rule := range m.Egress.Rules {
 			req.EgressHosts = append(req.EgressHosts, rule.Host)
@@ -1880,9 +1892,19 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	for _, sv := range specs {
 		names[sv.Name] = true
 	}
+	// Before the spec rather than inside the runtime, because the manifest is
+	// here. A store this build cannot bring to its declared stance is refused
+	// NOW, before a single image runs: the alternative is an environment that
+	// comes up green with a broker holding no topic in it, which is the empty
+	// stance under a different word and is not what the manifest said.
+	stanceJobs, err := o.stanceJobs()
+	if err != nil {
+		return result, err
+	}
 	spec := provider.EnvSpec{
 		EnvID: o.envID, Branch: o.opts.Branch, Services: specs,
 		Datastores:           providedStores,
+		StanceJobs:           stanceJobs,
 		Egress:               o.opts.Manifest.Egress,
 		DatabaseURL:          insideURL,
 		MigrationDatabaseURL: insideMigrateURL,

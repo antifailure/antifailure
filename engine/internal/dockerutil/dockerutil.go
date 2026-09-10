@@ -28,6 +28,7 @@ import (
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 
@@ -475,4 +476,44 @@ func FirstName(names []string) string {
 		return ""
 	}
 	return strings.TrimPrefix(names[0], "/")
+}
+
+// ImageInspector is the one method ImagePresent needs.
+//
+// An interface rather than *client.Client so the two error paths can be tested
+// without a daemon. The whole point of the helper is which ERROR it received,
+// and a real daemon cannot be asked to produce a chosen error on demand.
+type ImageInspector interface {
+	ImageInspect(ctx context.Context, ref string, opts ...client.ImageInspectOption) (image.InspectResponse, error)
+}
+
+// ImagePresent reports whether the daemon holds an image, and REFUSES TO GUESS
+// when it cannot tell.
+//
+// The two valued read this replaces is the reason it exists. Written inline,
+// the check is `if _, err := cli.ImageInspect(ctx, ref); err == nil`, and every
+// error takes the same branch as a genuine absence. Not found and "the daemon
+// was too busy to answer" become the same answer, and the caller that was
+// asking "is this image here" is told no by a daemon that never looked.
+//
+// That is not a theoretical shape. A test in engine/internal/runtime/local
+// asserts that a sidecar image is ABSENT before proving the air gap refuses to
+// build it. Its precondition inspected the tag, read a non-not-found error as
+// absence, and continued; the image was present, so the code under test took
+// its own early return and the assertion failed nine lines later saying an
+// error was expected. The precondition existed precisely to stop the test
+// running in that state and it waved it through, because it could not tell the
+// two errors apart. A check that cannot say "I could not look" reports the
+// reassuring answer instead.
+//
+// So absence is only ever a not found. Anything else is returned, and the
+// caller decides.
+func ImagePresent(ctx context.Context, cli ImageInspector, ref string) (bool, error) {
+	if _, err := cli.ImageInspect(ctx, ref); err != nil {
+		if cerrdefs.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("asking the daemon whether %s is present: %w", ref, err)
+	}
+	return true, nil
 }

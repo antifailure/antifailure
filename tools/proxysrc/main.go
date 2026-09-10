@@ -41,6 +41,7 @@ var sources = []string{
 	"cmd/af-proxy/dns.go",
 	"cmd/af-proxy/transparent.go",
 	"cmd/af-proxy/mitm.go",
+	"cmd/af-proxy/h2.go",
 	"cmd/af-proxy/capture.go",
 	"cmd/af-proxy/sandbox.go",
 	"cmd/af-proxy/stream.go",

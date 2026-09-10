@@ -46,6 +46,7 @@ import (
 	"time"
 
 	"github.com/antifailure/antifailure/ee/engine/cloudauth"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"github.com/antifailure/antifailure/engine/pkg/extension"
 )
 
@@ -123,7 +124,7 @@ func NewObjectStore(cfg ObjectStoreConfig) (*ObjectStore, error) {
 		suffix: cfg.suffix,
 	}
 	if s.client == nil {
-		s.client = &http.Client{Timeout: objectTimeout}
+		s.client = airgap.Client(airgap.SiteAuditSink, objectTimeout)
 	}
 	if s.suffix == nil {
 		s.suffix = randomSuffix

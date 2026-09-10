@@ -491,6 +491,94 @@ describe('the operations routes', { skip: hasDb ? false : 'no database' }, () =>
    * The gate
    * ------------------------------------------------------------------ */
 
+  /* -----------------------------------------------------------------------
+   * The control plane's own failures
+   * -------------------------------------------------------------------- */
+
+  test('the store route returns a group and says what the store is doing', async () => {
+    // Seeded through the store that ships rather than by INSERT, so this is a
+    // test of the route reading what the writer wrote. Two of them at the same
+    // instant as everything else here, so the window filter below is being
+    // asked the question it is for.
+    const { createFailureStore } = await import('../src/failures.ts')
+    const store = createFailureStore({ pool: h.pool, clock: h.clock, version: 'v-test' })
+    store.record({
+      source: 'http',
+      route: 'POST /v1/events',
+      method: 'POST',
+      kind: 'DrizzleQueryError',
+      providerCode: '23514',
+      requestId: 'req-seeded',
+    })
+    store.record({
+      source: 'http',
+      route: 'POST /v1/events',
+      method: 'POST',
+      kind: 'DrizzleQueryError',
+      providerCode: '23514',
+      requestId: 'req-seeded',
+    })
+    assert.deepEqual(await store.flush(), { applied: 1, capped: 0, failed: 0 })
+
+    const caller = await callerFor('infrastructure')
+    const view = await caller.admin.operations.failures.store({ hours: 24 })
+
+    const group = view.failures.find((f) => f.route === 'POST /v1/events')
+    assert.ok(group, 'the group the store just wrote is not in the answer')
+    assert.equal(group.occurrences, 2, 'two occurrences are one group of two')
+    assert.equal(group.kind, 'DrizzleQueryError')
+    assert.equal(group.providerCode, '23514')
+    assert.equal(group.firstSeenVersion, 'v-test')
+    assert.equal(group.lastRequestId, 'req-seeded')
+
+    // The status half. Without it a short list looks the same whether nothing
+    // failed or nothing was recorded, and those are opposite facts.
+    assert.equal(view.status.recording, true)
+    assert.ok(view.status.groups >= 1)
+    assert.equal(view.status.atCap, false)
+    assert.ok(view.status.cap > view.status.groups)
+  })
+
+  test('the window is a filter here too, not decoration', async () => {
+    // The same defect the overview route had: a window that is read and not
+    // applied returns everything and looks entirely reasonable doing it.
+    const { createFailureStore } = await import('../src/failures.ts')
+    const { FakeClock } = await import('../src/clock.ts')
+    const old = createFailureStore({
+      pool: h.pool,
+      // A year before the harness clock, which is what the route's own window
+      // is computed from.
+      clock: new FakeClock(new Date(h.clock.now().getTime() - 365 * 24 * 3600 * 1000)),
+      version: 'v-old',
+    })
+    old.record({
+      source: 'trpc',
+      route: 'a.route.that.stopped.failing',
+      method: 'query',
+      kind: 'TypeError',
+      providerCode: null,
+      requestId: null,
+    })
+    await old.flush()
+
+    const caller = await callerFor('infrastructure')
+    const recent = await caller.admin.operations.failures.store({ hours: 24 })
+    assert.equal(
+      recent.failures.some((f) => f.route === 'a.route.that.stopped.failing'),
+      false,
+      'a group last seen a year ago is inside the last day',
+    )
+
+    // And it is still there, which is what makes the absence above a filter
+    // rather than a store that lost the row.
+    const wide = await caller.admin.operations.failures.store({ hours: 168 })
+    assert.ok(wide.status.groups >= 1)
+    const [kept] = await h.admin<{ n: string }[]>`
+      SELECT count(*) AS n FROM control_plane_failures
+      WHERE route = 'a.route.that.stopped.failing'`
+    assert.equal(Number(kept!.n), 1)
+  })
+
   test('a role without the permission is refused rather than answered', async () => {
     const caller = await callerFor('analytics')
     await assert.rejects(
@@ -501,6 +589,14 @@ describe('the operations routes', { skip: hasDb ? false : 'no database' }, () =>
     await assert.rejects(
       () => caller.admin.operations.email.status({ hours: 168 }),
       (err: { message?: string }) => /admin\.email\.read/.test(err.message ?? ''),
+    )
+    // The new route is on the same permission and is asserted separately
+    // rather than assumed: a route added without a guard is the way access
+    // control actually breaks here, and the two above passing says nothing
+    // about a third.
+    await assert.rejects(
+      () => caller.admin.operations.failures.store({ hours: 24 }),
+      (err: { message?: string }) => /admin\.logs\.read/.test(err.message ?? ''),
     )
   })
 
