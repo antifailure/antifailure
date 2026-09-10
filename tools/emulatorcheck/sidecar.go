@@ -154,6 +154,12 @@ func (s *Sidecar) ServeTLS(ln net.Listener) error {
 	return server.ServeTLS(ln, "", "")
 }
 
+// ServeHTTP carries returned HTTP queue URLs through the same routing policy.
+// The production sidecar listens on both ports; this fixture must do so too.
+func (s *Sidecar) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.forward(w, r, r.Host)
+}
+
 // NewSidecar builds the stand in and its certificate authority.
 func NewSidecar(emulatorAddress string) (*Sidecar, error) {
 	s := &Sidecar{Emulator: emulatorAddress, leaf: map[string]*tls.Certificate{}}

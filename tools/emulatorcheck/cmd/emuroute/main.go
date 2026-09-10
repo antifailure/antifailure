@@ -18,13 +18,16 @@ import (
 	"flag"
 	"log"
 	"net"
+	"net/http"
 	"os"
+	"time"
 
 	"github.com/antifailure/antifailure/tools/emulatorcheck"
 )
 
 func main() {
 	listen := flag.String("listen", ":443", "where to answer HTTPS")
+	plainListen := flag.String("http-listen", ":80", "where to answer HTTP")
 	target := flag.String("emulator", "", "the emulator, as host:port")
 	caCert := flag.String("ca-cert", "", "the environment's certificate authority, in PEM")
 	caKey := flag.String("ca-key", "", "its private key, in PEM")
@@ -47,6 +50,16 @@ func main() {
 		log.Fatalf("emuroute: %v", err)
 	}
 	sidecar.Log = os.Stdout
+	plain, err := net.Listen("tcp", *plainListen)
+	if err != nil {
+		log.Fatalf("emuroute: %v", err)
+	}
+	go func() {
+		server := &http.Server{Handler: sidecar, ReadHeaderTimeout: 30 * time.Second}
+		if err := server.Serve(plain); err != nil {
+			log.Fatalf("emuroute HTTP: %v", err)
+		}
+	}()
 
 	ln, err := net.Listen("tcp", *listen)
 	if err != nil {
