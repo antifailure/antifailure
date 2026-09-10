@@ -254,7 +254,7 @@ nowhere.
 
 Transient failures are retried with at least once delivery. Each organization's
 position advances after delivery, so a collector outage causes forwarding lag.
-A crash after acceptance and before checkpointing can redeliver a batch; use
+A crash after acceptance and before saving the position can redeliver a batch; use
 `orgId` and `seq` to deduplicate. Positions are separate because transactions
 from different organizations can commit in a different order from their
 sequence numbers. The installation cursor is only an operational summary.
