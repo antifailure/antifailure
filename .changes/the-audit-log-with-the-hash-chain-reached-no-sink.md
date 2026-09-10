@@ -34,3 +34,7 @@ chain head against the signed entries. Remote destinations require HTTPS,
 redirects are refused, requests carry a deadline, and collector response bodies
 are cancelled rather than buffered or copied into logs. Polling stops through
 the control plane's shutdown hook.
+
+Event Hubs batches encode each message body as a JSON string and carry the
+signed manifest in event properties, so it survives delivery to a consumer.
+Splunk retains the manifest in an indexed field beside each audit event.

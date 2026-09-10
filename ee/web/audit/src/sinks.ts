@@ -103,6 +103,9 @@ export class SplunkSink implements Sink {
           source: 'antifailure-audit',
           sourcetype: this.opts.sourcetype ?? 'antifailure:audit',
           ...(this.opts.index ? { index: this.opts.index } : {}),
+          // HEC indexes custom fields from this flat object. A manifest only
+          // carried in an HTTP header never reaches the stored event.
+          fields: { antifailure_manifest: JSON.stringify(batch.manifest) },
           event: entry,
         }),
       )
@@ -116,8 +119,6 @@ export class SplunkSink implements Sink {
         headers: {
           authorization: `Splunk ${this.opts.token}`,
           'content-type': 'application/json',
-          // The manifest travels in a header so that the body stays exactly
-          // what Splunk expects and an operator can still check the batch.
           'x-antifailure-manifest': JSON.stringify(batch.manifest),
         },
         body,
@@ -162,7 +163,14 @@ export class EventHubsSink implements Sink {
           'content-type': 'application/vnd.microsoft.servicebus.json',
           'x-antifailure-manifest': JSON.stringify(batch.manifest),
         },
-        body: JSON.stringify(batch.entries.map((entry) => ({ Body: entry }))),
+        // The REST batch format requires a string Body. Batch properties in
+        // HTTP headers are ignored, so the signed manifest must travel with
+        // each event for a downstream consumer to retain and verify it.
+        // https://learn.microsoft.com/en-us/rest/api/eventhub/send-batch-events
+        body: JSON.stringify(batch.entries.map((entry) => ({
+          Body: JSON.stringify(entry),
+          UserProperties: { antifailure_manifest: JSON.stringify(batch.manifest) },
+        }))),
       },
       'event hubs',
     )

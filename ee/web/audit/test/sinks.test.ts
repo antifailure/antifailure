@@ -146,28 +146,38 @@ describe('splunk', () => {
     assert.equal(event.sourcetype, 'acme:audit')
   })
 
-  it('carries the manifest so a batch can still be checked', async () => {
+  it('carries the manifest in indexed fields so stored events can still be checked', async () => {
     const { fetch, calls } = capturing()
     const b = batch(2)
     await new SplunkSink({ url: 'https://splunk.test/x', token: 't', fetch }).deliver(b)
 
     const headers = calls[0]!.init.headers as Record<string, string>
     assert.deepEqual(JSON.parse(headers['x-antifailure-manifest']!), b.manifest)
+    const records = String(calls[0]!.init.body).split('\n').map(line => JSON.parse(line))
+    for (let i = 0; i < records.length; i += 1) {
+      assert.deepEqual(records[i].event, b.entries[i])
+      assert.deepEqual(JSON.parse(records[i].fields.antifailure_manifest), b.manifest)
+    }
   })
 })
 
 describe('event hubs', () => {
-  it('sends a JSON array of records', async () => {
+  it('sends string event bodies and persistent manifest properties in the documented REST format', async () => {
     const { fetch, calls } = capturing(201)
+    const expected = batch(2)
     await new EventHubsSink({
       url: 'https://ns.servicebus.windows.net/hub/messages',
       authorization: 'SharedAccessSignature sr=...',
       fetch,
-    }).deliver(batch(2))
+    }).deliver(expected)
 
     const records = JSON.parse(String(calls[0]!.init.body))
     assert.equal(records.length, 2)
-    assert.equal(records[0].Body.seq, 1)
+    for (let i = 0; i < records.length; i += 1) {
+      assert.equal(typeof records[i].Body, 'string')
+      assert.deepEqual(JSON.parse(records[i].Body), expected.entries[i])
+      assert.deepEqual(JSON.parse(records[i].UserProperties.antifailure_manifest), expected.manifest)
+    }
     const headers = calls[0]!.init.headers as Record<string, string>
     assert.match(headers['content-type']!, /servicebus/)
   })

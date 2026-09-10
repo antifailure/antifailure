@@ -188,9 +188,10 @@ of the one before it, so altering an old entry breaks every entry after it.
 
 ### What one batch looks like
 
-Batched rather than one entry per request, because the batch is what carries the
-proof. This is the JSON body's field schema; organization identifiers are UUID
-strings and `occurredAt` is an ISO timestamp:
+Batched rather than one entry per request, because the batch carries the proof.
+The webhook posts this JSON field schema directly. Splunk and Event Hubs wrap
+entries in their collector formats, described below. Organization identifiers
+are UUID strings and `occurredAt` is an ISO timestamp:
 
 ```typescript
 interface AuditBatch {
@@ -249,6 +250,12 @@ Event Hubs reads `AF_AUDIT_STREAM_EVENT_HUBS_URL` and
 `AF_AUDIT_STREAM_EVENT_HUBS_AUTHORIZATION`, the second being a shared access
 signature you generate, so no key reaches this process and managed identity
 stays possible.
+
+Event Hubs receives each entry as a JSON string in the event body and retains
+the signed batch manifest in the `antifailure_manifest` application property.
+Its batch API ignores properties supplied only through HTTP headers.
+Splunk stores the same manifest in the indexed `antifailure_manifest` field,
+alongside the audit entry's event data.
 
 `AF_AUDIT_STREAM_KEY` is required whenever a sink is named. A manifest signed
 under a key nobody chose is decoration rather than evidence.

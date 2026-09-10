@@ -69,3 +69,20 @@ multiple destinations. Object storage still requires an injected writer and
 cannot be selected through environment configuration. No live Splunk or Event
 Hubs service was used for this verification. Webhook receivers must deduplicate
 by organization and sequence, and signatures alone do not reject replay.
+
+## Collector wire formats
+
+The Event Hubs adapter follows Microsoft's
+[REST batch format](https://learn.microsoft.com/en-us/rest/api/eventhub/send-batch-events):
+each `Body` is a JSON string, and the manifest is retained in the event's
+`UserProperties`. Batch properties carried only in HTTP headers are ignored.
+The regression decodes both entries and manifests; mutations to the body type,
+body content and manifest property each fail before passing after restoration.
+
+Splunk's [HEC event format](https://help.splunk.com/en/splunk-enterprise/get-data-in/get-started-with-getting-data-in/9.4/get-data-with-http-event-collector/format-events-for-http-event-collector)
+places custom indexed metadata in a flat `fields` object. The serialized
+manifest is in `fields.antifailure_manifest`, so a stored event retains it.
+Removing that field fails the regression. The previous HTTP manifest header
+remains available for gateways, but downstream verification relies on the
+event metadata. These are protocol checks against documented formats, not
+measurements against live vendor accounts.
