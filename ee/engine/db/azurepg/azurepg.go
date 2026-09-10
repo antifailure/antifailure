@@ -95,12 +95,16 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"net/url"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the pgx driver
@@ -163,6 +167,9 @@ const envTagKey = "antifailure-env"
 const goldenTagKey = "antifailure-golden"
 
 const createdTagKey = "antifailure-created-at"
+
+const sourceTagKey = "antifailure-source"
+const preparedTagKey = "antifailure-prepared"
 
 // fromTagKey carries the golden a branch was restored from, so DestroyGolden
 // can refuse to remove one that is still referenced.
@@ -276,10 +283,13 @@ type Options struct {
 
 // Provider is the Azure Database for PostgreSQL provider.
 type Provider struct {
-	api    *armAPI
-	opts   Options
-	now    func() time.Time
-	closed bool
+	api          *armAPI
+	opts         Options
+	now          func() time.Time
+	closed       atomic.Bool
+	loginCatalog func(context.Context, *sql.DB) ([]string, error)
+	trustDir     string
+	trustFile    string
 }
 
 // New builds a provider from already resolved options.
@@ -308,7 +318,11 @@ func New(opts Options) (*Provider, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Provider{api: api, opts: opts, now: opts.Now}, nil
+	p := &Provider{api: api, opts: opts, now: opts.Now, loginCatalog: customerLogins}
+	if err := p.initializeTrust(); err != nil {
+		return nil, err
+	}
+	return p, nil
 }
 
 // Name identifies the provider, and is what appears in a manifest.
@@ -344,7 +358,10 @@ func (p *Provider) Capabilities() provider.Caps {
 
 // Close releases the provider's own resources.
 func (p *Provider) Close() error {
-	p.closed = true
+	p.closed.Store(true)
+	if p.trustDir != "" {
+		return os.RemoveAll(p.trustDir)
+	}
 	return nil
 }
 
@@ -370,8 +387,34 @@ func (p *Provider) branchPassword(server string) string {
 // identifier is hashed rather than used directly: two customers with an
 // environment called "staging" must not collide.
 func (p *Provider) serverName(prefix, envID string) string {
-	sum := sha256.Sum256([]byte(envID))
+	scope := strings.ToLower(p.opts.Subscription) + "\x00" + strings.ToLower(p.opts.ResourceGroup) + "\x00" + normaliseServerName(p.opts.SourceServer)
+	sum := sha256.Sum256([]byte(scope + "\x00" + envID))
 	return fmt.Sprintf("af-%s-%s", prefix, hex.EncodeToString(sum[:])[:16])
+}
+
+func (p *Provider) preparationReceipt(s *server) string {
+	mac := hmac.New(sha256.New, []byte(p.opts.BranchKey.Reveal()))
+	_, _ = fmt.Fprintf(mac, "prepared:%q:%q:%q:%q", normaliseServerName(p.opts.SourceServer), s.Name, s.Tags[envTagKey], s.Tags[fromTagKey])
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// Shared across provider objects in this process. This is not a distributed
+// quota reservation across independent engine processes.
+var branchAdmissions sync.Map
+
+func (p *Provider) admit(ctx context.Context) (func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	key := p.api.endpoint + "\x00" + p.serverName("admission", "")
+	stored, _ := branchAdmissions.LoadOrStore(key, make(chan struct{}, 1))
+	slot := stored.(chan struct{})
+	select {
+	case slot <- struct{}{}:
+		return func() { <-slot }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // port is the port a branch is reached on.
@@ -386,10 +429,9 @@ func (p *Provider) tlsMode() string {
 	if p.opts.TLSMode != "" {
 		return p.opts.TLSMode
 	}
-	// require rather than verify-full: Azure presents a public CA certificate
-	// that a client has to trust out of band, and verify-full without the root
-	// installed fails to connect rather than connecting less safely.
-	return "require"
+	// Azure's hostname presents a publicly trusted certificate. Encryption
+	// alone would still send a credential to an impersonating server.
+	return "verify-full"
 }
 
 func (p *Provider) connString(host string, port int, user, password, database string) secret.Value {
@@ -401,6 +443,9 @@ func (p *Provider) connString(host string, port int, user, password, database st
 	}
 	q := u.Query()
 	q.Set("sslmode", p.tlsMode())
+	if p.trustFile != "" {
+		q.Set("sslrootcert", p.trustFile)
+	}
 	u.RawQuery = q.Encode()
 	return secret.New(u.String())
 }
@@ -412,11 +457,11 @@ func sortVersionsNewestFirst(in []provider.GoldenVersion) {
 }
 
 // isOurs reports whether a server carries this provider's ownership tag.
-func isOurs(s *server) bool {
+func (p *Provider) isOurs(s *server) bool {
 	if s == nil {
 		return false
 	}
-	return s.Tags[tagKey] == tagValue
+	return s.Tags[tagKey] == tagValue && s.Tags[sourceTagKey] == normaliseServerName(p.opts.SourceServer)
 }
 
 // normaliseServerName trims what a person is likely to paste.
@@ -426,6 +471,7 @@ func isOurs(s *server) bool {
 // first label is tolerance on the read boundary; the write boundary stays
 // strict.
 func normaliseServerName(raw string) string {
+	raw = strings.ToLower(strings.TrimSpace(raw))
 	if i := strings.Index(raw, "."); i > 0 {
 		return raw[:i]
 	}

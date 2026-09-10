@@ -19,7 +19,7 @@ func TestCancellationAfterAcceptanceRemovesTheUnfinishedResource(t *testing.T) {
 		t.Run(map[bool]string{false: "golden", true: "branch"}[branching], func(t *testing.T) {
 			server := newFake(t, seedSQL)
 			opts := options(t, server)
-			original, err := azurepg.New(opts)
+			original, err := azurepg.NewWithFixtureRoles(opts)
 			require.NoError(t, err)
 			defer func() { _ = original.Close() }()
 			version := ""
@@ -38,7 +38,7 @@ func TestCancellationAfterAcceptanceRemovesTheUnfinishedResource(t *testing.T) {
 				}
 				return http.DefaultClient.Do(req)
 			})
-			p, err := azurepg.New(opts)
+			p, err := azurepg.NewWithFixtureRoles(opts)
 			require.NoError(t, err)
 			defer func() { _ = p.Close() }()
 			if branching {

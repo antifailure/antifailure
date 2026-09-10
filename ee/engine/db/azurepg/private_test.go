@@ -17,7 +17,7 @@ func TestPrivateRestoresRetainTheSubnetAndDNSWithoutPublicFirewallRules(t *testi
 	require.True(t, server.MakePrivate(sourceServer, subnet, zone))
 	opts := options(t, server)
 	opts.AllowCIDR = ""
-	p, err := azurepg.New(opts)
+	p, err := azurepg.NewWithFixtureRoles(opts)
 	require.NoError(t, err)
 	defer func() { _ = p.Close() }()
 	golden, err := p.RefreshGolden(context.Background(), goldenSpec())
@@ -37,7 +37,7 @@ func TestListedGoldensKeepTheirCreationTimeAndNewestFirstOrder(t *testing.T) {
 	now := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
 	opts := options(t, server)
 	opts.Now = func() time.Time { return now }
-	p, err := azurepg.New(opts)
+	p, err := azurepg.NewWithFixtureRoles(opts)
 	require.NoError(t, err)
 	defer func() { _ = p.Close() }()
 	_, err = p.RefreshGolden(context.Background(), goldenSpec())

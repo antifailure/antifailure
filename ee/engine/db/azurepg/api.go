@@ -254,21 +254,24 @@ func (a *armAPI) do(ctx context.Context, method, path string, body any, out any)
 		return nil, fmt.Errorf("azurepg: %s %s: %w", method, path, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	var result *asyncResult
+	if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
+		result = &asyncResult{Poll: resp.Header.Get("Azure-AsyncOperation")}
+		if result.Poll == "" {
+			result.Poll = resp.Header.Get("Location")
+		}
+	}
 
 	payload, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("azurepg: reading %s %s: %w", method, path, err)
+		return result, fmt.Errorf("azurepg: reading %s %s: %w", method, path, err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return nil, decodeAPIError(resp.StatusCode, payload)
 	}
-	result := &asyncResult{Poll: resp.Header.Get("Azure-AsyncOperation")}
-	if result.Poll == "" {
-		result.Poll = resp.Header.Get("Location")
-	}
 	if out != nil && len(bytes.TrimSpace(payload)) > 0 {
 		if err := json.Unmarshal(payload, out); err != nil {
-			return nil, fmt.Errorf("azurepg: decoding %s %s: %w", method, path, err)
+			return result, fmt.Errorf("azurepg: decoding %s %s: %w", method, path, err)
 		}
 	}
 	return result, nil
@@ -309,6 +312,9 @@ type database struct {
 	Name string `json:"name"`
 }
 
+func (d database) resourceName() string { return d.Name }
+func (s server) resourceName() string   { return s.Name }
+
 // listDatabases reads the databases on a server.
 //
 // A real Resource Manager call rather than an assumption that the application
@@ -334,7 +340,7 @@ func (a *armAPI) listServers(ctx context.Context) ([]server, error) {
 	return readPages[server](ctx, a, a.serversPath())
 }
 
-func readPages[T any](ctx context.Context, a *armAPI, path string) ([]T, error) {
+func readPages[T interface{ resourceName() string }](ctx context.Context, a *armAPI, path string) ([]T, error) {
 	var items []T
 	seen := map[string]bool{}
 	for path != "" {
@@ -351,7 +357,7 @@ func readPages[T any](ctx context.Context, a *armAPI, path string) ([]T, error) 
 		}
 		for i, raw := range page.Value {
 			var item T
-			if err := json.Unmarshal(raw, &item); err != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			if err := json.Unmarshal(raw, &item); err != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) || item.resourceName() == "" {
 				slog.Warn("azurepg: skipping malformed collection element", "index", i)
 				continue
 			}
@@ -369,12 +375,12 @@ func (a *armAPI) restore(ctx context.Context, source, destination, location stri
 		access.PublicNetworkAccess = "Disabled"
 	}
 	body := restoreRequest{
-		Location: location,
+		Location: canonicalLocation(location),
 		Tags:     tags,
 		Properties: restoreProps{
 			CreateMode:             "PointInTimeRestore",
 			SourceServerResourceID: a.serverResourceID(source),
-			PointInTimeUTC:         at.UTC().Format(time.RFC3339),
+			PointInTimeUTC:         at.UTC().Format(time.RFC3339Nano),
 			Network:                access,
 		},
 	}

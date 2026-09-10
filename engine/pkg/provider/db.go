@@ -71,6 +71,14 @@ type Branch struct {
 // ConnMode selects which connection string to hand out.
 type ConnMode string
 
+// DatabaseTrust optionally supplies the public CA certificates an application's
+// runtime needs to verify this branch. ConnString remains usable by the engine
+// itself; the orchestrator installs this bundle and rewrites its certificate
+// file reference for service containers. No private key belongs in this bundle.
+type DatabaseTrust interface {
+	TrustBundle(context.Context, Branch) (string, error)
+}
+
 const (
 	// ConnDirect is a direct connection, which is what migrations and
 	// pg_restore need because they use session level features a pooler in
