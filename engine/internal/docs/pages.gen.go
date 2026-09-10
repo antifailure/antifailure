@@ -4877,13 +4877,14 @@ these deliberately declined entries are not reconsidered on every pass.
 
 ## The licence is asked per action, not at startup
 
-Every sink checks ` + "`" + `audit_stream` + "`" + ` on every entry rather than once when it is
-registered, and the control plane's forwarder asks it once per organization on
-every pass. A licence that lapses while a long lived process is running stops
-forwarding immediately, without a restart, and one that renews starts again the
-same way. A configured sink on an installation without the feature accepts every
-entry and writes none, which is correct and is also silence, so the engine says
-so once at startup:
+The engine checks ` + "`" + `audit_stream` + "`" + ` on every entry. The control plane checks its
+process licence status and organization entitlement on each pass, so expiry or
+an entitlement withdrawal takes effect on the next pass without a restart.
+Organization entitlement grants also take effect on the next pass. Replacing
+the control plane's ` + "`" + `AF_LICENSE_KEY` + "`" + ` requires restarting the process, because
+the key is parsed at startup. A configured sink on an installation without the
+feature accepts every entry and writes none, so the engine says so once at
+startup:
 
 ` + "`" + "`" + "`" + `
 af: audit sink: configured, and audit_stream is not licensed on this

@@ -42,9 +42,9 @@
 // naming one of them and covering both, and a receiver checking the manifest
 // against the batch would be checking the wrong claim.
 //
-// FOUR: the entitlement is asked per pass, per organization, never cached. A
-// licence that lapses while the process runs stops forwarding on the next pass
-// without a restart, and one that renews starts again the same way. That is the
+// FOUR: the entitlement is asked per pass, per organization, never cached. An
+// organization entitlement that is withdrawn stops forwarding on the next pass
+// without a restart, and one that is granted starts it the same way. That is the
 // rule `ee/engine/auditsink` already follows per action, and the reason both
 // follow it is that a gate evaluated once at startup is a gate that cannot
 // expire.
