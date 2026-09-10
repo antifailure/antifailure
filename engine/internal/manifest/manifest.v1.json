@@ -316,10 +316,12 @@
             "supabase",
             "dblab",
             "pgurl",
-            "aurora"
+            "aurora",
+            "cloudsql",
+            "azurepg"
           ],
           "default": "docker",
-          "description": "Which provider creates branches. docker is local and needs nothing; neon, supabase, and dblab talk to a service; pgurl is any reachable Postgres, which is where the goldens and the branches are kept as databases on a server you name. aurora clones an Amazon Aurora PostgreSQL cluster and is in the enterprise edition, so a community build names it here and refuses it when a manifest selects it."
+          "description": "Which provider creates branches. docker is local and needs nothing; neon, supabase, and dblab talk to a service; pgurl is any reachable Postgres, which is where the goldens and the branches are kept as databases on a server you name. aurora clones an Amazon Aurora PostgreSQL cluster and is in the enterprise edition, so a community build names it here and refuses it when a manifest selects it. cloudsql fast clones a Google Cloud SQL for PostgreSQL instance and azurepg restores an Azure Database for PostgreSQL Flexible Server to a point in time; both are enterprise for the same reason. azurepg is the one provider here that does not branch in time flat in the size of the database, because a restore replays write ahead logs after the snapshot and that half is not flat."
         },
         "version": {
           "type": "integer",
