@@ -17,6 +17,10 @@ import (
 )
 
 func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Authorization") != "Bearer AF_FAKE_CLOUDSQL_TOKEN" {
+		writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "a Google identity is required")
+		return
+	}
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	// /v1/projects/{project}/instances[/{instance}[/{verb}]]
 	// /v1/projects/{project}/operations/{operation}

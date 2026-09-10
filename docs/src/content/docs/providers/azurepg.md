@@ -47,8 +47,9 @@ each is handled here.
 **Firewall rules are not copied.** Microsoft lists applying them as a post
 restore task. A branch created and left alone is a server nobody can connect to,
 and the failure arrives as a connection timeout that mentions no firewall at all.
-This provider creates the rule, and it refuses to start without a range to put
-in it rather than defaulting to the whole internet.
+For a public source, this provider requires an explicit range and creates the
+rule. A private source retains its delegated subnet and private DNS zone, with
+public network access disabled and no public firewall rule.
 
 **The administrator credential is copied.** A restored server keeps the source's
 administrator login, so without an explicit reset every preview environment
@@ -57,9 +58,9 @@ derived for every restore.
 
 **Public and private access cannot be crossed.** A server on a virtual network
 restores only to a virtual network, and one on public access only to public
-access. This provider opens a branch with a firewall rule, which exists only on
-the public side, so it refuses a private source **before** provisioning rather
-than after.
+access. Restores preserve the source's access model. A private source without
+its DNS zone is refused before provisioning. The engine must be able to reach
+that private network to mask, verify and use the restored database.
 
 Server parameters are not copied either. A source tuned for production comes
 back at the defaults, which is worth knowing and is not something this provider
@@ -82,13 +83,26 @@ qualified domain name is accepted too and the server name is taken from it.
 | `AF_AZUREPG_SUBSCRIPTION` | The subscription holding the servers |
 | `AF_AZUREPG_RESOURCE_GROUP` | The resource group the servers live in |
 | `AF_AZUREPG_BRANCH_KEY` | The key every restore's administrator password is derived from |
-| `AF_AZUREPG_ALLOW_CIDR` | The range the created firewall rule admits. Required |
+| `AF_AZUREPG_ALLOW_CIDR` | The range the created firewall rule admits. Required for public sources |
+| `AF_AZUREPG_DATABASE` | The application database. Required when several application databases exist |
 | `AF_AZUREPG_LOCATION` | The region. A restore lands in its source's region |
 | `AF_AZUREPG_TLS_MODE` | The `sslmode` of the connection strings. Defaults to `require` |
 
 `AF_AZUREPG_ALLOW_CIDR` has no default on purpose. A default of `0.0.0.0/0`
 would make every branch work immediately and would open a copy of production to
 the whole internet.
+
+Resource Manager calls authenticate with the engine's Azure credential chain:
+`AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and `AZURE_CLIENT_SECRET`. The identity needs
+permission to read and restore servers, update their credentials and metadata,
+and delete the resources this provider owns. Scope that permission to the
+dedicated resource group. These are control plane credentials, separate from
+the database administrator password derived from the branch key.
+
+Collection reads follow Azure pagination. An invalid row is logged and skipped
+without discarding valid rows, and continuation URLs cannot send the identity
+to another origin. Accepted restores that are cancelled are cleaned up with a
+fresh context.
 
 ## Deleting a server deletes its backups
 
@@ -115,6 +129,8 @@ behind it, and the fake models all three of the things Azure does not carry
 across a restore, so a provider that forgot one fails there rather than in your
 subscription.
 
-**No part of this has been run against Azure.** There is no subscription behind
-the test suite and there is not meant to be. The suite does not assert a real
-service, so the service owned conformance verdicts report as unproven.
+The default suite does not assert a real service, so service owned conformance
+verdicts report as unproven. The separate opt-in private Azure test restores a
+synthetic source, masks and verifies its row, branches it, checks that the
+source stayed unchanged, and deletes the branch and golden. A successful live
+run is required before claiming that path has been proved on Azure.

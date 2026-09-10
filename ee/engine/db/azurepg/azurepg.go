@@ -92,6 +92,7 @@
 package azurepg
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -134,6 +135,8 @@ const (
 	FirewallVariable = "AF_AZUREPG_ALLOW_CIDR"
 	// TLSModeVariable overrides the sslmode of the connection strings.
 	TLSModeVariable = "AF_AZUREPG_TLS_MODE"
+	// DatabaseVariable selects the application database on a multi database server.
+	DatabaseVariable = "AF_AZUREPG_DATABASE"
 )
 
 // apiVersion is the Resource Manager API version every request names.
@@ -158,6 +161,8 @@ const envTagKey = "antifailure-env"
 // goldenTagKey marks a server as a published golden rather than a branch. Its
 // value is the version, and versionTagKey carries the authoritative copy.
 const goldenTagKey = "antifailure-golden"
+
+const createdTagKey = "antifailure-created-at"
 
 // fromTagKey carries the golden a branch was restored from, so DestroyGolden
 // can refuse to remove one that is still referenced.
@@ -195,12 +200,11 @@ var systemDatabases = map[string]bool{
 //
 // The configured name wins. Otherwise the single non system database wins,
 // which is the ordinary shape of an application's server. With none, or with
-// more than one and no configuration, it falls back to postgres, which always
-// exists and connects: an ambiguous guess between two application databases
-// would be wrong silently rather than empty obviously.
-func pickDatabase(configured string, found []database) string {
+// more than one and no configuration, an explicit selection is required.
+// Connecting to an empty maintenance database would hide the ambiguity.
+func pickDatabase(configured string, found []database) (string, error) {
 	if configured != "" {
-		return configured
+		return configured, nil
 	}
 	var candidates []string
 	for _, d := range found {
@@ -209,9 +213,12 @@ func pickDatabase(configured string, found []database) string {
 		}
 	}
 	if len(candidates) == 1 {
-		return candidates[0]
+		return candidates[0], nil
 	}
-	return "postgres"
+	if len(candidates) > 1 {
+		return "", fmt.Errorf("azurepg: multiple application databases exist; set %s to select one", DatabaseVariable)
+	}
+	return "postgres", nil
 }
 
 // adminLoginOf is the administrator a connection string authenticates as.
@@ -251,12 +258,20 @@ type Options struct {
 	Variable      string
 	Endpoint      string
 	AllowCIDR     string
-	TLSMode       string
-	MaxBranches   int
-	PollInterval  time.Duration
-	Getenv        func(string) string
-	Now           func() time.Time
-	HTTPClient    httpDoer
+	// Database selects the application database when a server holds several.
+	Database string
+	// AdminUser overrides the administrator returned by Resource Manager.
+	AdminUser string
+	// Port allows a local tunnel; zero uses PostgreSQL's standard port.
+	Port         int
+	TLSMode      string
+	MaxBranches  int
+	PollInterval time.Duration
+	Getenv       func(string) string
+	// Token supplies an externally managed identity; nil uses the Azure credential chain.
+	Token      func(context.Context) (string, error)
+	Now        func() time.Time
+	HTTPClient httpDoer
 }
 
 // Provider is the Azure Database for PostgreSQL provider.

@@ -61,6 +61,7 @@ func postSlowClone(ctx context.Context, endpoint, project, source, destination s
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer AF_FAKE_CLOUDSQL_TOKEN")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err

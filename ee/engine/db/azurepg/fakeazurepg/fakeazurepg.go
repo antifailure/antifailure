@@ -16,8 +16,9 @@
 // THE THREE AZURE BEHAVIOURS THIS FAKE MODELS ON PURPOSE, because each is a
 // place a provider is wrong quietly and a permissive fake would hide it:
 //
-//   - A RESTORED SERVER INHERITS THE SOURCE'S ADMINISTRATOR LOGIN AND PASSWORD.
-//     Modelled so that the provider's password reset can be seen happening. A
+//   - A RESTORED SERVER INHERITS THE SOURCE'S PASSWORD. Administrator names
+//     are mapped to distinct real roles because the fixture shares one local
+//     Postgres across servers. The provider reads each returned login. A
 //     fake that started every restore with a blank password would let that
 //     reset be deleted with every test still green, and the defect it prevents
 //     is a preview environment reachable with production's credential.
@@ -88,6 +89,7 @@ type fakeServer struct {
 	StorageGB     int64
 	FirewallRules map[string][2]string
 	Subnet        string
+	PrivateDNS    string
 }
 
 // New starts the fake.
@@ -130,7 +132,7 @@ func New(opts Options) (*Server, error) {
 		Name:          opts.SourceServer,
 		Database:      s.databaseFor(opts.SourceServer),
 		Tags:          map[string]string{},
-		AdminLogin:    "afadmin",
+		AdminLogin:    s.roleFor(opts.SourceServer),
 		AdminPassword: "production-password",
 		StorageGB:     32,
 		// The source is reachable: a customer's production server has rules.
@@ -145,6 +147,9 @@ func New(opts Options) (*Server, error) {
 		}
 	}
 	s.servers[source.Name] = source
+	if err := s.ensureRole(source.AdminLogin, source.AdminPassword); err != nil {
+		return nil, err
+	}
 
 	s.http = httptest.NewServer(http.HandlerFunc(s.serve))
 	return s, nil
@@ -153,14 +158,22 @@ func New(opts Options) (*Server, error) {
 // URL is the endpoint a provider points at.
 func (s *Server) URL() string { return s.http.URL }
 
+func (s *Server) ResourceCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.servers)
+}
+
 // Close stops the fake and drops every database it made, REPORTING what it
 // could not clean up rather than swallowing it.
 func (s *Server) Close() []error {
 	s.http.Close()
 	s.mu.Lock()
 	names := make([]string, 0, len(s.servers))
+	roles := make([]string, 0, len(s.servers))
 	for _, srv := range s.servers {
 		names = append(names, srv.Database)
+		roles = append(roles, srv.AdminLogin)
 	}
 	s.servers = map[string]*fakeServer{}
 	s.mu.Unlock()
@@ -169,6 +182,11 @@ func (s *Server) Close() []error {
 		if _, err := s.admin.Exec(
 			`DROP DATABASE IF EXISTS ` + quoteIdent(database) + ` WITH (FORCE)`); err != nil {
 			problems = append(problems, fmt.Errorf("dropping %s: %w", database, err))
+		}
+	}
+	for _, role := range roles {
+		if _, err := s.admin.Exec(`DROP ROLE IF EXISTS ` + quoteIdent(role)); err != nil {
+			problems = append(problems, fmt.Errorf("dropping test role: %w", err))
 		}
 	}
 	if err := s.admin.Close(); err != nil {
@@ -233,7 +251,7 @@ func (s *Server) Exists(name string) bool {
 
 // MakePrivate delegates a server to a subnet, for the test that checks the
 // provider refuses to cross Azure's public and private access boundary.
-func (s *Server) MakePrivate(name, subnet string) bool {
+func (s *Server) MakePrivate(name, subnet string, zone ...string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	srv, ok := s.servers[name]
@@ -241,7 +259,19 @@ func (s *Server) MakePrivate(name, subnet string) bool {
 		return false
 	}
 	srv.Subnet = subnet
+	if len(zone) > 0 {
+		srv.PrivateDNS = zone[0]
+	}
 	return true
+}
+
+func (s *Server) NetworkOf(name string) (string, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if server := s.servers[name]; server != nil {
+		return server.Subnet, server.PrivateDNS
+	}
+	return "", ""
 }
 
 func (s *Server) databaseFor(name string) string {
@@ -253,6 +283,38 @@ func (s *Server) databaseFor(name string) string {
 		sum = -sum
 	}
 	return fmt.Sprintf("%s%s_%d", s.opts.Prefix, sanitise(name), sum%100000)
+}
+
+// A separate real role models each server's independent credential store.
+// This maps the administrator name at the fixture boundary: a shared local
+// Postgres cannot hold different passwords for one role in different databases.
+// The provider must use the administrator returned by the API, not a literal.
+func (s *Server) roleFor(name string) string {
+	role := s.opts.Prefix + "r_" + sanitise(name)
+	if len(role) > 60 {
+		role = role[:60]
+	}
+	return role
+}
+
+func (s *Server) ensureRole(role, password string) error {
+	var owner string
+	if err := s.admin.QueryRow(`SELECT current_user`).Scan(&owner); err != nil {
+		return err
+	}
+	var exists bool
+	if err := s.admin.QueryRow(`SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)`, role).Scan(&exists); err != nil {
+		return err
+	}
+	literal := `'` + strings.ReplaceAll(password, `'`, `''`) + `'`
+	statement := `ALTER ROLE ` + quoteIdent(role) + ` PASSWORD ` + literal
+	if !exists {
+		statement = `CREATE ROLE ` + quoteIdent(role) + ` LOGIN INHERIT PASSWORD ` + literal + ` IN ROLE ` + quoteIdent(owner)
+	}
+	if _, err := s.admin.Exec(statement); err != nil {
+		return fmt.Errorf("updating the fixture database credential: %w", err)
+	}
+	return nil
 }
 
 func (s *Server) execOn(database, statements string) error {

@@ -28,6 +28,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // The tag names carrying a golden's metadata.
@@ -51,7 +52,19 @@ func chunkTag(prefix, raw string) (map[string]string, error) {
 	if raw == "" {
 		return map[string]string{}, nil
 	}
-	needed := (len(raw) + tagValueMax - 1) / tagValueMax
+	if !utf8.ValidString(raw) {
+		return nil, fmt.Errorf("azurepg: tag metadata is not valid UTF-8")
+	}
+	var chunks []string
+	for rest := raw; rest != ""; {
+		end := min(len(rest), tagValueMax)
+		for end < len(rest) && !utf8.RuneStart(rest[end]) {
+			end--
+		}
+		chunks = append(chunks, rest[:end])
+		rest = rest[end:]
+	}
+	needed := len(chunks)
 	if needed > maxTagChunks {
 		return nil, fmt.Errorf(
 			"azurepg: a golden's %s is %d bytes, which needs %d Azure tags and this "+
@@ -61,13 +74,8 @@ func chunkTag(prefix, raw string) (map[string]string, error) {
 				"digest that verifies nothing", prefix, len(raw), needed, maxTagChunks, tagValueMax)
 	}
 	out := make(map[string]string, needed)
-	for i := 0; i < needed; i++ {
-		start := i * tagValueMax
-		end := start + tagValueMax
-		if end > len(raw) {
-			end = len(raw)
-		}
-		out[prefix+"-"+strconv.Itoa(i)] = raw[start:end]
+	for i, chunk := range chunks {
+		out[prefix+"-"+strconv.Itoa(i)] = chunk
 	}
 	return out, nil
 }

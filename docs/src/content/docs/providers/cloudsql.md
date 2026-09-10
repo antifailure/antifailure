@@ -76,6 +76,13 @@ production's database credential. That matters more here than it sounds: Google
 documents that a clone carries the source's users and passwords, so without the
 derived password every branch would be reachable with production's.
 
+Admin API calls use a service account supplied through
+`GOOGLE_APPLICATION_CREDENTIALS`, or the attached Google identity through the
+metadata service when no file is configured. The identity must have the Cloud
+SQL permissions needed to clone, configure and delete instances. An empty or
+failed token is refused before the request reaches the API. These control
+plane credentials are separate from the branch key and database password.
+
 ## Goldens cost compute here, and Aurora's trick does not exist
 
 The Aurora provider publishes a golden by deleting its writer instance and
