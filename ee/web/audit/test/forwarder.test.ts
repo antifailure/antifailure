@@ -35,6 +35,7 @@ import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Forwarder, PermanentError, verify } from '../src/index.ts'
+import { appendAudit, sql } from '@antifailure/db'
 import {
   RecordingSink,
   TestClock,
@@ -202,6 +203,56 @@ describe(
         after,
         'the cursor stopped at the gap, so every entry after a rolled back write would be lost',
       )
+    })
+
+    it('concurrent: a lower sequence that commits after another organization remains deliverable', async () => {
+      const slow = await tenant()
+      const fast = await tenant()
+      let announce!: (seq: number) => void
+      const allocated = new Promise<number>((resolve) => { announce = resolve })
+      let release!: () => void
+      const allowedToCommit = new Promise<void>((resolve) => { release = resolve })
+      const pending = h.pool.withTenant({ orgId: slow.orgId }, async (db) => {
+        const entry = await appendAudit(db, {
+          orgId: slow.orgId, actorLabel: 'harness', action: 'late.commit',
+          targetType: 'organization', origin: 'system',
+        })
+        announce(entry.seq)
+        await allowedToCommit
+      })
+      try {
+        const lower = await allocated
+        const higher = await h.write(fast.orgId, 'early.commit')
+        assert.ok(higher > lower)
+        const sink = new RecordingSink()
+        const f = forwarderFor(sink, new TestClock(), entitled)
+        await f.pass()
+        assert.deepEqual(sink.seqs(), [higher])
+        release()
+        await pending
+        await f.pass()
+        assert.deepEqual(sink.seqs(), [higher, lower], 'a committed audit entry was skipped forever')
+        await f.pass()
+        assert.deepEqual(sink.seqs(), [higher, lower], 'the late commit was replayed')
+      } finally {
+        release()
+        await pending
+      }
+    })
+
+    it('positions: a tenant cannot read or advance delivery state and the forwarder can', async () => {
+      const org = await tenant()
+      const seq = await h.write(org.orgId, 'position.boundary')
+      await forwarderFor(new RecordingSink(), new TestClock(), entitled).pass()
+      const hidden = await h.pool.withTenant({ orgId: org.orgId }, (db) =>
+        db.execute(sql`SELECT * FROM audit_stream_positions WHERE org_id = ${org.orgId}`))
+      assert.equal(hidden.length, 0)
+      await h.pool.withTenant({ orgId: org.orgId }, (db) =>
+        db.execute(sql`UPDATE audit_stream_positions SET delivered_seq = 0 WHERE org_id = ${org.orgId}`))
+      const visible = await h.pool.withAuditForwarder((db) =>
+        db.execute<{ delivered_seq: string }>(sql`
+          SELECT delivered_seq FROM audit_stream_positions WHERE org_id = ${org.orgId}`))
+      assert.equal(Number(visible[0]!.delivered_seq), seq)
     })
 
     it('empty: a forwarder over a log with nothing above the cursor moves nothing', async () => {

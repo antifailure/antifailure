@@ -151,6 +151,14 @@ describe('forwarding', () => {
 })
 
 describe('batch manifests', () => {
+  for (const field of ['org', 'count', 'firstSeq', 'lastSeq', 'headHash'] as const) {
+    it(`rejects altered ${field} metadata even when the digest and signature remain intact`, () => {
+      const entries = [entry(1), entry(2)]
+      const manifest = sign(entries, KEY)
+      const changed = { ...manifest, [field]: typeof manifest[field] === 'number' ? 99 : 'forged' }
+      assert.equal(verify({ entries, manifest: changed }, KEY).ok, false)
+    })
+  }
   it('verify under the right key', () => {
     const entries = [entry(1), entry(2)]
     const batch: Batch = { entries, manifest: sign(entries, KEY) }

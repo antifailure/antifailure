@@ -135,6 +135,10 @@ describe(
         SELECT coalesce(max(seq), 0) AS seq FROM audit_entries`
       const at = Number(rows[0]!.seq)
       await admin`UPDATE audit_stream_cursor SET delivered_seq = ${at} WHERE id`
+      await admin`
+        INSERT INTO audit_stream_positions (org_id, delivered_seq)
+        SELECT org_id, max(seq) FROM audit_entries GROUP BY org_id
+        ON CONFLICT (org_id) DO UPDATE SET delivered_seq = EXCLUDED.delivered_seq`
       return at
     }
 

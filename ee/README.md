@@ -34,8 +34,9 @@ delivery is tamper evident. Nothing in it chains entries to each other, because
 the engine runs on a machine with no database.
 
 **The control plane's half.** `audit_entries` carries `prev_hash` and
-`entry_hash`, is written by every sign on, every provisioning call, every
-operator impersonation and every admin action, and is MIT. `ee/web/audit`
+`entry_hash`, records organization actions including sign on, provisioning and
+administration, and is MIT. Global operator actions in `admin_audit_entries`
+are forwarded only when they also produce an organization entry. `ee/web/audit`
 carries it to a sink: a bounded queue, four destinations, and a batch manifest
 signed over the chain head so an archived batch can be checked without asking
 this control plane anything. `ee/web/server/src/register.ts` starts the poll
@@ -186,8 +187,9 @@ produced identical logs until that line existed.
   the second being a shared access signature the operator generates, so no key
   reaches this process and managed identity stays possible.
 - `AF_AUDIT_STREAM_WEBHOOK_URL` and `AF_AUDIT_STREAM_WEBHOOK_SECRET`, which
-  signs the body and a timestamp outside it so a delivery cannot be replayed
-  forever.
+  signs the body and its first entry's event timestamp. Receivers must
+  deduplicate by organization and sequence; signature verification alone does
+  not reject replay.
 - `AF_AUDIT_STREAM_INTERVAL_MS`, how often a pass runs, ten seconds by default.
 - `AF_AUDIT_STREAM_BATCH`, how many entries one pass reads, 500 by default, and
   `AF_AUDIT_STREAM_DELIVERY_BATCH`, how many one request carries, defaulting to

@@ -213,8 +213,8 @@ export function registerEnterprise(options: RegisterOptions): Registered {
  * `setSignInPolicy`, already was.
  *
  * WHAT THIS CLOSES. `audit_entries` carries a tamper evident hash chain and is
- * written by every sign on, every provisioning call, every impersonation and
- * every admin action. It reached no sink at all, while ee/README.md sold "SIEM
+ * records organization actions including sign on, provisioning and
+ * administration. It reached no sink at all, while ee/README.md sold "SIEM
  * streaming with a tamper evident hash chain" and could point at a real half
  * whenever it was questioned: the chain is real, the streaming is real, and
  * they were not joined to each other.

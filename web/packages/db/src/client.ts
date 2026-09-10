@@ -266,7 +266,7 @@ export interface Pool {
    * this is the only scope that sets `antifailure.audit_forwarder` and every
    * other scope in this file clears it by name.
    *
-   * SELECT only, on audit_entries and on the one row of audit_stream_cursor.
+   * SELECT only on audit_entries, with writes confined to delivery bookkeeping.
    * The forwarder copies: 0002 already withholds UPDATE, DELETE and TRUNCATE on
    * audit_entries from this role, so a forwarder cannot amend the log it is
    * reading even if a policy said it could.

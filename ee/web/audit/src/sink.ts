@@ -247,6 +247,11 @@ export function verify(batch: Batch, key: string): { ok: boolean; problem: strin
   if (expected.signature !== batch.manifest.signature) {
     return { ok: false, problem: 'the signature does not verify under this key' }
   }
+  for (const field of ['org', 'count', 'firstSeq', 'lastSeq', 'headHash'] as const) {
+    if (expected[field] !== batch.manifest[field]) {
+      return { ok: false, problem: `the manifest ${field} does not match the signed entries` }
+    }
+  }
   for (let i = 1; i < batch.entries.length; i += 1) {
     if (batch.entries[i]!.seq <= batch.entries[i - 1]!.seq) {
       return { ok: false, problem: `entries ${i - 1} and ${i} are out of order` }

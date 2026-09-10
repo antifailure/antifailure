@@ -1652,14 +1652,20 @@ export const controlPlaneFailures = pgTable(
 /* ---------------------------------------------------------------------------
  * Where the audit stream forwarder got to
  *
- * One row for the whole installation, because audit_entries.seq comes from one
- * sequence rather than one per tenant, so a single number says where the
- * forwarder is. See migration 0043 for why the read it guards is the widest
- * declaration keyed policy in this schema and what confines it.
+ * One summary row for operational diagnostics. Per organization positions
+ * determine delivery because sequence allocation and commit order differ.
+ * See migration 0043 for the policies confining these reads.
  * ------------------------------------------------------------------------ */
 
 export const auditStreamCursor = pgTable('audit_stream_cursor', {
   id: boolean('id').primaryKey().default(true),
+  deliveredSeq: bigint('delivered_seq', { mode: 'number' }).notNull().default(0),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+})
+
+/** Delivery positions follow the writer's per organization transaction lock. */
+export const auditStreamPositions = pgTable('audit_stream_positions', {
+  orgId: uuid('org_id').primaryKey().references(() => organizations.id, { onDelete: 'cascade' }),
   deliveredSeq: bigint('delivered_seq', { mode: 'number' }).notNull().default(0),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
 })

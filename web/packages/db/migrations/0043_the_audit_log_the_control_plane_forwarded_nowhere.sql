@@ -8,8 +8,8 @@
 -- `audit_entries.prev_hash` and `audit_entries.entry_hash`, written by the
 -- control plane in 0001. The streaming is `ee/engine/auditsink`, which forwards
 -- five ENGINE actions from a machine that has no database connection. So single
--- sign on logins, directory provisioning, operator impersonation and every
--- admin action were written into `audit_entries` and forwarded to nothing at
+-- organization sign on, directory provisioning and administrative actions
+-- were written into `audit_entries` and forwarded to nothing at
 -- all, and the sentence that said otherwise could point at a real half whenever
 -- it was questioned.
 --
@@ -21,7 +21,7 @@
 -- every pull request. Tested, green and unreachable is the most convincing
 -- disguise dead code can wear.
 --
--- What was missing from the database, and is here, is the two rows of state
+-- What was missing from the database, and is here, is the delivery state
 -- that let a poll loop say where it got to.
 --
 -- ---------------------------------------------------------------------------
@@ -58,27 +58,23 @@
 -- the thing that asked for it.
 --
 -- ---------------------------------------------------------------------------
--- The second decision: one cursor, not one per organization
+-- The second decision: delivery positions follow the writer's lock boundary
 -- ---------------------------------------------------------------------------
 --
--- `audit_entries.seq` comes from ONE sequence for the whole installation, not
--- one per tenant, so a single number is a complete description of where the
--- forwarder got to. A cursor per organization would need the list of
--- organizations before it could read anything, which is a second cross tenant
--- read to avoid a number.
+-- Sequence allocation does not imply commit order across organizations.
+-- appendAudit serializes only writers to the same organization's chain. The
+-- delivery query joins audit entries to per organization positions, requiring
+-- no organization inventory read. The singleton cursor is only a summary.
 --
 -- The cursor advances past an entry that was deliberately NOT forwarded, which
 -- is the unlicensed case, and that is a decision rather than an oversight. It
 -- is the behaviour `ee/engine/auditsink` already has, written down on
 -- docs/enterprise/audit-stream.md as "accepts every entry and writes none". It
--- is also forced by the cursor being global: one organization that never buys
--- audit streaming would otherwise stall the stream for every organization that
--- did, forever.
+-- avoids repeatedly reading entries deliberately declined by the licence.
 --
--- The cursor is advanced only past entries a sink ACCEPTED, so a sink that is
--- down costs forwarding lag and never an entry. Delivery is therefore at least
--- once and a duplicate is detectable by `seq`, which is the trade every audit
--- forwarder has to pick a side of, and losing an entry is the wrong side.
+-- Delivery positions advance after acceptance or an explicit permanent refusal.
+-- Transient failures stay pending; permanent refusals are logged and skipped.
+-- A crash after acceptance but before checkpointing can redeliver a batch.
 
 BEGIN;
 
@@ -106,9 +102,8 @@ CREATE OR REPLACE FUNCTION current_audit_forwarder() RETURNS boolean
 -- states, and a table with no row cannot tell them apart.
 CREATE TABLE audit_stream_cursor (
   id              boolean PRIMARY KEY DEFAULT true,
-  -- The highest audit_entries.seq a sink has accepted. Zero means nothing has
-  -- been forwarded yet, which is the state a fresh installation is in and is
-  -- not the same as "up to date".
+  -- A monotonic summary of processed sequence numbers, including deliberate
+  -- licence declines and permanent refusals. It never filters pending work.
   delivered_seq   bigint      NOT NULL DEFAULT 0,
   -- When the cursor last moved. Read by nothing today and written by the
   -- forwarder, so that an operator asking "is the stream stuck" has an answer
@@ -182,5 +177,24 @@ CREATE POLICY audit_stream_cursor_is_advanced_by_the_forwarder ON audit_stream_c
 CREATE POLICY audit_entries_are_forwarded ON audit_entries
   FOR SELECT TO antifailure_app
   USING (current_audit_forwarder());
+
+/* Sequence allocation is ordered only inside one organization's writer lock.
+   These positions, rather than the summary cursor, determine pending work. */
+CREATE TABLE audit_stream_positions (
+  org_id uuid PRIMARY KEY REFERENCES organizations(id) ON DELETE CASCADE,
+  delivered_seq bigint NOT NULL DEFAULT 0 CHECK (delivered_seq >= 0),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+GRANT SELECT, INSERT, UPDATE ON audit_stream_positions TO antifailure_app;
+GRANT SELECT ON audit_stream_positions TO antifailure_admin;
+ALTER TABLE audit_stream_positions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_stream_positions FORCE ROW LEVEL SECURITY;
+CREATE POLICY audit_stream_positions_read ON audit_stream_positions
+  FOR SELECT TO antifailure_app USING (current_audit_forwarder());
+CREATE POLICY audit_stream_positions_insert ON audit_stream_positions
+  FOR INSERT TO antifailure_app WITH CHECK (current_audit_forwarder());
+CREATE POLICY audit_stream_positions_update ON audit_stream_positions
+  FOR UPDATE TO antifailure_app USING (current_audit_forwarder())
+  WITH CHECK (current_audit_forwarder());
 
 COMMIT;

@@ -115,7 +115,7 @@ The features a license can name are `air_gapped`, `audit_stream`, `billing`, `cl
 <!-- entitlement-names:end -->
 
 <!-- entitlement-count:start -->
-Of the 14 features a license can carry, **10 are refused when the license does not name them**, 8 by the engine and 2 by the control plane. The rest are listed here anyway, with what actually happens without each one, because a feature that is sold and never checked is worth knowing about and the number is only useful if it can come back unflattering.
+Of the 14 features a license can carry, **10 are refused when the license does not name them**, 8 by the engine and 3 by the control plane, with some checked by both. The rest are listed here anyway, with what actually happens without each one, because a feature that is sold and never checked is worth knowing about and the number is only useful if it can come back unflattering.
 <!-- entitlement-count:end -->
 
 The table is generated from `ee/engine/feature/catalogue.go`, which is the one
@@ -136,7 +136,7 @@ is where it gets published.
 | Feature | What it is | Without it |
 | --- | --- | --- |
 | `air_gapped` | An installation that reaches nothing outside the operator's own network. | Withheld. `airgapped/airgapped.go:RegisterFromEnvironment` asks the license, and the feature is off when the answer is no. |
-| `audit_stream` | Privileged actions forwarded to the organization's own SIEM. | Withheld. `auditsink/auditsink.go:auditsink.permitted` asks the license, and the feature is off when the answer is no. |
+| `audit_stream` | Privileged actions forwarded to the organization's own SIEM. | Withheld by both the engine at `auditsink/auditsink.go:auditsink.permitted` and the control plane at `ee/web/server/src/register.ts:startAuditStream`. Each checks the license. |
 | `billing` | Subscriptions, invoices and the plan an organization is on. | Nothing changes, because the capability is not built yet. |
 | `cloud_database` | Managed cloud database providers, the ones that need an organization behind them rather than a developer's own card. | Withheld. `cloudgate/cloudgate.go:gatedDatabase.Branch` asks the license, and the feature is off when the answer is no. |
 | `cloud_runtime` | Managed cloud runtime providers, on the same rule as the databases. | Withheld. `cloudgate/cloudgate.go:gatedRuntime.Up` asks the license, and the feature is off when the answer is no. |

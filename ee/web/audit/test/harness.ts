@@ -39,7 +39,7 @@ export async function available(): Promise<boolean> {
   }
   if (process.env.AF_TEST_DATABASE_URL || process.env.AF_REQUIRE_DATABASE === '1') {
     throw new Error(
-      `AF_TEST_DATABASE_URL is ${adminUrl} and nothing answered after three attempts. ` +
+      'The test database did not answer after three attempts. ' +
         `Refusing to skip: this suite is the only place an audit entry is watched to reach a ` +
         `sink, and a run that proves nothing is worse than a red one. Underlying error: ` +
         `${last instanceof Error ? last.message : String(last)}`,
@@ -131,8 +131,13 @@ export interface Harness {
 
 export async function start(): Promise<Harness> {
   const admin = postgres(adminUrl, { max: 3, connect_timeout: 30, onnotice: () => {} })
-  await migrate(admin)
-  await admin.unsafe(`ALTER ROLE antifailure_app LOGIN PASSWORD 'app-test-password'`)
+  try {
+    await migrate(admin)
+    await admin.unsafe(`ALTER ROLE antifailure_app LOGIN PASSWORD 'app-test-password'`)
+  } catch (err) {
+    await admin.end({ timeout: 5 })
+    throw err
+  }
 
   const url = new URL(adminUrl)
   url.username = 'antifailure_app'
@@ -163,6 +168,10 @@ export async function start(): Promise<Harness> {
     },
     async setCursor(to) {
       await admin`UPDATE audit_stream_cursor SET delivered_seq = ${to} WHERE id`
+      await admin`
+        INSERT INTO audit_stream_positions (org_id, delivered_seq)
+        SELECT org_id, max(seq) FROM audit_entries WHERE seq <= ${to} GROUP BY org_id
+        ON CONFLICT (org_id) DO UPDATE SET delivered_seq = EXCLUDED.delivered_seq`
     },
     async burnSequence() {
       const rows = await admin<{ nextval: string }[]>`SELECT nextval('audit_entries_seq_seq')`

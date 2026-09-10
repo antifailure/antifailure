@@ -507,8 +507,9 @@ describe('the two languages agree about who refuses what', () => {
     const states = goCatalogueStates(catalogueGo, licenseGo)
     assert.ok(states.size > 0, 'no catalogue entries were parsed, so this test proves nothing')
     for (const feature of declared()) {
-      assert.equal(
-        states.get(feature), CONTROL_PLANE_GATED,
+      assert.ok(
+        states.get(feature) === CONTROL_PLANE_GATED ||
+          (states.get(feature) === 'gated' && goControlPlaneAt(catalogueGo, licenseGo, feature) !== null),
         `${feature} declares an enforcement site in this process and the Go catalogue calls ` +
           `it ${states.get(feature)}. A feature this control plane refuses by name is being ` +
           'published as one nobody is refused, which is what the catalogue exists to prevent.',
@@ -523,7 +524,8 @@ describe('the two languages agree about who refuses what', () => {
     // otherwise stand with nothing behind it.
     const states = goCatalogueStates(catalogueGo, licenseGo)
     const claimed = [...states.entries()]
-      .filter(([, state]) => state === CONTROL_PLANE_GATED)
+      .filter(([name, state]) => state === CONTROL_PLANE_GATED ||
+        (state === 'gated' && goControlPlaneAt(catalogueGo, licenseGo, name) !== null))
       .map(([feature]) => feature)
       .sort()
     assert.ok(

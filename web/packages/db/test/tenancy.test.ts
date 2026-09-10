@@ -56,6 +56,7 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
   // separate test proves nothing fell out of it.
   const isolatedByUser = new Map<string, string>([
     ['sessions', 'belongs to a user, not an organization; covered by its own test below'],
+    ['audit_stream_positions', 'forwarder bookkeeping; tenant access is refused and tested explicitly'],
   ])
 
   // relkind r and p. A partitioned table's parent is p, not r, so a filter on
@@ -193,10 +194,8 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
         'audit_stream_cursor',
         'one row of bookkeeping about how far the audit stream forwarder has got, the same ' +
           'shape as analytics_rollup_state. It carries no org_id because it belongs to the ' +
-          'INSTALLATION rather than to a tenant: audit_entries.seq comes from one sequence for ' +
-          'the whole database, so one number describes the forwarder completely and a cursor ' +
-          'per organization would need the list of organizations before it could read anything, ' +
-          'which is a second cross tenant read to avoid a number. What confines the application ' +
+          'INSTALLATION rather than to a tenant. It is a summary, while per organization ' +
+          'positions determine which rows remain pending. What confines the application ' +
           'role is the declaration the policies key on, which only Pool.withAuditForwarder sets ' +
           'and every other scope in client.ts clears, plus grants of SELECT and UPDATE with no ' +
           'INSERT and no DELETE so it cannot create a second cursor or remove the one there is. ' +

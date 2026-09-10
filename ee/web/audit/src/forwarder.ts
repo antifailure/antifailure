@@ -14,7 +14,9 @@
 //
 // So this file is deliberately small and is the whole of what was absent: read
 // the rows above a cursor, ask whether each organization is entitled, hand the
-// entitled ones to the queue, and move the cursor only past what a sink took.
+// entitled ones to the queue, and persist each organization's position.
+// Writers serialize within an organization, so a global sequence cursor would
+// skip an earlier allocated row that commits after another organization's row.
 //
 // ---------------------------------------------------------------------------
 // The five decisions in here, each of which has a wrong answer that looks fine
@@ -51,9 +53,7 @@
 // and the cursor advances past it. It is not held for a licence that might
 // arrive later. That is the behaviour docs/enterprise/audit-stream.md already
 // describes for the engine, "accepts every entry and writes none", and here it
-// is also forced: the cursor is one number for the whole installation, so one
-// organization that never buys the feature would otherwise stall the stream for
-// every organization that did.
+// avoids repeatedly reading entries deliberately declined by the licence.
 
 // `sql` through @antifailure/db rather than from drizzle-orm directly, for the
 // reason web/packages/db/src/index.ts opens with: a second physical copy of
@@ -65,9 +65,8 @@ import { Queue, type Clock, type Entry, type Sink } from './sink.ts'
 export interface ForwarderOptions {
   pool: Pool
   clock: Clock
-  /** Where entries go. One, because an installation that wants two runs two
-   *  forwarders and the ordering between them is then explicit rather than
-   *  hidden inside a fan-out nobody can see the state of. */
+  /** One destination per installation. Replicas share delivery positions.
+   *  Multiple destinations require a collector that fans out after receiving. */
   sink: Sink
   /** Signs the batch manifests, so an object sitting in an archive can be
    *  checked without reaching back to the control plane that wrote it. */
@@ -205,11 +204,12 @@ export class Forwarder {
 
     const rows = await this.opts.pool.withAuditForwarder(async (db) =>
       db.execute<Row>(sql`
-        SELECT seq, org_id, actor_label, action, target_type, target_id,
-               origin, detail, occurred_at, entry_hash
-        FROM audit_entries
-        WHERE seq > ${from}
-        ORDER BY seq ASC
+        SELECT a.seq, a.org_id, a.actor_label, a.action, a.target_type, a.target_id,
+               a.origin, a.detail, a.occurred_at, a.entry_hash
+        FROM audit_entries a
+        LEFT JOIN audit_stream_positions p ON p.org_id = a.org_id
+        WHERE a.seq > coalesce(p.delivered_seq, 0)
+        ORDER BY a.seq ASC
         LIMIT ${this.batchSize}`),
     )
 
@@ -236,6 +236,7 @@ export class Forwarder {
     for (const [orgId, forOrg] of byOrg) {
       if (!(await this.opts.permitted(orgId, now))) {
         unlicensed += forOrg.length
+        await this.advanceOrganization(orgId, forOrg[forOrg.length - 1]!.seq)
         continue
       }
 
@@ -244,11 +245,16 @@ export class Forwarder {
         clock: this.opts.clock,
         key: this.opts.key,
         batchSize: this.deliveryBatchSize,
+        capacity: Math.max(10_000, forOrg.length),
       })
       for (const entry of forOrg) queue.enqueue(entry)
 
       const sent = await queue.flush()
       delivered += sent
+      const completed = forOrg.length - queue.depth
+      if (completed > 0) {
+        await this.advanceOrganization(orgId, forOrg[completed - 1]!.seq)
+      }
 
       // WHAT STILL WAITS, NOT WHAT WAS NOT DELIVERED, and the difference is the
       // whole correctness of the cursor.
@@ -286,7 +292,7 @@ export class Forwarder {
     }
 
     const highest = entries[entries.length - 1]!.seq
-    const to = blocked === null ? highest : blocked - 1
+    const to = Math.max(from, blocked === null ? highest : blocked - 1)
     if (to > from) await this.advance(to)
 
     return {
@@ -335,6 +341,17 @@ export class Forwarder {
         WHERE id AND delivered_seq < ${to}`)
     })
   }
+
+  private async advanceOrganization(orgId: string, to: number): Promise<void> {
+    await this.opts.pool.withAuditForwarder(async (db) => {
+      await db.execute(sql`
+        INSERT INTO audit_stream_positions (org_id, delivered_seq, updated_at)
+        VALUES (${orgId}, ${to}, ${this.opts.clock.now().toISOString()})
+        ON CONFLICT (org_id) DO UPDATE
+        SET delivered_seq = greatest(audit_stream_positions.delivered_seq, EXCLUDED.delivered_seq),
+            updated_at = EXCLUDED.updated_at`)
+    })
+  }
 }
 
 export interface ForwarderHandle {
@@ -362,7 +379,7 @@ export interface ForwarderHandle {
  * slow destination into a duplicate storm.
  */
 export function startForwarder(
-  forwarder: Forwarder,
+  forwarder: Pick<Forwarder, 'pass'>,
   intervalMs: number,
   onError?: (err: unknown) => void,
 ): ForwarderHandle {

@@ -35,7 +35,9 @@
 // week and produced a bug only a paying customer could reproduce.
 
 import { startControlPlane } from '@antifailure/api/boot'
-import { registerEnterprise } from './register.ts'
+import { registerEnterprise, type Registered } from './register.ts'
+
+let registered: Registered | undefined
 
 await startControlPlane({
   beforeServer: (ctx) => {
@@ -65,7 +67,7 @@ await startControlPlane({
         : `enterprise routes publish themselves at ${baseUrl} (from AF_APP_BASE_URL)`,
     )
 
-    registerEnterprise({
+    registered = registerEnterprise({
       pool: ctx.pool,
       clock: ctx.clock,
       baseUrl,
@@ -75,4 +77,5 @@ await startControlPlane({
       log: ctx.log,
     })
   },
+  beforeClose: () => registered?.auditStream?.stop(),
 })

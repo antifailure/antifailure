@@ -61,6 +61,9 @@ const (
 func effect(e feature.Entitlement) string {
 	switch e.State {
 	case feature.StateGated:
+		if e.ControlPlaneAt != "" {
+			return "Withheld by both the engine at `" + e.EnforcedAt + "` and the control plane at `" + e.ControlPlaneAt + "`. Each checks the license."
+		}
 		// "Withheld" rather than "refused", because for one of the three the
 		// licensed behaviour IS a refusal: an unlicensed policy hook permits.
 		// "Refused" in that row would read as the environment being refused,
@@ -145,6 +148,12 @@ func countSentence() string {
 	engine := len(feature.GatedFeatures()) + len(feature.EditionGatedFeatures())
 	plane := len(feature.ControlPlaneGatedFeatures())
 	total := len(license.AllFeatures())
+	unique := map[license.Feature]bool{}
+	for _, group := range [][]license.Feature{feature.GatedFeatures(), feature.EditionGatedFeatures(), feature.ControlPlaneGatedFeatures()} {
+		for _, f := range group {
+			unique[f] = true
+		}
+	}
 	// Split, because one number hid the error this page was corrected for.
 	// Counting only the engine's gates reported three of twelve and read as
 	// "nine of these do nothing", when two of the nine were being refused by
@@ -152,11 +161,11 @@ func countSentence() string {
 	// is what stops the next reader drawing the old conclusion from it.
 	return fmt.Sprintf(
 		"Of the %d features a license can carry, **%d are refused when the license does not "+
-			"name them**, %d by the engine and %d by the control plane. The rest are listed "+
+			"name them**, %d by the engine and %d by the control plane, with some checked by both. The rest are listed "+
 			"here anyway, with what actually happens without each one, because a feature that "+
 			"is sold and never checked is worth knowing about and the number is only useful "+
 			"if it can come back unflattering.\n",
-		total, engine+plane, engine, plane)
+		total, len(unique), engine, plane)
 }
 
 // splice replaces the block between one pair of markers.

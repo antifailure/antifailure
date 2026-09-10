@@ -4590,8 +4590,8 @@ that is unreachable loses forwarding and never loses the entry.
 
 Until this page said so, only the first half existed. The control plane's audit
 log carried a tamper evident chain and reached no destination at all, so single
-sign on logins, directory provisioning, operator impersonation and every admin
-action were recorded and forwarded nowhere.
+organization sign on, directory provisioning and administrative actions were
+recorded and forwarded nowhere.
 
 ## What the engine forwards
 
@@ -4753,9 +4753,11 @@ take is in the dead letter file before ` + "`" + `Write` + "`" + ` returns.
 
 A different stream with a different shape, and the shape is the reason it is
 worth having. The engine forwards five actions from a machine with no database.
-The control plane forwards ` + "`" + `audit_entries` + "`" + `, which is every sign on, every
-directory provisioning call, every operator impersonation and every
-administrative action, and which carries a hash chain: each entry holds the hash
+The control plane forwards ` + "`" + `audit_entries` + "`" + `, the organization log covering
+actions including sign on, directory provisioning and administration. The
+separate global operator log, ` + "`" + `admin_audit_entries` + "`" + `, is forwarded only where its
+writer also produces an organization entry. Each organization has its own hash
+chain: each entry holds the hash
 of the one before it, so altering an old entry breaks every entry after it.
 
 ### What one batch looks like
@@ -4772,6 +4774,11 @@ sha256 over the canonical batch body with ` + "`" + `signature` + "`" + ` an HMA
 under ` + "`" + `AF_AUDIT_STREAM_KEY` + "`" + `. That is what lets a batch sitting in an archive be
 checked without reaching back to the control plane that wrote it, which is the
 situation an auditor is usually in.
+
+For webhooks, ` + "`" + `x-antifailure-timestamp` + "`" + ` is the first entry's event time, not
+the delivery time. Catching up after an outage can deliver old events. Verify
+the signature and deduplicate by organization and sequence; signature
+verification alone does not reject replay.
 
 One batch holds one organization. A manifest names an organization, so a batch
 carrying two would name one and cover both, and a receiver checking it would be
@@ -4797,6 +4804,11 @@ stays possible.
 ` + "`" + `AF_AUDIT_STREAM_KEY` + "`" + ` is required whenever a sink is named. A manifest signed
 under a key nobody chose is decoration rather than evidence.
 
+Remote collector URLs require HTTPS and cannot contain user information.
+Loopback HTTP is permitted for a local collector. Redirects are refused, each
+request carries a thirty second deadline, and response bodies are discarded
+without being buffered or included in error logs.
+
 ` + "`" + `AF_AUDIT_STREAM_INTERVAL_MS` + "`" + ` is how often a pass runs, ten seconds by default.
 ` + "`" + `AF_AUDIT_STREAM_BATCH` + "`" + ` is how many entries one pass reads, 500 by default, and
 ` + "`" + `AF_AUDIT_STREAM_DELIVERY_BATCH` + "`" + ` is how many one request carries, defaulting to
@@ -4814,11 +4826,12 @@ nowhere.
 
 ### Delivery, and what happens when your collector is down
 
-At least once, never at most once. The cursor advances only past entries a sink
-accepted, so a collector that is down costs forwarding lag and never an entry,
-and the entries are redelivered when it comes back. A duplicate is visible in
-` + "`" + `seq` + "`" + `; a gap would not be visible at all, which is why the trade is made in that
-direction.
+Transient failures are retried with at least once delivery. Each organization's
+position advances after delivery, so a collector outage causes forwarding lag.
+A crash after acceptance and before checkpointing can redeliver a batch; use
+` + "`" + `orgId` + "`" + ` and ` + "`" + `seq` + "`" + ` to deduplicate. Positions are separate because transactions
+from different organizations can commit in a different order from their
+sequence numbers. The installation cursor is only an operational summary.
 
 A batch your endpoint will never accept, meaning it answers 400, 401, 403, 404
 or 413, is given up on rather than retried forever, because one batch nobody
@@ -4829,9 +4842,8 @@ continues.
 
 An organization that is not entitled to ` + "`" + `audit_stream` + "`" + ` is skipped and the stream
 moves on past it. It is not held for an entitlement that might arrive later, and
-that is the same behaviour the engine has. The cursor is one number for the
-whole installation, so an organization that never buys audit streaming would
-otherwise stall the stream for every organization that did.
+that is the same behaviour the engine has. Its delivery position advances so
+these deliberately declined entries are not reconsidered on every pass.
 
 ## The licence is asked per action, not at startup
 
@@ -5419,7 +5431,7 @@ The features a license can name are ` + "`" + `air_gapped` + "`" + `, ` + "`" + 
 <!-- entitlement-names:end -->
 
 <!-- entitlement-count:start -->
-Of the 14 features a license can carry, **10 are refused when the license does not name them**, 8 by the engine and 2 by the control plane. The rest are listed here anyway, with what actually happens without each one, because a feature that is sold and never checked is worth knowing about and the number is only useful if it can come back unflattering.
+Of the 14 features a license can carry, **10 are refused when the license does not name them**, 8 by the engine and 3 by the control plane, with some checked by both. The rest are listed here anyway, with what actually happens without each one, because a feature that is sold and never checked is worth knowing about and the number is only useful if it can come back unflattering.
 <!-- entitlement-count:end -->
 
 The table is generated from ` + "`" + `ee/engine/feature/catalogue.go` + "`" + `, which is the one
@@ -5440,7 +5452,7 @@ is where it gets published.
 | Feature | What it is | Without it |
 | --- | --- | --- |
 | ` + "`" + `air_gapped` + "`" + ` | An installation that reaches nothing outside the operator's own network. | Withheld. ` + "`" + `airgapped/airgapped.go:RegisterFromEnvironment` + "`" + ` asks the license, and the feature is off when the answer is no. |
-| ` + "`" + `audit_stream` + "`" + ` | Privileged actions forwarded to the organization's own SIEM. | Withheld. ` + "`" + `auditsink/auditsink.go:auditsink.permitted` + "`" + ` asks the license, and the feature is off when the answer is no. |
+| ` + "`" + `audit_stream` + "`" + ` | Privileged actions forwarded to the organization's own SIEM. | Withheld by both the engine at ` + "`" + `auditsink/auditsink.go:auditsink.permitted` + "`" + ` and the control plane at ` + "`" + `ee/web/server/src/register.ts:startAuditStream` + "`" + `. Each checks the license. |
 | ` + "`" + `billing` + "`" + ` | Subscriptions, invoices and the plan an organization is on. | Nothing changes, because the capability is not built yet. |
 | ` + "`" + `cloud_database` + "`" + ` | Managed cloud database providers, the ones that need an organization behind them rather than a developer's own card. | Withheld. ` + "`" + `cloudgate/cloudgate.go:gatedDatabase.Branch` + "`" + ` asks the license, and the feature is off when the answer is no. |
 | ` + "`" + `cloud_runtime` + "`" + ` | Managed cloud runtime providers, on the same rule as the databases. | Withheld. ` + "`" + `cloudgate/cloudgate.go:gatedRuntime.Up` + "`" + ` asks the license, and the feature is off when the answer is no. |
