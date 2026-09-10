@@ -89,8 +89,10 @@ func (Registration) Open(ctx context.Context, cfg extension.DatabaseConfig) (pro
 	// somebody is still looking at the manifest, instead of after a server has
 	// been provisioned and has to be deleted again.
 	allow := lookup(FirewallVariable)
-	if _, _, err := cidrRange(allow); err != nil {
-		return nil, err
+	if allow != "" {
+		if _, _, err := cidrRange(allow); err != nil {
+			return nil, err
+		}
 	}
 
 	return New(Options{
@@ -102,6 +104,7 @@ func (Registration) Open(ctx context.Context, cfg extension.DatabaseConfig) (pro
 		Variable:      variable,
 		Endpoint:      lookup(EndpointVariable),
 		AllowCIDR:     allow,
+		Database:      lookup(DatabaseVariable),
 		TLSMode:       lookup(TLSModeVariable),
 		MaxBranches:   db.MaxBranches,
 		Getenv:        lookup,

@@ -120,6 +120,7 @@ func options(t *testing.T, server *fakecloudsql.Server) cloudsql.Options {
 	t.Helper()
 	host, port := hostPort(t, requirePostgres(t))
 	return cloudsql.Options{
+		Token: func(context.Context) (string, error) { return "AF_FAKE_CLOUDSQL_TOKEN", nil },
 		// The Auth Proxy path, which is also how this suite reaches its data:
 		// every fake instance is a database on ONE Postgres, so the address is
 		// shared and the database name is what distinguishes them. The

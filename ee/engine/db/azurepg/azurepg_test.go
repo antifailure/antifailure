@@ -124,7 +124,7 @@ func TestTheFakeDoesNotCopyFirewallRules(t *testing.T) {
 // public side, so a private source would provision a server it could not then
 // open. Refusing up front costs one read; discovering it after the restore
 // costs a provisioned server and the time to provision it.
-func TestAPrivateSourceIsRefusedBeforeProvisioning(t *testing.T) {
+func TestAPrivateSourceWithoutDNSIsRefusedBeforeProvisioning(t *testing.T) {
 	server := newFake(t, seedSQL)
 	p := newProvider(t, server)
 	ctx := context.Background()

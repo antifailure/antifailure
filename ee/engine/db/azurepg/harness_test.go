@@ -16,7 +16,9 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"net/url"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -114,7 +116,16 @@ func randomSuffix(t *testing.T) string {
 
 func options(t *testing.T, server *fakeazurepg.Server) azurepg.Options {
 	t.Helper()
+	address, err := url.Parse(postgresURL())
+	require.NoError(t, err)
+	port := 5432
+	if address.Port() != "" {
+		port, err = strconv.Atoi(address.Port())
+		require.NoError(t, err)
+	}
 	return azurepg.Options{
+		Token:         func(context.Context) (string, error) { return "AF_FAKE_AZUREPG_TOKEN", nil },
+		Port:          port,
 		Subscription:  testSubscription,
 		ResourceGroup: testResourceGroup,
 		Location:      testLocation,

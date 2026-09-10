@@ -33,6 +33,13 @@ login, so without a reset every preview holds production's credential; and a
 restore cannot cross between public and private access, which is refused before
 provisioning rather than after.
 
+Both control plane clients obtain identity tokens before making API calls.
+Azure restores preserve private subnet and DNS configuration, retain ownership
+metadata when publishing, and list the full paginated inventory. Invalid rows
+do not discard valid collection entries. A server with several application
+databases requires an explicit selection. Cancellation after restore acceptance
+cleans up with a fresh context instead of leaving an untracked billed server.
+
 Neither has been run against the real service. Both suites drive a fake control
 plane with a real Postgres behind it, so the behaviours that are claims about
 bytes are checked against bytes, and neither asserts `RealService`, so the

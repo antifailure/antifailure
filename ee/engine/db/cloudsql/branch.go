@@ -131,9 +131,6 @@ func (p *Provider) Branch(ctx context.Context, version string, envID string) (pr
 		return provider.Branch{}, fmt.Errorf(
 			"cloudsql: cloning golden %q into %q: %w", golden.Name, name, err)
 	}
-	if err := p.api.waitForOperation(ctx, op, p.opts.PollInterval); err != nil {
-		return provider.Branch{}, err
-	}
 
 	created := false
 	defer func() {
@@ -146,6 +143,9 @@ func (p *Provider) Branch(ctx context.Context, version string, envID string) (pr
 			_ = p.api.waitForOperation(cleanup, op, p.opts.PollInterval)
 		}
 	}()
+	if err := p.api.waitForOperation(ctx, op, p.opts.PollInterval); err != nil {
+		return provider.Branch{}, err
+	}
 
 	if err := p.label(ctx, name, map[string]string{
 		labelKey:    labelValue,

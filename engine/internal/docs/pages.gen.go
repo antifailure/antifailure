@@ -12559,6 +12559,271 @@ instead of publishing either answer. ` + "`" + `UNPROVEN` + "`" + ` is not a pas
 it as its own line. Deciding it needs a run against a real Aurora, and the same
 suite produces a measured verdict there without changing.
 `,
+	"providers/azurepg.md": `---
+title: Azure Database for PostgreSQL
+description: Branching a Flexible Server with a point in time restore, why this provider does not claim copy on write, and the three things Azure does not carry across a restore.
+sidebar:
+  order: 9
+---
+
+A branch here is a **point in time restore** of an Azure Database for PostgreSQL
+Flexible Server. It needs no dump and no reload, and it produces a server
+carrying the golden's rows without anything reading them over a connection. It
+is the only mechanism Azure offers that does.
+
+## This provider does not claim copy on write, and that is deliberate
+
+The Aurora and Cloud SQL providers report copy on write branching. **This one
+reports that it does not.**
+
+Microsoft documents a restore as creating a **new server**, and describes the
+restored server as an independent copy: the physical files are restored from the
+snapshot backups to the new server's data location, and a recovery process then
+replays write ahead log files to bring it to a consistent state. Nothing in
+Microsoft's documentation says the restored server shares storage with its
+source.
+
+The temptation to claim otherwise is real, because Microsoft also writes that
+"the data restore operation from a snapshot doesn't depend on the size of data",
+which reads exactly like a copy on write sentence. The same paragraph continues
+that the recovery timing "might vary, depending on the previous backup of the
+requested date and time and the number of logs to process", and gives the
+overall recovery as **a few minutes up to a few hours**.
+
+So one half of the operation is flat in the size of the data and the other half
+is not flat in anything you control. Quoting the first half and declaring copy
+on write would be quoting the fast part of a number whose slow part is the one
+you wait through.
+
+Declaring it false is not a way of dodging the question. The conformance suite
+requires the **opposite** proof of a provider that declares false: that branch
+time does grow with the size of the database. The honest declaration is the one
+that leaves the behaviour testable.
+
+## Three things Azure does not carry across a restore
+
+Each of these is an outage or an exposure if a provider assumes otherwise, and
+each is handled here.
+
+**Firewall rules are not copied.** Microsoft lists applying them as a post
+restore task. A branch created and left alone is a server nobody can connect to,
+and the failure arrives as a connection timeout that mentions no firewall at all.
+For a public source, this provider requires an explicit range and creates the
+rule. A private source retains its delegated subnet and private DNS zone, with
+public network access disabled and no public firewall rule.
+
+**The administrator credential is copied.** A restored server keeps the source's
+administrator login, so without an explicit reset every preview environment
+would be reachable with production's database credential. A distinct password is
+derived for every restore.
+
+**Public and private access cannot be crossed.** A server on a virtual network
+restores only to a virtual network, and one on public access only to public
+access. Restores preserve the source's access model. A private source without
+its DNS zone is refused before provisioning. The engine must be able to reach
+that private network to mask, verify and use the restored database.
+
+Server parameters are not copied either. A source tuned for production comes
+back at the defaults, which is worth knowing and is not something this provider
+tries to fix for you.
+
+## What it looks like
+
+` + "`" + "`" + "`" + `yaml
+database:
+  provider: azurepg
+  project: acme-production
+  api_key_env: AF_AZUREPG_BRANCH_KEY
+` + "`" + "`" + "`" + `
+
+` + "`" + `project` + "`" + ` is the **flexible server** goldens are restored from. The fully
+qualified domain name is accepted too and the server name is taken from it.
+
+| Variable | What it is |
+| ---: | --- |
+| ` + "`" + `AF_AZUREPG_SUBSCRIPTION` + "`" + ` | The subscription holding the servers |
+| ` + "`" + `AF_AZUREPG_RESOURCE_GROUP` + "`" + ` | The resource group the servers live in |
+| ` + "`" + `AF_AZUREPG_BRANCH_KEY` + "`" + ` | The key every restore's administrator password is derived from |
+| ` + "`" + `AF_AZUREPG_ALLOW_CIDR` + "`" + ` | The range the created firewall rule admits. Required for public sources |
+| ` + "`" + `AF_AZUREPG_DATABASE` + "`" + ` | The application database. Required when several application databases exist |
+| ` + "`" + `AF_AZUREPG_LOCATION` + "`" + ` | The region. A restore lands in its source's region |
+| ` + "`" + `AF_AZUREPG_TLS_MODE` + "`" + ` | The ` + "`" + `sslmode` + "`" + ` of the connection strings. Defaults to ` + "`" + `require` + "`" + ` |
+
+` + "`" + `AF_AZUREPG_ALLOW_CIDR` + "`" + ` has no default on purpose. A default of ` + "`" + `0.0.0.0/0` + "`" + `
+would make every branch work immediately and would open a copy of production to
+the whole internet.
+
+Resource Manager calls authenticate with the engine's Azure credential chain:
+` + "`" + `AZURE_TENANT_ID` + "`" + `, ` + "`" + `AZURE_CLIENT_ID` + "`" + ` and ` + "`" + `AZURE_CLIENT_SECRET` + "`" + `. The identity needs
+permission to read and restore servers, update their credentials and metadata,
+and delete the resources this provider owns. Scope that permission to the
+dedicated resource group. These are control plane credentials, separate from
+the database administrator password derived from the branch key.
+
+Collection reads follow Azure pagination. An invalid row is logged and skipped
+without discarding valid rows, and continuation URLs cannot send the identity
+to another origin. Accepted restores that are cancelled are cleaned up with a
+fresh context.
+
+## Deleting a server deletes its backups
+
+Microsoft states this plainly, and it is why every destructive path here reads an
+` + "`" + `antifailure` + "`" + ` resource tag before acting rather than trusting a name. A customer
+whose own server happens to be called ` + "`" + `af-b-something` + "`" + ` must not lose it to our
+garbage collection, and on Azure there is nothing to restore from afterwards.
+
+## What is not here
+
+**Reset.** A restore creates a new server rather than returning an existing one
+to an earlier state, which Microsoft states directly: a restore "always creates a
+new database server with the name that you provide. It doesn't overwrite the
+existing database server." There is no operation matching the capability, so the
+conformance suite skips the behaviour by name.
+
+**Microsoft Entra database authentication.** Flexible Server supports it, it
+would be the better credential, and it is not implemented.
+
+## What has been proved, and what has not
+
+The provider's own suite drives a fake Resource Manager with a real Postgres
+behind it, and the fake models all three of the things Azure does not carry
+across a restore, so a provider that forgot one fails there rather than in your
+subscription.
+
+The default suite does not assert a real service, so service owned conformance
+verdicts report as unproven. The separate opt-in private Azure test restores a
+synthetic source, masks and verifies its row, branches it, checks that the
+source stayed unchanged, and deletes the branch and golden. A successful live
+run is required before claiming that path has been proved on Azure.
+`,
+	"providers/cloudsql.md": `---
+title: Google Cloud SQL
+description: Branching a Cloud SQL for PostgreSQL instance with a fast clone, the request shape that decides whether it is fast, and the one question this provider could not settle.
+sidebar:
+  order: 8
+---
+
+Cloud SQL can clone an instance. When the clone is a **fast clone** it is
+created from an Instant Snapshot, which Google documents as a metadata only
+operation, so the size of the data does not affect how long it takes.
+
+That is the reason this provider exists, and the sentence that has to travel
+with it is longer than usual.
+
+## Cloud SQL has two clone workflows and the call site does not name them
+
+There is also a **standard clone**, which takes a full backup and provisions a
+new instance from it. Its duration scales with the size of the database, and for
+a large one it is measured in hours rather than minutes.
+
+Cloud SQL chooses between the two **from the shape of the request**, silently,
+and returns the same operation either way. There is no field in the response
+that says which you got. So a provider that asks for a clone and reports flat
+branch time is making a claim it has not checked.
+
+Three things force the standard workflow:
+
+- **Naming a zone at all.** Not naming a different zone: Google states that
+  re-specifying even the source's own zone falls back to the standard workflow.
+  The fast path requires the field to be absent.
+- **Asking for a point in time.** A clone carrying a recovery timestamp is
+  restored rather than snapshotted.
+- **Disk properties that do not match the source**, meaning the disk type, the
+  encryption and the block size.
+
+The first is the trap, and it is worth saying plainly: the request that pins a
+branch beside its golden, which is the careful looking thing to do, is exactly
+the request that stops being a fast clone.
+
+This provider does not ask for a clone and hope. The type it builds the request
+from has **no field** for a zone or a point in time, so asking for the slow path
+does not compile, and two separate tests hold that: one asserts on the
+marshalled JSON that those keys are absent rather than empty, and one counts
+every clone the provider causes and requires none of them to be classified
+standard by Google's own rule.
+
+## What it looks like
+
+` + "`" + "`" + "`" + `yaml
+database:
+  provider: cloudsql
+  project: acme-production
+  api_key_env: AF_CLOUDSQL_BRANCH_KEY
+` + "`" + "`" + "`" + `
+
+` + "`" + `project` + "`" + ` is the Cloud SQL **instance** that goldens are cloned from. The
+connection name ` + "`" + `project:region:instance` + "`" + ` is accepted too and the instance is
+taken from it.
+
+Nothing connects to production. The copy is made by the control plane and the
+masking runs against the copy, so no credential in this configuration reaches
+the source instance over a connection.
+
+| Variable | What it is |
+| ---: | --- |
+| ` + "`" + `AF_CLOUDSQL_PROJECT` + "`" + ` | The Google Cloud project holding the instances |
+| ` + "`" + `AF_CLOUDSQL_REGION` + "`" + ` | The region the source instance lives in |
+| ` + "`" + `AF_CLOUDSQL_BRANCH_KEY` + "`" + ` | The key every clone's password is derived from |
+| ` + "`" + `AF_CLOUDSQL_STOP_GOLDENS` + "`" + ` | ` + "`" + `1` + "`" + ` to stop a published golden's compute. Read the section below first |
+| ` + "`" + `AF_CLOUDSQL_TIER` + "`" + ` | Overrides the machine tier. Empty keeps the source's, which is what keeps a clone fast |
+| ` + "`" + `AF_CLOUDSQL_TLS_MODE` + "`" + ` | The ` + "`" + `sslmode` + "`" + ` of the connection strings. Defaults to ` + "`" + `require` + "`" + ` |
+
+The branch key is **not** the source instance's password. A distinct password is
+derived from it for every clone, so a preview environment never holds
+production's database credential. That matters more here than it sounds: Google
+documents that a clone carries the source's users and passwords, so without the
+derived password every branch would be reachable with production's.
+
+Admin API calls use a service account supplied through
+` + "`" + `GOOGLE_APPLICATION_CREDENTIALS` + "`" + `, or the attached Google identity through the
+metadata service when no file is configured. The identity must have the Cloud
+SQL permissions needed to clone, configure and delete instances. An empty or
+failed token is refused before the request reaches the API. These control
+plane credentials are separate from the branch key and database password.
+
+## Goldens cost compute here, and Aurora's trick does not exist
+
+The Aurora provider publishes a golden by deleting its writer instance and
+keeping the volume, because an Aurora cluster's storage exists whether or not an
+instance is attached and is still clonable. A published Aurora golden costs
+storage and no compute.
+
+**Cloud SQL has no such thing.** An instance is compute and storage together and
+there is no clonable object underneath it. The closest shape available is an
+instance whose activation policy is ` + "`" + `NEVER` + "`" + `, which stops the compute and keeps
+the disk.
+
+Whether Cloud SQL will fast clone an instance that is stopped is **not
+established**. Google's clone documentation does not address a stopped source in
+either direction, and this provider will not assume the permissive answer about
+somebody's bill or somebody's outage. So the default keeps goldens running,
+which costs compute per retained golden and is known to work, and
+` + "`" + `AF_CLOUDSQL_STOP_GOLDENS=1` + "`" + ` opts in to the cheaper behaviour with that unknown
+attached. Settling it takes one clone of one stopped instance in one project.
+
+## What is not here
+
+**Reset.** Cloud SQL has no rewind that returns an instance to an earlier state
+without creating a new one. Restoring a backup onto an existing instance goes
+through the same provisioning as a clone and takes the instance offline while it
+runs, so calling that Reset would publish a capability whose cost is nothing
+like what the name implies. The conformance suite skips the behaviour by name.
+
+**IAM database authentication.** Cloud SQL supports it for PostgreSQL, it would
+be the better credential, and it is not implemented.
+
+## What has been proved, and what has not
+
+The provider's own suite drives a fake Cloud SQL Admin API with a real Postgres
+behind it, so the behaviours that are claims about bytes are checked against
+bytes. Every request shape is what the Admin API documents.
+
+**No part of this has been run against Google.** There is no project behind the
+test suite and there is not meant to be. The suite does not assert a real
+service, so the service owned conformance verdicts report as unproven rather
+than as passed, which is the honest reading of a run whose storage is a local
+Postgres.
+`,
 	"providers/databases.md": `---
 title: Database providers
 description: What a database provider is, which ones ship, how to choose, and what every one of them guarantees.
@@ -12572,7 +12837,7 @@ meant to be written by people outside this repository.
 
 ` + "`" + "`" + "`" + `yaml
 database:
-  provider: docker   # or neon, supabase, dblab, pgurl, or aurora
+  provider: docker   # or neon, supabase, dblab, pgurl, aurora, cloudsql, or azurepg
   version: 17
 ` + "`" + "`" + "`" + `
 
@@ -12586,6 +12851,8 @@ database:
 | [` + "`" + `supabase` + "`" + `](/docs/providers/supabase) | A Supabase branch, which is a whole separate project | Grows with the database, because a Supabase branch is created empty | A Supabase project on a paid plan and an access token |
 | [` + "`" + `pgurl` + "`" + `](/docs/providers/pgurl) | A database on any Postgres server you name | Grows with the database, because a branch is a server side file copy | A reachable Postgres and a role that may create databases |
 | [` + "`" + `aurora` + "`" + `](/docs/providers/aurora) | A clone of an Amazon Aurora PostgreSQL cluster | Flat, because a clone shares the source's storage volume | An Aurora PostgreSQL cluster, an IAM role, and the enterprise edition |
+| [` + "`" + `cloudsql` + "`" + `](/docs/providers/cloudsql) | A fast clone of a Google Cloud SQL for PostgreSQL instance | Flat, because a fast clone is created from an Instant Snapshot. Cloud SQL's other clone workflow is not flat, and the provider is built so it cannot ask for that one | A Cloud SQL instance, a service account, and the enterprise edition |
+| [` + "`" + `azurepg` + "`" + `](/docs/providers/azurepg) | A point in time restore of an Azure Database for PostgreSQL Flexible Server | Grows with the database. The snapshot half is flat and the log replay half is not, so this provider does not claim copy on write | A flexible server, a service principal, and the enterprise edition |
 
 ` + "`" + `docker` + "`" + ` is the default and needs nothing. Its branch time is flat, measured
 rather than assumed: the conformance suite branches an 8 MiB golden and a 512 MiB
@@ -12623,6 +12890,22 @@ branching moves no data whatever the size. What it does not give you is
 seconds: a clone has no instances, a preview environment needs one, and
 provisioning a writer takes minutes. That number is flat in the size too, and
 the provider page says so before you buy rather than after.
+
+` + "`" + `cloudsql` + "`" + ` is the flat one for a production on Google Cloud, and it is in the
+enterprise edition for the same reason ` + "`" + `aurora` + "`" + ` is. A branch is a Cloud SQL
+FAST clone, created from an Instant Snapshot, so it moves no data whatever the
+size. The thing to know before choosing it is that Cloud SQL also has a slower
+clone whose duration scales with the database, it picks between the two from
+the shape of the request rather than from anything you ask for, and it tells you
+nothing about which you got. The provider is built so it cannot ask for the slow
+one, and its page explains the three conditions that would have selected it.
+
+` + "`" + `azurepg` + "`" + ` is the one for a production on Azure, and it is the only provider here
+that does NOT claim flat branch time. A branch is a point in time restore, whose
+snapshot half is flat in the size of the data and whose log replay half is not,
+so the honest number is one that grows. Microsoft gives the overall recovery as
+a few minutes up to a few hours. Its page says why claiming otherwise would be
+quoting the fast half of that.
 
 A provider named in the manifest and neither built into this binary nor
 registered with it is refused at startup rather than substituted. Falling back
@@ -12686,7 +12969,7 @@ them is refused at validation rather than accepted and then never consulted.
 title: Datastore providers
 description: Every store an environment holds other than the primary Postgres, the stance each one declares, and why there is no default.
 sidebar:
-  order: 9
+  order: 11
 ---
 
 A datastore is a store the environment holds that is not the primary Postgres:
@@ -13153,7 +13436,7 @@ ignored.
 title: Emulators
 description: How a third party API is answered inside an environment, why Antifailure writes none of them, and what a declaration has to carry.
 sidebar:
-  order: 11
+  order: 13
 ---
 
 An emulator is a third party API answered inside the environment: an S3, a
@@ -13250,7 +13533,7 @@ registration can shadow nothing.
 title: Provider limits
 description: What happens when a provider runs out of branches, and what to do about it.
 sidebar:
-  order: 12
+  order: 14
 ---
 
 Every hosted provider has a ceiling on how many databases exist at once, and it
@@ -13745,7 +14028,7 @@ does not have.
 title: Runtimes
 description: Where an environment's containers actually run, what each runtime declares it can do, and why a runtime says no rather than reporting an address that does not resolve.
 sidebar:
-  order: 10
+  order: 12
 ---
 
 A runtime is where an environment's containers actually run. Everything above
@@ -13831,7 +14114,7 @@ the built in runtimes are looked up first.
 title: Golden stores
 description: Where a golden's dump and its attestation live, the four stores that ship, and exactly what is proved about the services that speak the S3 API.
 sidebar:
-  order: 8
+  order: 10
 ---
 
 A golden store is where a golden's dump and its attestation live when they

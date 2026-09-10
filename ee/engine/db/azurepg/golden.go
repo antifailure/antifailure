@@ -46,16 +46,13 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 	version := provider.NewGoldenVersionID(created, spec.RulesHash)
 	name := p.serverName(goldenPrefix, version)
 
-	op, err := p.api.restore(ctx, source, name, src.Location, p.now().UTC(), map[string]string{
+	op, err := p.api.restore(ctx, source, name, src.Location, src.Properties.Network, p.now().UTC(), map[string]string{
 		tagKey:       tagValue,
 		goldenTagKey: version,
 	})
 	if err != nil {
 		return provider.GoldenVersion{}, fmt.Errorf(
 			"azurepg: restoring source server %q into %q: %w", source, name, err)
-	}
-	if err := p.api.wait(ctx, op, p.opts.PollInterval); err != nil {
-		return provider.GoldenVersion{}, err
 	}
 
 	published := false
@@ -72,6 +69,9 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 			_ = p.api.wait(cleanup, op, p.opts.PollInterval)
 		}
 	}()
+	if err := p.api.wait(ctx, op, p.opts.PollInterval); err != nil {
+		return provider.GoldenVersion{}, err
+	}
 
 	url, err := p.prepare(ctx, name)
 	if err != nil {
@@ -114,6 +114,9 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 		return provider.GoldenVersion{}, err
 	}
 	metadata[versionTagKey] = version
+	metadata[tagKey] = tagValue
+	metadata[goldenTagKey] = version
+	metadata[createdTagKey] = created.Format(time.RFC3339Nano)
 	op, err = p.api.patchServer(ctx, name, map[string]any{"tags": metadata})
 	if err != nil {
 		return provider.GoldenVersion{}, fmt.Errorf("azurepg: tagging golden %q: %w", name, err)
@@ -143,23 +146,21 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 // cross.
 //
 // Microsoft states a public access server restores only to public access and a
-// virtual network server only to a virtual network. This provider creates
-// firewall rules, which exist only on the public side, so pointing it at a
-// private source would produce a server it then could not open. Refusing here
-// costs a read; discovering it after the restore costs a provisioned server and
-// the time to provision it.
+// virtual network server only to a virtual network. Public sources require a
+// firewall range; private sources require the DNS zone that restores retain.
+// Both are checked before a billed server is provisioned.
 func (p *Provider) refuseAccessCrossing(src *server) error {
-	if src.access() == AccessPrivate {
-		return fmt.Errorf(
-			"azurepg: the source server %q is delegated to a virtual network, and this "+
-				"provider opens a branch with a firewall rule, which exists only on the "+
-				"public access side. Microsoft does not permit a restore to cross "+
-				"between public and private access in either direction, so this would "+
-				"provision a server that nothing could reach. Point database.project at "+
-				"a public access server, or run the engine inside the same virtual "+
-				"network with a provider that does not need the rule", src.Name)
+	if p.opts.Location != "" && !strings.EqualFold(p.opts.Location, src.Location) {
+		return fmt.Errorf("azurepg: the configured location %q differs from the source location %q", p.opts.Location, src.Location)
 	}
-	return nil
+	if src.access() == AccessPrivate {
+		if src.Properties.Network.PrivateDNSZoneResourceID == "" {
+			return fmt.Errorf("azurepg: source %q is on a virtual network but names no private DNS zone; a restore cannot preserve its private connectivity", src.Name)
+		}
+		return nil
+	}
+	_, _, err := cidrRange(p.opts.AllowCIDR)
+	return err
 }
 
 // prepare does the POST RESTORE work Azure does not do for you.
@@ -189,19 +190,18 @@ func (p *Provider) prepare(ctx context.Context, name string) (secret.Value, erro
 		return secret.Value{}, err
 	}
 
-	start, end, err := cidrRange(p.opts.AllowCIDR)
-	if err != nil {
-		return secret.Value{}, err
-	}
-	op, err = p.api.putFirewallRule(ctx, name, "antifailure", start, end)
-	if err != nil {
-		return secret.Value{}, fmt.Errorf(
-			"azurepg: creating the firewall rule on %q: %w. Azure does not copy firewall "+
-				"rules across a restore, so without this rule the server exists and "+
-				"nothing can connect to it", name, err)
-	}
-	if err := p.api.wait(ctx, op, p.opts.PollInterval); err != nil {
-		return secret.Value{}, err
+	if srv.access() == AccessPublic {
+		start, end, err := cidrRange(p.opts.AllowCIDR)
+		if err != nil {
+			return secret.Value{}, err
+		}
+		op, err = p.api.putFirewallRule(ctx, name, "antifailure", start, end)
+		if err != nil {
+			return secret.Value{}, fmt.Errorf("azurepg: creating the restored server's firewall rule: %w", err)
+		}
+		if err := p.api.wait(ctx, op, p.opts.PollInterval); err != nil {
+			return secret.Value{}, err
+		}
 	}
 
 	srv, err = p.api.getServer(ctx, name)
@@ -218,7 +218,11 @@ func (p *Provider) prepare(ctx context.Context, name string) (secret.Value, erro
 	if err != nil {
 		return secret.Value{}, err
 	}
-	return p.connString(host, p.port(), login, password, pickDatabase(p.opts.Database, found)), nil
+	database, err := pickDatabase(p.opts.Database, found)
+	if err != nil {
+		return secret.Value{}, err
+	}
+	return p.connString(host, p.port(), login, password, database), nil
 }
 
 // ListGoldens returns known versions, newest first.
@@ -250,8 +254,10 @@ func (p *Provider) ListGoldens(ctx context.Context) ([]provider.GoldenVersion, e
 			continue
 		}
 		meta := decodeMetadata(s.Tags)
+		created, _ := time.Parse(time.RFC3339Nano, s.Tags[createdTagKey])
 		out = append(out, provider.GoldenVersion{
 			ID:          version,
+			CreatedAt:   created,
 			SizeBytes:   s.Properties.Storage.StorageSizeGB * 1024 * 1024 * 1024,
 			RulesHash:   meta.RulesHash,
 			Provenance:  meta.Provenance,

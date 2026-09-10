@@ -22,6 +22,10 @@ import (
 )
 
 func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Authorization") != "Bearer AF_FAKE_AZUREPG_TOKEN" {
+		writeErr(w, http.StatusUnauthorized, "AuthenticationFailed", "an Azure identity is required")
+		return
+	}
 	if r.URL.Query().Get("api-version") == "" && !strings.HasPrefix(r.URL.Path, "/operations/") {
 		writeErr(w, http.StatusBadRequest, "MissingApiVersionParameter",
 			"The api-version query parameter (?api-version=) is required for all requests.")
@@ -75,6 +79,19 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		s.delete(w, rest[0])
 	case len(rest) == 3 && rest[1] == "firewallRules" && r.Method == http.MethodPut:
 		s.putFirewall(w, r, rest[0], rest[2])
+	case len(rest) == 2 && rest[1] == "databases" && r.Method == http.MethodGet:
+		s.mu.Lock()
+		server, ok := s.servers[rest[0]]
+		var names []map[string]string
+		if ok {
+			names = []map[string]string{{"name": "postgres"}, {"name": server.Database}}
+		}
+		s.mu.Unlock()
+		if !ok {
+			writeErr(w, http.StatusNotFound, "ResourceNotFound", "the flexible server was not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"value": names})
 	default:
 		writeErr(w, http.StatusNotFound, "NotFound",
 			"no such method: "+r.Method+" "+r.URL.Path)
@@ -85,8 +102,9 @@ func (s *Server) render(srv *fakeServer) map[string]any {
 	network := map[string]any{"publicNetworkAccess": "Enabled"}
 	if srv.Subnet != "" {
 		network = map[string]any{
-			"delegatedSubnetResourceId": srv.Subnet,
-			"publicNetworkAccess":       "Disabled",
+			"delegatedSubnetResourceId":   srv.Subnet,
+			"privateDnsZoneArmResourceId": srv.PrivateDNS,
+			"publicNetworkAccess":         "Disabled",
 		}
 	}
 	return map[string]any{
@@ -133,7 +151,7 @@ func (s *Server) get(w http.ResponseWriter, name string) {
 // restore serves a point in time restore.
 //
 // It models the three Azure behaviours the package comment names: the restored
-// server INHERITS the source's administrator login and password, it starts with
+// server inherits the source's password with a separate local login, starts with
 // NO firewall rules, and it is an independent copy whose bytes were moved.
 func (s *Server) restore(w http.ResponseWriter, r *http.Request, name string) {
 	var body struct {
@@ -143,6 +161,11 @@ func (s *Server) restore(w http.ResponseWriter, r *http.Request, name string) {
 			CreateMode             string `json:"createMode"`
 			SourceServerResourceID string `json:"sourceServerResourceId"`
 			PointInTimeUTC         string `json:"pointInTimeUTC"`
+			Network                struct {
+				Subnet string `json:"delegatedSubnetResourceId"`
+				DNS    string `json:"privateDnsZoneArmResourceId"`
+				Public string `json:"publicNetworkAccess"`
+			} `json:"network"`
 		} `json:"properties"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -175,7 +198,8 @@ func (s *Server) restore(w http.ResponseWriter, r *http.Request, name string) {
 		return
 	}
 	// Microsoft: a restore cannot cross between public and private access.
-	if src.Subnet != "" {
+	if src.Subnet != body.Properties.Network.Subnet || src.PrivateDNS != body.Properties.Network.DNS ||
+		(src.Subnet != "" && body.Properties.Network.Public != "Disabled") {
 		s.mu.Unlock()
 		writeErr(w, http.StatusBadRequest, "InvalidParameterValue",
 			"restore across public and private access is not supported")
@@ -192,12 +216,14 @@ func (s *Server) restore(w http.ResponseWriter, r *http.Request, name string) {
 		tags[k] = v
 	}
 	s.servers[name] = &fakeServer{
-		Name:     name,
-		Database: database,
-		Tags:     tags,
+		Subnet:     body.Properties.Network.Subnet,
+		PrivateDNS: body.Properties.Network.DNS,
+		Name:       name,
+		Database:   database,
+		Tags:       tags,
 		// Inherited from the source, which is the behaviour the provider's
 		// password reset exists to undo.
-		AdminLogin:    src.AdminLogin,
+		AdminLogin:    s.roleFor(name),
 		AdminPassword: src.AdminPassword,
 		StorageGB:     src.StorageGB,
 		// EMPTY. Azure does not copy firewall rules across a restore.
@@ -231,10 +257,15 @@ func (s *Server) patch(w http.ResponseWriter, r *http.Request, name string) {
 		return
 	}
 	if body.Properties.AdministratorLoginPassword != "" {
+		if err := s.ensureRole(srv.AdminLogin, body.Properties.AdministratorLoginPassword); err != nil {
+			s.mu.Unlock()
+			writeErr(w, http.StatusInternalServerError, "InternalServerError", err.Error())
+			return
+		}
 		srv.AdminPassword = body.Properties.AdministratorLoginPassword
 	}
-	for k, v := range body.Tags {
-		srv.Tags[k] = v
+	if body.Tags != nil {
+		srv.Tags = body.Tags
 	}
 	op := s.nextOp()
 	s.mu.Unlock()
@@ -258,7 +289,14 @@ func (s *Server) delete(w http.ResponseWriter, name string) {
 	op := s.nextOp()
 	s.mu.Unlock()
 
-	_, _ = s.admin.Exec(`DROP DATABASE IF EXISTS ` + quoteIdent(database) + ` WITH (FORCE)`)
+	if _, err := s.admin.Exec(`DROP DATABASE IF EXISTS ` + quoteIdent(database) + ` WITH (FORCE)`); err != nil {
+		writeErr(w, http.StatusInternalServerError, "InternalServerError", err.Error())
+		return
+	}
+	if _, err := s.admin.Exec(`DROP ROLE IF EXISTS ` + quoteIdent(srv.AdminLogin)); err != nil {
+		writeErr(w, http.StatusInternalServerError, "InternalServerError", err.Error())
+		return
+	}
 	w.Header().Set("Azure-AsyncOperation", "/operations/"+op)
 	writeJSON(w, http.StatusOK, nil)
 }

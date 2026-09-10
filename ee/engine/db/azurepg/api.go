@@ -22,10 +22,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
+
+	"github.com/antifailure/antifailure/ee/engine/cloudauth"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 )
 
 type httpDoer interface {
@@ -40,6 +45,7 @@ type armAPI struct {
 	subscription  string
 	resourceGroup string
 	client        httpDoer
+	token         func(context.Context) (string, error)
 }
 
 func newARMAPI(opts Options) (*armAPI, error) {
@@ -52,13 +58,29 @@ func newARMAPI(opts Options) (*armAPI, error) {
 	}
 	client := opts.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: 60 * time.Second}
+		guarded := airgap.Client(airgap.SiteAzurePostgres, 60*time.Second)
+		guarded.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		client = guarded
+	}
+	getenv := opts.Getenv
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	token := opts.Token
+	if token == nil {
+		source := &cloudauth.AzureTokenSource{
+			TenantID: getenv("AZURE_TENANT_ID"), ClientID: getenv("AZURE_CLIENT_ID"),
+			ClientSecret: getenv("AZURE_CLIENT_SECRET"), Authority: getenv("AZURE_AUTHORITY_HOST"),
+			Resource: defaultEndpoint,
+		}
+		token = source.Token
 	}
 	return &armAPI{
 		endpoint:      strings.TrimSuffix(endpoint, "/"),
 		subscription:  opts.Subscription,
 		resourceGroup: opts.ResourceGroup,
 		client:        client,
+		token:         token,
 	}, nil
 }
 
@@ -90,7 +112,8 @@ type storageProps struct {
 // public access does not. Microsoft states a restore cannot cross the two, so
 // this is read to refuse the crossing rather than to report it.
 type networkProps struct {
-	DelegatedSubnetResourceID string `json:"delegatedSubnetResourceId"`
+	DelegatedSubnetResourceID string `json:"delegatedSubnetResourceId,omitempty"`
+	PrivateDNSZoneResourceID  string `json:"privateDnsZoneArmResourceId,omitempty"`
 	PublicNetworkAccess       string `json:"publicNetworkAccess"`
 }
 
@@ -119,9 +142,10 @@ type restoreRequest struct {
 }
 
 type restoreProps struct {
-	CreateMode             string `json:"createMode"`
-	SourceServerResourceID string `json:"sourceServerResourceId"`
-	PointInTimeUTC         string `json:"pointInTimeUTC"`
+	CreateMode             string       `json:"createMode"`
+	SourceServerResourceID string       `json:"sourceServerResourceId"`
+	PointInTimeUTC         string       `json:"pointInTimeUTC"`
+	Network                networkProps `json:"network"`
 }
 
 func (a *armAPI) serverResourceID(name string) string {
@@ -190,6 +214,18 @@ type asyncResult struct {
 
 // do issues one request.
 func (a *armAPI) do(ctx context.Context, method, path string, body any, out any) (*asyncResult, error) {
+	base, err := url.Parse(a.endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("azurepg: invalid API endpoint: %w", err)
+	}
+	target, err := url.Parse(path)
+	if err != nil {
+		return nil, fmt.Errorf("azurepg: invalid API request address: %w", err)
+	}
+	target = base.ResolveReference(target)
+	if target.Scheme != base.Scheme || target.Host != base.Host || target.User != nil {
+		return nil, fmt.Errorf("azurepg: API continuation crossed the configured origin")
+	}
 	var reader io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
@@ -198,13 +234,21 @@ func (a *armAPI) do(ctx context.Context, method, path string, body any, out any)
 		}
 		reader = bytes.NewReader(encoded)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, a.endpoint+path, reader)
+	req, err := http.NewRequestWithContext(ctx, method, target.String(), reader)
 	if err != nil {
 		return nil, fmt.Errorf("azurepg: building %s %s: %w", method, path, err)
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	token, err := a.token(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("azurepg: obtaining an Azure identity: %w", err)
+	}
+	if token == "" {
+		return nil, fmt.Errorf("azurepg: the Azure identity returned an empty access token")
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := a.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("azurepg: %s %s: %w", method, path, err)
@@ -274,14 +318,8 @@ type database struct {
 // connection string pointing at an empty maintenance database and a branch that
 // reports healthy while holding none of their rows.
 func (a *armAPI) listDatabases(ctx context.Context, name string) ([]database, error) {
-	var page struct {
-		Value []database `json:"value"`
-	}
 	path := a.serverResourceID(name) + "/databases?api-version=" + apiVersion
-	if _, err := a.do(ctx, http.MethodGet, path, nil, &page); err != nil {
-		return nil, err
-	}
-	return page.Value, nil
+	return readPages[database](ctx, a, path)
 }
 
 func (a *armAPI) getServer(ctx context.Context, name string) (*server, error) {
@@ -293,18 +331,43 @@ func (a *armAPI) getServer(ctx context.Context, name string) (*server, error) {
 }
 
 func (a *armAPI) listServers(ctx context.Context) ([]server, error) {
-	var page struct {
-		Value    []server `json:"value"`
-		NextLink string   `json:"nextLink"`
+	return readPages[server](ctx, a, a.serversPath())
+}
+
+func readPages[T any](ctx context.Context, a *armAPI, path string) ([]T, error) {
+	var items []T
+	seen := map[string]bool{}
+	for path != "" {
+		if seen[path] || len(seen) >= 10000 {
+			return nil, fmt.Errorf("azurepg: collection continuation repeated or exceeded its page limit")
+		}
+		seen[path] = true
+		var page struct {
+			Value    []json.RawMessage `json:"value"`
+			NextLink string            `json:"nextLink"`
+		}
+		if _, err := a.do(ctx, http.MethodGet, path, nil, &page); err != nil {
+			return nil, err
+		}
+		for i, raw := range page.Value {
+			var item T
+			if err := json.Unmarshal(raw, &item); err != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				slog.Warn("azurepg: skipping malformed collection element", "index", i)
+				continue
+			}
+			items = append(items, item)
+		}
+		path = page.NextLink
 	}
-	if _, err := a.do(ctx, http.MethodGet, a.serversPath(), nil, &page); err != nil {
-		return nil, err
-	}
-	return page.Value, nil
+	return items, nil
 }
 
 // restore creates a new server from an existing one at a point in time.
-func (a *armAPI) restore(ctx context.Context, source, destination, location string, at time.Time, tags map[string]string) (*asyncResult, error) {
+func (a *armAPI) restore(ctx context.Context, source, destination, location string, access networkProps, at time.Time, tags map[string]string) (*asyncResult, error) {
+	access.PublicNetworkAccess = "Enabled"
+	if access.DelegatedSubnetResourceID != "" {
+		access.PublicNetworkAccess = "Disabled"
+	}
 	body := restoreRequest{
 		Location: location,
 		Tags:     tags,
@@ -312,6 +375,7 @@ func (a *armAPI) restore(ctx context.Context, source, destination, location stri
 			CreateMode:             "PointInTimeRestore",
 			SourceServerResourceID: a.serverResourceID(source),
 			PointInTimeUTC:         at.UTC().Format(time.RFC3339),
+			Network:                access,
 		},
 	}
 	return a.do(ctx, http.MethodPut, a.serverPath(destination), body, nil)
@@ -350,9 +414,6 @@ func (a *armAPI) wait(ctx context.Context, result *asyncResult, poll time.Durati
 		poll = 2 * time.Second
 	}
 	target := result.Poll
-	if strings.HasPrefix(target, a.endpoint) {
-		target = strings.TrimPrefix(target, a.endpoint)
-	}
 	ticker := time.NewTicker(poll)
 	defer ticker.Stop()
 	for {

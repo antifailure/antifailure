@@ -45,9 +45,6 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 		return provider.GoldenVersion{}, fmt.Errorf(
 			"cloudsql: cloning source instance %q: %w", source, err)
 	}
-	if err := p.api.waitForOperation(ctx, op, p.opts.PollInterval); err != nil {
-		return provider.GoldenVersion{}, err
-	}
 
 	// From here on the instance EXISTS and holds production's rows. Every
 	// return before publication has to remove it.
@@ -65,6 +62,9 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 			_ = p.api.waitForOperation(cleanup, op, p.opts.PollInterval)
 		}
 	}()
+	if err := p.api.waitForOperation(ctx, op, p.opts.PollInterval); err != nil {
+		return provider.GoldenVersion{}, err
+	}
 
 	if err := p.label(ctx, name, map[string]string{
 		labelKey:       labelValue,
