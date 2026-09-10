@@ -624,6 +624,7 @@ k8s-conformance cluster="af-conformance":
     # The ingress behavior must run too. This public wildcard DNS spelling
     # resolves only to loopback; the listener is not exposed on other hosts.
     python3 -c 'import socket; assert socket.gethostbyname("proof.127.0.0.1.sslip.io") == "127.0.0.1"'
+    kubectl --context "$ctx" -n kube-system wait --for=create deployment/traefik --timeout=5m
     kubectl --context "$ctx" -n kube-system rollout status deployment/traefik --timeout=5m
     kubectl --context "$ctx" wait --for=condition=Ready nodes --all --timeout=5m
     # AF_SKIP_SLOW is removed rather than passed through, and it is announced
