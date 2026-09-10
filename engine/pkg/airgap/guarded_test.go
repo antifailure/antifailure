@@ -52,16 +52,17 @@ var exempt = map[string]string{
 	// in proxy.json, and the air gapped hook refuses an environment whose
 	// policy would have it reach anything, which is the same control one step
 	// earlier.
-	"engine/cmd/af-proxy/main.go":        "the sidecar cannot import engine/pkg",
-	"engine/cmd/af-proxy/synth.go":       "the sidecar cannot import engine/pkg",
-	"engine/cmd/af-proxy/destination.go": "the sidecar cannot import engine/pkg",
-	"engine/cmd/af-proxy/dns.go":         "the sidecar cannot import engine/pkg",
-	"engine/cmd/af-proxy/h2.go":          "the sidecar cannot import engine/pkg",
-	"engine/cmd/af-proxy/mitm.go":        "the sidecar cannot import engine/pkg",
-	"engine/cmd/af-proxy/transparent.go": "the sidecar cannot import engine/pkg",
-	"engine/cmd/af-proxy/capture.go":     "the sidecar cannot import engine/pkg",
-	"engine/cmd/af-proxy/sandbox.go":     "the sidecar cannot import engine/pkg",
-	"engine/cmd/af-proxy/internal.go":    "the sidecar cannot import engine/pkg",
+	"engine/cmd/af-proxy/main.go":         "the sidecar cannot import engine/pkg",
+	"engine/cmd/af-proxy/synth.go":        "the sidecar cannot import engine/pkg",
+	"engine/cmd/af-proxy/destination.go":  "the sidecar cannot import engine/pkg",
+	"engine/cmd/af-proxy/dns.go":          "the sidecar cannot import engine/pkg",
+	"engine/cmd/af-proxy/h2.go":           "the sidecar cannot import engine/pkg",
+	"engine/cmd/af-proxy/mitm.go":         "the sidecar cannot import engine/pkg",
+	"engine/cmd/af-proxy/transparent.go":  "the sidecar cannot import engine/pkg",
+	"engine/cmd/af-proxy/capture.go":      "the sidecar cannot import engine/pkg",
+	"engine/cmd/af-proxy/sandbox.go":      "the sidecar cannot import engine/pkg",
+	"engine/cmd/af-proxy/internal.go":     "the sidecar cannot import engine/pkg",
+	"engine/cmd/af-proxy/network_gate.go": "trusted pod startup probes must attempt direct sockets to detect a policy that is not enforced; fixed public endpoints carry no customer data",
 
 	// The application's own image. What a docker build fetches is a base image
 	// and whatever the repository's package manager resolves, all of it inside

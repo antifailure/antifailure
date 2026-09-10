@@ -50,6 +50,38 @@ func trueRef() *bool          { b := true; return &b }
 func int32Ref(n int32) *int32 { return &n }
 func int64Ref(n int64) *int64 { return &n }
 
+// networkGateContainer is trusted code with no customer environment, mounts,
+// service account token or network capabilities. Its init status gates every
+// process in the same pod, including replacement replicas on another node.
+func networkGateContainer(image, proxyIP string) corev1.Container {
+	return corev1.Container{
+		Name: "af-network-gate", Image: image,
+		TerminationMessagePolicy: corev1.TerminationMessageFallbackToLogsOnError,
+		Command:                  []string{"/af-proxy"},
+		Args:                     []string{"-network-gate", "-gate-control", net.JoinHostPort(proxyIP, strconv.Itoa(ProxyPort))},
+		SecurityContext: &corev1.SecurityContext{
+			AllowPrivilegeEscalation: falseRef(), ReadOnlyRootFilesystem: trueRef(),
+			SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
+			RunAsNonRoot:   trueRef(), RunAsUser: int64Ref(65532),
+			Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+		},
+	}
+}
+
+func (r *Runtime) networkGate(proxyIP string, resources corev1.ResourceRequirements) corev1.Container {
+	// ensureImages and startProxy resolve this before any customer template
+	// is submitted. An absent image makes Kubernetes reject the pod rather
+	// than fall back to executing a customer's image as a security probe.
+	r.proxyOnce.Lock()
+	defer r.proxyOnce.Unlock()
+	c := networkGateContainer(r.proxyRef, proxyIP)
+	// An init container with no limits would silently drop an otherwise
+	// Guaranteed pod into Burstable. Init requests use max, not sum, so the
+	// same budget preserves the application's declared scheduling footprint.
+	c.Resources = resources
+	return c
+}
+
 // namespaceFor builds the environment's namespace.
 func (r *Runtime) namespaceObject(envID string) *corev1.Namespace {
 	labels := labelsFor(envID, "namespace")
@@ -435,6 +467,7 @@ func (r *Runtime) proxyObjects(
 						}},
 						SecurityContext: &corev1.SecurityContext{
 							AllowPrivilegeEscalation: falseRef(),
+							SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 							// The sidecar reads its configuration and writes
 							// its decisions to stdout. It opens no file, so
 							// there is nothing for a writable root to be for.
@@ -582,6 +615,7 @@ func containerFor(spec provider.EnvSpec, s provider.ServiceSpec, migration bool)
 		Env:   serviceEnv(spec, s, migration),
 		SecurityContext: &corev1.SecurityContext{
 			AllowPrivilegeEscalation: falseRef(),
+			SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 		},
 	}
@@ -680,8 +714,9 @@ func (r *Runtime) deploymentFor(
 		// reason: a pod that keeps failing lands in CrashLoopBackOff, which
 		// Status reports, and its exit code is kept in the container's last
 		// termination state rather than being lost on the restart.
-		RestartPolicy: corev1.RestartPolicyAlways,
-		Containers:    []corev1.Container{containerFor(spec, s, false)},
+		RestartPolicy:  corev1.RestartPolicyAlways,
+		Containers:     []corev1.Container{containerFor(spec, s, false)},
+		InitContainers: []corev1.Container{r.networkGate(resolverIP, resourcesFor(s))},
 	}
 	if spec.CACertPEM != "" {
 		pod.Volumes = append(pod.Volumes, corev1.Volume{
@@ -798,6 +833,7 @@ func (r *Runtime) oneShotJob(
 		DNSConfig:                    dnsConfig,
 		RestartPolicy:                corev1.RestartPolicyNever,
 		Containers:                   []corev1.Container{container},
+		InitContainers:               []corev1.Container{r.networkGate(resolverIP, container.Resources)},
 	}
 	if spec.CACertPEM != "" {
 		pod.Volumes = append(pod.Volumes, corev1.Volume{
