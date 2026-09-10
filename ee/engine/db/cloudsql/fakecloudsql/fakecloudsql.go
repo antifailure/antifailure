@@ -179,6 +179,12 @@ func New(opts Options) (*Server, error) {
 // URL is the endpoint a provider points at.
 func (s *Server) URL() string { return s.http.URL }
 
+func (s *Server) ResourceCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.instances)
+}
+
 // Close stops the fake and drops every database it made.
 //
 // It RETURNS what it could not clean up rather than swallowing it. A fake that

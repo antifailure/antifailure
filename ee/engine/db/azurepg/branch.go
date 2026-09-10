@@ -68,6 +68,9 @@ func (p *Provider) Branch(ctx context.Context, version string, envID string) (pr
 				"it would hand an environment a copy of production that no masking pass "+
 				"has been proved to have touched", version))
 	}
+	if err := p.refuseAccessCrossing(golden); err != nil {
+		return provider.Branch{}, err
+	}
 
 	if p.opts.MaxBranches > 0 {
 		count, err := p.countBranches(ctx)
@@ -84,7 +87,7 @@ func (p *Provider) Branch(ctx context.Context, version string, envID string) (pr
 		}
 	}
 
-	op, err := p.api.restore(ctx, goldenName, name, golden.Location, p.now().UTC(), map[string]string{
+	op, err := p.api.restore(ctx, goldenName, name, golden.Location, golden.Properties.Network, p.now().UTC(), map[string]string{
 		tagKey:    tagValue,
 		envTagKey: envID,
 		// The golden this branch came from, so DestroyGolden can refuse to
@@ -94,9 +97,6 @@ func (p *Provider) Branch(ctx context.Context, version string, envID string) (pr
 	if err != nil {
 		return provider.Branch{}, fmt.Errorf(
 			"azurepg: restoring golden %q into %q: %w", goldenName, name, err)
-	}
-	if err := p.api.wait(ctx, op, p.opts.PollInterval); err != nil {
-		return provider.Branch{}, err
 	}
 
 	created := false
@@ -110,6 +110,9 @@ func (p *Provider) Branch(ctx context.Context, version string, envID string) (pr
 			_ = p.api.wait(cleanup, op, p.opts.PollInterval)
 		}
 	}()
+	if err := p.api.wait(ctx, op, p.opts.PollInterval); err != nil {
+		return provider.Branch{}, err
+	}
 
 	// The post restore work Azure does not do: reset the inherited
 	// administrator password and create the firewall rule. See prepare.
@@ -185,7 +188,16 @@ func (p *Provider) ConnString(ctx context.Context, b provider.Branch, mode provi
 		return secret.Value{}, fmt.Errorf(
 			"azurepg: server %q reports no fully qualified domain name", name)
 	}
-	return p.connString(host, 5432, adminUser, p.branchPassword(name), "postgres"), nil
+	found, err := p.api.listDatabases(ctx, name)
+	if err != nil {
+		return secret.Value{}, err
+	}
+	database, err := pickDatabase(p.opts.Database, found)
+	if err != nil {
+		return secret.Value{}, err
+	}
+	return p.connString(host, p.port(), adminLoginOf(s, p.opts.AdminUser),
+		p.branchPassword(name), database), nil
 }
 
 // Inventory lists everything this provider currently holds.
