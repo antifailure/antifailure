@@ -4154,12 +4154,21 @@ func main() {
 ` + "`" + "`" + "`" + `
 
 Five things can be registered: ` + "`" + `AddDatabaseProvider` + "`" + `, ` + "`" + `AddDatastoreProvider` + "`" + `,
-` + "`" + `AddRuntimeProvider` + "`" + `, ` + "`" + `AddGoldenStore` + "`" + ` and ` + "`" + `AddEmulator` + "`" + `. Three of them are
-selected by the engine today. ` + "`" + `AddDatastoreProvider` + "`" + ` and ` + "`" + `AddEmulator` + "`" + ` have no
-lifecycle behind them yet, because the manifest declares one datastore and no
-egress rule can name an emulator, so registering either of those does nothing
-beyond appearing in ` + "`" + `af license status` + "`" + `. Each socket says so in its own
+` + "`" + `AddRuntimeProvider` + "`" + `, ` + "`" + `AddGoldenStore` + "`" + ` and ` + "`" + `AddEmulator` + "`" + `. The engine consults
+all five, and each socket says where a manifest reaches it in its own
 documentation rather than leaving you to discover it.
+
+This paragraph used to say that three of the five were selected and that
+` + "`" + `AddDatastoreProvider` + "`" + ` and ` + "`" + `AddEmulator` + "`" + ` had no lifecycle behind them. Both
+halves became false, at different times and for different reasons. A datastore
+has been able to name a provider since #294, which resolves
+` + "`" + `datastores[].provider` + "`" + ` through the registry before falling back to the built
+in one. An egress rule can name an emulator as of the change that added
+` + "`" + `emulate` + "`" + ` to ` + "`" + `egress.rules[].mode` + "`" + `, which resolves the name before anything
+starts and refuses the environment when nothing answers to it. A page telling
+an author that the socket they are registering into does nothing is worse than
+a page that omits the socket, because it is the sentence that stops them
+looking.
 
 Four rules are worth knowing before you rely on this.
 
