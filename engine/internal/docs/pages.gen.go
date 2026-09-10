@@ -4763,10 +4763,33 @@ of the one before it, so altering an old entry breaks every entry after it.
 ### What one batch looks like
 
 Batched rather than one entry per request, because the batch is what carries the
-proof:
+proof. This is the JSON body's field schema; organization identifiers are UUID
+strings and ` + "`" + `occurredAt` + "`" + ` is an ISO timestamp:
 
-` + "`" + "`" + "`" + `json
-{"entries":[{"seq":82,"orgId":"2b8c3b13-cb7b-4a4b-b895-2ec495ac3138","actor":"scim","action":"scim.user.created","targetType":"user","targetId":"230bef84-511e-4abd-91b3-5d744778e3da","origin":"scim","detail":{"active":true,"userName":"ada@example.test"},"occurredAt":"2026-09-09T14:28:22.969Z","entryHash":"c9945c32d8080d853706af010221851cd81448008c72e7230a2967f97fc0df9e"}],"manifest":{"org":"2b8c3b13-cb7b-4a4b-b895-2ec495ac3138","count":1,"firstSeq":82,"lastSeq":82,"headHash":"c9945c32d8080d853706af010221851cd81448008c72e7230a2967f97fc0df9e","digest":"00b8b0b63b2ddaa329a59e00b3a520d870f5227ac34adde991280c6fe395029c","signature":"9bd6b494cf1f4de8a8e71af737346bb0a1d504c16f791d30bd81c517d44c58ab"}}
+` + "`" + "`" + "`" + `typescript
+interface AuditBatch {
+  entries: Array<{
+    seq: number
+    orgId: string
+    actor: string
+    action: string
+    targetType: string
+    targetId: string | null
+    origin: string
+    detail: Record<string, unknown>
+    occurredAt: string
+    entryHash: string
+  }>
+  manifest: {
+    org: string
+    count: number
+    firstSeq: number
+    lastSeq: number
+    headHash: string
+    digest: string
+    signature: string
+  }
+}
 ` + "`" + "`" + "`" + `
 
 ` + "`" + `headHash` + "`" + ` is the chain hash of the last entry in the batch, and ` + "`" + `digest` + "`" + ` is a
