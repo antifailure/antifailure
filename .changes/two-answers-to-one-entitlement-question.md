@@ -1,0 +1,97 @@
+# fixed
+
+There were two entitlement systems and they did not know about each other.
+
+The engine has `license.Feature`, fourteen names a signed license may carry. The
+control plane has `organizations.plan` and `entitlements.ts`, which is real,
+tested, and about quotas. Nothing reconciled them, so "what does this customer
+get" had no single answer, and a self hosted license and a hosted plan could
+disagree in silence.
+
+`ee/engine/feature/catalogue.go` is now the one answer. Every feature carries
+what it is, where it is enforced as `path:symbol`, and, when it is not refused,
+which reason applies: it is refused by the control plane rather than the engine,
+it is implemented and deliberately free, it is built and loaded by no binary, or
+the capability does not exist.
+
+Of the fourteen, ten are refused when a license does not name them, eight by
+the engine and two by the control plane. Four change nothing whatever when they
+are absent, and the page says so.
+
+THAT NUMBER MOVED FOUR TIMES WHILE THIS WAS BEING WRITTEN, from five to seven
+to nine to ten, and every move was the product changing rather than the
+measurement being wrong. Three features were filed as not built on a measurement
+that was true when it was taken and that named its own expiry in its own text.
+`audit_stream` had a socket in the community engine with nothing plugged into
+it. `multi_runtime` had a scheduler with no caller, no way for a manifest to ask
+for a placement, and no importable home for a check. `air_gapped` had no
+reference in any Go code outside the constant and the generator's copy of the
+name list, and its reason said in so many words that the lane which would build
+it had not landed. All three shipped afterwards. Then `cloud_database` and
+`cloud_runtime` arrived as two new names in the license with `ee/engine/cloudgate`
+already refusing them per call, so they were gated before this catalogue had a
+row for either.
+
+That last move is the one worth reading, because the rule it broke is written in
+this same change. A reason may describe the tree and may name a commit it is
+true of, and it must NOT describe a future: a forward reference is unverifiable
+when it is written and silently false afterwards. The `air_gapped` row named a
+lane that had not landed, the lane landed, and nothing in the repository could
+tell. The count itself cannot drift, because the sentence on the page is
+generated from the catalogue rather than restated from the last time somebody
+counted, so the page now reads ten. The prose beside it is what needed a rule,
+and now has one.
+
+THE FIRST VERSION OF THIS CATALOGUE PUT FOUR OF THE TWELVE THEN SELLABLE IN THE
+WRONG PLACE, and the four are worth recording because they failed in two
+opposite directions with one cause. Every one of them found real code and never
+asked who that code served.
+
+Two were UNDER claimed, because the measurement read one language. Enforcement
+lives in Go and in TypeScript; the count was of `feature.Enabled` call sites,
+which only the engine has. `sso` and `scim` came back zero and were published as
+features nobody has, paid or not, while the enterprise control plane refuses
+both by name with a 402. A zero in that count means not enforced by the ENGINE,
+which is a different fact from not enforced.
+
+Two were OVER claimed, because the code served a different subject. `billing`
+read as free because `billingRouter` is real, mounted and ungated, and that code
+bills the customer FOR Antifailure, while the licensed feature would meter on
+the customer's own behalf and does not exist. `enterprise_dashboard` read as
+covered by the plan because the console really is refused below the enterprise
+tier, which is our own funnel enforcing our own pricing rather than anything a
+license grants. Both are named in `notShipped` and cannot be sold at all.
+
+Two checks now hold those two failures, and NEITHER COVERS THE OTHER'S CASE,
+which is stated here so nobody assumes one gate closes the class. A cross
+language check compares the catalogue's state claims against the TypeScript
+registry's declarations in both directions, and compares the named site byte for
+byte against what that registry actually declared; it catches `sso` and `scim`
+and cannot catch `billing`, because that row was true about the code it named. A
+second check holds the catalogue to `notShipped`, whose own comment says it is
+the only place that has to change when one of these is built; it catches
+`billing` and `enterprise_dashboard` and cannot catch `sso` and `scim`, because
+those are sellable and were merely described wrongly. Nothing automated found
+`billing`. A person read the catalogue's own prose and asked who the code was
+for.
+
+A state meaning "refused on the plan as a whole" has been REMOVED rather than
+left unoccupied. It was the affordance that made the wrong classification
+available, and a refusal keyed on our own pricing tiers does not describe
+anything a license sells.
+
+The rest of the scaffolding stands. A feature in the license and not the
+catalogue fails. A `feature.Declare` with no catalogue entry fails. A row
+claiming enforcement at a file with no call refusing that exact feature fails,
+which is how `compliance_packs` was found to have spent its whole
+life declared at `compliance.Pack.Evaluate`, a function that takes no context
+and therefore cannot ask about a license at all. For each feature the catalogue
+calls enforced in the engine, the real entry point is called twice, once with a
+license granting everything else and once with everything, and the behaviour has
+to differ. The control plane's half is checked from the control plane, because a
+developer renaming `orgProcedure` does not run a Go module that is deliberately
+outside the workspace.
+
+The licensing page's feature table and its count are generated from the
+catalogue and say the number out loud, including when the number is
+unflattering.

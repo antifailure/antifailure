@@ -50,15 +50,44 @@ func TestAValueOfTheWrongTypeInTheContextGrantsNothing(t *testing.T) {
 	require.False(t, feature.Enabled(ctx, license.FeatureSSO))
 }
 
-func TestDeclaredSitesAreRecordedForTheDeadCodeCheck(t *testing.T) {
+func TestTheRegistryRecordsWhatWasDeclaredAndNothingElse(t *testing.T) {
 	t.Parallel()
-	// A feature a license can grant and nothing checks is a feature that is
-	// silently free. The registry is what makes that visible, so it has to
-	// actually record.
-	feature.Declare(license.FeatureSSO, "ee/web/auth.Handler")
-	require.Contains(t, feature.Sites(license.FeatureSSO), "ee/web/auth.Handler")
-	require.Contains(t, feature.Declared(), license.FeatureSSO)
-	require.Empty(t, feature.Sites(license.FeatureCompliance))
+	// A UNIT TEST OF THE REGISTRY, and the rename says so because the old name
+	// did not. This was TestDeclaredSitesAreRecordedForTheDeadCodeCheck, and it
+	// was not the dead code check and could not have been. It declared a site
+	// naming ee/web/auth.Handler, a package that has never existed, and then
+	// asserted Sites(FeatureCompliance) was empty. That assertion passed because
+	// this binary links neither the compliance package nor any other enforcing
+	// one, so nothing could have filled the registry, so it could not fail for
+	// any reason to do with the product. It is the shape of check this whole
+	// lane exists to find, and it was inside the package doing the finding.
+	//
+	// The dead code check is real and it is in ee/engine/cmd/af, because that
+	// is the only package where main.go's imports have run every init and the
+	// registry is populated at all. It cannot be written here: this package is
+	// imported BY compliance, secrets and policyenforce, so importing them back
+	// is a cycle.
+	//
+	// A name no licence carries, deliberately. Declaring a real feature here
+	// would put a site in the global registry for a feature this build does not
+	// enforce, which is the false signal the registry exists to make visible.
+	const fabricated = license.Feature("a_name_no_licence_carries")
+
+	require.Empty(t, feature.Sites(fabricated),
+		"the registry answered for a feature nothing has declared")
+
+	feature.Declare(fabricated, "feature/feature_test.go:TestTheRegistryRecords")
+	require.Contains(t, feature.Sites(fabricated),
+		"feature/feature_test.go:TestTheRegistryRecords")
+	require.Contains(t, feature.Declared(), fabricated)
+
+	// Sites answers about the feature it was asked about. Without this, a Sites
+	// that returned every recorded site regardless of key would satisfy every
+	// assertion above, and every reconciliation built on it would be comparing
+	// one list against itself.
+	require.NotContains(t, feature.Sites(license.FeatureBilling),
+		"feature/feature_test.go:TestTheRegistryRecords",
+		"a site declared for one feature was returned for another")
 }
 
 func TestAnExpiredLicenseInAContextGrantsNothing(t *testing.T) {

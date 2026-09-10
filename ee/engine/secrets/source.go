@@ -55,7 +55,7 @@ import (
 func init() {
 	// Recorded so that a feature which is sold and never checked shows up as
 	// such. See ee/engine/feature.
-	feature.Declare(license.FeatureSecrets, "ee/engine/secrets.Source")
+	feature.Declare(license.FeatureSecrets, "secrets/source.go:Source.Available")
 }
 
 // Backend is one store, reduced to the two things a lookup needs.

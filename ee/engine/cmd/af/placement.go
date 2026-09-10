@@ -30,6 +30,12 @@ import (
 )
 
 func init() {
+	// path:symbol, the same form every other declaration uses, because the
+	// registry checks and the licence catalogue both parse this field and a
+	// sentence with a comma in it is readable by neither. That the gate is
+	// edition.Permits rather than feature.Enabled is explained in the
+	// catalogue's entry for this feature, which is where an explanation belongs
+	// and where a reader looking for one will be.
 	feature.Declare(license.FeatureMultiRuntime,
-		"engine/internal/env.(*Orchestrator).placement, gated through edition.Permits")
+		"engine/internal/env/env.go:Orchestrator.placement")
 }

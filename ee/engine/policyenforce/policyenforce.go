@@ -36,7 +36,7 @@ import (
 func init() {
 	// Recorded so that a feature which is sold and never checked shows up as
 	// such. See ee/engine/feature.
-	feature.Declare(license.FeaturePolicy, "ee/engine/policyenforce.Hook")
+	feature.Declare(license.FeaturePolicy, "policyenforce/policyenforce.go:Hook.Check")
 }
 
 // Policy is what an organization requires of every repository.
