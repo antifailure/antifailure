@@ -107,7 +107,7 @@ func TestTheFakeDoesNotCopyFirewallRules(t *testing.T) {
 
 	// A restore driven straight through the provider's golden path, whose
 	// server the provider has not yet opened.
-	p, err := azurepg.New(optionsWithoutFirewall(t, server))
+	p, err := azurepg.NewWithFixtureRoles(optionsWithoutFirewall(t, server))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = p.Close() })
 	_, err = p.RefreshGolden(ctx, goldenSpec())

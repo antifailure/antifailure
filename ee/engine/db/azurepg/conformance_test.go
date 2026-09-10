@@ -41,7 +41,7 @@ func TestConformance(t *testing.T) {
 	server := newFake(t, conformance.DefaultSeedSQL)
 
 	conformance.RunDatabase(t, func(t *testing.T) provider.Database {
-		p, err := azurepg.New(options(t, server))
+		p, err := azurepg.NewWithFixtureRoles(options(t, server))
 		require.NoError(t, err)
 		return p
 	}, conformanceOptions())

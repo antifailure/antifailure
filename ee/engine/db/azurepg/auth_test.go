@@ -81,6 +81,7 @@ func TestRegisteredProviderUsesTheSelectedApplicationDatabase(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "/billing", parsed.Path)
 	require.Equal(t, "chosen-admin", parsed.User.Username())
+	require.Equal(t, "verify-full", parsed.Query().Get("sslmode"))
 }
 func TestAzureIdentityFailuresNeverReachTheDatabaseAPI(t *testing.T) {
 	for _, broken := range []bool{false, true} {

@@ -144,7 +144,7 @@ func options(t *testing.T, server *fakeazurepg.Server) azurepg.Options {
 
 func newProvider(t *testing.T, server *fakeazurepg.Server) *azurepg.Provider {
 	t.Helper()
-	p, err := azurepg.New(options(t, server))
+	p, err := azurepg.NewWithFixtureRoles(options(t, server))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = p.Close() })
 	return p

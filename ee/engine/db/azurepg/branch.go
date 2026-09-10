@@ -30,9 +30,14 @@ const branchPrefix = "b"
 // no access to this one's memory, and on Azure a duplicate is not merely a
 // wasted instance, it is a second server billed by the hour.
 func (p *Provider) Branch(ctx context.Context, version string, envID string) (provider.Branch, error) {
-	if p.closed {
+	if p.closed.Load() {
 		return provider.Branch{}, fmt.Errorf("azurepg: provider is closed")
 	}
+	release, err := p.admit(ctx)
+	if err != nil {
+		return provider.Branch{}, err
+	}
+	defer release()
 	name := p.serverName(branchPrefix, envID)
 
 	// Idempotence first, and before the limit check. An existing branch must
@@ -40,8 +45,14 @@ func (p *Provider) Branch(ctx context.Context, version string, envID string) (pr
 	// `af up` on the last environment that fits would refuse the environment
 	// that already exists.
 	if existing, err := p.api.getServer(ctx, name); err == nil {
-		if !isOurs(existing) {
+		if !p.isOurs(existing) {
 			return provider.Branch{}, fmt.Errorf("azurepg: server %q: %w", name, ErrNotOurs)
+		}
+		if existing.Tags[envTagKey] != envID || existing.Tags[fromTagKey] != version || existing.Tags[goldenTagKey] != "" {
+			return provider.Branch{}, fmt.Errorf("azurepg: existing server does not match the requested environment and golden")
+		}
+		if err := p.finishBranch(ctx, existing); err != nil {
+			return provider.Branch{EnvID: envID, From: version, ProviderRef: name}, err
 		}
 		return provider.Branch{EnvID: envID, From: version, ProviderRef: name}, nil
 	} else if !notFound(err) {
@@ -58,7 +69,7 @@ func (p *Provider) Branch(ctx context.Context, version string, envID string) (pr
 		}
 		return provider.Branch{}, err
 	}
-	if !isOurs(golden) {
+	if !p.isOurs(golden) {
 		return provider.Branch{}, fmt.Errorf("azurepg: golden %q: %w", goldenName, ErrNotOurs)
 	}
 	if golden.Tags[versionTagKey] != version {
@@ -88,14 +99,15 @@ func (p *Provider) Branch(ctx context.Context, version string, envID string) (pr
 	}
 
 	op, err := p.api.restore(ctx, goldenName, name, golden.Location, golden.Properties.Network, p.now().UTC(), map[string]string{
-		tagKey:    tagValue,
-		envTagKey: envID,
+		tagKey:       tagValue,
+		envTagKey:    envID,
+		sourceTagKey: normaliseServerName(p.opts.SourceServer),
 		// The golden this branch came from, so DestroyGolden can refuse to
 		// remove one that is still referenced.
 		fromTagKey: version,
 	})
-	if err != nil {
-		return provider.Branch{}, fmt.Errorf(
+	if err != nil && op == nil {
+		return provider.Branch{EnvID: envID, From: version, ProviderRef: name}, fmt.Errorf(
 			"azurepg: restoring golden %q into %q: %w", goldenName, name, err)
 	}
 
@@ -110,13 +122,20 @@ func (p *Provider) Branch(ctx context.Context, version string, envID string) (pr
 			_ = p.api.wait(cleanup, op, p.opts.PollInterval)
 		}
 	}()
+	if err != nil {
+		return provider.Branch{}, fmt.Errorf("azurepg: accepted restore response could not be read: %w", err)
+	}
 	if err := p.api.wait(ctx, op, p.opts.PollInterval); err != nil {
 		return provider.Branch{}, err
 	}
 
 	// The post restore work Azure does not do: reset the inherited
 	// administrator password and create the firewall rule. See prepare.
-	if _, err := p.prepare(ctx, name); err != nil {
+	restored, err := p.api.getServer(ctx, name)
+	if err != nil {
+		return provider.Branch{}, err
+	}
+	if err := p.finishBranch(ctx, restored); err != nil {
 		return provider.Branch{}, err
 	}
 
@@ -127,6 +146,41 @@ func (p *Provider) Branch(ctx context.Context, version string, envID string) (pr
 		ProviderRef: name,
 		CreatedAt:   p.now().UTC(),
 	}, nil
+}
+
+// A retry after process loss resumes preparation before handing out a branch.
+func (p *Provider) finishBranch(ctx context.Context, srv *server) error {
+	for srv.Properties.State != "Ready" {
+		if srv.Properties.State == "Failed" || srv.Properties.State == "Dropping" {
+			return fmt.Errorf("azurepg: restored server is %s", srv.Properties.State)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(p.opts.PollInterval):
+		}
+		current, err := p.api.getServer(ctx, srv.Name)
+		if err != nil {
+			return err
+		}
+		srv = current
+	}
+	if srv.Tags[preparedTagKey] == p.preparationReceipt(srv) {
+		return nil
+	}
+	if _, err := p.prepare(ctx, srv.Name); err != nil {
+		return err
+	}
+	tags := make(map[string]string, len(srv.Tags)+1)
+	for key, value := range srv.Tags {
+		tags[key] = value
+	}
+	tags[preparedTagKey] = p.preparationReceipt(srv)
+	op, err := p.api.patchServer(ctx, srv.Name, map[string]any{"tags": tags})
+	if err != nil {
+		return err
+	}
+	return p.api.wait(ctx, op, p.opts.PollInterval)
 }
 
 // Reset returns provider.ErrUnsupported.
@@ -154,7 +208,7 @@ func (p *Provider) Destroy(ctx context.Context, b provider.Branch) error {
 		}
 		return err
 	}
-	if !isOurs(s) {
+	if !p.isOurs(s) {
 		return fmt.Errorf("azurepg: server %q: %w", name, ErrNotOurs)
 	}
 	op, err := p.api.deleteServer(ctx, name)
@@ -175,6 +229,9 @@ func (p *Provider) Destroy(ctx context.Context, b provider.Branch) error {
 // which is the field a caller is supposed to read, and the address it gets is
 // the one that works.
 func (p *Provider) ConnString(ctx context.Context, b provider.Branch, mode provider.ConnMode) (secret.Value, error) {
+	if p.closed.Load() {
+		return secret.Value{}, fmt.Errorf("azurepg: provider is closed")
+	}
 	name := b.ProviderRef
 	if name == "" {
 		name = p.serverName(branchPrefix, b.EnvID)
@@ -213,7 +270,7 @@ func (p *Provider) Inventory(ctx context.Context) ([]provider.Resource, error) {
 	var out []provider.Resource
 	for i := range servers {
 		s := &servers[i]
-		if !isOurs(s) {
+		if !p.isOurs(s) {
 			continue
 		}
 		kind := "branch"
@@ -273,7 +330,7 @@ func (p *Provider) countBranches(ctx context.Context) (int, error) {
 	count := 0
 	for i := range servers {
 		s := &servers[i]
-		if isOurs(s) && s.Tags[goldenTagKey] == "" {
+		if p.isOurs(s) && s.Tags[goldenTagKey] == "" {
 			count++
 		}
 	}

@@ -26,7 +26,7 @@ func TestCollectionsContinuePastMalformedRowsAndFirstPage(t *testing.T) {
 					fmt.Fprint(w, `{"value":[{"name":"last"}]}`)
 					return
 				}
-				fmt.Fprintf(w, `{"value":[{"name":"first"},23,null,{"name":42}],"nextLink":%q}`, host+"/second")
+				fmt.Fprintf(w, `{"value":[{"name":"first"},23,null,{}, {"name":42}],"nextLink":%q}`, host+"/second")
 			}))
 			defer srv.Close()
 			host = srv.URL
@@ -97,4 +97,52 @@ func TestDatabaseAmbiguityRequiresAnExplicitSelection(t *testing.T) {
 	selected, err := pickDatabase("billing", found)
 	require.NoError(t, err)
 	require.Equal(t, "billing", selected)
+}
+
+func TestAzureLocationDisplayNameMatchesItsCanonicalRegion(t *testing.T) {
+	p := &Provider{opts: Options{Location: "centralus", AllowCIDR: "203.0.113.4/32"}}
+	require.NoError(t, p.refuseAccessCrossing(&server{Location: "Central US"}))
+	require.ErrorContains(t, p.refuseAccessCrossing(&server{Location: "East US"}), "differs")
+}
+
+func TestRestoreSendsTheCanonicalLocation(t *testing.T) {
+	var location string
+	var restoreAt string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request restoreRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			w.WriteHeader(400)
+			return
+		}
+		location = request.Location
+		restoreAt = request.Properties.PointInTimeUTC
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	api, err := newARMAPI(Options{Endpoint: srv.URL, Token: func(context.Context) (string, error) { return "AF_FAKE_TOKEN", nil }})
+	require.NoError(t, err)
+	at := time.Date(2026, 9, 10, 1, 2, 3, 123456789, time.UTC)
+	_, err = api.restore(context.Background(), "source", "copy", "Central US", networkProps{}, at, nil)
+	require.NoError(t, err)
+	require.Equal(t, "centralus", location)
+	require.Equal(t, at.Format(time.RFC3339Nano), restoreAt)
+}
+
+func TestResourceNamesSeparateSourcesAndAccounts(t *testing.T) {
+	base := Options{Subscription: "one", ResourceGroup: "group", SourceServer: "source"}
+	first := (&Provider{opts: base}).serverName(branchPrefix, "same-environment")
+	for _, field := range []string{"source", "group", "subscription"} {
+		t.Run(field, func(t *testing.T) {
+			changed := base
+			switch field {
+			case "source":
+				changed.SourceServer = "another"
+			case "group":
+				changed.ResourceGroup = "another"
+			case "subscription":
+				changed.Subscription = "another"
+			}
+			require.NotEqual(t, first, (&Provider{opts: changed}).serverName(branchPrefix, "same-environment"))
+		})
+	}
 }
