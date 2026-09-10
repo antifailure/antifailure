@@ -493,6 +493,7 @@ egress:
 | ` + "`" + `sandbox` + "`" + ` | Sent to the provider's sandbox, with the sandbox credential substituted for the one the application holds. |
 | ` + "`" + `capture` + "`" + ` | Answered locally and recorded, so a workflow finishes and nothing leaves. |
 | ` + "`" + `mock` + "`" + ` | Answered from a fixture pack, with no network at all. |
+| ` + "`" + `emulate` + "`" + ` | Answered by an emulator running inside the environment, at the provider's own hostname, so the application needs no endpoint override. |
 | ` + "`" + `synth` + "`" + ` | Answered by a model, for an API with no sandbox and no fixture. |
 
 ` + "`" + `sandbox` + "`" + ` is the one worth understanding. The application inside the container
@@ -520,7 +521,8 @@ outside them falls through to the next rule that matches, and then to the
 default. ` + "`" + `rate_limit` + "`" + ` is a token bucket, which is what stops a retry loop in a
 preview from looking like an attack to somebody's rate limiter.
 
-` + "`" + `fixtures` + "`" + ` names a pack for ` + "`" + `mock` + "`" + ` mode.
+` + "`" + `fixtures` + "`" + ` names a pack for ` + "`" + `mock` + "`" + ` mode. ` + "`" + `emulator` + "`" + ` names the emulator for
+` + "`" + `emulate` + "`" + ` mode, and is required there and refused everywhere else.
 
 ## Matching a host
 
@@ -567,6 +569,64 @@ an address, or a pattern whose stars are all interior. A host swept in by a
 leading wildcard, or reached through ` + "`" + `default: capture` + "`" + ` with no rule at all, is
 refused instead, with a decision saying so, because an invented success is
 believed and nobody wrote that host down.
+
+## Emulate answers at the provider's own hostname
+
+` + "`" + `emulate` + "`" + ` hands the request to an emulator running beside your services.
+LocalStack, Azurite and the vendors' own emulators carry years of fidelity work
+that a replacement written here would not have, so Antifailure writes none of
+them and routes to them instead.
+
+` + "`" + "`" + "`" + `yaml
+    - host: "s3.*.amazonaws.com"
+      mode: emulate
+      emulator: localstack
+    - host: "*.s3.*.amazonaws.com"
+      mode: emulate
+      emulator: localstack
+      note: "the bucket is in the hostname, so this is a second rule"
+` + "`" + "`" + "`" + `
+
+The reason the mode exists is what it does not ask you to change. Using an
+emulator normally means an endpoint override, or a client constructed one way in
+tests and another way in production, and an application changed for the test is
+not the application that ships. Here the name still resolves to the sidecar, the
+sidecar still presents a certificate for ` + "`" + `s3.us-east-1.amazonaws.com` + "`" + ` signed by
+the authority the environment already trusts, and the body is forwarded to a
+container on the environment's own network. Your SDK is configured for
+production and stays that way.
+
+` + "`" + `emulator` + "`" + ` names a registration rather than an image or an address. What
+container runs, which digest it is pinned to and what it is started with belong
+to whoever registered the emulator, so a manifest cannot point traffic at a host
+of its choosing. A name this build has not registered refuses the environment
+before it starts, rather than falling through to ` + "`" + `block` + "`" + `, because a rule that
+silently does nothing is how somebody comes to believe an environment was tested
+against S3.
+
+The emulator container joins the environment's inner network and nothing else.
+That network is created with Docker's ` + "`" + `internal` + "`" + ` flag, so the emulator has no
+route to the internet at all, which is a property of the network rather than a
+promise made here.
+
+### Two headers are deliberately not rewritten
+
+The destination is rewritten. The request is not.
+
+The ` + "`" + `Host` + "`" + ` header keeps the name your application asked for. Virtual hosted
+addressing puts the S3 bucket in the hostname, so
+` + "`" + `mybucket.s3.us-east-1.amazonaws.com` + "`" + ` **is** the request, and an emulator told
+the host is ` + "`" + `af-emu-localstack:4566` + "`" + ` has been told the bucket is called
+` + "`" + `af-emu` + "`" + `. LocalStack, Azurite and fake-gcs-server all read it from the header.
+
+The ` + "`" + `Authorization` + "`" + ` header is forwarded untouched. ` + "`" + `sandbox` + "`" + ` replaces a
+credential because the request leaves the environment and a real provider is on
+the other end; here the other end has no route out, so there is nothing for a
+credential to leak to. Re-signing is not an option either, because SigV4 signs
+the ` + "`" + `Host` + "`" + ` header, so replacing the credential without re-signing would produce
+a signature that disagrees with its own request. The sidecar records the access
+key id, never the secret, so that the live credential tripwire's refusals can be
+read against the requests that were accepted.
 
 ## Reading a decision
 
@@ -689,7 +749,7 @@ means the client pins its own.
   disable pinning in the client for previews.
 ` + "`" + "`" + "`" + `
 
-` + "`" + `sandbox` + "`" + `, ` + "`" + `capture` + "`" + `, ` + "`" + `mock` + "`" + ` and ` + "`" + `synth` + "`" + ` all terminate TLS, because deciding
+` + "`" + `sandbox` + "`" + `, ` + "`" + `capture` + "`" + `, ` + "`" + `mock` + "`" + `, ` + "`" + `emulate` + "`" + ` and ` + "`" + `synth` + "`" + ` all terminate TLS, because deciding
 what a request means requires reading it. A client that pins a certificate will
 refuse. ` + "`" + `allow` + "`" + ` does not intercept, so a pinned client works, at the cost of
 the engine not seeing what it sent.
@@ -4177,12 +4237,21 @@ func main() {
 ` + "`" + "`" + "`" + `
 
 Five things can be registered: ` + "`" + `AddDatabaseProvider` + "`" + `, ` + "`" + `AddDatastoreProvider` + "`" + `,
-` + "`" + `AddRuntimeProvider` + "`" + `, ` + "`" + `AddGoldenStore` + "`" + ` and ` + "`" + `AddEmulator` + "`" + `. Three of them are
-selected by the engine today. ` + "`" + `AddDatastoreProvider` + "`" + ` and ` + "`" + `AddEmulator` + "`" + ` have no
-lifecycle behind them yet, because the manifest declares one datastore and no
-egress rule can name an emulator, so registering either of those does nothing
-beyond appearing in ` + "`" + `af license status` + "`" + `. Each socket says so in its own
+` + "`" + `AddRuntimeProvider` + "`" + `, ` + "`" + `AddGoldenStore` + "`" + ` and ` + "`" + `AddEmulator` + "`" + `. The engine consults
+all five, and each socket says where a manifest reaches it in its own
 documentation rather than leaving you to discover it.
+
+This paragraph used to say that three of the five were selected and that
+` + "`" + `AddDatastoreProvider` + "`" + ` and ` + "`" + `AddEmulator` + "`" + ` had no lifecycle behind them. Both
+halves became false, at different times and for different reasons. A datastore
+has been able to name a provider since #294, which resolves
+` + "`" + `datastores[].provider` + "`" + ` through the registry before falling back to the built
+in one. An egress rule can name an emulator as of the change that added
+` + "`" + `emulate` + "`" + ` to ` + "`" + `egress.rules[].mode` + "`" + `, which resolves the name before anything
+starts and refuses the environment when nothing answers to it. A page telling
+an author that the socket they are registering into does nothing is worse than
+a page that omits the socket, because it is the sentence that stops them
+looking.
 
 Four rules are worth knowing before you rely on this.
 
@@ -4437,6 +4506,110 @@ the observation the assertion looks for is a value whose plaintext IS the
 redaction marker. It is kept because the suite checks the rendering rather than
 trusting the signature, and a signature that stopped returning ` + "`" + `secret.Value` + "`" + `
 would make it violable for real.
+
+## Writing an emulator
+
+An emulator is a declaration rather than an implementation. Antifailure writes
+none: LocalStack, Azurite and the vendors' own carry years of fidelity work that
+a replacement written here would not have. Register one with
+` + "`" + `extension.Registry.AddEmulator` + "`" + ` and it supplies a name, the hostnames it
+answers for, and a container pinned by digest. A tag is refused, because an
+emulator answers for a production API and a tag that moves changes what an
+environment was tested against with nothing in the repository changing.
+
+What the engine adds is routing, and it is the whole reason the socket exists.
+An egress rule set to ` + "`" + `emulate` + "`" + ` names your emulator, the engine starts your
+container on the environment's inner network, and the sidecar answers for the
+provider's own hostname with a certificate the environment already trusts. The
+application needs no endpoint override, which is the one thing every other way
+of using an emulator costs you.
+
+Three fields on the container exist because one reference implementation is not
+a contract, and LocalStack is the reason none of them showed up first: it is a
+single image whose entrypoint is the emulator, so it needs none of them.
+
+` + "`" + `Command` + "`" + ` decides which emulator you get. Google ships Pub/Sub, Firestore,
+Datastore and Bigtable inside ONE Cloud CLI image whose entrypoint is the CLI,
+so ` + "`" + `Image` + "`" + `, ` + "`" + `Port` + "`" + ` and ` + "`" + `Env` + "`" + ` alone describe four identical containers that run
+nothing. Azurite needs it too, for a smaller reason with the same shape: it
+binds to loopback unless told otherwise, and an emulator listening on 127.0.0.1
+answers nothing from the sidecar while looking perfectly healthy in its own logs.
+
+` + "`" + `Companions` + "`" + ` are containers your emulator does not work without. Azure's Service
+Bus emulator refuses to start without an MSSQL instance beside it. Companions
+join the environment's inner network on exactly the terms the emulator does, so
+they have no route out either and ` + "`" + `Reach` + "`" + ` covers them without knowing they
+exist. Each carries its own digest and its own ` + "`" + `Maintainer` + "`" + `, because a companion
+runs beside a copy of production data on the emulator's terms and "it came with
+the emulator" is not a provenance. A companion's own companions are refused: one
+level is what the known cases need, and a graph here would be a dependency
+resolver nobody asked for.
+
+` + "`" + `Maintainer` + "`" + ` is declared and never inferred from the registry the image sits in.
+A registry path is a fact about hosting and this is a fact about support, and the
+two disagree exactly where it matters: ` + "`" + `fsouza/fake-gcs-server` + "`" + ` is the de facto
+GCS emulator and Google does not publish it, because Google ships no GCS emulator
+at all. Somebody deciding whether to trust an environment's answers about object
+storage should read that rather than infer it from a hostname.
+
+**An image that pulls is not an image that starts, and no emulator may require a
+cloud account.** ` + "`" + `localstack/localstack` + "`" + ` exits 55 on licence activation before it
+binds a port, which is a container that pulled, started, and answers nothing.
+Google's six start with no account, no token and no credential. The suite catches
+this without a rule of its own: a container that never binds fails
+` + "`" + `Covered_IsAnswered` + "`" + `, because the probe goes to your own declared hostname and
+there is nothing on the other end. Check it before you pin a digest, because the
+failure arrives as a routing problem and is not one.
+
+` + "`" + "`" + "`" + `go
+func TestMyEmulator(t *testing.T) {
+    conformance.RunEmulator(t, factory, conformance.EmulatorOptions{})
+}
+` + "`" + "`" + "`" + `
+
+` + "`" + `conformance.EmulatorBehaviors()` + "`" + ` lists what it checks, and none of it is about
+whether your emulator implements S3 correctly. That is your emulator's business
+and its own project's tests. What the suite checks is the nine promises the
+ENGINE makes: that a request inside your declared surface is answered and is not
+refused, that an operation outside it comes back in the provider's own error
+shape, that the state is enumerable and goes away, that a live credential is
+refused before you see it, and that your container cannot reach the internet.
+
+**The subject is the emulator as routed.** Every probe is sent to your own
+declared hostname through ` + "`" + `RoundTrip` + "`" + `, and nothing in the suite knows your
+container's address or may learn it. An implementation that pointed ` + "`" + `RoundTrip` + "`" + `
+at the container directly would pass all nine behaviours and prove none of them,
+because the claim being checked is the routing and not the emulator.
+
+**Declare a covered probe that your emulator really implements.** Two behaviours
+read it, and they are separate on purpose: one requires that it is answered at
+all, and the other requires that the answer is not a refusal. An emulator that
+refuses every request satisfies the uncovered behaviour, satisfies the live
+credential behaviour, holds no state to leak and reaches nothing, so it would
+pass everything else here and be useless. The second behaviour reads the
+response body as well as the status, because AWS returns ` + "`" + `200` + "`" + ` carrying an error
+document for several operations.
+
+` + "`" + `Covered.Creates` + "`" + ` false is a legitimate answer. A read only operation is a
+perfectly good thing to be covered by, and the two state behaviours skip by name
+rather than failing. Declaring ` + "`" + `Creates` + "`" + ` on a probe that creates nothing turns
+` + "`" + `State_IsEnumerable` + "`" + ` into a failure nobody can act on.
+
+The suite ships with its own broken emulator and its own self test, in
+` + "`" + `engine/conformance/emulator_selftest_test.go` + "`" + `. The rule there is one break per
+ASSERTION rather than one per behaviour, because ` + "`" + `Fatalf` + "`" + ` stops at the first
+failure: a behaviour with three assertions and one control has shown its first
+can go red and has shown nothing about the other two.
+
+**The containment behaviour is proved twice and it has to be.** ` + "`" + `Reach` + "`" + ` is a
+behaviour in the suite, and the suite's own subject is a fake whose ` + "`" + `Reach` + "`" + `
+returns whatever the fake decides, so passing it says nothing about Docker.
+` + "`" + `engine/internal/runtime/local/emulator_test.go` + "`" + ` asks the daemon instead: it
+reads back the network the container actually attached to, requires it to be
+` + "`" + `Internal` + "`" + `, and attempts an outbound connection from inside the running
+container. It carries a control in the same run, reaching the sidecar by name,
+because a container that can reach nothing at all fails an escape attempt for
+reasons that have nothing to do with containment.
 
 ## Before you open a pull request
 
@@ -20108,7 +20281,7 @@ suite that decides whether one of them is finished is
 
 | Key | Notes |
 | --- | --- |
-| ` + "`" + `default` + "`" + ` | Any mode: ` + "`" + `block` + "`" + ` (default), ` + "`" + `allow` + "`" + `, ` + "`" + `capture` + "`" + `, ` + "`" + `mock` + "`" + `, ` + "`" + `sandbox` + "`" + ` or ` + "`" + `synth` + "`" + `. |
+| ` + "`" + `default` + "`" + ` | Any mode: ` + "`" + `block` + "`" + ` (default), ` + "`" + `allow` + "`" + `, ` + "`" + `capture` + "`" + `, ` + "`" + `mock` + "`" + `, ` + "`" + `sandbox` + "`" + ` or ` + "`" + `synth` + "`" + `. ` + "`" + `emulate` + "`" + ` is refused here, because it answers from an emulator named on the rule and a default names no rule. |
 | ` + "`" + `allow_ipv6` + "`" + ` | Off by default. |
 | ` + "`" + `rules` + "`" + ` | See [egress](/docs/concepts/egress). |
 
@@ -21520,20 +21693,21 @@ What the environment may reach on the network. Everything leaves through the sid
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | ` + "`" + `allow_ipv6` + "`" + ` | boolean | no | Whether the environment may open IPv6 connections. Off by default, because an IPv6 path that bypasses the proxy is the most common way an egress control is silently defeated. Defaults to ` + "`" + `false` + "`" + `. |
-| ` + "`" + `default` + "`" + ` | ` + "`" + `block` + "`" + `, ` + "`" + `allow` + "`" + `, ` + "`" + `capture` + "`" + `, ` + "`" + `mock` + "`" + `, ` + "`" + `sandbox` + "`" + `, ` + "`" + `synth` + "`" + ` | no | What happens to a host with no rule. Changing this away from block is a deliberate act with a real cost: it is how a preview environment emails a real customer. Defaults to ` + "`" + `block` + "`" + `. |
+| ` + "`" + `default` + "`" + ` | ` + "`" + `block` + "`" + `, ` + "`" + `allow` + "`" + `, ` + "`" + `capture` + "`" + `, ` + "`" + `mock` + "`" + `, ` + "`" + `emulate` + "`" + `, ` + "`" + `sandbox` + "`" + `, ` + "`" + `synth` + "`" + ` | no | What happens to a host with no rule. Changing this away from block is a deliberate act with a real cost: it is how a preview environment emails a real customer. emulate is listed here and is refused as a default, because the emulator is named on a rule and a default names no rule; the refusal says so, which a missing enum value could not. Defaults to ` + "`" + `block` + "`" + `. |
 | ` + "`" + `rules` + "`" + ` | list of [Egress rule](#egress-rule) | no | What the environment may do with one host. Max items 500. |
 
 ## Egress rule
 
-What the environment may do with one host. A rule is per host because that is the unit a person can reason about: allowed, blocked, answered from a fixture, or sent to the provider's own sandbox.
+What the environment may do with one host. A rule is per host because that is the unit a person can reason about: allowed, blocked, answered from a fixture, answered by an emulator inside the environment, or sent to the provider's own sandbox.
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | ` + "`" + `credential` + "`" + ` | string | no | Name of the environment variable holding the sandbox credential for this host. Max length 128, matches ` + "`" + `^[A-Za-z_][A-Za-z0-9_]*$` + "`" + `. |
+| ` + "`" + `emulator` + "`" + ` | string | no | Name of the registered emulator that answers this host, for a rule in emulate mode. Required there and refused on every other mode. A name this build has not registered is refused rather than falling through to block. Max length 63, matches ` + "`" + `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$` + "`" + `. |
 | ` + "`" + `fixtures` + "`" + ` | string | no | Path to a fixture pack or an OpenAPI document for mock mode, relative to the repository root. Max length 512. |
 | ` + "`" + `host` + "`" + ` | string | **yes** | Host to match. A leading *. matches one or more labels. A star anywhere else is one whole label, so email.*.amazonaws.com reaches SES in any region and reaches nothing else, and *.s3.*.amazonaws.com reaches a bucket in any region. An IP literal matches only itself. Max length 253. |
 | ` + "`" + `methods` + "`" + ` | list of string | no | Restrict the rule to these HTTP methods. Max items 10. |
-| ` + "`" + `mode` + "`" + ` | ` + "`" + `block` + "`" + `, ` + "`" + `allow` + "`" + `, ` + "`" + `capture` + "`" + `, ` + "`" + `mock` + "`" + `, ` + "`" + `sandbox` + "`" + `, ` + "`" + `synth` + "`" + ` | **yes** | block refuses with a readable decision. allow passes through with a rate limit. sandbox substitutes test credentials and forwards to the provider's sandbox. capture records the message into the inbox and returns the provider's success shape. mock answers from a fixture or an offline pack. synth asks a model to invent a response and marks every result that touched it as unverified. |
+| ` + "`" + `mode` + "`" + ` | ` + "`" + `block` + "`" + `, ` + "`" + `allow` + "`" + `, ` + "`" + `capture` + "`" + `, ` + "`" + `mock` + "`" + `, ` + "`" + `emulate` + "`" + `, ` + "`" + `sandbox` + "`" + `, ` + "`" + `synth` + "`" + ` | **yes** | block refuses with a readable decision. allow passes through with a rate limit. sandbox substitutes test credentials and forwards to the provider's sandbox. capture records the message into the inbox and returns the provider's success shape. mock answers from a fixture or an offline pack. emulate answers from an emulator running inside the environment, which the application reaches with no endpoint override. synth asks a model to invent a response and marks every result that touched it as unverified. |
 | ` + "`" + `note` + "`" + ` | string | no | Why this rule exists. Rendered in the network policy view, because a rule nobody can explain is a rule nobody dares remove. Max length 512. |
 | ` + "`" + `paths` + "`" + ` | list of string | no | Restrict the rule to these path prefixes. Anything else on the same host falls through to the next rule. Max items 100. |
 | ` + "`" + `rate_limit` + "`" + ` | string | no | Token bucket rate, for example 10/s or 600/m. Applies to allow and sandbox. Matches ` + "`" + `^[0-9]+/(s\|m\|h)$` + "`" + `. |

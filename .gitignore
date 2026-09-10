@@ -341,3 +341,4 @@ web/apps/api/zzserve.ts
 # Anchored, so it ignores the build artefact at the root and not the command at
 # tools/prmerge.
 /prmerge
+/enginetest

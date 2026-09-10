@@ -264,6 +264,7 @@ func TestDecision_AllowedOnlyForRealNetworkModes(t *testing.T) {
 		schema.ModeBlock:   false,
 		schema.ModeCapture: false,
 		schema.ModeMock:    false,
+		schema.ModeEmulate: false,
 		schema.ModeSynth:   false,
 	}
 	for _, m := range schema.AllModes() {
@@ -558,6 +559,13 @@ func TestInspectsHost_OnlyWhenTheDecisionNeedsTheRequest(t *testing.T) {
 			rule("api.stripe.com", schema.ModeSandbox)}, schema.ModeBlock, "api.stripe.com", true},
 		{"synth must answer the request", []schema.EgressRule{
 			rule("api.example.com", schema.ModeSynth)}, schema.ModeBlock, "api.example.com", true},
+		// Emulate is the one where deciding wrong in the SAFE direction is
+		// still wrong. A tunnelled emulate rule opens a connection to the real
+		// s3.amazonaws.com and hands it to the application encrypted end to
+		// end, so the request leaves the environment, which is the exact
+		// opposite of what the rule asked for.
+		{"emulate must answer for the provider's own hostname", []schema.EgressRule{
+			emulateRuleFor("s3.amazonaws.com")}, schema.ModeBlock, "s3.amazonaws.com", true},
 		{"a wildcard that captures covers its subdomains", []schema.EgressRule{
 			rule("*.resend.com", schema.ModeCapture)}, schema.ModeBlock, "api.resend.com", true},
 		{"a rule for another host does not", []schema.EgressRule{
@@ -568,6 +576,53 @@ func TestInspectsHost_OnlyWhenTheDecisionNeedsTheRequest(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			e := engine(t, tc.def, tc.rules...)
 			require.Equal(t, tc.want, e.InspectsHost(tc.host, 443))
+		})
+	}
+}
+
+// emulateRuleFor is an emulate rule, which needs an emulator name where the
+// other modes need nothing.
+func emulateRuleFor(host string) schema.EgressRule {
+	r := rule(host, schema.ModeEmulate)
+	r.Emulator = "localstack"
+	return r
+}
+
+// TestInspectsHost_EveryModeIsClassified is the guard the table above cannot be.
+//
+// A table is a list of cases somebody remembered to write, and this branch is
+// the proof that a list written by hand goes stale: a seventh mode was added
+// and four separate lists did not know about it. This one iterates AllModes and
+// refuses a mode nobody has decided about, so the next mode cannot be added
+// without someone stating whether the sidecar has to read the request to serve
+// it.
+func TestInspectsHost_EveryModeIsClassified(t *testing.T) {
+	t.Parallel()
+	inspects := map[schema.Mode]bool{
+		schema.ModeBlock:   false,
+		schema.ModeAllow:   false,
+		schema.ModeCapture: true,
+		schema.ModeMock:    true,
+		schema.ModeEmulate: true,
+		schema.ModeSandbox: true,
+		schema.ModeSynth:   true,
+	}
+	for _, m := range schema.AllModes() {
+		m := m
+		t.Run(string(m), func(t *testing.T) {
+			t.Parallel()
+			want, ok := inspects[m]
+			require.True(t, ok,
+				"mode %q is not classified; a new mode must decide whether the sidecar has "+
+					"to read the request in order to serve it, and getting that wrong in the "+
+					"quiet direction tunnels a request that was supposed to be answered "+
+					"inside the environment", m)
+			r := rule("api.example.com", m)
+			if m == schema.ModeEmulate {
+				r.Emulator = "localstack"
+			}
+			e := engine(t, schema.ModeBlock, r)
+			require.Equal(t, want, e.InspectsHost("api.example.com", 443), "mode %q", m)
 		})
 	}
 }

@@ -1,5 +1,7 @@
 package emulator
 
+import "github.com/antifailure/antifailure/engine/pkg/extension"
+
 // GCP is not one emulator, and that is the first thing this file records.
 //
 // AWS is one LocalStack container answering nine services on one gateway port.
@@ -114,8 +116,11 @@ var gcs = &Emulator{
 	Project:      "fake-gcs-server",
 	ProjectURL:   "https://github.com/fsouza/fake-gcs-server",
 	Official:     false,
-	Image:        gcsImage,
-	Port:         GCSPort,
+	// fsouza publishes it and Google ships no GCS emulator at all, so a
+	// project with no company behind it rather than the vendor's.
+	Maintainer: extension.MaintainerCommunity,
+	Image:      gcsImage,
+	Port:       GCSPort,
 	// No Command. The image's entrypoint is /bin/fake-gcs-server, so the
 	// emulator is what a bare container runs, and everything below is set
 	// through its FAKE_GCS_ environment variables instead.
@@ -184,9 +189,11 @@ var pubsub = &Emulator{
 	Project:      "Google Cloud CLI emulators",
 	ProjectURL:   "https://cloud.google.com/pubsub/docs/emulator",
 	Official:     true,
-	Image:        gcloudImage,
-	Port:         PubSubPort,
-	Env:          map[string]string{"CLOUDSDK_CORE_DISABLE_PROMPTS": "1"},
+	// Google publishes it, and Google is the cloud being emulated.
+	Maintainer: extension.MaintainerVendor,
+	Image:      gcloudImage,
+	Port:       PubSubPort,
+	Env:        map[string]string{"CLOUDSDK_CORE_DISABLE_PROMPTS": "1"},
 	// The image is the CLI, so the command is what decides which emulator
 	// this container is. 0.0.0.0 rather than the default localhost bind,
 	// because the address the sidecar forwards to is the container's
@@ -219,9 +226,11 @@ var firestore = &Emulator{
 	Project:      "Google Cloud CLI emulators",
 	ProjectURL:   "https://cloud.google.com/firestore/docs/emulator",
 	Official:     true,
-	Image:        gcloudImage,
-	Port:         FirestorePort,
-	Env:          map[string]string{"CLOUDSDK_CORE_DISABLE_PROMPTS": "1"},
+	// Google publishes it, and Google is the cloud being emulated.
+	Maintainer: extension.MaintainerVendor,
+	Image:      gcloudImage,
+	Port:       FirestorePort,
+	Env:        map[string]string{"CLOUDSDK_CORE_DISABLE_PROMPTS": "1"},
 	// The image is the CLI, so the command is what decides which emulator
 	// this container is. 0.0.0.0 rather than the default localhost bind,
 	// because the address the sidecar forwards to is the container's
@@ -253,9 +262,11 @@ var datastore = &Emulator{
 	Project:      "Google Cloud CLI emulators",
 	ProjectURL:   "https://cloud.google.com/datastore/docs/tools/datastore-emulator",
 	Official:     true,
-	Image:        gcloudImage,
-	Port:         DatastorePort,
-	Env:          map[string]string{"CLOUDSDK_CORE_DISABLE_PROMPTS": "1"},
+	// Google publishes it, and Google is the cloud being emulated.
+	Maintainer: extension.MaintainerVendor,
+	Image:      gcloudImage,
+	Port:       DatastorePort,
+	Env:        map[string]string{"CLOUDSDK_CORE_DISABLE_PROMPTS": "1"},
 	// The image is the CLI, so the command is what decides which emulator
 	// this container is. 0.0.0.0 rather than the default localhost bind,
 	// because the address the sidecar forwards to is the container's
@@ -291,9 +302,11 @@ var bigtable = &Emulator{
 	Project:      "Google Cloud CLI emulators",
 	ProjectURL:   "https://cloud.google.com/bigtable/docs/emulator",
 	Official:     true,
-	Image:        gcloudImage,
-	Port:         BigtablePort,
-	Env:          map[string]string{"CLOUDSDK_CORE_DISABLE_PROMPTS": "1"},
+	// Google publishes it, and Google is the cloud being emulated.
+	Maintainer: extension.MaintainerVendor,
+	Image:      gcloudImage,
+	Port:       BigtablePort,
+	Env:        map[string]string{"CLOUDSDK_CORE_DISABLE_PROMPTS": "1"},
 	// The image is the CLI, so the command is what decides which emulator
 	// this container is. 0.0.0.0 rather than the default localhost bind,
 	// because the address the sidecar forwards to is the container's
@@ -332,8 +345,10 @@ var spanner = &Emulator{
 	Project:      "Cloud Spanner Emulator",
 	ProjectURL:   "https://github.com/GoogleCloudPlatform/cloud-spanner-emulator",
 	Official:     true,
-	Image:        spannerImage,
-	Port:         SpannerGRPCPort,
+	// Google publishes it, and Google is the cloud being emulated.
+	Maintainer: extension.MaintainerVendor,
+	Image:      spannerImage,
+	Port:       SpannerGRPCPort,
 	// No Command. The image already runs ./gateway_main --hostname 0.0.0.0,
 	// read from its published config rather than assumed, so it binds every
 	// interface without being told to.

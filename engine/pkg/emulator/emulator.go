@@ -118,6 +118,12 @@ type Emulator struct {
 	Outside []Service
 	// Licence is the attribution this image owes.
 	Licence Licence
+	// Maintainer is who stands behind the image, and it is DECLARED rather
+	// than inferred from the registry the image sits in. A registry path is a
+	// fact about hosting and this is a fact about support, and the two
+	// disagree exactly where it matters: the de facto GCS emulator is not
+	// published by Google, because Google ships none.
+	Maintainer extension.EmulatorMaintainer
 }
 
 // Name is the value an egress rule names this emulator by.
@@ -151,7 +157,7 @@ func (e *Emulator) Container() extension.EmulatorContainer {
 	}
 	cmd := append([]string(nil), e.Command...)
 	return extension.EmulatorContainer{
-		Image: e.Image, Port: e.Port, Env: env, Command: cmd,
+		Image: e.Image, Port: e.Port, Env: env, Command: cmd, Maintainer: e.Maintainer,
 	}
 }
 

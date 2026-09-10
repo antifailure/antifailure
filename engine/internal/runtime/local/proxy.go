@@ -55,9 +55,22 @@ type sidecarConfig struct {
 	EnvID       string            `json:"env_id"`
 	MockPacks   []string          `json:"mock_packs,omitempty"`
 	Credentials map[string]string `json:"credentials,omitempty"`
-	Resolver    string            `json:"resolver,omitempty"`
-	CACert      string            `json:"ca_cert,omitempty"`
-	CAKey       string            `json:"ca_key,omitempty"`
+	// Emulators mirrors the sidecar's own map of the same name. An emulate
+	// rule names an emulator and the sidecar looks the address up here, so a
+	// manifest can never name a place to send traffic to: only something a
+	// registration already declared and the registry already checked.
+	Emulators map[string]emulatorRoute `json:"emulators,omitempty"`
+	Resolver  string                   `json:"resolver,omitempty"`
+	CACert    string                   `json:"ca_cert,omitempty"`
+	CAKey     string                   `json:"ca_key,omitempty"`
+}
+
+// emulatorRoute mirrors the sidecar's own type of the same name, declared here
+// for the same reason sidecarConfig is: the runtime must not import a main
+// package, and the sidecar is compiled from source this binary carries, so a
+// mismatch fails the sidecar's own test rather than a build.
+type emulatorRoute struct {
+	Address string `json:"address"`
 }
 
 // startProxy builds, places, and starts the egress sidecar.
@@ -78,6 +91,7 @@ func (r *Runtime) startProxy(
 	credentials map[string]secrets.Value,
 	mockPacks []string,
 	modelEnv []string,
+	emulators []provider.EmulatorSpec,
 	nets networks,
 	journal func(string, string) error,
 	progress func(string),
@@ -143,10 +157,18 @@ func (r *Runtime) startProxy(
 	// assign an address until the container starts, which is after this file
 	// has to exist. The sidecar finds its own inside it.
 	cfg := sidecarConfig{
-		Egress:   orEmptyEgress(egress),
-		Subnet:   subnet,
-		Internal: append(append([]string{DatabaseAlias, ProxyAlias}, serviceNames...), datastores...),
-		EnvID:    envID,
+		Egress: orEmptyEgress(egress),
+		Subnet: subnet,
+		// The emulator aliases are internal names, exactly as the datastore
+		// names are and for exactly the same reason: the sidecar answers DNS
+		// for the environment, and a name it answered for itself is a name it
+		// could never forward to. Leaving them out would make the sidecar
+		// resolve af-emu-localstack to its own address and forward the
+		// request to itself, forever.
+		Internal: emulatorAliases(append(
+			append([]string{DatabaseAlias, ProxyAlias}, serviceNames...), datastores...), emulators),
+		EnvID:     envID,
+		Emulators: emulatorRoutes(emulators),
 	}
 	if ca != nil {
 		cfg.CACert, cfg.CAKey = ca.CertPEM, ca.KeyPEM.Reveal()
@@ -239,6 +261,14 @@ func runningProxyIP(settings *container.NetworkSettings, networkID string) (stri
 }
 
 func proxyName(envID string) string { return "af-proxy-" + envID }
+
+// emulatorAliases appends each emulator's alias to the internal name list.
+func emulatorAliases(names []string, emulators []provider.EmulatorSpec) []string {
+	for _, e := range emulators {
+		names = append(names, EmulatorAlias(e.Name))
+	}
+	return names
+}
 
 func orEmptyEgress(e *schema.Egress) schema.Egress {
 	if e == nil {
@@ -435,6 +465,17 @@ type Decision struct {
 	// can debug".
 	Pack    string `json:"pack"`
 	Fixture string `json:"fixture"`
+	// Emulator names which emulator answered, for a rule in emulate mode. An
+	// environment running LocalStack beside Azurite has two of them, and a
+	// decision that cannot say which one answered is a decision nobody can
+	// act on.
+	Emulator string `json:"emulator"`
+	// KeyID is the access key identifier the request was signed with, and
+	// never the secret. An emulator verifies no signature, so the only thing
+	// between a misconfigured application and a real cloud account is the
+	// live credential tripwire, and a refusal is auditable only if the
+	// requests that were ACCEPTED say which key they carried.
+	KeyID string `json:"key_id"`
 }
 
 // Decisions reads the sidecar's decision log for an environment.

@@ -44,7 +44,7 @@ func TestTheHistoricalRowsAreFound(t *testing.T) {
 	for name, tc := range map[string]struct{ body, missing string }{
 		"egress.default": {
 			egressTable + "| `default` | `block` (default) or `allow`. |\n",
-			"capture, mock, sandbox, synth",
+			"capture, mock, emulate, sandbox, synth",
 		},
 		"database.provider": {
 			"## `database`\n\n| Key | Notes |\n| --- | --- |\n" +
@@ -73,7 +73,7 @@ func TestTheHistoricalRowsAreFound(t *testing.T) {
 
 func TestACompleteRowIsSilent(t *testing.T) {
 	noRows(t, egressTable+
-		"| `default` | Any mode: `block` (default), `allow`, `capture`, `mock`, `sandbox` or `synth`. |\n")
+		"| `default` | Any mode: `block` (default), `allow`, `capture`, `mock`, `emulate`, `sandbox` or `synth`. |\n")
 }
 
 // The bug that made this tool report success while checking nothing.

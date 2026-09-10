@@ -692,7 +692,9 @@ jobs:
         # The race detector always. A data race that only shows up under load
         # is the kind of bug this product exists to find, and shipping one
         # would be embarrassing.
-        run: cd engine && go test ./... -race -count=1 -timeout 30m
+        # Storage timing must not compete with other packages creating and
+        # copying databases on this runner's Docker daemon. Every package runs.
+        run: go run ./tools/enginetest .
         env:
           # Docker is available on this runner, so the provider and runtime
           # suites run for real rather than skipping.

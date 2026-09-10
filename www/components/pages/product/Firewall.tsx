@@ -25,7 +25,7 @@ export function FirewallPage() {
         <Split visual={<PFW05 />}>
           <PageHeading
             kicker="Attempted-effect ledger"
-            title="<strong>Every outbound attempt is recorded, including the denials.</strong> Six per-host modes, from refusing outright to answering from an offline pack. Never a live processor."
+            title="<strong>Every outbound attempt is recorded, including the denials.</strong> Seven per-host modes, from refusing outright to answering from an offline pack. Never a live processor."
           />
         </Split>
         <ul className="mt-10 grid grid-cols-3 items-start gap-x-16 gap-y-10 max-xl:grid-cols-1">

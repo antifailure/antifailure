@@ -1,5 +1,7 @@
 package emulator
 
+import "github.com/antifailure/antifailure/engine/pkg/extension"
+
 // AWSName is the value an egress rule names the AWS emulator by.
 const AWSName = "aws"
 
@@ -40,8 +42,11 @@ var aws = &Emulator{
 	// Amazon. Recorded rather than left to a reader's inference, for the
 	// reason the field's own comment gives.
 	Official: false,
-	Image:    awsImage,
-	Port:     AWSPort,
+	// The same fact with the grain the registry validation reads: a company
+	// that is not the cloud whose API this answers for.
+	Maintainer: extension.MaintainerCommercial,
+	Image:      awsImage,
+	Port:       AWSPort,
 	Env: map[string]string{
 		// The allowlist, and the reason it is one. SERVICES alone only
 		// decides what is loaded eagerly; STRICT_SERVICE_LOADING makes it the

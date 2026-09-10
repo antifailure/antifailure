@@ -34,6 +34,7 @@ type PolicyRuleJSON struct {
 	Credential  string   `json:"credential,omitempty"`
 	Fixtures    string   `json:"fixtures,omitempty"`
 	WebhookPath string   `json:"webhook_path,omitempty"`
+	Emulator    string   `json:"emulator,omitempty"`
 	Note        string   `json:"note,omitempty"`
 }
 
@@ -64,6 +65,7 @@ type ExplainJSON struct {
 	Credential  string             `json:"credential,omitempty"`
 	Fixtures    string             `json:"fixtures,omitempty"`
 	WebhookPath string             `json:"webhook_path,omitempty"`
+	Emulator    string             `json:"emulator,omitempty"`
 	Matched     []ExplainMatchJSON `json:"matched"`
 }
 
@@ -130,7 +132,7 @@ in the decision, no matter where it sits in the file.`),
 						Host: r.Host, Mode: string(r.Mode), Paths: r.Paths,
 						Methods: r.Methods, RateLimit: r.RateLimit,
 						Credential: r.Credential, Fixtures: r.Fixtures,
-						WebhookPath: r.WebhookPath, Note: r.Note,
+						WebhookPath: r.WebhookPath, Emulator: r.Emulator, Note: r.Note,
 					})
 				}
 				return env.Out.JSON(doc)
@@ -229,6 +231,8 @@ func modeVerb(m schema.Mode) string {
 		return "captured into the inbox"
 	case schema.ModeMock:
 		return "answered from a mock"
+	case schema.ModeEmulate:
+		return "answered by an emulator inside the environment"
 	case schema.ModeSandbox:
 		return "sent to the provider's sandbox"
 	case schema.ModeSynth:
@@ -246,6 +250,13 @@ func styleForMode(m schema.Mode) Style {
 		return StyleGood
 	case schema.ModeSynth:
 		return StyleBad
+	case schema.ModeCapture, schema.ModeMock, schema.ModeEmulate:
+		// Answered inside the environment, so nothing left and nothing was
+		// invented. Emulate is named here rather than left to fall through,
+		// because it is the mode most easily mistaken for sandbox, which IS
+		// warned about: both hand the request to a real service, and only one
+		// of them is on a network with a route out.
+		return StyleDim
 	default:
 		return StyleDim
 	}
@@ -275,7 +286,8 @@ matched, so a surprising answer is diagnosable rather than mysterious.`),
 					Request: req.String(), Mode: string(d.Mode), Allowed: d.Allowed(),
 					Rule: d.RuleHost, Reason: d.Reason(), RateLimit: d.RateLimit,
 					Credential: d.Credential, Fixtures: d.Fixtures, WebhookPath: d.WebhookPath,
-					Matched: make([]ExplainMatchJSON, 0, len(chain)),
+					Emulator: d.Emulator,
+					Matched:  make([]ExplainMatchJSON, 0, len(chain)),
 				}
 				for i, m := range chain {
 					doc.Matched = append(doc.Matched, ExplainMatchJSON{
@@ -301,6 +313,11 @@ matched, so a surprising answer is diagnosable rather than mysterious.`),
 			}
 			if d.Fixtures != "" {
 				detail = append(detail, [2]string{"Fixtures", d.Fixtures})
+			}
+			if d.Emulator != "" {
+				detail = append(detail, [2]string{"Emulator",
+					d.Emulator + " answers inside the environment, at the provider's own hostname, " +
+						"so the application reaches it with no endpoint override."})
 			}
 			if d.WebhookPath != "" {
 				detail = append(detail, [2]string{"Webhooks", "delivered to " + d.WebhookPath})
@@ -417,6 +434,14 @@ type DecisionJSON struct {
 	// Pack and Fixture name what answered a mocked request.
 	Pack    string `json:"pack,omitempty"`
 	Fixture string `json:"fixture,omitempty"`
+	// Emulator names which emulator answered, and KeyID is the access key
+	// identifier the request was signed with, never the secret.
+	//
+	// The pair is what makes an emulated call auditable. An emulator verifies
+	// no signature, so a script asking "did anything reach the events store
+	// carrying a key nobody meant to use" has nothing else to read.
+	Emulator string `json:"emulator,omitempty"`
+	KeyID    string `json:"key_id,omitempty"`
 	// Duration is how long the request took, WaitedMs how much of that the
 	// policy itself held it for, and Limit that rate in words. Without the
 	// last two, a request the policy deliberately slowed reads as an
@@ -530,6 +555,7 @@ func decisionDoc(d local.Decision) DecisionJSON {
 		Bytes: d.Bytes, Reason: d.Reason, Error: d.Error,
 		Substituted: d.Substituted, Synthesized: d.Synthesized,
 		Pack: d.Pack, Fixture: d.Fixture,
+		Emulator: d.Emulator, KeyID: d.KeyID,
 		Duration: d.Duration, WaitedMs: d.WaitedMs, Limit: d.Limit,
 		Via: d.Via, HostOnly: d.HostOnly, Stream: d.Stream, Seq: d.Seq,
 	}

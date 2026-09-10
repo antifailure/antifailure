@@ -401,7 +401,7 @@ build-release version="dev":
 test: test-engine test-tools test-web test-runner test-site-api
 
 test-engine:
-    cd engine && go test ./... -race -count=1 -timeout 30m
+    go run ./tools/enginetest .
 
 # G4. The coverage thresholds in the build plan's C.5, per package.
 #

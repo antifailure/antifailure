@@ -69,6 +69,12 @@ type Config struct {
 	// whatever this is set to, so pointing it somewhere unexpected cannot
 	// turn into a way around the policy.
 	Resolver string `json:"resolver,omitempty"`
+	// Emulators are the emulators this environment is running, keyed by the
+	// name a rule refers to. Written by the engine after it has resolved the
+	// registrations, because the sidecar cannot import the registry: it is
+	// built from a fixed list of files that stops at policy and schema, so
+	// that the image compiles with no network and no module download.
+	Emulators map[string]emulatorRoute `json:"emulators,omitempty"`
 	// CACert and CAKey are the environment's certificate authority, in PEM.
 	//
 	// Present only when something in the policy needs to read inside TLS. An
@@ -94,6 +100,7 @@ func main() {
 	p := &proxy{
 		engine: engine, envID: cfg.EnvID, out: json.NewEncoder(os.Stdout),
 		credentials: cfg.Credentials,
+		emulators:   cfg.Emulators,
 		limits:      newLimiter(),
 		destinations: newDestinations(
 			engine.Rules(), cfg.Subnet, engine.AllowsIPv6()),
@@ -326,6 +333,16 @@ type record struct {
 	// debug.
 	Pack    string `json:"pack,omitempty"`
 	Fixture string `json:"fixture,omitempty"`
+	// Emulator names what answered an emulated request, for the same reason
+	// Pack does: a reader has to be able to tell which of several emulators
+	// in one environment produced a response.
+	Emulator string `json:"emulator,omitempty"`
+	// KeyID is the access key identifier the request was signed with, and
+	// never the secret. An emulator verifies no signature, so the only thing
+	// between a misconfigured application and a real cloud account is the
+	// tripwire, and a refusal is auditable only if the requests that were
+	// ACCEPTED say which key they carried.
+	KeyID string `json:"key_id,omitempty"`
 	// Stream marks a decision made on a connection that is not HTTP, where
 	// the host came from the TLS handshake and nothing inside the connection
 	// was read or could be. Recorded as its own field rather than left to be
@@ -360,6 +377,11 @@ type proxy struct {
 	credentials map[string]string
 	// mocks answers requests for hosts set to mock.
 	mocks *mockpack.Engine
+	// emulators are where each registered emulator answers, by the name a
+	// rule refers to. Empty in the community build, where nothing is
+	// registered, and an emulate rule in that build is refused rather than
+	// falling through to something plausible.
+	emulators map[string]emulatorRoute
 	// limits shape traffic to a rule's declared rate, so a load run does not
 	// get somebody's sandbox account throttled.
 	limits *limiter
@@ -619,7 +641,7 @@ func (p *proxy) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch d.Mode {
-	case schema.ModeCapture, schema.ModeMock, schema.ModeSynth:
+	case schema.ModeCapture, schema.ModeMock, schema.ModeEmulate, schema.ModeSynth:
 		p.serveInsideTheEnvironment(w, r, req, d, &rec, started)
 		return
 	}
@@ -698,9 +720,32 @@ func (p *proxy) serveInsideTheEnvironment(
 	host := preq.Host
 	// The larger of the two limits the modes below apply, so neither is
 	// handed a body this function truncated first. Each still applies its own.
-	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	//
+	// One byte past it, because emulate cannot tolerate a truncation the way
+	// capture can. A captured message that lost its last kilobyte is a log
+	// entry somebody reads; an emulated PUT that lost its last kilobyte is an
+	// object the emulator now holds, wrong, with a 200 in front of it. So the
+	// extra byte is how this tells "exactly at the limit" from "over it", and
+	// over it is refused below rather than silently cut.
+	body, _ := io.ReadAll(io.LimitReader(r.Body, insideBodyLimit+1))
 	_ = r.Body.Close()
 	r.Body = io.NopCloser(bytes.NewReader(body))
+
+	if d.Mode == schema.ModeEmulate && len(body) > insideBodyLimit {
+		rec.Status = http.StatusRequestEntityTooLarge
+		rec.Allowed = false
+		rec.Reason = oversizedEmulateReason
+		rec.Duration = time.Since(started).String()
+		p.emit(*rec)
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusRequestEntityTooLarge)
+		_, _ = io.WriteString(w, oversizedEmulateBody(host, r))
+		return
+	}
+	if len(body) > insideBodyLimit {
+		body = body[:insideBodyLimit]
+		r.Body = io.NopCloser(bytes.NewReader(body))
+	}
 
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
@@ -724,6 +769,8 @@ func (p *proxy) serveInsideTheEnvironment(
 		p.capture(conn, r, preq, d, rec)
 	case schema.ModeMock:
 		p.serveMock(conn, r, host, rec)
+	case schema.ModeEmulate:
+		p.serveEmulated(conn, r, host, d, rec)
 	case schema.ModeSynth:
 		p.serveSynth(conn, r, host, rec)
 	}

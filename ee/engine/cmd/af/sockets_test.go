@@ -162,6 +162,10 @@ func (outsideEmulator) Container() extension.EmulatorContainer {
 		Image: "localstack/localstack@sha256:" +
 			"0000000000000000000000000000000000000000000000000000000000000000",
 		Port: 4566,
+		// Declared rather than inferred from the registry path, which is the
+		// whole point of the field: LocalStack is a company selling an
+		// emulator, and an extension outside this module has to say so too.
+		Maintainer: extension.MaintainerCommercial,
 	}
 }
 

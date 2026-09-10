@@ -225,9 +225,9 @@ func Modes(schemaPath string) ([]string, error) {
 
 	// Every matching enum is collected and they are then required to agree,
 	// rather than the longest one winning. Taking the longest would mean the
-	// block and capture test below decided nothing: the egress enum has six
-	// values and github's has three, so it would win either way, and a
-	// seventh value added to some unrelated mode would silently take over the
+	// block and capture test below decided nothing: the egress enum has seven
+	// values and github's has three, so it would win either way, and an
+	// eighth value added to some unrelated mode would silently take over the
 	// list this whole tool enforces.
 	var found [][]string
 	var walk func(node any)

@@ -21,6 +21,17 @@ import (
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
+// emulatorList names the emulators an environment asked for, sorted, for a
+// refusal that says which ones rather than how many.
+func emulatorList(specs []provider.EmulatorSpec) string {
+	names := make([]string, 0, len(specs))
+	for _, e := range specs {
+		names = append(names, e.Name)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
+}
+
 // Up creates the environment and returns once every service that declares
 // readiness has answered.
 //
@@ -45,6 +56,20 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 	}
 	namespace := r.namespace(spec.EnvID)
 	env := provider.Env{EnvID: spec.EnvID, NetworkID: namespace, CreatedAt: r.clock.Now().UTC()}
+
+	// Refused rather than started without them, which is the rule EnvSpec's
+	// own comment states. An emulate rule with no emulator behind it is an
+	// environment whose calls to a cloud API fail, reported as an environment
+	// that came up, and somebody is then one step away from believing their
+	// application was tested against S3. A refusal naming what is missing is
+	// the only honest answer this runtime can give today.
+	if len(spec.Emulators) > 0 {
+		return env, aferrors.Coded(aferrors.AFRUN040, "detail", fmt.Sprintf(
+			"this environment declares %s in emulate mode, and the kubernetes runtime does not "+
+				"run emulator containers yet. Run it on the local runtime, or give those hosts a "+
+				"mode this runtime has: block, mock or capture all answer without an emulator",
+			emulatorList(spec.Emulators)))
+	}
 
 	order, err := startOrder(spec.Services)
 	if err != nil {

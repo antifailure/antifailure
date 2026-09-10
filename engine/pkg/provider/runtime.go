@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/antifailure/antifailure/engine/pkg/schema"
@@ -138,6 +139,21 @@ type EnvSpec struct {
 	// MockPacks are fixture packs from the repository, as raw JSON. The packs
 	// that ship with the engine are always available and are not listed here.
 	MockPacks []string
+	// Emulators are the third party services answered inside the environment,
+	// one per emulator an egress rule names.
+	//
+	// They are separate from Services because nothing about them comes from
+	// the manifest except the name: the image, its digest, the port and the
+	// variables belong to whoever registered the emulator, and were checked
+	// when the registry validated the registration. A manifest that could
+	// describe the container could describe any container.
+	//
+	// A runtime that cannot run them must REFUSE the environment rather than
+	// start it without them. An emulate rule with no emulator behind it is an
+	// environment whose S3 calls fail, reported as an environment that came
+	// up, and the whole point of this list is that somebody is about to
+	// believe their application was tested against S3.
+	Emulators []EmulatorSpec
 	// ModelEnv carries a model key to the sidecar, for a rule in synth mode.
 	// It is passed as an environment variable rather than written into a
 	// file, so a key never lands on disk.
@@ -243,6 +259,86 @@ func (j StanceJob) Line() string {
 	default:
 		return "applying the " + j.Stance + " stance"
 	}
+}
+
+// EmulatorSpec is one emulator container to run inside the environment.
+//
+// It joins the environment's inner network and nothing else, so it has no
+// route out. That is a property of the network rather than a promise made
+// here: the local runtime creates the inner network with Docker's internal
+// flag, which is the only setting that actually removes a container's route to
+// the internet. Turning off IP masquerading looks like it should work and does
+// not, and that was measured rather than assumed.
+type EmulatorSpec struct {
+	// Name is what an egress rule refers to, and what the sidecar's route is
+	// keyed by.
+	Name string
+	// Image is the container image, pinned by digest. The registry refuses a
+	// registration whose image is pinned by a tag, because an emulator
+	// answers for a production API and a tag that moves changes what an
+	// environment was tested against with nothing in the repository changing.
+	Image string
+	// Port is the port inside the container the sidecar forwards to.
+	Port int
+	// Env is what the container is started with.
+	Env map[string]string
+	// Command overrides the image's own command. Empty uses the image's.
+	//
+	// For Google there is no other way to say which emulator is meant: the
+	// Cloud CLI image ships four of them behind one entrypoint.
+	Command []string
+	// Maintainer records who stands behind the image, as the registration
+	// declared it. Carried so a runtime can report it, never so a runtime can
+	// decide with it.
+	Maintainer string
+	// Companions are containers this emulator does not work without, such as
+	// the MSSQL instance the Azure Service Bus emulator refuses to start
+	// without.
+	//
+	// They join the environment's inner network on exactly the same terms as
+	// the emulator, so they have no route out either. A runtime that starts
+	// the emulator and not its companions produces an emulator that never
+	// becomes ready, reported as a slow start.
+	Companions []EmulatorCompanion
+}
+
+// EmulatorCompanion is a container an emulator does not work without.
+//
+// It carries no Port, because nothing outside the environment addresses it:
+// the emulator reaches it by name on the environment's own network and the
+// sidecar never forwards to it. That is the difference between a companion
+// and a second emulator, and it is why this is a separate type rather than
+// another EmulatorSpec.
+// CompanionHost is the hostname a companion answers to on the environment's
+// network, given the emulator that declares it and its ONE BASED position in
+// that emulator's Companions.
+//
+// A function rather than a convention somebody writes out, because a
+// registration has to put this string into the PRINCIPAL's environment at
+// declaration time: Azure's Service Bus emulator dials SQL by name and its own
+// default is the literal sql_container_alias, so the emulator has to be told
+// where its companion is before either container exists. A name derived from
+// anything only known at runtime could not be written there at all.
+//
+// The position rather than a name the registration chooses, because a name is
+// an address on the environment's network and the addresses are the engine's
+// to hand out. A registration free to pick one could pick a service's.
+func CompanionHost(emulator string, index int) string {
+	return fmt.Sprintf("af-emu-companion-%s-%d", emulator, index)
+}
+
+type EmulatorCompanion struct {
+	// Name is what it answers to on the network, within the emulator's own
+	// namespace, so two emulators may each have a companion called "db".
+	Name string
+	// Image is the container image, pinned by digest.
+	Image string
+	// Env is what the container is started with.
+	Env map[string]string
+	// Command overrides the image's own command.
+	Command []string
+	// Maintainer records who stands behind the image.
+	Maintainer string
 }
 
 // ServiceSpec is one container to run.

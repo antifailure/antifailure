@@ -152,12 +152,21 @@ func main() {
 ```
 
 Five things can be registered: `AddDatabaseProvider`, `AddDatastoreProvider`,
-`AddRuntimeProvider`, `AddGoldenStore` and `AddEmulator`. Three of them are
-selected by the engine today. `AddDatastoreProvider` and `AddEmulator` have no
-lifecycle behind them yet, because the manifest declares one datastore and no
-egress rule can name an emulator, so registering either of those does nothing
-beyond appearing in `af license status`. Each socket says so in its own
+`AddRuntimeProvider`, `AddGoldenStore` and `AddEmulator`. The engine consults
+all five, and each socket says where a manifest reaches it in its own
 documentation rather than leaving you to discover it.
+
+This paragraph used to say that three of the five were selected and that
+`AddDatastoreProvider` and `AddEmulator` had no lifecycle behind them. Both
+halves became false, at different times and for different reasons. A datastore
+has been able to name a provider since #294, which resolves
+`datastores[].provider` through the registry before falling back to the built
+in one. An egress rule can name an emulator as of the change that added
+`emulate` to `egress.rules[].mode`, which resolves the name before anything
+starts and refuses the environment when nothing answers to it. A page telling
+an author that the socket they are registering into does nothing is worse than
+a page that omits the socket, because it is the sentence that stops them
+looking.
 
 Four rules are worth knowing before you rely on this.
 
@@ -412,6 +421,110 @@ the observation the assertion looks for is a value whose plaintext IS the
 redaction marker. It is kept because the suite checks the rendering rather than
 trusting the signature, and a signature that stopped returning `secret.Value`
 would make it violable for real.
+
+## Writing an emulator
+
+An emulator is a declaration rather than an implementation. Antifailure writes
+none: LocalStack, Azurite and the vendors' own carry years of fidelity work that
+a replacement written here would not have. Register one with
+`extension.Registry.AddEmulator` and it supplies a name, the hostnames it
+answers for, and a container pinned by digest. A tag is refused, because an
+emulator answers for a production API and a tag that moves changes what an
+environment was tested against with nothing in the repository changing.
+
+What the engine adds is routing, and it is the whole reason the socket exists.
+An egress rule set to `emulate` names your emulator, the engine starts your
+container on the environment's inner network, and the sidecar answers for the
+provider's own hostname with a certificate the environment already trusts. The
+application needs no endpoint override, which is the one thing every other way
+of using an emulator costs you.
+
+Three fields on the container exist because one reference implementation is not
+a contract, and LocalStack is the reason none of them showed up first: it is a
+single image whose entrypoint is the emulator, so it needs none of them.
+
+`Command` decides which emulator you get. Google ships Pub/Sub, Firestore,
+Datastore and Bigtable inside ONE Cloud CLI image whose entrypoint is the CLI,
+so `Image`, `Port` and `Env` alone describe four identical containers that run
+nothing. Azurite needs it too, for a smaller reason with the same shape: it
+binds to loopback unless told otherwise, and an emulator listening on 127.0.0.1
+answers nothing from the sidecar while looking perfectly healthy in its own logs.
+
+`Companions` are containers your emulator does not work without. Azure's Service
+Bus emulator refuses to start without an MSSQL instance beside it. Companions
+join the environment's inner network on exactly the terms the emulator does, so
+they have no route out either and `Reach` covers them without knowing they
+exist. Each carries its own digest and its own `Maintainer`, because a companion
+runs beside a copy of production data on the emulator's terms and "it came with
+the emulator" is not a provenance. A companion's own companions are refused: one
+level is what the known cases need, and a graph here would be a dependency
+resolver nobody asked for.
+
+`Maintainer` is declared and never inferred from the registry the image sits in.
+A registry path is a fact about hosting and this is a fact about support, and the
+two disagree exactly where it matters: `fsouza/fake-gcs-server` is the de facto
+GCS emulator and Google does not publish it, because Google ships no GCS emulator
+at all. Somebody deciding whether to trust an environment's answers about object
+storage should read that rather than infer it from a hostname.
+
+**An image that pulls is not an image that starts, and no emulator may require a
+cloud account.** `localstack/localstack` exits 55 on licence activation before it
+binds a port, which is a container that pulled, started, and answers nothing.
+Google's six start with no account, no token and no credential. The suite catches
+this without a rule of its own: a container that never binds fails
+`Covered_IsAnswered`, because the probe goes to your own declared hostname and
+there is nothing on the other end. Check it before you pin a digest, because the
+failure arrives as a routing problem and is not one.
+
+```go
+func TestMyEmulator(t *testing.T) {
+    conformance.RunEmulator(t, factory, conformance.EmulatorOptions{})
+}
+```
+
+`conformance.EmulatorBehaviors()` lists what it checks, and none of it is about
+whether your emulator implements S3 correctly. That is your emulator's business
+and its own project's tests. What the suite checks is the nine promises the
+ENGINE makes: that a request inside your declared surface is answered and is not
+refused, that an operation outside it comes back in the provider's own error
+shape, that the state is enumerable and goes away, that a live credential is
+refused before you see it, and that your container cannot reach the internet.
+
+**The subject is the emulator as routed.** Every probe is sent to your own
+declared hostname through `RoundTrip`, and nothing in the suite knows your
+container's address or may learn it. An implementation that pointed `RoundTrip`
+at the container directly would pass all nine behaviours and prove none of them,
+because the claim being checked is the routing and not the emulator.
+
+**Declare a covered probe that your emulator really implements.** Two behaviours
+read it, and they are separate on purpose: one requires that it is answered at
+all, and the other requires that the answer is not a refusal. An emulator that
+refuses every request satisfies the uncovered behaviour, satisfies the live
+credential behaviour, holds no state to leak and reaches nothing, so it would
+pass everything else here and be useless. The second behaviour reads the
+response body as well as the status, because AWS returns `200` carrying an error
+document for several operations.
+
+`Covered.Creates` false is a legitimate answer. A read only operation is a
+perfectly good thing to be covered by, and the two state behaviours skip by name
+rather than failing. Declaring `Creates` on a probe that creates nothing turns
+`State_IsEnumerable` into a failure nobody can act on.
+
+The suite ships with its own broken emulator and its own self test, in
+`engine/conformance/emulator_selftest_test.go`. The rule there is one break per
+ASSERTION rather than one per behaviour, because `Fatalf` stops at the first
+failure: a behaviour with three assertions and one control has shown its first
+can go red and has shown nothing about the other two.
+
+**The containment behaviour is proved twice and it has to be.** `Reach` is a
+behaviour in the suite, and the suite's own subject is a fake whose `Reach`
+returns whatever the fake decides, so passing it says nothing about Docker.
+`engine/internal/runtime/local/emulator_test.go` asks the daemon instead: it
+reads back the network the container actually attached to, requires it to be
+`Internal`, and attempts an outbound connection from inside the running
+container. It carries a control in the same run, reaching the sidecar by name,
+because a container that can reach nothing at all fails an escape attempt for
+reasons that have nothing to do with containment.
 
 ## Before you open a pull request
 
