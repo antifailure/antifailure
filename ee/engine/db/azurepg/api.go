@@ -88,6 +88,7 @@ func newARMAPI(opts Options) (*armAPI, error) {
 type server struct {
 	Name       string            `json:"name"`
 	Location   string            `json:"location"`
+	SKU        serverSKU         `json:"sku"`
 	Tags       map[string]string `json:"tags"`
 	Properties serverProperties  `json:"properties"`
 }
@@ -100,6 +101,11 @@ type serverProperties struct {
 	CreateTimeRaw            string       `json:"earliestRestoreDate"`
 	Storage                  storageProps `json:"storage"`
 	Network                  networkProps `json:"network"`
+}
+
+type serverSKU struct {
+	Name string `json:"name"`
+	Tier string `json:"tier"`
 }
 
 type storageProps struct {
@@ -137,6 +143,7 @@ func (s *server) access() Access {
 // the post restore work this provider has to do anyway.
 type restoreRequest struct {
 	Location   string            `json:"location"`
+	SKU        serverSKU         `json:"sku"`
 	Tags       map[string]string `json:"tags,omitempty"`
 	Properties restoreProps      `json:"properties"`
 }
@@ -369,13 +376,17 @@ func readPages[T interface{ resourceName() string }](ctx context.Context, a *arm
 }
 
 // restore creates a new server from an existing one at a point in time.
-func (a *armAPI) restore(ctx context.Context, source, destination, location string, access networkProps, at time.Time, tags map[string]string) (*asyncResult, error) {
+func (a *armAPI) restore(ctx context.Context, source, destination, location string, sku serverSKU, access networkProps, at time.Time, tags map[string]string) (*asyncResult, error) {
+	if sku.Name == "" || sku.Tier == "" {
+		return nil, fmt.Errorf("azurepg: source server returned no complete SKU; refusing an implicit restore size")
+	}
 	access.PublicNetworkAccess = "Enabled"
 	if access.DelegatedSubnetResourceID != "" {
 		access.PublicNetworkAccess = "Disabled"
 	}
 	body := restoreRequest{
 		Location: canonicalLocation(location),
+		SKU:      sku,
 		Tags:     tags,
 		Properties: restoreProps{
 			CreateMode:             "PointInTimeRestore",

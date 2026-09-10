@@ -98,7 +98,7 @@ func (p *Provider) Branch(ctx context.Context, version string, envID string) (pr
 		}
 	}
 
-	op, err := p.api.restore(ctx, goldenName, name, golden.Location, golden.Properties.Network, p.now().UTC(), map[string]string{
+	op, err := p.api.restore(ctx, goldenName, name, golden.Location, golden.SKU, golden.Properties.Network, p.now().UTC(), map[string]string{
 		tagKey:       tagValue,
 		envTagKey:    envID,
 		sourceTagKey: normaliseServerName(p.opts.SourceServer),

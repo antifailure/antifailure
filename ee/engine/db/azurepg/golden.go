@@ -46,7 +46,7 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 	version := provider.NewGoldenVersionID(created, spec.RulesHash)
 	name := p.serverName(goldenPrefix, version)
 
-	op, err := p.api.restore(ctx, source, name, src.Location, src.Properties.Network, p.now().UTC(), map[string]string{
+	op, err := p.api.restore(ctx, source, name, src.Location, src.SKU, src.Properties.Network, p.now().UTC(), map[string]string{
 		tagKey:       tagValue,
 		goldenTagKey: version,
 		sourceTagKey: source,

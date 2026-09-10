@@ -110,6 +110,7 @@ func (s *Server) render(srv *fakeServer) map[string]any {
 	return map[string]any{
 		"name":     srv.Name,
 		"location": s.opts.Location,
+		"sku":      map[string]string{"name": "Standard_B1ms", "tier": "Burstable"},
 		"tags":     srv.Tags,
 		"properties": map[string]any{
 			"fullyQualifiedDomainName": "127.0.0.1",
@@ -155,7 +156,11 @@ func (s *Server) get(w http.ResponseWriter, name string) {
 // NO firewall rules, and it is an independent copy whose bytes were moved.
 func (s *Server) restore(w http.ResponseWriter, r *http.Request, name string) {
 	var body struct {
-		Location   string            `json:"location"`
+		Location string `json:"location"`
+		SKU      struct {
+			Name string `json:"name"`
+			Tier string `json:"tier"`
+		} `json:"sku"`
 		Tags       map[string]string `json:"tags"`
 		Properties struct {
 			CreateMode             string `json:"createMode"`
@@ -176,6 +181,10 @@ func (s *Server) restore(w http.ResponseWriter, r *http.Request, name string) {
 		writeErr(w, http.StatusBadRequest, "InvalidParameterValue",
 			"this fake serves only createMode PointInTimeRestore, and was asked for "+
 				body.Properties.CreateMode)
+		return
+	}
+	if body.SKU.Name != "Standard_B1ms" || body.SKU.Tier != "Burstable" {
+		writeErr(w, http.StatusForbidden, "RequestDisallowedByPolicy", "the source SKU must be explicit")
 		return
 	}
 	sourceName := body.Properties.SourceServerResourceID

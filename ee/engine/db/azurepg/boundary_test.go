@@ -108,6 +108,7 @@ func TestAzureLocationDisplayNameMatchesItsCanonicalRegion(t *testing.T) {
 func TestRestoreSendsTheCanonicalLocation(t *testing.T) {
 	var location string
 	var restoreAt string
+	var actualSKU serverSKU
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request restoreRequest
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -115,6 +116,7 @@ func TestRestoreSendsTheCanonicalLocation(t *testing.T) {
 			return
 		}
 		location = request.Location
+		actualSKU = request.SKU
 		restoreAt = request.Properties.PointInTimeUTC
 		_, _ = w.Write([]byte(`{}`))
 	}))
@@ -122,10 +124,12 @@ func TestRestoreSendsTheCanonicalLocation(t *testing.T) {
 	api, err := newARMAPI(Options{Endpoint: srv.URL, Token: func(context.Context) (string, error) { return "AF_FAKE_TOKEN", nil }})
 	require.NoError(t, err)
 	at := time.Date(2026, 9, 10, 1, 2, 3, 123456789, time.UTC)
-	_, err = api.restore(context.Background(), "source", "copy", "Central US", networkProps{}, at, nil)
+	sku := serverSKU{Name: "Standard_B1ms", Tier: "Burstable"}
+	_, err = api.restore(context.Background(), "source", "copy", "Central US", sku, networkProps{}, at, nil)
 	require.NoError(t, err)
 	require.Equal(t, "centralus", location)
 	require.Equal(t, at.Format(time.RFC3339Nano), restoreAt)
+	require.Equal(t, sku, actualSKU)
 }
 
 func TestResourceNamesSeparateSourcesAndAccounts(t *testing.T) {
