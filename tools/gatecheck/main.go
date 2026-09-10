@@ -582,6 +582,12 @@ func gatesIn(raw, dir string) []gate {
 			case strings.HasPrefix(whole, "go run ./tools/"),
 				strings.HasPrefix(whole, "go run ../tools/"):
 				out = append(out, gate{kind: "tool", arg: m[1]})
+				if m[1] == "enginetest" {
+					// This runner discovers the whole engine inventory and runs
+					// each package once, isolating the storage timing package.
+					// Its partition and failure propagation are mutation tested.
+					out = append(out, gate{kind: "gotest", arg: "./...", dir: "engine"})
+				}
 			case strings.HasPrefix(whole, "go test"):
 				out = append(out, gate{"gotest", normalizeTarget(m[2]), goDir(raw, dir)})
 			case strings.HasPrefix(whole, "go vet"):
@@ -647,19 +653,10 @@ var (
 // normalizeTarget reduces a Go package pattern to what is worth comparing.
 //
 // The directory the command ran in is compared separately and exactly; this is
-// only about the pattern. `./internal/secrets/...` and `./...` reach different
-// sets of packages but both mean "everything under here", and CI spells the
-// same run both ways in two workflows.
+// only about the pattern. A recursive subtree must retain its identity:
+// testing secrets alone does not exercise the whole engine.
 func normalizeTarget(target string) string {
-	target = strings.Trim(target, `"'`)
-	switch {
-	case strings.Contains(target, "..."):
-		return "./..."
-	case strings.HasPrefix(target, "./internal/"), strings.HasPrefix(target, "./license"):
-		return target
-	default:
-		return target
-	}
+	return strings.Trim(target, `"')`)
 }
 
 // uncalledByGate reports recipes that define a gate and that `just gate` never
