@@ -131,3 +131,36 @@ func TestObserve_HandlesAnEmptyLog(t *testing.T) {
 	require.Empty(t, c.Hosts)
 	require.Nil(t, egress.CredentialFinding(c))
 }
+
+// A connection nothing looked inside is counted and its host is named.
+//
+// The field this asserts on exists because two before it did not. waited_ms
+// and synthesized were both written by the sidecar for months into a struct
+// with no field for them, so json.Unmarshal dropped them and every consumer
+// downstream saw a rate limited call and a model's invention as ordinary
+// allowed requests. A stream flag written by the sidecar and read by nobody
+// would be the third, and the thing it would hide is larger: how much of an
+// environment's traffic was never inspected at all.
+//
+// Counted separately from host_only, which every stream decision also sets,
+// because the two are different admissions. A host_only HTTPS request was
+// decided without its path and could have been read if a rule had asked. A
+// stream connection could never have been read, in any configuration.
+func TestObserve_NamesTheHostsNothingLookedInside(t *testing.T) {
+	t.Parallel()
+	c := egress.Observe([]local.Decision{
+		{Host: "af.servicebus.windows.net", Mode: "allow", Rule: "af.servicebus.windows.net",
+			Allowed: true, HostOnly: true, Stream: true},
+		{Host: "af.servicebus.windows.net", Mode: "allow", Rule: "af.servicebus.windows.net",
+			Allowed: true, HostOnly: true, Stream: true},
+		{Host: "api.stripe.com", Mode: "allow", Rule: "api.stripe.com",
+			Allowed: true, HostOnly: true},
+	})
+
+	require.Equal(t, 2, c.Stream,
+		"two connections were decided without anything inside them being read")
+	require.Equal(t, 3, c.HostOnly,
+		"every stream decision is host only as well, and the HTTPS one is too")
+	require.Equal(t, []string{"af.servicebus.windows.net"}, c.StreamHosts,
+		"the broker connected to twice is named once, and the HTTPS host is not named at all")
+}
