@@ -17,6 +17,7 @@
   },
   "devDependencies": {
     "@antifailure-ee/scim": "*",
+    "@antifailure-ee/server": "*",
     "@antifailure-ee/sso": "*",
     "@types/node": "^24.0.0",
     "postgres": "^3.4.9",

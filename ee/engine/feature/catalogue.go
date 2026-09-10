@@ -265,8 +265,9 @@ var catalogue = []Entitlement{
 		// import that would have enforced that is the one the dependency
 		// forbids, so a test in ee/engine/cmd/af asserts they are equal from a
 		// binary that links both. See TestTheAuditSiteIsTheOneAuditsinkDeclares.
-		EnforcedAt: "auditsink/auditsink.go:auditsink.permitted",
-		State:      StateGated,
+		EnforcedAt:     "auditsink/auditsink.go:auditsink.permitted",
+		ControlPlaneAt: "ee/web/server/src/register.ts:startAuditStream",
+		State:          StateGated,
 	},
 	{
 		Feature: license.FeatureBilling,
@@ -510,7 +511,7 @@ func SplitSite(site string) (file, symbol string, ok bool) {
 func ControlPlaneGatedFeatures() []license.Feature {
 	out := []license.Feature{}
 	for _, e := range catalogue {
-		if e.State == StateControlPlaneGated {
+		if e.State == StateControlPlaneGated || (e.State == StateGated && e.ControlPlaneAt != "") {
 			out = append(out, e.Feature)
 		}
 	}

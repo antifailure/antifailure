@@ -20,37 +20,43 @@ approvals, SIEM streaming of the engine's privileged actions, organization wide
 policy enforcement, customer owned runtime clusters, enterprise secret
 managers, billing and metering, and support tooling.
 
-### What that sentence used to claim, and what actually ships
+### What "SIEM streaming with a tamper evident hash chain" means, exactly
 
-It said "SIEM streaming with a tamper evident hash chain". Both halves are real
-and they are not joined to each other, so the conjunction was false in the way
-that is hardest to notice: each half can be pointed at.
+It is two mechanisms and they are now joined to each other. They were not, for
+as long as both existed, and the conjunction was false in the way that is
+hardest to notice, because each half could be pointed at when questioned.
 
-What ships is `ee/engine/auditsink`. It is registered in
-`ee/engine/cmd/af/main.go`, it asks the licence per call, and it forwards the
-five actions that `docs/enterprise/audit-stream.md` lists, to Splunk, Event
-Hubs, an object store or a webhook. The webhook carries an HMAC over the exact
-bytes posted, which makes one delivery tamper evident. There is no chain across
-entries in it.
+**The engine's half.** `ee/engine/auditsink`, registered in
+`ee/engine/cmd/af/main.go`, asks the licence per call and forwards the five
+actions `docs/enterprise/audit-stream.md` lists to syslog, a webhook or an
+object store. Its webhook carries an HMAC over the exact bytes posted, so one
+delivery is tamper evident. Nothing in it chains entries to each other, because
+the engine runs on a machine with no database.
 
-The chain exists in two places and neither is streamed. `audit_entries` carries
-`prev_hash` and `entry_hash` and is written by the control plane regardless of
-any licence, which is MIT and is not sold. `ee/web/audit` implements the
-forwarder that would carry that chain to a sink, with a bounded queue, four
-sinks and signed batch manifests over the chain head, and **nothing imports
-it**. It is not a declared dependency of any package in this workspace,
-including `ee/web/server`, so it could not be imported without a package.json
-change, while its own suite runs and passes in CI on every pull request. Tested,
-green, and unreachable is the most convincing possible disguise for dead code.
+**The control plane's half.** `audit_entries` carries `prev_hash` and
+`entry_hash`, records organization actions including sign on, provisioning and
+administration, and is MIT. Global operator actions in `admin_audit_entries`
+are forwarded only when they also produce an organization entry. `ee/web/audit`
+carries it to a sink: a bounded queue, four destinations, and a batch manifest
+signed over the chain head so an archived batch can be checked without asking
+this control plane anything. `ee/web/server/src/register.ts` starts the poll
+loop, which is what was missing.
 
-So the control plane's audit log is not forwarded anywhere. Single sign on
-logins, directory provisioning, operator impersonation and every admin action
-are in `audit_entries` and reach no sink. `docs/enterprise/audit-stream.md` was
-already accurate about this and says so in its second paragraph; it was this
-summary line that sold more than the product does. Wiring the control plane half
-is enterprise side work, since `ee/web/server/src/register.ts` already does non
-route work and is handed the pool and the clock, and when it lands this
-paragraph is what gets deleted.
+**What was wrong and how long it lasted.** `ee/web/audit` was complete, tested
+and imported by nothing. It was not a declared dependency of any package in this
+workspace, so it could not be imported without a package.json change, while
+`npm --prefix ee/web test` ran its suite green on every pull request because
+that command runs every workspace. Tested, green and unreachable is the most
+convincing disguise dead code can wear, and the summary line above it sold the
+conjunction the whole time.
+
+Two things the wiring found that the sentence above could not have:
+`web/apps/api/src/entitlements.ts` had no `audit_stream` entry at all, so
+`licensed(pool, orgId, 'audit_stream', now)` answered false for every
+organization on every plan and the gate could never have been passed; and the
+audit log is a cross tenant read by nature, which needed a policy and a pool
+scope of its own rather than a reuse of the sweeper's. Migration 0043 carries
+that argument.
 
 ## How the boundary is enforced
 
@@ -140,7 +146,7 @@ maintenance.mjs` mean exactly what they mean in the community image. A Helm
 release or a container app pointed at the enterprise repository instead of the
 community one needs no other change.
 
-Five variables are read only by this edition. Two of them are required and the
+Five variables configure the edition itself. Two of them are required and the
 process says so and exits rather than starting half configured:
 
 - `AF_EE_SSO_KEY`, **required**, 32 bytes of base64. Single sign-on encrypts the
@@ -161,6 +167,47 @@ A licence that does not parse is refused at startup rather than degraded. That
 is a deployment mistake and not a commercial state, and starting anyway would
 mean an enterprise deployment quietly serving 402 to its own identity provider
 because somebody pasted a truncated key.
+
+### Streaming the control plane's audit log
+
+Off unless a destination is named, and the process says which state it is in on
+every start, because an installation that forwards and one that does not
+produced identical logs until that line existed.
+
+- `AF_AUDIT_STREAM_SINK`, one of `splunk`, `event_hubs` or `webhook`. Unset
+  means the audit log is written and not forwarded, which is said out loud.
+- `AF_AUDIT_STREAM_KEY`, **required when a sink is named**. Batch manifests are
+  signed under it, and a manifest signed under a key nobody chose is decoration
+  rather than evidence. Generate one with `openssl rand -base64 32`.
+- `AF_AUDIT_STREAM_SPLUNK_URL` and `AF_AUDIT_STREAM_SPLUNK_TOKEN` for the HTTP
+  Event Collector, with `AF_AUDIT_STREAM_SPLUNK_INDEX` and
+  `AF_AUDIT_STREAM_SPLUNK_SOURCETYPE` optional so entries land where the
+  customer's existing searches already look.
+- `AF_AUDIT_STREAM_EVENT_HUBS_URL` and `AF_AUDIT_STREAM_EVENT_HUBS_AUTHORIZATION`,
+  the second being a shared access signature the operator generates, so no key
+  reaches this process and managed identity stays possible.
+- `AF_AUDIT_STREAM_WEBHOOK_URL` and `AF_AUDIT_STREAM_WEBHOOK_SECRET`, which
+  signs the body and its first entry's event timestamp. Receivers must
+  deduplicate by organization and sequence; signature verification alone does
+  not reject replay.
+- `AF_AUDIT_STREAM_INTERVAL_MS`, how often a pass runs, ten seconds by default.
+- `AF_AUDIT_STREAM_BATCH`, how many entries one pass reads, 500 by default, and
+  `AF_AUDIT_STREAM_DELIVERY_BATCH`, how many one request carries, defaulting to
+  the pass size. Two knobs rather than one because a pass size is how fast the
+  forwarder catches up and a delivery size is what somebody else's collector
+  will accept in one request.
+
+A sink named with its variables missing **refuses to start**, naming the
+variable. That is the same rule the engine's sink follows and for the same
+reason: somebody who set the variable has said every privileged action must
+reach their SIEM, and starting anyway forwards nothing and says nothing, which
+is indistinguishable from a quiet week.
+
+The object store sink in `ee/web/audit/src/sinks.ts` **cannot be configured from
+the environment**, because it takes a `put` callback and this side of the
+product carries no S3 or Blob signer to supply one. It is reachable by an
+embedder that passes a `Sink` directly. Naming it in the variable is refused
+rather than accepted and then silently writing nowhere.
 
 **With no licence the enterprise routes are mounted and answer 402**, naming
 the feature and the variable to set. They are not left unmounted. A 404 says

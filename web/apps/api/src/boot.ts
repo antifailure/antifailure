@@ -127,6 +127,8 @@ export interface BootHooks {
    * is discovering it in production.
    */
   beforeServer?: (ctx: BootContext) => void | Promise<void>
+  /** Stops edition-owned scheduling before the shared database pool closes. */
+  beforeClose?: () => void | Promise<void>
 }
 
 /** The running process, for a caller that wants to stop it. */
@@ -795,8 +797,9 @@ export async function startControlPlane(hooks: BootHooks = {}): Promise<ControlP
         // Flushed before the pool closes, for the same reason the sink is:
         // whatever the last ten seconds grouped is otherwise lost on every
         // deploy, and a deploy is exactly when an operator is looking.
-        void failures
-          .flush()
+        void Promise.resolve()
+          .then(() => hooks.beforeClose?.())
+          .then(() => failures.flush())
           .catch((err) => console.error('failure store flush on shutdown', err))
           .then(() => postHogSink.shutdown())
           .then(() => pool.close())
@@ -819,8 +822,9 @@ export async function startControlPlane(hooks: BootHooks = {}): Promise<ControlP
             reject(err)
             return
           }
-          void failures
-            .flush()
+          void Promise.resolve()
+            .then(() => hooks.beforeClose?.())
+            .then(() => failures.flush())
             .catch((err) => console.error('failure store flush on close', err))
             .then(() => postHogSink.shutdown())
             .then(() => pool.close())

@@ -5,6 +5,8 @@
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import {
   SplunkSink, EventHubsSink, ObjectStoreSink, WebhookSink, verifyWebhook,
   PermanentError, sign, type Batch, type Entry, type Fetcher,
@@ -40,6 +42,81 @@ function capturing(status = 200, body = ''): { fetch: Fetcher; calls: Capture[] 
   }
 }
 
+describe('audit destination protection', () => {
+  it('a real redirect never receives the audit body at its target', async () => {
+    let received = 0
+    const server = createServer((req, res) => {
+      req.resume()
+      if (req.url === '/redirect') res.writeHead(307, { location: '/target' }).end()
+      else { received += 1; res.writeHead(200).end() }
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/redirect`
+    try {
+      await assert.rejects(new WebhookSink({ url, secret: 'AF_FAKE_SECRET', fetch }).deliver(batch()))
+      assert.equal(received, 0, 'the redirected destination received the private audit body')
+    } finally {
+      server.closeAllConnections()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+  it('the deadline aborts a real collector request before its response', async (t) => {
+    const deadline = new AbortController()
+    let requested = false
+    const server = createServer((req, res) => {
+      req.resume()
+      requested = true
+      deadline.abort(new Error('synthetic collector deadline'))
+      // Finish on the next event-loop turn if the abort was ignored. This
+      // makes the negative control fail by accepting a response, not hang.
+      setImmediate(() => res.writeHead(200).end())
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const timeout = t.mock.method(AbortSignal, 'timeout', () => deadline.signal)
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/never`
+    try {
+      await assert.rejects(new WebhookSink({ url, secret: 'AF_FAKE_SECRET', fetch }).deliver(batch()), /deadline/)
+      assert.equal(requested, true)
+      assert.deepEqual(timeout.mock.calls[0]!.arguments, [30_000])
+    } finally {
+      server.closeAllConnections()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+  const constructors = {
+    splunk: (url: string) => new SplunkSink({ url, token: 't', fetch: capturing().fetch }),
+    eventHubs: (url: string) => new EventHubsSink({ url, authorization: 't', fetch: capturing().fetch }),
+    webhook: (url: string) => new WebhookSink({ url, secret: 's', fetch: capturing().fetch }),
+  }
+  for (const [name, build] of Object.entries(constructors)) {
+    it(`${name} refuses plaintext delivery to a remote collector`, () => {
+      assert.throws(() => build('http://collector.example.test/ingest'), /requires HTTPS/)
+    })
+    it(`${name} refuses credentials embedded in a destination URL`, () => {
+      assert.throws(() => build('https://user:password@collector.example.test/ingest'), /requires HTTPS/)
+    })
+  }
+  it('refuses redirects instead of forwarding the audit body to another destination', async () => {
+    const { fetch, calls } = capturing()
+    await new WebhookSink({ url: 'https://collector.test/ingest', secret: 's', fetch }).deliver(batch())
+    assert.equal(calls[0]!.init.redirect, 'error')
+  })
+  it('bounds collector requests with an abort signal', async () => {
+    const { fetch, calls } = capturing()
+    await new WebhookSink({ url: 'https://collector.test/ingest', secret: 's', fetch }).deliver(batch())
+    assert.ok(calls[0]!.init.signal instanceof AbortSignal)
+  })
+  it('cancels an unfinished collector response without buffering it', async () => {
+    let cancelled = false
+    const fetch: Fetcher = async () => new Response(new ReadableStream({
+      start(controller) { controller.enqueue(new TextEncoder().encode('AF_FAKE_PRIVATE_DETAIL')) },
+      cancel() { cancelled = true },
+    }), { status: 500 })
+    await assert.rejects(new WebhookSink({ url: 'https://collector.test/ingest', secret: 's', fetch }).deliver(batch()))
+    assert.equal(cancelled, true)
+  })
+})
+
 describe('splunk', () => {
   it('sends newline-delimited events, not an array', async () => {
     // HEC takes objects one per line. An array is accepted and indexed as a
@@ -69,28 +146,38 @@ describe('splunk', () => {
     assert.equal(event.sourcetype, 'acme:audit')
   })
 
-  it('carries the manifest so a batch can still be checked', async () => {
+  it('carries the manifest in indexed fields so stored events can still be checked', async () => {
     const { fetch, calls } = capturing()
     const b = batch(2)
     await new SplunkSink({ url: 'https://splunk.test/x', token: 't', fetch }).deliver(b)
 
     const headers = calls[0]!.init.headers as Record<string, string>
     assert.deepEqual(JSON.parse(headers['x-antifailure-manifest']!), b.manifest)
+    const records = String(calls[0]!.init.body).split('\n').map(line => JSON.parse(line))
+    for (let i = 0; i < records.length; i += 1) {
+      assert.deepEqual(records[i].event, b.entries[i])
+      assert.deepEqual(JSON.parse(records[i].fields.antifailure_manifest), b.manifest)
+    }
   })
 })
 
 describe('event hubs', () => {
-  it('sends a JSON array of records', async () => {
+  it('sends string event bodies and persistent manifest properties in the documented REST format', async () => {
     const { fetch, calls } = capturing(201)
+    const expected = batch(2)
     await new EventHubsSink({
       url: 'https://ns.servicebus.windows.net/hub/messages',
       authorization: 'SharedAccessSignature sr=...',
       fetch,
-    }).deliver(batch(2))
+    }).deliver(expected)
 
     const records = JSON.parse(String(calls[0]!.init.body))
     assert.equal(records.length, 2)
-    assert.equal(records[0].Body.seq, 1)
+    for (let i = 0; i < records.length; i += 1) {
+      assert.equal(typeof records[i].Body, 'string')
+      assert.deepEqual(JSON.parse(records[i].Body), expected.entries[i])
+      assert.deepEqual(JSON.parse(records[i].UserProperties.antifailure_manifest), expected.manifest)
+    }
     const headers = calls[0]!.init.headers as Record<string, string>
     assert.match(headers['content-type']!, /servicebus/)
   })

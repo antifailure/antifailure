@@ -1547,11 +1547,18 @@ export const environmentUsageDaily = pgTable('environment_usage_daily', {
   measuredAt: timestamp('measured_at', { withTimezone: true }).notNull(),
 }, (t) => [primaryKey({ columns: [t.orgId, t.day] })])
 
+/** Organization-owned positions, readable and writable only by the forwarder. */
+export const auditStreamPositions = pgTable('audit_stream_positions', {
+  orgId: uuid('org_id').primaryKey().references(() => organizations.id, { onDelete: 'cascade' }),
+  deliveredSeq: bigint('delivered_seq', { mode: 'number' }).notNull().default(0),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+})
+
 export const tenantScopedTables = [
   environmentUsage, environmentUsageDaily, usageRollupState,
   members, githubInstallations, repositories, environments, goldenVersions,
   runs, verdicts, artifacts, maskingRules, networkRules, runtimes, engineTokens,
-  events, auditEntries, providerKeys, providerBudgets,
+  events, auditEntries, auditStreamPositions, providerKeys, providerBudgets,
   ssoConnections, ssoConnectionSecrets, ssoDomains, ssoLoginStates,
   ssoAssertionsSeen, ssoBreakGlassCodes,
   scimTokens, scimResources, scimGroups, scimGroupMembers,
@@ -1648,3 +1655,17 @@ export const controlPlaneFailures = pgTable(
   },
   (t) => [index('control_plane_failures_last_seen_idx').on(t.lastSeenAt)],
 )
+
+/* ---------------------------------------------------------------------------
+ * Where the audit stream forwarder got to
+ *
+ * One summary row for operational diagnostics. Per organization positions
+ * determine delivery because sequence allocation and commit order differ.
+ * See migration 0043 for the policies confining these reads.
+ * ------------------------------------------------------------------------ */
+
+export const auditStreamCursor = pgTable('audit_stream_cursor', {
+  id: boolean('id').primaryKey().default(true),
+  deliveredSeq: bigint('delivered_seq', { mode: 'number' }).notNull().default(0),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+})

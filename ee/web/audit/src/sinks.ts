@@ -21,6 +21,15 @@ import { PermanentError, type Batch, type Sink } from './sink.ts'
 /** The fetch a sink uses. */
 export type Fetcher = (url: string, init: RequestInit) => Promise<Response>
 
+function validateDestination(raw: string): void {
+  let url: URL
+  try { url = new URL(raw) } catch { throw new Error('The audit destination must be an absolute HTTPS URL.') }
+  const local = ['127.0.0.1', '[::1]', 'localhost'].includes(url.hostname)
+  if (url.username || url.password || (url.protocol !== 'https:' && !(url.protocol === 'http:' && local))) {
+    throw new Error('The audit destination requires HTTPS without URL credentials; HTTP is allowed only for a loopback collector.')
+  }
+}
+
 /**
  * Decides whether a status means "never going to work".
  *
@@ -41,19 +50,18 @@ async function send(
 ): Promise<void> {
   let res: Response
   try {
-    res = await fetcher(url, init)
+    res = await fetcher(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(30_000) })
   } catch (err) {
     // A transport failure is temporary by assumption. A hostname that does not
     // resolve looks the same as one that is briefly unreachable, and guessing
     // wrong towards permanent would discard entries over a DNS blip.
     throw new Error(`${what}: ${err instanceof Error ? err.message : String(err)}`)
   }
+  // Do not buffer or quote a collector response. It can echo private audit
+  // data, and truncating after text() has already read an unbounded body.
+  await res.body?.cancel().catch(() => {})
   if (res.ok) return
-
-  // Bounded, because an error path must not read an unbounded body from an
-  // endpoint that may not be the one intended.
-  const body = (await res.text().catch(() => '')).slice(0, 500)
-  const message = `${what} answered ${res.status}${body ? `: ${body}` : ''}`
+  const message = `${what} answered ${res.status}`
   throw permanent(res.status) ? new PermanentError(message) : new Error(message)
 }
 
@@ -76,6 +84,7 @@ export class SplunkSink implements Sink {
   private readonly opts: SplunkOptions
 
   constructor(opts: SplunkOptions) {
+    validateDestination(opts.url)
     this.opts = opts
   }
 
@@ -94,6 +103,9 @@ export class SplunkSink implements Sink {
           source: 'antifailure-audit',
           sourcetype: this.opts.sourcetype ?? 'antifailure:audit',
           ...(this.opts.index ? { index: this.opts.index } : {}),
+          // HEC indexes custom fields from this flat object. A manifest only
+          // carried in an HTTP header never reaches the stored event.
+          fields: { antifailure_manifest: JSON.stringify(batch.manifest) },
           event: entry,
         }),
       )
@@ -107,8 +119,6 @@ export class SplunkSink implements Sink {
         headers: {
           authorization: `Splunk ${this.opts.token}`,
           'content-type': 'application/json',
-          // The manifest travels in a header so that the body stays exactly
-          // what Splunk expects and an operator can still check the batch.
           'x-antifailure-manifest': JSON.stringify(batch.manifest),
         },
         body,
@@ -134,6 +144,7 @@ export class EventHubsSink implements Sink {
   private readonly opts: EventHubsOptions
 
   constructor(opts: EventHubsOptions) {
+    validateDestination(opts.url)
     this.opts = opts
   }
 
@@ -152,7 +163,14 @@ export class EventHubsSink implements Sink {
           'content-type': 'application/vnd.microsoft.servicebus.json',
           'x-antifailure-manifest': JSON.stringify(batch.manifest),
         },
-        body: JSON.stringify(batch.entries.map((entry) => ({ Body: entry }))),
+        // The REST batch format requires a string Body. Batch properties in
+        // HTTP headers are ignored, so the signed manifest must travel with
+        // each event for a downstream consumer to retain and verify it.
+        // https://learn.microsoft.com/en-us/rest/api/eventhub/send-batch-events
+        body: JSON.stringify(batch.entries.map((entry) => ({
+          Body: JSON.stringify(entry),
+          UserProperties: { antifailure_manifest: JSON.stringify(batch.manifest) },
+        }))),
       },
       'event hubs',
     )
@@ -229,13 +247,15 @@ export interface WebhookOptions {
  * A signed webhook, for everything with no adapter.
  *
  * The signature covers the body and a timestamp, and the timestamp is outside
- * the body so a receiver can reject an old delivery without parsing it. A
- * signature over the body alone is replayable forever.
+ * the body so a receiver can inspect the event time before parsing it.
+ * Receivers deduplicate by organization and sequence: backlog delivery can
+ * legitimately contain old events, and signature verification permits replay.
  */
 export class WebhookSink implements Sink {
   private readonly opts: WebhookOptions
 
   constructor(opts: WebhookOptions) {
+    validateDestination(opts.url)
     this.opts = opts
   }
 
