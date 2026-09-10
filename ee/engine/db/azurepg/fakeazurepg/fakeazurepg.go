@@ -309,7 +309,7 @@ func (s *Server) ensureRole(role, password string) error {
 	literal := `'` + strings.ReplaceAll(password, `'`, `''`) + `'`
 	statement := `ALTER ROLE ` + quoteIdent(role) + ` PASSWORD ` + literal
 	if !exists {
-		statement = `CREATE ROLE ` + quoteIdent(role) + ` LOGIN INHERIT PASSWORD ` + literal + ` IN ROLE ` + quoteIdent(owner)
+		statement = `CREATE ROLE ` + quoteIdent(role) + ` LOGIN CREATEROLE INHERIT PASSWORD ` + literal + ` IN ROLE ` + quoteIdent(owner)
 	}
 	if _, err := s.admin.Exec(statement); err != nil {
 		return fmt.Errorf("updating the fixture database credential: %w", err)

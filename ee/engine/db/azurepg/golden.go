@@ -29,7 +29,7 @@ const goldenPrefix = "g"
 // running flexible server holding UNMASKED production data, billed by the hour,
 // under a name returned to nobody.
 func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) (provider.GoldenVersion, error) {
-	if p.closed {
+	if p.closed.Load() {
 		return provider.GoldenVersion{}, fmt.Errorf("azurepg: provider is closed")
 	}
 	source := normaliseServerName(p.opts.SourceServer)
@@ -49,8 +49,9 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 	op, err := p.api.restore(ctx, source, name, src.Location, src.Properties.Network, p.now().UTC(), map[string]string{
 		tagKey:       tagValue,
 		goldenTagKey: version,
+		sourceTagKey: source,
 	})
-	if err != nil {
+	if err != nil && op == nil {
 		return provider.GoldenVersion{}, fmt.Errorf(
 			"azurepg: restoring source server %q into %q: %w", source, name, err)
 	}
@@ -69,6 +70,9 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 			_ = p.api.wait(cleanup, op, p.opts.PollInterval)
 		}
 	}()
+	if err != nil {
+		return provider.GoldenVersion{}, fmt.Errorf("azurepg: accepted restore response could not be read: %w", err)
+	}
 	if err := p.api.wait(ctx, op, p.opts.PollInterval); err != nil {
 		return provider.GoldenVersion{}, err
 	}
@@ -99,6 +103,9 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 	if err != nil {
 		return provider.GoldenVersion{}, fmt.Errorf("azurepg: verifying golden: %w", err)
 	}
+	if err := p.disableInheritedLogins(ctx, url); err != nil {
+		return provider.GoldenVersion{}, err
+	}
 
 	// The metadata goes on AFTER verification, so a golden that never verified
 	// cannot be found carrying a provenance that suggests it did. It is also
@@ -115,6 +122,7 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 	}
 	metadata[versionTagKey] = version
 	metadata[tagKey] = tagValue
+	metadata[sourceTagKey] = source
 	metadata[goldenTagKey] = version
 	metadata[createdTagKey] = created.Format(time.RFC3339Nano)
 	op, err = p.api.patchServer(ctx, name, map[string]any{"tags": metadata})
@@ -150,7 +158,7 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 // firewall range; private sources require the DNS zone that restores retain.
 // Both are checked before a billed server is provisioned.
 func (p *Provider) refuseAccessCrossing(src *server) error {
-	if p.opts.Location != "" && !strings.EqualFold(p.opts.Location, src.Location) {
+	if p.opts.Location != "" && canonicalLocation(p.opts.Location) != canonicalLocation(src.Location) {
 		return fmt.Errorf("azurepg: the configured location %q differs from the source location %q", p.opts.Location, src.Location)
 	}
 	if src.access() == AccessPrivate {
@@ -161,6 +169,11 @@ func (p *Provider) refuseAccessCrossing(src *server) error {
 	}
 	_, _, err := cidrRange(p.opts.AllowCIDR)
 	return err
+}
+
+// Resource Manager can return a display name such as Central US for centralus.
+func canonicalLocation(location string) string {
+	return strings.ToLower(strings.Join(strings.Fields(location), ""))
 }
 
 // prepare does the POST RESTORE work Azure does not do for you.
@@ -222,7 +235,11 @@ func (p *Provider) prepare(ctx context.Context, name string) (secret.Value, erro
 	if err != nil {
 		return secret.Value{}, err
 	}
-	return p.connString(host, p.port(), login, password, database), nil
+	connection := p.connString(host, p.port(), login, password, database)
+	if err := p.disableInheritedLogins(ctx, connection); err != nil {
+		return secret.Value{}, err
+	}
+	return connection, nil
 }
 
 // ListGoldens returns known versions, newest first.
@@ -239,7 +256,7 @@ func (p *Provider) ListGoldens(ctx context.Context) ([]provider.GoldenVersion, e
 	var out []provider.GoldenVersion
 	for i := range servers {
 		s := &servers[i]
-		if !isOurs(s) {
+		if !p.isOurs(s) {
 			continue
 		}
 		if s.Tags[goldenTagKey] == "" {
@@ -284,7 +301,7 @@ func (p *Provider) DestroyGolden(ctx context.Context, version string) error {
 		}
 		return err
 	}
-	if !isOurs(s) {
+	if !p.isOurs(s) {
 		return fmt.Errorf("azurepg: server %q: %w", name, ErrNotOurs)
 	}
 	// A golden with a live branch must not be removed. The engine's contract
@@ -320,7 +337,7 @@ func (p *Provider) branchesFrom(ctx context.Context, version string) ([]string, 
 	var out []string
 	for i := range servers {
 		s := &servers[i]
-		if !isOurs(s) || s.Tags[goldenTagKey] != "" {
+		if !p.isOurs(s) || s.Tags[goldenTagKey] != "" {
 			continue
 		}
 		if s.Tags[fromTagKey] == version {
