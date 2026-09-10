@@ -156,8 +156,16 @@ func hostPort(t *testing.T, raw string) (string, string) {
 
 func newProvider(t *testing.T, server *fakecloudsql.Server) *cloudsql.Provider {
 	t.Helper()
-	p, err := cloudsql.New(context.Background(), options(t, server))
+	p, err := newScoped(context.Background(), server, options(t, server))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = p.Close() })
 	return p
+}
+
+func newScoped(ctx context.Context, server *fakecloudsql.Server, opts cloudsql.Options) (*cloudsql.Provider, error) {
+	p, err := cloudsql.New(ctx, opts)
+	if err == nil {
+		cloudsql.SetLoginCatalogForTest(p, server.CustomerLogins)
+	}
+	return p, err
 }

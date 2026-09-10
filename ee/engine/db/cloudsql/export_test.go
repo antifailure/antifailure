@@ -2,6 +2,20 @@
 
 package cloudsql
 
+import (
+	"context"
+	"database/sql"
+)
+
+// SetLoginCatalogForTest limits the shared Postgres fixture to its own roles.
+// Production always reads the full server catalog. This seam ships in no binary.
+func SetLoginCatalogForTest(p *Provider, lookup func(context.Context, *sql.DB) ([]string, error)) {
+	p.loginCatalog = lookup
+}
+func CustomerLoginsForTest(ctx context.Context, db *sql.DB) ([]string, error) {
+	return customerLogins(ctx, db)
+}
+
 // The one door the external test package needs, and no more.
 //
 // fastCloneRequest is unexported because nothing outside this package may build

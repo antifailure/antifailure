@@ -101,13 +101,15 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"net"
-	"net/url"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the pgx driver
@@ -253,7 +255,7 @@ type Options struct {
 	// the provider choose; see pickDatabase.
 	Database string
 	// AdminUser names the administrator to authenticate as. Empty lets the
-	// provider read it from the instance; see pickUser.
+	// provider read it from the instance; see selectAdministrator.
 	AdminUser string
 	// ProxyAddress is a host:port that replaces the instance's own address.
 	//
@@ -268,7 +270,8 @@ type Options struct {
 	// The DATABASE still distinguishes one instance from another, which is why
 	// the database name is read from the instance rather than assumed.
 	ProxyAddress string
-	// TLSMode is the sslmode for connection strings. Empty means require.
+	// TLSMode is an optional verification override. Empty selects secure verification
+	// from the instance CA mode. Disable is only supported for a local proxy.
 	TLSMode string
 	// StopGoldens selects the golden compute policy.
 	StopGoldens GoldenStopPolicy
@@ -294,10 +297,13 @@ type Options struct {
 
 // Provider is the Cloud SQL database provider.
 type Provider struct {
-	api    *adminAPI
-	opts   Options
-	now    func() time.Time
-	closed bool
+	api          *adminAPI
+	opts         Options
+	now          func() time.Time
+	closed       atomic.Bool
+	certMu       sync.Mutex
+	certDir      string
+	loginCatalog func(context.Context, *sql.DB) ([]string, error)
 }
 
 // New builds a provider from already resolved options.
@@ -309,6 +315,7 @@ func New(ctx context.Context, opts Options) (*Provider, error) {
 	if opts.SourceInstance == "" {
 		return nil, fmt.Errorf("cloudsql: SourceInstance is empty")
 	}
+	opts.SourceInstance = normaliseInstanceID(opts.SourceInstance)
 	if opts.Project == "" {
 		return nil, fmt.Errorf("cloudsql: Project is empty")
 	}
@@ -320,6 +327,9 @@ func New(ctx context.Context, opts Options) (*Provider, error) {
 	}
 	if opts.Now == nil {
 		opts.Now = time.Now
+	}
+	if err := validateTLSOptions(opts); err != nil {
+		return nil, err
 	}
 	if opts.StopGoldens == "" {
 		opts.StopGoldens = GoldenStaysRunning
@@ -336,7 +346,7 @@ func New(ctx context.Context, opts Options) (*Provider, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Provider{api: api, opts: opts, now: opts.Now}, nil
+	return &Provider{api: api, opts: opts, now: opts.Now, loginCatalog: customerLogins}, nil
 }
 
 // Name identifies the provider, and is what appears in a manifest.
@@ -374,8 +384,7 @@ func (p *Provider) Capabilities() provider.Caps {
 
 // Close releases the provider's own resources.
 func (p *Provider) Close() error {
-	p.closed = true
-	return nil
+	return p.closeCertificates()
 }
 
 // branchPassword derives a distinct password for one instance from the branch
@@ -383,41 +392,23 @@ func (p *Provider) Close() error {
 //
 // Derived rather than stored, and derived from a key that is NOT the source
 // instance's password, so that a preview environment never holds production's
-// database credential. Changing the key changes every branch's password, which
-// is the intended way to revoke them all at once.
+// database credential. Changing the key invalidates the preparation receipts.
+// Existing servers must be removed or reconciled before they can be reused;
+// deriving a new value alone does not revoke credentials already on a server.
 func (p *Provider) branchPassword(instance string) string {
 	mac := hmac.New(sha256.New, []byte(p.opts.BranchKey.Reveal()))
 	mac.Write([]byte(instance))
-	return "af" + hex.EncodeToString(mac.Sum(nil))[:30]
+	return "Af1!" + hex.EncodeToString(mac.Sum(nil))
 }
 
 // instanceName builds the Cloud SQL instance id for a branch.
 //
-// Cloud SQL instance ids are at most 98 characters, lower case letters, digits
-// and hyphens, and must start with a letter. They are also NOT reusable for a
-// week after deletion, which is why the environment identifier is hashed with
-// the clock rather than used directly: an environment torn down and brought
-// back under the same name inside that window would otherwise be refused by a
-// name Google is still holding.
+// Names bind the source instance and environment, so two sources in the same
+// cloud project cannot accidentally adopt each other's branch. They remain
+// stable across processes, which is required for interrupted-create recovery.
 func (p *Provider) instanceName(prefix, envID string) string {
-	sum := sha256.Sum256([]byte(envID))
+	sum := sha256.Sum256([]byte(p.opts.Project + "\x00" + p.opts.SourceInstance + "\x00" + envID))
 	return fmt.Sprintf("af-%s-%s", prefix, hex.EncodeToString(sum[:])[:16])
-}
-
-// tlsMode is the sslmode used in every connection string this provider hands
-// back.
-//
-// require rather than disable by default, and it is worth saying why the
-// default is not verify-full: Cloud SQL's server certificate is signed by a per
-// instance CA that a client has to be given out of band, so verify-full without
-// that file fails to connect rather than connecting less safely. The stronger
-// mode is available through the variable for a caller who has distributed the
-// CA.
-func (p *Provider) tlsMode() string {
-	if p.opts.TLSMode != "" {
-		return p.opts.TLSMode
-	}
-	return "require"
 }
 
 // address is where a client should connect for one instance.
@@ -452,38 +443,6 @@ func (p *Provider) address(in *instance) (string, int, error) {
 	// Cloud SQL for PostgreSQL always listens on 5432 and the Admin API
 	// exposes no port field, so this is a constant rather than a read.
 	return host, 5432, nil
-}
-
-// connString assembles a connection string for one instance.
-func (p *Provider) connString(host string, port int, user, password, database string) secret.Value {
-	u := &url.URL{
-		Scheme: "postgresql",
-		User:   url.UserPassword(user, password),
-		Host:   host + ":" + strconv.Itoa(port),
-		Path:   "/" + database,
-	}
-	q := u.Query()
-	q.Set("sslmode", p.tlsMode())
-	u.RawQuery = q.Encode()
-	return secret.New(u.String())
-}
-
-// pickUser chooses the administrator a connection string authenticates as.
-//
-// The configured name wins. Otherwise the first user the instance reports wins,
-// which on a stock Cloud SQL instance is postgres. Falling back to the literal
-// "postgres" when the collection is empty keeps the ordinary case working
-// without making the name an assumption everywhere else.
-func pickUser(configured string, found []user) string {
-	if configured != "" {
-		return configured
-	}
-	for _, u := range found {
-		if u.Name != "" {
-			return u.Name
-		}
-	}
-	return "postgres"
 }
 
 // systemDatabases are the ones Cloud SQL creates and no application uses.

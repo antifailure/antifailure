@@ -6,10 +6,10 @@ package cloudsql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 )
@@ -31,8 +31,8 @@ const goldenPrefix = "g"
 // data. Returning the error without removing it would be a data exposure that
 // the caller has no handle to clean up, because the instance id was never
 // returned to anybody.
-func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) (provider.GoldenVersion, error) {
-	if p.closed {
+func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) (result provider.GoldenVersion, rerr error) {
+	if p.closed.Load() {
 		return provider.GoldenVersion{}, fmt.Errorf("cloudsql: provider is closed")
 	}
 	created := p.now().UTC()
@@ -41,33 +41,33 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 
 	source := normaliseInstanceID(p.opts.SourceInstance)
 	op, err := p.api.clone(ctx, source, name)
-	if err != nil {
-		return provider.GoldenVersion{}, fmt.Errorf(
-			"cloudsql: cloning source instance %q: %w", source, err)
+	partial := provider.GoldenVersion{ID: version, ProviderRef: name}
+	if err != nil && !acceptedResponse(err) {
+		if uncertainResponse(err) {
+			return partial, fmt.Errorf("cloudsql: clone acceptance is unknown for %q; reconcile ownership before removal: %w", name, err)
+		}
+		return provider.GoldenVersion{}, fmt.Errorf("cloudsql: cloning source instance %q: %w", source, err)
 	}
-
-	// From here on the instance EXISTS and holds production's rows. Every
-	// return before publication has to remove it.
 	published := false
 	defer func() {
 		if published {
 			return
 		}
-		// A fresh context: the failure that brought us here is very often
-		// ctx being cancelled, and cleanup that inherits a cancelled context
-		// does nothing at all while looking like it ran.
-		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
-		defer cancel()
-		if op, err := p.api.deleteInstance(cleanup, name); err == nil {
-			_ = p.api.waitForOperation(cleanup, op, p.opts.PollInterval)
+		if cleanupErr := p.removeCreated(ctx, name); cleanupErr != nil {
+			result = partial
+			rerr = errors.Join(rerr, cleanupErr)
 		}
 	}()
+	if err != nil {
+		return provider.GoldenVersion{}, err
+	}
 	if err := p.api.waitForOperation(ctx, op, p.opts.PollInterval); err != nil {
 		return provider.GoldenVersion{}, err
 	}
 
 	if err := p.label(ctx, name, map[string]string{
 		labelKey:       labelValue,
+		sourceLabelKey: p.sourceIdentity(),
 		goldenLabelKey: shortVersion(version),
 	}); err != nil {
 		return provider.GoldenVersion{}, err
@@ -81,6 +81,11 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 	if spec.Load != nil {
 		if err := spec.Load(ctx, spec.SourceURL, url); err != nil {
 			return provider.GoldenVersion{}, fmt.Errorf("cloudsql: loading golden: %w", err)
+		}
+		// A loader can create roles or replace credentials along with data.
+		url, err = p.reassertCredentials(ctx, name)
+		if err != nil {
+			return provider.GoldenVersion{}, err
 		}
 	}
 	if spec.Mask == nil {
@@ -98,6 +103,12 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 	attestation, err := spec.Verify(ctx, url)
 	if err != nil {
 		return provider.GoldenVersion{}, fmt.Errorf("cloudsql: verifying golden: %w", err)
+	}
+
+	// Hooks may create login roles. Reassert the credential boundary after
+	// every hook and before the cloud metadata publishes the golden.
+	if _, err := p.reassertCredentials(ctx, name); err != nil {
+		return provider.GoldenVersion{}, err
 	}
 
 	// The metadata goes on AFTER verification, so a golden that never verified
@@ -157,7 +168,7 @@ func (p *Provider) ListGoldens(ctx context.Context) ([]provider.GoldenVersion, e
 	var out []provider.GoldenVersion
 	for i := range instances {
 		in := &instances[i]
-		if !isOurs(in) {
+		if !p.owns(in) {
 			continue
 		}
 		if in.Settings.UserLabels[goldenLabelKey] == "" {
@@ -195,6 +206,11 @@ func (p *Provider) ListGoldens(ctx context.Context) ([]provider.GoldenVersion, e
 // not one API call: a project where somebody has named their own instance the
 // way this provider names its own must not lose it here.
 func (p *Provider) DestroyGolden(ctx context.Context, version string) error {
+	release, err := p.admit(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	name, err := p.goldenInstance(ctx, version)
 	if err != nil {
 		if notFound(err) {
@@ -237,7 +253,7 @@ func (p *Provider) branchesFrom(ctx context.Context, version string) ([]string, 
 	var out []string
 	for i := range instances {
 		in := &instances[i]
-		if !isOurs(in) || in.Settings.UserLabels[goldenLabelKey] != "" {
+		if !p.owns(in) || in.Settings.UserLabels[goldenLabelKey] != "" {
 			continue
 		}
 		if in.Settings.UserLabels[fromLabelKey] == marker {
@@ -255,7 +271,7 @@ func (p *Provider) goldenInstance(ctx context.Context, version string) (string, 
 	if err != nil {
 		return "", err
 	}
-	if !isOurs(in) {
+	if !p.owns(in) || in.Name != name || in.Settings.UserLabels[goldenLabelKey] != shortVersion(version) {
 		return "", fmt.Errorf("cloudsql: instance %q: %w", name, ErrNotOurs)
 	}
 	return name, nil

@@ -10,7 +10,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 	"github.com/antifailure/antifailure/engine/pkg/secret"
@@ -19,9 +18,8 @@ import (
 // branchPrefix distinguishes a branch's instance id from a golden's.
 const branchPrefix = "b"
 
-// adminUser is the Postgres role Cloud SQL creates on every instance.
-// credentialsFor resolves the administrator and database for one instance,
-// then sets that user's password to the derived one.
+// credentialsFor resolves the administrator and database for one instance.
+// It only reads; prepareCredentials rotates and validates the credentials.
 //
 // Both halves are READ from the instance rather than assumed, for the reasons
 // pickUser and pickDatabase give. The password set here is what makes a branch
@@ -32,7 +30,10 @@ func (p *Provider) credentialsFor(ctx context.Context, name string) (usr, db, pa
 	if err != nil {
 		return "", "", "", err
 	}
-	usr = pickUser(p.opts.AdminUser, users)
+	usr, err = selectAdministrator(p.opts.AdminUser, users)
+	if err != nil {
+		return "", "", "", err
+	}
 	found, err := p.api.listDatabases(ctx, name)
 	if err != nil {
 		return "", "", "", err
@@ -56,10 +57,15 @@ func (p *Provider) credentialsFor(ctx context.Context, name string) (usr, db, pa
 // re-run. That is decided by looking the instance up, not by a local map: a
 // second process running the same command has no access to this one's memory,
 // and creating a duplicate paid instance is the failure that would cause.
-func (p *Provider) Branch(ctx context.Context, version string, envID string) (provider.Branch, error) {
-	if p.closed {
+func (p *Provider) Branch(ctx context.Context, version string, envID string) (branch provider.Branch, rerr error) {
+	if p.closed.Load() {
 		return provider.Branch{}, fmt.Errorf("cloudsql: provider is closed")
 	}
+	release, err := p.admit(ctx)
+	if err != nil {
+		return provider.Branch{}, err
+	}
+	defer release()
 	name := p.instanceName(branchPrefix, envID)
 
 	// Idempotence first, and before the limit check. An existing branch must
@@ -67,8 +73,11 @@ func (p *Provider) Branch(ctx context.Context, version string, envID string) (pr
 	// `af up` on the last environment that fits would refuse the environment
 	// that already exists.
 	if existing, err := p.api.getInstance(ctx, name); err == nil {
-		if !isOurs(existing) {
+		if !p.owns(existing) {
 			return provider.Branch{}, fmt.Errorf("cloudsql: instance %q: %w", name, ErrNotOurs)
+		}
+		if err := p.requirePrepared(existing, version, envID); err != nil {
+			return provider.Branch{}, err
 		}
 		return provider.Branch{
 			EnvID:       envID,
@@ -88,7 +97,7 @@ func (p *Provider) Branch(ctx context.Context, version string, envID string) (pr
 		}
 		return provider.Branch{}, err
 	}
-	if !isOurs(golden) {
+	if !p.owns(golden) {
 		return provider.Branch{}, fmt.Errorf("cloudsql: golden %q: %w", golden.Name, ErrNotOurs)
 	}
 	// The AUTHORITATIVE version label rather than the marker, and the
@@ -127,34 +136,42 @@ func (p *Provider) Branch(ctx context.Context, version string, envID string) (pr
 	}
 
 	op, err := p.api.clone(ctx, golden.Name, name)
-	if err != nil {
-		return provider.Branch{}, fmt.Errorf(
-			"cloudsql: cloning golden %q into %q: %w", golden.Name, name, err)
+	partial := provider.Branch{EnvID: envID, From: version, ProviderRef: name}
+	if err != nil && !acceptedResponse(err) {
+		if uncertainResponse(err) {
+			return partial, fmt.Errorf("cloudsql: clone acceptance is unknown for %q; reconcile ownership before removal: %w", name, err)
+		}
+		return provider.Branch{}, fmt.Errorf("cloudsql: cloning golden %q into %q: %w", golden.Name, name, err)
 	}
-
 	created := false
 	defer func() {
 		if created {
 			return
 		}
-		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
-		defer cancel()
-		if op, err := p.api.deleteInstance(cleanup, name); err == nil {
-			_ = p.api.waitForOperation(cleanup, op, p.opts.PollInterval)
+		if cleanupErr := p.removeCreated(ctx, name); cleanupErr != nil {
+			branch = partial
+			rerr = errors.Join(rerr, cleanupErr)
 		}
 	}()
+	if err != nil {
+		return provider.Branch{}, err
+	}
 	if err := p.api.waitForOperation(ctx, op, p.opts.PollInterval); err != nil {
 		return provider.Branch{}, err
 	}
 
 	if err := p.label(ctx, name, map[string]string{
-		labelKey:    labelValue,
-		envLabelKey: envID,
+		labelKey:       labelValue,
+		sourceLabelKey: p.sourceIdentity(),
+		envLabelKey:    envID,
 		// The golden this branch came from, so DestroyGolden can refuse to
 		// remove one that is still referenced. Without it a golden with a live
 		// branch is removable and the branch's data disappears underneath a
 		// running environment.
-		fromLabelKey: shortVersion(version),
+		fromLabelKey:     shortVersion(version),
+		goldenLabelKey:   "",
+		versionLabelKey:  encodeValue(version),
+		preparedLabelKey: "",
 	}); err != nil {
 		return provider.Branch{}, err
 	}
@@ -163,13 +180,8 @@ func (p *Provider) Branch(ctx context.Context, version string, envID string) (pr
 	// So a branch would be reachable with production's database credential
 	// until this runs, and that is exactly what this provider exists to
 	// prevent. Setting it is not a convenience.
-	usr, _, password, err := p.credentialsFor(ctx, name)
-	if err != nil {
+	if _, err := p.prepareCredentials(ctx, name); err != nil {
 		return provider.Branch{}, err
-	}
-	if _, err := p.api.setPassword(ctx, name, usr, password); err != nil {
-		return provider.Branch{}, fmt.Errorf(
-			"cloudsql: setting the branch password on %q: %w", name, err)
 	}
 
 	// The golden's compute policy is not inherited in a useful state: a clone
@@ -180,8 +192,14 @@ func (p *Provider) Branch(ctx context.Context, version string, envID string) (pr
 		}
 	}
 
+	if err := p.label(ctx, name, map[string]string{preparedLabelKey: p.preparedToken(name, version, envID)}); err != nil {
+		return provider.Branch{}, err
+	}
 	in, err := p.api.getInstance(ctx, name)
 	if err != nil {
+		return provider.Branch{}, err
+	}
+	if err := p.requirePrepared(in, version, envID); err != nil {
 		return provider.Branch{}, err
 	}
 	created = true
@@ -219,7 +237,9 @@ func (p *Provider) Destroy(ctx context.Context, b provider.Branch) error {
 		}
 		return err
 	}
-	if !isOurs(in) {
+	if !p.owns(in) || in.Settings.UserLabels[goldenLabelKey] != "" ||
+		in.Name != p.instanceName(branchPrefix, in.Settings.UserLabels[envLabelKey]) ||
+		(b.EnvID != "" && in.Settings.UserLabels[envLabelKey] != b.EnvID) {
 		return fmt.Errorf("cloudsql: instance %q: %w", name, ErrNotOurs)
 	}
 	op, err := p.api.deleteInstance(ctx, name)
@@ -251,40 +271,20 @@ func (p *Provider) ConnString(ctx context.Context, b provider.Branch, mode provi
 	if err != nil {
 		return secret.Value{}, err
 	}
-	host, port, err := p.address(in)
-	if err != nil {
+	if err := p.requireBranchIdentity(in, b); err != nil {
 		return secret.Value{}, err
 	}
 	usr, db, password, err := p.credentialsFor(ctx, name)
 	if err != nil {
 		return secret.Value{}, err
 	}
-	return p.connString(host, port, usr, password, db), nil
+	return p.secureConnString(ctx, in, usr, password, db)
 }
 
 // adminURL is the connection string the masking and verification hooks are
 // given for a golden.
 func (p *Provider) adminURL(ctx context.Context, name string) (secret.Value, error) {
-	in, err := p.api.getInstance(ctx, name)
-	if err != nil {
-		return secret.Value{}, err
-	}
-	host, port, err := p.address(in)
-	if err != nil {
-		return secret.Value{}, err
-	}
-	// A golden is cloned from the source, so its postgres password is still
-	// the source's. It is reset to a derived one here so that even the golden,
-	// which nobody is meant to connect to after publication, does not sit in
-	// the project reachable with production's credential.
-	usr, db, password, err := p.credentialsFor(ctx, name)
-	if err != nil {
-		return secret.Value{}, err
-	}
-	if _, err := p.api.setPassword(ctx, name, usr, password); err != nil {
-		return secret.Value{}, fmt.Errorf("cloudsql: setting the golden password on %q: %w", name, err)
-	}
-	return p.connString(host, port, usr, password, db), nil
+	return p.prepareCredentials(ctx, name)
 }
 
 // primaryAddress picks the address a client should use.
@@ -327,7 +327,7 @@ func (p *Provider) Inventory(ctx context.Context) ([]provider.Resource, error) {
 	var out []provider.Resource
 	for i := range instances {
 		in := &instances[i]
-		if !isOurs(in) {
+		if !p.owns(in) {
 			continue
 		}
 		kind := "branch"
@@ -384,7 +384,7 @@ func (p *Provider) countBranches(ctx context.Context) (int, error) {
 	count := 0
 	for i := range instances {
 		in := &instances[i]
-		if isOurs(in) && in.Settings.UserLabels[goldenLabelKey] == "" {
+		if p.owns(in) && in.Settings.UserLabels[goldenLabelKey] == "" {
 			count++
 		}
 	}
@@ -396,5 +396,4 @@ func (p *Provider) countBranches(ctx context.Context) (int, error) {
 // would otherwise be caught only when somebody selects this provider.
 var (
 	_ provider.Database = (*Provider)(nil)
-	_                   = errors.Is
 )

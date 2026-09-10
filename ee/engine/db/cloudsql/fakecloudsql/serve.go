@@ -84,6 +84,10 @@ func (s *Server) serveInstances(w http.ResponseWriter, r *http.Request, rest []s
 }
 
 func (s *Server) render(in *fakeInstance) map[string]any {
+	flags := []map[string]string{}
+	for name, value := range in.DatabaseFlags {
+		flags = append(flags, map[string]string{"name": name, "value": value})
+	}
 	return map[string]any{
 		"kind":            "sql#instance",
 		"name":            in.Name,
@@ -97,6 +101,7 @@ func (s *Server) render(in *fakeInstance) map[string]any {
 		},
 		"settings": map[string]any{
 			"tier":               in.Tier,
+			"databaseFlags":      flags,
 			"activationPolicy":   in.ActivationPolicy,
 			"userLabels":         in.UserLabels,
 			"dataDiskType":       in.DiskType,
@@ -161,6 +166,10 @@ func (s *Server) delete(w http.ResponseWriter, name string) {
 func (s *Server) patch(w http.ResponseWriter, r *http.Request, name string) {
 	var body struct {
 		Settings struct {
+			DatabaseFlags []struct {
+				Name  string `json:"name"`
+				Value string `json:"value"`
+			} `json:"databaseFlags"`
 			UserLabels       map[string]string `json:"userLabels"`
 			ActivationPolicy string            `json:"activationPolicy"`
 			Tier             string            `json:"tier"`
@@ -176,6 +185,23 @@ func (s *Server) patch(w http.ResponseWriter, r *http.Request, name string) {
 		s.mu.Unlock()
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "no such instance: "+name)
 		return
+	}
+	if body.Settings.DatabaseFlags != nil {
+		in.DatabaseFlags = map[string]string{}
+		for _, flag := range body.Settings.DatabaseFlags {
+			in.DatabaseFlags[flag.Name] = flag.Value
+		}
+		if in.DatabaseFlags["cloudsql.iam_authentication"] == "off" {
+			for _, u := range in.ExtraUsers {
+				if u.Type != "" && u.Type != "BUILT_IN" {
+					if _, err := s.admin.Exec("ALTER ROLE " + quoteIdent(u.Role) + " NOLOGIN"); err != nil {
+						s.mu.Unlock()
+						writeErr(w, 500, "INTERNAL", err.Error())
+						return
+					}
+				}
+			}
+		}
 	}
 	if body.Settings.UserLabels != nil {
 		in.UserLabels = body.Settings.UserLabels
@@ -211,9 +237,23 @@ func (s *Server) setPassword(w http.ResponseWriter, r *http.Request, name string
 	if role == "" || role == "postgres" {
 		role = s.roleFor(name)
 	}
-	_ = role
-	in.Password = body.Password
-	in.Role = role
+	if extra, ok := in.ExtraUsers[body.Name]; ok {
+		if extra.Type != "" && extra.Type != "BUILT_IN" {
+			s.mu.Unlock()
+			writeErr(w, 400, "INVALID_ARGUMENT", "IAM users do not have built-in passwords")
+			return
+		}
+		role = extra.Role
+		extra.Password = body.Password
+	} else {
+		if body.Name != role {
+			s.mu.Unlock()
+			writeErr(w, 404, "NOT_FOUND", "no such user")
+			return
+		}
+		in.Password = body.Password
+		in.Role = role
+	}
 	op := s.nextOp("users")
 	s.mu.Unlock()
 
@@ -222,6 +262,19 @@ func (s *Server) setPassword(w http.ResponseWriter, r *http.Request, name string
 	if err := s.ensureRole(role, body.Password); err != nil {
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", err.Error())
 		return
+	}
+
+	if role == in.Role {
+		if _, err := s.admin.Exec("ALTER ROLE " + quoteIdent(role) + " CREATEROLE"); err != nil {
+			writeErr(w, 500, "INTERNAL", err.Error())
+			return
+		}
+		for _, user := range in.ExtraUsers {
+			if _, err := s.admin.Exec("GRANT " + quoteIdent(user.Role) + " TO " + quoteIdent(role) + " WITH ADMIN OPTION"); err != nil {
+				writeErr(w, 500, "INTERNAL", err.Error())
+				return
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"name": op.Name, "status": op.Status})
 }
@@ -235,24 +288,24 @@ func (s *Server) setPassword(w http.ResponseWriter, r *http.Request, name string
 func (s *Server) listUsers(w http.ResponseWriter, name string) {
 	s.mu.Lock()
 	in, ok := s.instances[name]
-	var role string
-	if ok {
-		role = in.Role
-		if role == "" {
-			role = s.roleFor(name)
-		}
-	}
-	s.mu.Unlock()
 	if !ok {
-		writeErr(w, http.StatusNotFound, "NOT_FOUND", "no such instance: "+name)
+		s.mu.Unlock()
+		writeErr(w, 404, "NOT_FOUND", "no such instance")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"kind": "sql#usersList",
-		"items": []map[string]any{
-			{"kind": "sql#user", "name": role, "instance": name},
-		},
-	})
+	role := in.Role
+	if role == "" {
+		role = s.roleFor(name)
+	}
+	items := []map[string]any{{"kind": "sql#user", "name": role, "instance": name, "type": "BUILT_IN", "databaseRoles": []string{"cloudsqlsuperuser"}}}
+	for _, u := range in.ExtraUsers {
+		if !u.Listed {
+			continue
+		}
+		items = append(items, map[string]any{"kind": "sql#user", "name": u.Name, "type": u.Type, "instance": name})
+	}
+	s.mu.Unlock()
+	writeJSON(w, 200, map[string]any{"kind": "sql#usersList", "items": items})
 }
 
 // clone is the method this whole fake exists for.
@@ -319,7 +372,24 @@ func (s *Server) clone(w http.ResponseWriter, r *http.Request, source string) {
 	// provider's password reset exists precisely to undo it, and a fake that
 	// started every clone with a blank password would let that reset be
 	// deleted with every test still green.
+	extras := map[string]*fakeUser{}
+	for key, u := range src.ExtraUsers {
+		copied := *u
+		copied.Role = s.userRole(destination, u.Name)
+		if err := s.ensureRole(copied.Role, copied.Password); err != nil {
+			s.mu.Unlock()
+			writeErr(w, 500, "INTERNAL", err.Error())
+			return
+		}
+		extras[key] = &copied
+	}
+	flags := map[string]string{}
+	for key, value := range src.DatabaseFlags {
+		flags[key] = value
+	}
 	s.instances[destination] = &fakeInstance{
+		ExtraUsers:       extras,
+		DatabaseFlags:    flags,
 		Name:             destination,
 		Database:         database,
 		Region:           src.Region,

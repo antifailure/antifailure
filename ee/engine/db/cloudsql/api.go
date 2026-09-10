@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -49,8 +50,15 @@ func newAdminAPI(opts Options) (*adminAPI, error) {
 	if endpoint == "" {
 		endpoint = defaultEndpoint
 	}
-	if _, err := url.Parse(endpoint); err != nil {
-		return nil, fmt.Errorf("cloudsql: %s is not a URL: %w", EndpointVariable, err)
+	parsed, err := url.Parse(endpoint)
+	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return nil, fmt.Errorf("cloudsql: %s must be an HTTPS API origin without credentials, query or fragment", EndpointVariable)
+	}
+	host := parsed.Hostname()
+	ip := net.ParseIP(host)
+	local := host == "localhost" || (ip != nil && ip.IsLoopback())
+	if parsed.Scheme != "https" && (parsed.Scheme != "http" || !local) {
+		return nil, fmt.Errorf("cloudsql: %s requires HTTPS; HTTP is permitted only for a loopback API fixture", EndpointVariable)
 	}
 	client := opts.HTTPClient
 	if client == nil {
@@ -92,7 +100,19 @@ func newAdminAPI(opts Options) (*adminAPI, error) {
 // here because something reads them. Settings.UserLabels is the ownership
 // predicate, Settings.ActivationPolicy is how a golden's compute is stopped,
 // and the disk fields are what decide whether a clone can be fast.
+type sslCert struct {
+	Cert            string `json:"cert"`
+	Instance        string `json:"instance"`
+	SHA1Fingerprint string `json:"sha1Fingerprint"`
+}
+
+type ipConfiguration struct {
+	ServerCAMode string `json:"serverCaMode"`
+}
+
 type instance struct {
+	DNSName        string   `json:"dnsName"`
+	ServerCACert   sslCert  `json:"serverCaCert"`
 	Name           string   `json:"name"`
 	Region         string   `json:"region"`
 	DatabaseVer    string   `json:"databaseVersion"`
@@ -109,7 +129,14 @@ type ipAddr struct {
 	IPAddress string `json:"ipAddress"`
 }
 
+type databaseFlag struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
 type settings struct {
+	IPConfiguration  ipConfiguration   `json:"ipConfiguration"`
+	DatabaseFlags    []databaseFlag    `json:"databaseFlags"`
 	Tier             string            `json:"tier"`
 	ActivationPolicy string            `json:"activationPolicy"`
 	UserLabels       map[string]string `json:"userLabels"`
@@ -249,13 +276,17 @@ func (a *adminAPI) do(ctx context.Context, method, path string, body any, out an
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := a.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("cloudsql: %s %s: %w", method, path, err)
+		return &uncertainResponseError{fmt.Errorf("cloudsql: %s %s: %w", method, path, err)}
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	payload, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("cloudsql: reading %s %s: %w", method, path, err)
+		problem := fmt.Errorf("cloudsql: reading %s %s: %w", method, path, err)
+		if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
+			return &acceptedResponseError{problem}
+		}
+		return problem
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return decodeAPIError(resp.StatusCode, payload)
@@ -264,7 +295,7 @@ func (a *adminAPI) do(ctx context.Context, method, path string, body any, out an
 		return nil
 	}
 	if err := json.Unmarshal(payload, out); err != nil {
-		return fmt.Errorf("cloudsql: decoding %s %s: %w", method, path, err)
+		return &acceptedResponseError{fmt.Errorf("cloudsql: decoding %s %s: %w", method, path, err)}
 	}
 	return nil
 }
@@ -362,7 +393,9 @@ func (a *adminAPI) listDatabases(ctx context.Context, instance string) ([]databa
 
 // user is one entry from an instance's users collection.
 type user struct {
-	Name string `json:"name"`
+	Name          string   `json:"name"`
+	Type          string   `json:"type"`
+	DatabaseRoles []string `json:"databaseRoles"`
 }
 
 // listUsers reads the users on an instance.
