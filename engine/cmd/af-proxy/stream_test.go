@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -14,6 +16,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/antifailure/antifailure/engine/internal/egress"
+	"github.com/antifailure/antifailure/engine/internal/policy"
+	"github.com/antifailure/antifailure/engine/internal/runtime/local"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -212,14 +217,13 @@ func TestStream_HowManyOutboundProtocolsAnEnvironmentCanCarry(t *testing.T) {
 // runProbe plays one protocol's opening bytes at the byte stream handler.
 func runProbe(t *testing.T, p protocolProbe) outcome {
 	t.Helper()
-	// Default allow, so that a refusal in this measurement is the sidecar
-	// being unable to attribute the connection rather than the policy saying
-	// no. Measuring under default block would report every row as refused and
-	// prove nothing about which ones can be decided.
-	// The port is named by a rule, because naming it is what opens the
-	// listener now. The host is not one the corpus uses, so every decision
-	// below still falls to the default and the measurement is unchanged.
-	rules := []schema.EgressRule{{Host: fmt.Sprintf("probe.test:%d", p.port)}}
+	// Each probe names its own destination and port. Opening a listener for
+	// another host must not grant this probe access through default allow.
+	host := p.sni
+	if host == "" {
+		host = "probe.test"
+	}
+	rules := []schema.EgressRule{{Host: net.JoinHostPort(host, strconv.Itoa(p.port)), Mode: schema.ModeAllow}}
 	s := newSidecar(t, &schema.Egress{Default: schema.ModeAllow, Rules: rules})
 
 	listening := false
@@ -300,7 +304,7 @@ func TestStream_AnAllowedHostIsReachedAndABlockedOneIsNot(t *testing.T) {
 	s := newSidecar(t, &schema.Egress{
 		Default: schema.ModeBlock,
 		Rules: []schema.EgressRule{
-			{Host: "allowed.broker.test", Mode: schema.ModeAllow},
+			{Host: net.JoinHostPort("allowed.broker.test", strconv.Itoa(broker.port)), Mode: schema.ModeAllow},
 			// The loopback address the fixture lives on, named so the address
 			// guard permits it. Naming an address is consent, which is the
 			// only way to reach loopback through this sidecar.
@@ -426,7 +430,7 @@ func TestStream_AModeThatCannotBeHonouredIsRefusedRatherThanAllowed(t *testing.T
 			s := newSidecar(t, &schema.Egress{
 				Default: schema.ModeBlock,
 				Rules: []schema.EgressRule{
-					{Host: "broker.test", Mode: mode, Credential: "AF_SANDBOX"},
+					{Host: net.JoinHostPort("broker.test", strconv.Itoa(broker.port)), Mode: mode, Credential: "AF_SANDBOX"},
 					{Host: broker.host, Mode: schema.ModeAllow},
 				},
 			})
@@ -435,7 +439,7 @@ func TestStream_AModeThatCannotBeHonouredIsRefusedRatherThanAllowed(t *testing.T
 			}
 
 			client, server := net.Pipe()
-			go s.serveStream(protocolAt(5671))(server)
+			go s.serveStream(protocolAt(broker.port))(server)
 			go func() {
 				_ = tls.Client(client, &tls.Config{
 					ServerName:         "broker.test",
@@ -450,6 +454,7 @@ func TestStream_AModeThatCannotBeHonouredIsRefusedRatherThanAllowed(t *testing.T
 				"%s was treated as allow on a connection nothing can read inside", mode)
 			require.Equal(t, 0, broker.count(),
 				"a %s rule reached the provider, which for sandbox means the application's own credential did", mode)
+			require.Equal(t, string(schema.ModeBlock), rec.Mode, "refused modes must count as refused in the containment report")
 			require.Contains(t, rec.Reason, string(mode))
 			require.Contains(t, rec.Reason, "does not read inside")
 		})
@@ -515,6 +520,87 @@ func TestStream_APortNamedByARuleIsListenedOn(t *testing.T) {
 		}
 	}
 	require.True(t, found, "a rule naming a port did not open a listener for it")
+}
+
+func TestStream_AnotherHostsPortDoesNotGrantAWebsiteRuleThatPort(t *testing.T) {
+	assertStreamRefused(t, nil)
+}
+
+func TestStream_RequestScopedRulesCannotGrantOpaqueConnections(t *testing.T) {
+	for _, scope := range []string{"path_allow", "method_allow", "path_block", "method_block", "sandbox_path"} {
+		t.Run(scope, func(t *testing.T) {
+			assertStreamRefused(t, func(port int) []schema.EgressRule {
+				host := net.JoinHostPort("website.test", strconv.Itoa(port))
+				rule := schema.EgressRule{Host: host, Mode: schema.ModeAllow}
+				switch scope {
+				case "path_allow":
+					rule.Paths = []string{"/"}
+				case "method_allow":
+					rule.Methods = []string{"CONNECT"}
+				case "path_block":
+					rule.Mode = schema.ModeBlock
+					rule.Paths = []string{"/private"}
+				case "method_block":
+					rule.Mode = schema.ModeBlock
+					rule.Methods = []string{"POST"}
+				case "sandbox_path":
+					rule.Mode = schema.ModeSandbox
+					rule.Paths = []string{"/private"}
+					rule.Credential = "AF_SANDBOX"
+				}
+				return []schema.EgressRule{rule, {Host: host, Mode: schema.ModeAllow}}
+			})
+		})
+	}
+}
+
+func assertStreamRefused(t *testing.T, extra func(int) []schema.EgressRule) {
+	t.Helper()
+	broker := newRecordingBroker(t)
+	s := newSidecar(t, &schema.Egress{
+		Default: schema.ModeBlock,
+		Rules: []schema.EgressRule{
+			{Host: net.JoinHostPort("broker.test", strconv.Itoa(broker.port)), Mode: schema.ModeAllow},
+			{Host: "website.test", Mode: schema.ModeAllow},
+			{Host: broker.host, Mode: schema.ModeAllow},
+		},
+	})
+	if extra != nil {
+		rules := append(s.engine.Rules(), extra(broker.port)...)
+		var err error
+		s.engine, err = policy.New(&schema.Egress{Default: schema.ModeBlock, Rules: rules})
+		require.NoError(t, err)
+	}
+	s.resolve = func(context.Context, string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP(broker.host)}, nil
+	}
+	client, server := net.Pipe()
+	go s.serveStream(protocolAt(broker.port))(server)
+	go func() {
+		defer func() { _ = client.Close() }()
+		_ = client.SetDeadline(time.Now().Add(time.Second))
+		_ = tls.Client(client, &tls.Config{
+			ServerName:         "website.test",
+			InsecureSkipVerify: true, //nolint:gosec // the fixture observes whether a connection is made
+		}).Handshake()
+	}()
+	rec := s.waitFor(t, func(r record) bool { return r.Host == "website.test" })
+	require.Zero(t, broker.count(), "a rule that cannot grant an opaque connection reached the broker")
+	require.False(t, rec.Allowed, "the decision reported an ungranted stream as allowed")
+	require.Equal(t, string(schema.ModeBlock), rec.Mode)
+	require.Equal(t, 403, rec.Status)
+	require.True(t, rec.Stream)
+	require.True(t, rec.HostOnly)
+	require.Equal(t, "stream", rec.Via)
+	data, err := json.Marshal(rec)
+	require.NoError(t, err)
+	var decision local.Decision
+	require.NoError(t, json.Unmarshal(data, &decision))
+	report := egress.Observe([]local.Decision{decision})
+	require.Equal(t, 1, report.Refused)
+	require.Zero(t, report.Allowed)
+	require.Equal(t, 1, report.Stream)
+	require.Equal(t, []string{"website.test"}, report.StreamHosts)
 }
 
 // recordingBroker is a raw TCP fixture that counts connections.
@@ -586,4 +672,91 @@ func TestStream_ThePortTableIsSortedAndUnique(t *testing.T) {
 		require.False(t, seen[p], "port %d appears twice", p)
 		seen[p] = true
 	}
+}
+
+// The broker receives the client's bytes and its reply reaches the same client.
+// The TLS handshake is end to end, with the broker's certificate verified by
+// the client. No certificate authority is installed on the sidecar.
+func TestStream_AllowedBytesRoundTripWithoutTLSInterception(t *testing.T) {
+	assertStreamRoundTrip(t, false)
+}
+
+func TestStream_InternalBytesRoundTripWithoutAnEgressGrant(t *testing.T) {
+	assertStreamRoundTrip(t, true)
+}
+
+func assertStreamRoundTrip(t *testing.T, internal bool) {
+	t.Helper()
+	const name = "broker.test"
+	certPEM, keyPEM, err := GenerateAuthority("stream-origin-fixture", time.Now())
+	require.NoError(t, err)
+	ca, err := newCertAuthority(certPEM, keyPEM)
+	require.NoError(t, err)
+	leaf, err := ca.leaf(name)
+	require.NoError(t, err)
+	roots := x509.NewCertPool()
+	require.True(t, roots.AppendCertsFromPEM([]byte(certPEM)))
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{*leaf}, MinVersion: tls.VersionTLS12})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ln.Close() })
+	host, portText, err := net.SplitHostPort(ln.Addr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portText)
+	require.NoError(t, err)
+	request := []byte{'A', 'M', 'Q', 'P', 0, 1, 0, 0}
+	reply := []byte{'A', 'M', 'Q', 'P', 0, 1, 0, 0, 42}
+	received := make(chan []byte, 1)
+	go func() {
+		conn, acceptErr := ln.Accept()
+		if acceptErr != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+		got := make([]byte, len(request))
+		if _, readErr := io.ReadFull(conn, got); readErr != nil {
+			return
+		}
+		received <- got
+		_, _ = conn.Write(reply)
+	}()
+	s := newSidecar(t, &schema.Egress{Default: schema.ModeBlock, Rules: []schema.EgressRule{
+		{Host: net.JoinHostPort(name, portText), Mode: schema.ModeAllow},
+		{Host: host, Mode: schema.ModeAllow},
+	}})
+	if internal {
+		s = newSidecar(t, &schema.Egress{Default: schema.ModeBlock})
+		s.internal = newInside([]string{name})
+		s.destinations = newDestinations(nil, "127.0.0.0/8", false)
+	}
+	s.resolve = func(context.Context, string) ([]net.IP, error) { return []net.IP{net.ParseIP(host)}, nil }
+	client, server := net.Pipe()
+	t.Cleanup(func() { _ = client.Close(); _ = server.Close() })
+	go s.serveStream(protocolAt(port))(server)
+	secure := tls.Client(client, &tls.Config{ServerName: name, RootCAs: roots, MinVersion: tls.VersionTLS12})
+	_ = secure.SetDeadline(time.Now().Add(5 * time.Second))
+	require.NoError(t, secure.Handshake(), "the broker's certificate must reach the client unchanged")
+	_, err = secure.Write(request)
+	require.NoError(t, err)
+	got := make([]byte, len(reply))
+	_, err = io.ReadFull(secure, got)
+	require.NoError(t, err)
+	require.Equal(t, reply, got)
+	select {
+	case upstream := <-received:
+		require.Equal(t, request, upstream)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the broker never received the client's bytes")
+	}
+	_ = secure.Close()
+	rec := s.waitFor(t, func(r record) bool { return r.Host == name })
+	if internal {
+		require.Equal(t, "internal", rec.Via)
+	} else {
+		require.Equal(t, "stream", rec.Via)
+	}
+	require.True(t, rec.Allowed)
+	require.True(t, rec.Stream)
+	require.True(t, rec.HostOnly)
+	require.Positive(t, rec.Bytes)
 }

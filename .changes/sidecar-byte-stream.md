@@ -30,7 +30,17 @@ decided on the name in its TLS handshake, and a rule that spells no port
 matches every port, so a manifest that allowed one host for HTTP silently
 carried that host's Redis and its mail as well, forwarded. The listeners are
 now opened only for ports a rule names, which is the bargain the rest of the
-manifest already makes, and the escape probe that found this reports nothing.
+manifest already makes.
+
+A listener is shared by destinations, so selecting its ports was not sufficient.
+A rule granting `broker.example.com:5671` also exposed that port to a portless
+allow rule for `website.example.com`. The matching rule now has to name the
+actual destination port. A real recording broker reproduced the unintended
+connection and now receives none.
+
+Path and method rules also cannot govern bytes the sidecar never reads. The
+stream path refuses hosts whose applicable rules require inspection, rather
+than matching them against an invented CONNECT request at `/`.
 
 On Kubernetes the NetworkPolicy is the union of the table and the ports the
 rules name, which is wider than the listeners on purpose. Permitting a port

@@ -282,7 +282,14 @@ this path is forwarded on the strength of the name in its handshake, and a rule
 that names no port applies to every port, so answering on a port nobody asked
 for would carry an allowed host's cache and its mail alongside its website.
 Writing the port down is the consent, in the same way that naming a private
-address is.
+address is. A listener is shared by all destinations on its port, so the
+matched allow rule must name the port for this host too. Allowing
+`broker.example.com:5671` never grants `website.example.com` that port.
+
+Rules scoped to a path or method require inspection. If any rule for the host
+and port needs inspection, the opaque connection is refused, including when a
+broader allow rule would otherwise match. No synthetic path or method can
+stand in for the bytes the sidecar cannot read.
 
 Antifailure still knows what these ports usually carry: 5671 and 5672 for AMQP,
 9092 and 9093 for Kafka, 27017 for MongoDB, 6379 and 6380 for Redis, 5432 for
@@ -323,8 +330,7 @@ negotiate TLS after a cleartext exchange rather than before one. There is no
 host name anywhere in those bytes, so the connection cannot be attributed to a
 host, so no rule can apply to it and it is refused with that as the reason.
 
-The way through is the TLS form, which every managed provider of these
-protocols requires anyway: `amqps` on 5671, `rediss` on 6380, Kafka's
+For providers offering TLS from the first byte, use that form: `amqps` on 5671, `rediss` on 6380, Kafka's
 `SASL_SSL` on 9093, MongoDB Atlas, and mail on 465.
 
 ### Reading it afterwards

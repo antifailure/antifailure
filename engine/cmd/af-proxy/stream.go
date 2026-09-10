@@ -44,7 +44,7 @@ import (
 //
 // It cannot know anything inside the connection. There is no request, no
 // method, no path, and no header. So a rule that names paths or methods cannot
-// apply, and the three modes that answer from inside a connection cannot be
+// apply, and the four modes that answer from inside a connection cannot be
 // honoured here at all:
 //
 //   - capture has to understand a message to record one;
@@ -138,6 +138,7 @@ func (p *proxy) serveStream(proto schema.StreamProtocol) func(net.Conn) {
 		// not talk to Stripe" into a connection to Stripe.
 		if reason, cannot := streamCannotHonour(d.Mode, proto); cannot {
 			rec.Allowed = false
+			rec.Mode = string(schema.ModeBlock)
 			rec.Reason = reason
 			rec.Status = http.StatusForbidden
 			rec.Duration = time.Since(started).String()
@@ -154,6 +155,33 @@ func (p *proxy) serveStream(proto schema.StreamProtocol) func(net.Conn) {
 			// any of these protocols would read as prose, and inventing a
 			// frame that looked like the broker's own error would be a lie
 			// about who refused.
+			return
+		}
+
+		// A synthetic CONNECT at / cannot prove that an unseen request meets
+		// a path or method rule. Check every rule for the destination, just
+		// as the HTTPS path does before choosing whether to inspect TLS.
+		if p.engine.InspectsHost(sni, proto.Port) {
+			rec.Allowed = false
+			rec.Mode = string(schema.ModeBlock)
+			rec.Reason = "A rule for this host and port requires request inspection, which a byte stream cannot provide."
+			rec.Status = http.StatusForbidden
+			rec.Duration = time.Since(started).String()
+			p.emit(rec)
+			return
+		}
+
+		// A listener is shared by every destination on its port. Another
+		// host's explicit port must not widen a website-only rule or default
+		// allow into a grant for this connection.
+		_, namedPort, portErr := net.SplitHostPort(d.RuleHost)
+		if portErr != nil || namedPort != strconv.Itoa(proto.Port) {
+			rec.Allowed = false
+			rec.Mode = string(schema.ModeBlock)
+			rec.Reason = "A byte stream requires an allow rule naming this host and port explicitly."
+			rec.Status = http.StatusForbidden
+			rec.Duration = time.Since(started).String()
+			p.emit(rec)
 			return
 		}
 
@@ -252,7 +280,6 @@ func streamRefusal(proto schema.StreamProtocol) string {
 	}
 	return base + fmt.Sprintf(
 		"%s carries no host name in its cleartext form, so a connection to it cannot be "+
-			"attributed to a host and cannot be decided. Reach the broker over TLS, which "+
-			"every managed provider of this protocol requires anyway, and the handshake will "+
-			"name the host.", proto.Name)
+			"attributed to a host and cannot be decided. If the broker supports TLS from "+
+			"the first byte, connect over TLS so the handshake names the host.", proto.Name)
 }

@@ -1965,7 +1965,7 @@ import (
 //
 // It cannot know anything inside the connection. There is no request, no
 // method, no path, and no header. So a rule that names paths or methods cannot
-// apply, and the three modes that answer from inside a connection cannot be
+// apply, and the four modes that answer from inside a connection cannot be
 // honoured here at all:
 //
 //   - capture has to understand a message to record one;
@@ -2059,6 +2059,7 @@ func (p *proxy) serveStream(proto schema.StreamProtocol) func(net.Conn) {
 		// not talk to Stripe" into a connection to Stripe.
 		if reason, cannot := streamCannotHonour(d.Mode, proto); cannot {
 			rec.Allowed = false
+			rec.Mode = string(schema.ModeBlock)
 			rec.Reason = reason
 			rec.Status = http.StatusForbidden
 			rec.Duration = time.Since(started).String()
@@ -2075,6 +2076,33 @@ func (p *proxy) serveStream(proto schema.StreamProtocol) func(net.Conn) {
 			// any of these protocols would read as prose, and inventing a
 			// frame that looked like the broker's own error would be a lie
 			// about who refused.
+			return
+		}
+
+		// A synthetic CONNECT at / cannot prove that an unseen request meets
+		// a path or method rule. Check every rule for the destination, just
+		// as the HTTPS path does before choosing whether to inspect TLS.
+		if p.engine.InspectsHost(sni, proto.Port) {
+			rec.Allowed = false
+			rec.Mode = string(schema.ModeBlock)
+			rec.Reason = "A rule for this host and port requires request inspection, which a byte stream cannot provide."
+			rec.Status = http.StatusForbidden
+			rec.Duration = time.Since(started).String()
+			p.emit(rec)
+			return
+		}
+
+		// A listener is shared by every destination on its port. Another
+		// host's explicit port must not widen a website-only rule or default
+		// allow into a grant for this connection.
+		_, namedPort, portErr := net.SplitHostPort(d.RuleHost)
+		if portErr != nil || namedPort != strconv.Itoa(proto.Port) {
+			rec.Allowed = false
+			rec.Mode = string(schema.ModeBlock)
+			rec.Reason = "A byte stream requires an allow rule naming this host and port explicitly."
+			rec.Status = http.StatusForbidden
+			rec.Duration = time.Since(started).String()
+			p.emit(rec)
 			return
 		}
 
@@ -2173,9 +2201,8 @@ func streamRefusal(proto schema.StreamProtocol) string {
 	}
 	return base + fmt.Sprintf(
 		"%s carries no host name in its cleartext form, so a connection to it cannot be "+
-			"attributed to a host and cannot be decided. Reach the broker over TLS, which "+
-			"every managed provider of this protocol requires anyway, and the handshake will "+
-			"name the host.", proto.Name)
+			"attributed to a host and cannot be decided. If the broker supports TLS from "+
+			"the first byte, connect over TLS so the handshake names the host.", proto.Name)
 }
 `,
 	"cmd/af-proxy/synth.go": "package main\n\nimport (\n\t\"bytes\"\n\t\"encoding/json\"\n\t\"fmt\"\n\t\"io\"\n\t\"net/http\"\n\t\"strings\"\n\t\"time\"\n)\n\n// Synth asks a model to invent a response, and marks everything downstream of\n// it as unverified rather than passed.\n//\n// It is an escape hatch, not a mode to rely on, and the design says so at\n// every turn. A workflow that touched a synthesized response reports\n// unverified, which is neither a pass nor a failure, because the answer came\n// from a model rather than from the thing being tested. The response header\n// says so too, so an application logging it can tell.\n//\n// It exists because the alternative is worse. Somebody exploring a provider\n// with no sandbox and no fixtures gets a refusal and stops; with this they get\n// something shaped right, keep moving, and are told plainly that nothing they\n// just saw is evidence.\n//\n// The key is the user's, read from this process's environment. With none, a\n// synth rule refuses and says which variable to set.\n\n// synthConfig is where a model is reached.\ntype synthConfig struct {\n\tprovider string\n\tapiKey   string\n\tmodel    string\n\tbaseURL  string\n}\n\n// synthFromEnvironment reads a configuration, or nothing.\nfunc synthFromEnvironment(getenv func(string) string) *synthConfig {\n\tif key := getenv(\"ANTHROPIC_API_KEY\"); key != \"\" {\n\t\treturn &synthConfig{\n\t\t\tprovider: \"anthropic\", apiKey: key,\n\t\t\tmodel:   orDefault(getenv(\"AF_MODEL\"), \"claude-sonnet-5\"),\n\t\t\tbaseURL: orDefault(getenv(\"ANTHROPIC_BASE_URL\"), \"https://api.anthropic.com\"),\n\t\t}\n\t}\n\tif key := getenv(\"OPENAI_API_KEY\"); key != \"\" {\n\t\treturn &synthConfig{\n\t\t\tprovider: \"openai\", apiKey: key,\n\t\t\tmodel:   orDefault(getenv(\"AF_MODEL\"), \"gpt-4.1\"),\n\t\t\tbaseURL: orDefault(getenv(\"OPENAI_BASE_URL\"), \"https://api.openai.com\"),\n\t\t}\n\t}\n\treturn nil\n}\n\nfunc orDefault(s, fallback string) string {\n\tif s == \"\" {\n\t\treturn fallback\n\t}\n\treturn s\n}\n\n// serveSynth answers a request from a model, and reports whether it did.\nfunc (p *proxy) serveSynth(w io.Writer, req *http.Request, host string, rec *record) bool {\n\tif p.synth == nil {\n\t\trec.Status = http.StatusForbidden\n\t\trec.Allowed = false\n\t\trec.Reason = \"This host is set to synth and no model key is available.\"\n\t\twriteRawStatus(w, http.StatusForbidden, \"text/plain; charset=utf-8\",\n\t\t\t\"Antifailure could not synthesize a response.\\n\\n\"+\n\t\t\t\t\"  \"+req.Method+\" https://\"+host+req.URL.Path+\"\\n\\n\"+\n\t\t\t\t\"This host is set to synth, which asks a model to invent a response. Set\\n\"+\n\t\t\t\t\"ANTHROPIC_API_KEY or OPENAI_API_KEY, or set the rule to mock and write a\\n\"+\n\t\t\t\t\"fixture, which is the better answer for anything you intend to rely on.\\n\")\n\t\treturn true\n\t}\n\n\tbody, _ := io.ReadAll(io.LimitReader(req.Body, 64<<10))\n\t_ = req.Body.Close()\n\n\tanswer, err := p.synth.complete(synthPrompt(req, host, body))\n\tif err != nil {\n\t\trec.Status = http.StatusBadGateway\n\t\trec.Allowed = false\n\t\trec.Error = err.Error()\n\t\twriteRawStatus(w, http.StatusBadGateway, \"text/plain; charset=utf-8\",\n\t\t\t\"Antifailure could not reach the model to synthesize a response: \"+err.Error()+\"\\n\")\n\t\treturn true\n\t}\n\n\tstatus, payload := parseSynth(answer)\n\trec.Status = status\n\trec.Bytes = int64(len(payload))\n\trec.Synthesized = true\n\n\t// The header is not decoration. An application that logs its responses can\n\t// tell afterwards which ones were invented, and a workflow that touched\n\t// one reports unverified rather than passed.\n\t// Not checked: a failure here means the client hung up mid response.\n\t_, _ = fmt.Fprintf(w,\n\t\t\"HTTP/1.1 %d %s\\r\\nContent-Type: application/json\\r\\n\"+\n\t\t\t\"X-Antifailure-Synthesized: true\\r\\nContent-Length: %d\\r\\nConnection: close\\r\\n\\r\\n%s\",\n\t\tstatus, http.StatusText(status), len(payload), payload)\n\treturn true\n}\n\n// synthPrompt describes the request and asks for the provider's own shape.\nfunc synthPrompt(req *http.Request, host string, body []byte) string {\n\ttrimmed := string(body)\n\tif len(trimmed) > 4000 {\n\t\ttrimmed = trimmed[:4000] + \"\\n... (truncated)\"\n\t}\n\treturn strings.Join([]string{\n\t\t\"An application in a test environment made this request to a third party API.\",\n\t\t\"That API is unreachable, so invent the response it would most likely have given.\",\n\t\t\"\",\n\t\treq.Method + \" https://\" + host + req.URL.RequestURI(),\n\t\t\"\",\n\t\t\"Request body:\",\n\t\torDefault(trimmed, \"(empty)\"),\n\t\t\"\",\n\t\t\"Answer with one JSON object and nothing else:\",\n\t\t`{\"status\": <http status>, \"body\": <the response body as a JSON value>}`,\n\t\t\"\",\n\t\t\"Use the shape this provider actually returns, including the fields its own\",\n\t\t\"client libraries parse. Use obviously fake values: example.test addresses,\",\n\t\t\"identifiers prefixed with the provider's own convention, and never anything\",\n\t\t\"that could be mistaken for real data.\",\n\t}, \"\\n\")\n}\n\n// parseSynth reads the model's answer, and gives up readably.\nfunc parseSynth(raw string) (int, string) {\n\tcandidates := []string{raw}\n\tif i, j := strings.Index(raw, \"{\"), strings.LastIndex(raw, \"}\"); i >= 0 && j > i {\n\t\tcandidates = append([]string{raw[i : j+1]}, candidates...)\n\t}\n\tfor _, candidate := range candidates {\n\t\tvar out struct {\n\t\t\tStatus int             `json:\"status\"`\n\t\t\tBody   json.RawMessage `json:\"body\"`\n\t\t}\n\t\tif err := json.Unmarshal([]byte(strings.TrimSpace(candidate)), &out); err != nil {\n\t\t\tcontinue\n\t\t}\n\t\tif out.Status == 0 {\n\t\t\tout.Status = 200\n\t\t}\n\t\tif len(out.Body) == 0 {\n\t\t\tout.Body = []byte(\"{}\")\n\t\t}\n\t\treturn out.Status, string(out.Body)\n\t}\n\t// A model that did not answer with a shape is reported rather than\n\t// guessed at. An empty 200 would let the application carry on with\n\t// nothing, which is the failure this mode is already closest to.\n\treturn http.StatusBadGateway,\n\t\t`{\"error\":{\"message\":\"Antifailure could not read the synthesized response.\"}}`\n}\n\n// complete sends one request to the model.\nfunc (c *synthConfig) complete(prompt string) (string, error) {\n\tvar body []byte\n\tvar req *http.Request\n\tvar err error\n\n\tclient := &http.Client{Timeout: 60 * time.Second}\n\tif c.provider == \"anthropic\" {\n\t\tbody, _ = json.Marshal(map[string]any{\n\t\t\t\"model\": c.model, \"max_tokens\": 1024,\n\t\t\t\"messages\": []map[string]string{{\"role\": \"user\", \"content\": prompt}},\n\t\t})\n\t\treq, err = http.NewRequest(http.MethodPost, c.baseURL+\"/v1/messages\", bytes.NewReader(body))\n\t\tif err != nil {\n\t\t\treturn \"\", err\n\t\t}\n\t\treq.Header.Set(\"x-api-key\", c.apiKey)\n\t\treq.Header.Set(\"anthropic-version\", \"2023-06-01\")\n\t} else {\n\t\tbody, _ = json.Marshal(map[string]any{\n\t\t\t\"model\": c.model, \"max_tokens\": 1024,\n\t\t\t\"messages\": []map[string]string{{\"role\": \"user\", \"content\": prompt}},\n\t\t})\n\t\treq, err = http.NewRequest(http.MethodPost, c.baseURL+\"/v1/chat/completions\", bytes.NewReader(body))\n\t\tif err != nil {\n\t\t\treturn \"\", err\n\t\t}\n\t\treq.Header.Set(\"authorization\", \"Bearer \"+c.apiKey)\n\t}\n\treq.Header.Set(\"content-type\", \"application/json\")\n\n\tresp, err := client.Do(req)\n\tif err != nil {\n\t\treturn \"\", err\n\t}\n\tdefer func() { _ = resp.Body.Close() }()\n\n\tpayload, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))\n\tif resp.StatusCode >= 400 {\n\t\treturn \"\", fmt.Errorf(\"the model answered %d\", resp.StatusCode)\n\t}\n\n\tif c.provider == \"anthropic\" {\n\t\tvar out struct {\n\t\t\tContent []struct {\n\t\t\t\tText string `json:\"text\"`\n\t\t\t} `json:\"content\"`\n\t\t}\n\t\tif err := json.Unmarshal(payload, &out); err != nil {\n\t\t\treturn \"\", err\n\t\t}\n\t\tvar b strings.Builder\n\t\tfor _, part := range out.Content {\n\t\t\tb.WriteString(part.Text)\n\t\t}\n\t\treturn b.String(), nil\n\t}\n\tvar out struct {\n\t\tChoices []struct {\n\t\t\tMessage struct {\n\t\t\t\tContent string `json:\"content\"`\n\t\t\t} `json:\"message\"`\n\t\t} `json:\"choices\"`\n\t}\n\tif err := json.Unmarshal(payload, &out); err != nil {\n\t\treturn \"\", err\n\t}\n\tif len(out.Choices) == 0 {\n\t\treturn \"\", fmt.Errorf(\"the model returned no choices\")\n\t}\n\treturn out.Choices[0].Message.Content, nil\n}\n",
@@ -4213,11 +4240,11 @@ import (
 	"strconv"
 )
 
-// The ports an environment answers on for protocols that are not HTTP.
+// Names for ports carrying protocols that are not HTTP.
 //
 // This table lives in the schema package rather than beside the sidecar that
 // listens on it because THREE things have to agree about it and they run in
-// three different processes. The sidecar opens a listener per port. The
+// three different processes. The sidecar opens listeners named by policy. The
 // Kubernetes runtime writes a NetworkPolicy, and a port missing there is a
 // packet the cluster drops before the sidecar ever sees it, which presents as
 // a hang rather than as a refusal. The manifest validator refuses the modes
@@ -4252,7 +4279,7 @@ type StreamProtocol struct {
 	SNI bool
 }
 
-// ByteStreamProtocols are the ports the sidecar answers on beyond HTTP.
+// ByteStreamProtocols names common protocols beyond HTTP.
 //
 // Chosen by asking, for each protocol, what a managed provider a real
 // application actually pays for listens on: Azure Service Bus and CloudAMQP on
@@ -4264,8 +4291,8 @@ type StreamProtocol struct {
 // It is a fixed list rather than everything, because a listener per port for
 // all 65535 of them is not a design, and because a port nobody named is a port
 // whose refusal nobody will read. Ports named in the manifest's own rules are
-// added to this set at startup, so a broker on an unusual port is reachable by
-// declaring it.
+// used to build the listener set at startup, so a broker on an unusual port is reachable by
+// declaring it. The table supplies names, never permission to open a listener.
 var ByteStreamProtocols = []StreamProtocol{
 	{Port: 22, Name: "SSH", SNI: false},
 	{Port: 25, Name: "SMTP", SNI: false},
@@ -4286,7 +4313,7 @@ var ByteStreamProtocols = []StreamProtocol{
 }
 
 // StreamPorts is the set of ports the byte stream path listens on for a given
-// policy: the table above, plus any port the policy's own rules name.
+// policy: only ports the policy's own rules name, described by the table above.
 //
 // The rules are consulted so that a broker on a port nobody standardised is
 // reachable by writing it down, which is the same bargain the rest of the

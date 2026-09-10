@@ -6,11 +6,11 @@ import (
 	"strconv"
 )
 
-// The ports an environment answers on for protocols that are not HTTP.
+// Names for ports carrying protocols that are not HTTP.
 //
 // This table lives in the schema package rather than beside the sidecar that
 // listens on it because THREE things have to agree about it and they run in
-// three different processes. The sidecar opens a listener per port. The
+// three different processes. The sidecar opens listeners named by policy. The
 // Kubernetes runtime writes a NetworkPolicy, and a port missing there is a
 // packet the cluster drops before the sidecar ever sees it, which presents as
 // a hang rather than as a refusal. The manifest validator refuses the modes
@@ -45,7 +45,7 @@ type StreamProtocol struct {
 	SNI bool
 }
 
-// ByteStreamProtocols are the ports the sidecar answers on beyond HTTP.
+// ByteStreamProtocols names common protocols beyond HTTP.
 //
 // Chosen by asking, for each protocol, what a managed provider a real
 // application actually pays for listens on: Azure Service Bus and CloudAMQP on
@@ -57,8 +57,8 @@ type StreamProtocol struct {
 // It is a fixed list rather than everything, because a listener per port for
 // all 65535 of them is not a design, and because a port nobody named is a port
 // whose refusal nobody will read. Ports named in the manifest's own rules are
-// added to this set at startup, so a broker on an unusual port is reachable by
-// declaring it.
+// used to build the listener set at startup, so a broker on an unusual port is reachable by
+// declaring it. The table supplies names, never permission to open a listener.
 var ByteStreamProtocols = []StreamProtocol{
 	{Port: 22, Name: "SSH", SNI: false},
 	{Port: 25, Name: "SMTP", SNI: false},
@@ -79,7 +79,7 @@ var ByteStreamProtocols = []StreamProtocol{
 }
 
 // StreamPorts is the set of ports the byte stream path listens on for a given
-// policy: the table above, plus any port the policy's own rules name.
+// policy: only ports the policy's own rules name, described by the table above.
 //
 // The rules are consulted so that a broker on a port nobody standardised is
 // reachable by writing it down, which is the same bargain the rest of the
