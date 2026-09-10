@@ -165,7 +165,7 @@ func TestTheGoldenStopPolicyIsRefusedRatherThanGuessed(t *testing.T) {
 	server := newFake(t, seedSQL)
 	opts := options(t, server)
 	opts.StopGoldens = cloudsql.GoldenStopPolicy("maybe")
-	_, err := cloudsql.New(context.Background(), opts)
+	_, err := newScoped(context.Background(), server, opts)
 	require.Error(t, err,
 		"an unrecognised golden stop policy was accepted, so a typo silently selects "+
 			"one of the two behaviours and the person who made it is not told which")
@@ -173,7 +173,7 @@ func TestTheGoldenStopPolicyIsRefusedRatherThanGuessed(t *testing.T) {
 	// And the default is the one that is known to work rather than the cheap one.
 	opts = options(t, server)
 	opts.StopGoldens = ""
-	p, err := cloudsql.New(context.Background(), opts)
+	p, err := newScoped(context.Background(), server, opts)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = p.Close() })
 	require.NoError(t, p.Close())
