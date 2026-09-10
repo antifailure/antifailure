@@ -19,8 +19,12 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
+
+	"github.com/antifailure/antifailure/ee/engine/cloudauth"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 )
 
 // httpDoer is the transport, narrowed to what this client uses so a fake can
@@ -37,6 +41,7 @@ type adminAPI struct {
 	endpoint string
 	project  string
 	client   httpDoer
+	token    func(context.Context) (string, error)
 }
 
 func newAdminAPI(opts Options) (*adminAPI, error) {
@@ -49,12 +54,34 @@ func newAdminAPI(opts Options) (*adminAPI, error) {
 	}
 	client := opts.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: 60 * time.Second}
+		guarded := airgap.Client(airgap.SiteCloudSQL, 60*time.Second)
+		guarded.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		client = guarded
+	}
+	getenv := opts.Getenv
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	token := opts.Token
+	if token == nil {
+		var account *cloudauth.GCPServiceAccount
+		if path := getenv("GOOGLE_APPLICATION_CREDENTIALS"); path != "" {
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				return nil, fmt.Errorf("cloudsql: reading GOOGLE_APPLICATION_CREDENTIALS: %w", err)
+			}
+			account, err = cloudauth.ParseGCPServiceAccount(raw)
+			if err != nil {
+				return nil, fmt.Errorf("cloudsql: parsing GOOGLE_APPLICATION_CREDENTIALS: %w", err)
+			}
+		}
+		token = cloudauth.NewGCPTokenSource(account, cloudauth.ScopeGoogleCloudPlatform).Token
 	}
 	return &adminAPI{
 		endpoint: strings.TrimSuffix(endpoint, "/"),
 		project:  opts.Project,
 		client:   client,
+		token:    token,
 	}, nil
 }
 
@@ -212,6 +239,14 @@ func (a *adminAPI) do(ctx context.Context, method, path string, body any, out an
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	token, err := a.token(ctx)
+	if err != nil {
+		return fmt.Errorf("cloudsql: obtaining a Google identity: %w", err)
+	}
+	if token == "" {
+		return fmt.Errorf("cloudsql: the Google identity returned an empty access token")
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := a.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("cloudsql: %s %s: %w", method, path, err)

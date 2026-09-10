@@ -277,6 +277,8 @@ type Options struct {
 	// Getenv resolves the optional settings, already bound to the engine's
 	// credential chain.
 	Getenv func(string) string
+	// Token supplies an externally managed identity; nil uses the Google credential chain.
+	Token func(context.Context) (string, error)
 	// Now is the clock, injected so a test does not wait on a real one.
 	Now func() time.Time
 	// PollInterval is how often a long running operation is re-read.
