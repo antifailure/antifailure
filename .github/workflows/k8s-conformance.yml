@@ -5,6 +5,8 @@ on:
   push:
     paths:
       - '.github/workflows/k8s-conformance.yml'
+      - 'engine/internal/runtime/k8s/**'
+      - 'engine/conformance/runtime.go'
 
 permissions:
   contents: read
