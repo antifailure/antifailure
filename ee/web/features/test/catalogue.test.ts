@@ -49,6 +49,10 @@ import { FEATURES, declared, sites, type Feature } from '../src/index.ts'
 // worse than no check, and it was living inside the file it was checking.
 import '@antifailure-ee/sso'
 import '@antifailure-ee/scim'
+// The audit stream's site is declared by the enterprise entry point rather than
+// by ee/web/audit, because forwarding is not a route and the licence question
+// is asked where the forwarder is built, not where the bytes are sent.
+import '@antifailure-ee/server'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repo = path.resolve(here, '..', '..', '..', '..')
@@ -183,7 +187,7 @@ describe('every declared enforcement site names something that can refuse', () =
     // twelve here would be asserting something false about a different process.
     // What is asserted is that the features enforced HERE say so.
     assert.deepEqual(
-      declared(), ['scim', 'sso'] as Feature[],
+      declared(), ['audit_stream', 'scim', 'sso'] as Feature[],
       'the set of features enforced in the control plane changed. If one was added, import ' +
         'its package at the top of this file so the registry can see it and add it here. If ' +
         'one disappeared, a declare() call was removed and a feature is silently free again.',

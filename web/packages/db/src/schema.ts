@@ -1648,3 +1648,18 @@ export const controlPlaneFailures = pgTable(
   },
   (t) => [index('control_plane_failures_last_seen_idx').on(t.lastSeenAt)],
 )
+
+/* ---------------------------------------------------------------------------
+ * Where the audit stream forwarder got to
+ *
+ * One row for the whole installation, because audit_entries.seq comes from one
+ * sequence rather than one per tenant, so a single number says where the
+ * forwarder is. See migration 0043 for why the read it guards is the widest
+ * declaration keyed policy in this schema and what confines it.
+ * ------------------------------------------------------------------------ */
+
+export const auditStreamCursor = pgTable('audit_stream_cursor', {
+  id: boolean('id').primaryKey().default(true),
+  deliveredSeq: bigint('delivered_seq', { mode: 'number' }).notNull().default(0),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+})

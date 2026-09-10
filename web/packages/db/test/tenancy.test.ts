@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url'
 import assert from 'node:assert/strict'
 import { sql } from 'drizzle-orm'
 import { createPool } from '../src/client.ts'
+import { appendAudit } from '../src/audit.ts'
 import {
   available,
   appUrl,
@@ -189,6 +190,21 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
       ['analytics_retention_cohorts', 'a cohort grid of counts, with no identifier in it'],
       ['analytics_funnel_weeks', 'counts of how far subjects got, with no identifier in them'],
       [
+        'audit_stream_cursor',
+        'one row of bookkeeping about how far the audit stream forwarder has got, the same ' +
+          'shape as analytics_rollup_state. It carries no org_id because it belongs to the ' +
+          'INSTALLATION rather than to a tenant: audit_entries.seq comes from one sequence for ' +
+          'the whole database, so one number describes the forwarder completely and a cursor ' +
+          'per organization would need the list of organizations before it could read anything, ' +
+          'which is a second cross tenant read to avoid a number. What confines the application ' +
+          'role is the declaration the policies key on, which only Pool.withAuditForwarder sets ' +
+          'and every other scope in client.ts clears, plus grants of SELECT and UPDATE with no ' +
+          'INSERT and no DELETE so it cannot create a second cursor or remove the one there is. ' +
+          'The test below proves an ordinary tenant reaches neither this row nor another ' +
+          'tenant\'s audit entries, and that the forwarder scope reaches both. See ' +
+          'migrations/0043.',
+      ],
+      [
         'control_plane_failures',
         'what the CONTROL PLANE caught in itself, grouped: one row per fingerprint over the ' +
           'declared route key, the HTTP method, the error class and the driver code, with a ' +
@@ -300,6 +316,134 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
     assert.equal(Number(left!.n), 1, 'the refusal above was a statement that matched nothing')
 
     await h.admin`DELETE FROM control_plane_failures WHERE fingerprint = ${fingerprint}`
+  })
+
+  /**
+   * The audit stream forwarder's reach, both ways.
+   *
+   * Migration 0043 adds the widest declaration keyed policy in this schema: a
+   * SELECT on audit_entries with no tenant in its USING clause, because an
+   * operator who configures a SIEM has asked for every organization's
+   * privileged actions in one stream and there is no tenant to scope that to.
+   * Postgres ORs permissive policies, so a policy naming no tenant WIDENS the
+   * table for whoever its predicate is true for, which is exactly the failure
+   * 0021 records the first version of the sweeper policies causing here.
+   *
+   * So both directions are asserted in one test. Bob, on the strongest position
+   * an ordinary request is ever in, reaches neither alice's audit entries nor
+   * the cursor row. The forwarder scope reaches both, which is what stops the
+   * two denials above being a boundary that is simply broken for everybody.
+   */
+  it('only the forwarder scope reads across tenants, and it does read', async () => {
+    await h.pool.withTenant({ orgId: alice.orgId, userId: alice.userId }, (db) =>
+      appendAudit(db, {
+        orgId: alice.orgId,
+        actorLabel: 'the fixture',
+        action: 'audit.stream.isolation',
+        targetType: 'organization',
+        targetId: alice.orgId,
+        origin: 'system',
+      }),
+    )
+
+    // Bob's own connection, with a tenant set, which is the position every
+    // request handler in the product runs in.
+    const seenByBob = await h.pool.withTenant(
+      { orgId: bob.orgId, userId: bob.userId },
+      async (db) =>
+        db.execute<{ n: string }>(sql`
+          SELECT count(*) AS n FROM audit_entries WHERE org_id = ${alice.orgId}`),
+    )
+    assert.equal(
+      Number(seenByBob[0]!.n), 0,
+      "bob read alice's audit entries. The forwarder policy names no tenant, so it widened " +
+        'audit_entries for every ordinary request rather than for the one scope that declares ' +
+        'itself.',
+    )
+
+    const cursorForBob = await h.pool.withTenant(
+      { orgId: bob.orgId, userId: bob.userId },
+      async (db) => db.execute<{ n: string }>(sql`SELECT count(*) AS n FROM audit_stream_cursor`),
+    )
+    assert.equal(
+      Number(cursorForBob[0]!.n), 0,
+      'a tenant connection read the audit stream cursor, so the forwarder policies are true ' +
+        'for callers that never declared themselves',
+    )
+
+    // A tenant cannot move the cursor either. Rewinding it would republish an
+    // organization's whole audit history to whatever sink is configured.
+    //
+    // WHAT THIS ASSERTION CAN AND CANNOT SAY NO ABOUT, established by mutation
+    // rather than by reading. Widening the UPDATE policy to `USING (true)`
+    // leaves this green, and that is not a weak test: an UPDATE has to satisfy
+    // the SELECT policies as well, which the test above this file already
+    // proves in its own case, so a caller who cannot SEE the row cannot update
+    // it whatever the UPDATE policy says. The UPDATE policy is defence in depth
+    // that no tenant facing test can exercise while the SELECT policy denies,
+    // and the pair of assertions this comment sits between is what is really
+    // holding the row. Said here rather than left implied, because an
+    // assertion nothing can break reads exactly like one that is doing work.
+    const moved = await h.pool.withTenant(
+      { orgId: bob.orgId, userId: bob.userId },
+      async (db) => db.execute(sql`UPDATE audit_stream_cursor SET delivered_seq = 0 WHERE id`),
+    )
+    assert.equal(
+      (moved as unknown as { count?: number }).count ?? 0, 0,
+      'a tenant connection moved the audit stream cursor',
+    )
+
+    // And the half that IS independently breakable, which is the grant rather
+    // than a policy. 0043 gives the application role SELECT and UPDATE and
+    // nothing else, so it cannot create a second cursor row or remove the one
+    // there is, and a statement that tried is refused by the database before
+    // any policy is consulted. Asserted as 42501 specifically: a statement that
+    // merely affected no rows would pass a weaker assertion and would mean the
+    // opposite, that the table IS writable.
+    for (const [what, statement] of [
+      ['create a second cursor', sql`INSERT INTO audit_stream_cursor (id) VALUES (false)`],
+      ['delete the cursor', sql`DELETE FROM audit_stream_cursor WHERE id`],
+    ] as const) {
+      const refused = await h.pool
+        .withTenant({ orgId: bob.orgId, userId: bob.userId }, async (db) => {
+          await db.execute(statement)
+        })
+        .then(() => null, (e: unknown) => pgError(e))
+      assert.equal(
+        refused?.code, '42501',
+        `the application role could ${what}, so a forwarder's own bookkeeping is writable from ` +
+          'a request path',
+      )
+    }
+
+    const [cursorsLeft] = await h.admin<{ n: string }[]>`
+      SELECT count(*) AS n FROM audit_stream_cursor`
+    assert.equal(
+      Number(cursorsLeft!.n), 1,
+      'the refusals above were statements that quietly matched nothing',
+    )
+
+    // THE POSITIVE CONTROL, without which every assertion above is satisfied by
+    // a policy nobody can pass and a feature that cannot work.
+    const seenByForwarder = await h.pool.withAuditForwarder(async (db) =>
+      db.execute<{ n: string }>(sql`
+        SELECT count(*) AS n FROM audit_entries WHERE org_id = ${alice.orgId}`),
+    )
+    assert.ok(
+      Number(seenByForwarder[0]!.n) > 0,
+      'the forwarder scope cannot read the audit log it exists to forward, so the three ' +
+        'refusals above are a boundary that is broken for everybody rather than isolation',
+    )
+    const cursorForForwarder = await h.pool.withAuditForwarder(async (db) =>
+      db.execute<{ n: string }>(sql`SELECT count(*) AS n FROM audit_stream_cursor`),
+    )
+    assert.equal(
+      Number(cursorForForwarder[0]!.n), 1,
+      'the forwarder scope cannot read its own cursor row, so it would re-stream the whole ' +
+        'audit log every time it started',
+    )
+
+    await h.admin`DELETE FROM audit_entries WHERE action = 'audit.stream.isolation'`
   })
 
   it('the application role cannot read or write an operator\'s notes', async () => {

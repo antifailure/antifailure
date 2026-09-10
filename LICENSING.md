@@ -12,10 +12,13 @@ every database provider, the egress and mocking layer, the agent runner,
 insights, load, and the control plane are MIT and stay MIT. What is in `ee/` is
 the set of things a large company requires before a rollout and an individual
 developer never uses: single sign on, SCIM, custom roles, SIEM streaming of
-the engine's privileged actions, policy enforcement, customer owned runtimes,
-and billing. `ee/README.md` says exactly which actions those are and which
-audit log is not forwarded, because a one word summary of a feature is where a
-product oversells itself first.
+the engine's privileged actions and of the control plane's own audit log,
+policy enforcement, customer owned runtimes, and billing. `ee/README.md` says
+exactly which actions the engine forwards and what the control plane's stream
+carries, because a one word summary of a feature is where a product oversells
+itself first, and this sentence did: it named the streaming and the hash chain
+as one thing for as long as they were two, and the control plane's log reached
+no sink at all.
 
 The reasoning behind the split, including the alternatives that were rejected,
 is in [ADR 0002](./docs/adr/0002-license-model.md).

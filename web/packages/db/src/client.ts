@@ -253,6 +253,30 @@ export interface Pool {
    */
   withExpirySweeper<T>(fn: (db: Db) => Promise<T>): Promise<T>
   /**
+   * Runs fn as the audit stream forwarder, which reads across tenants.
+   *
+   * The only scope here other than withPlatformAdmin that does, and unlike that
+   * one it declares a boolean rather than a credential, so the argument for why
+   * it is safe has to be made rather than assumed. It is made in migration
+   * 0043 and it is this: an operator who configures a SIEM has asked for every
+   * organization's privileged actions in one stream, so there is no tenant to
+   * scope the read to and the feature cannot exist without a policy that names
+   * none. Postgres ORs permissive policies, so such a policy WIDENS the table
+   * for whoever the predicate is true for, and what keeps that bounded is that
+   * this is the only scope that sets `antifailure.audit_forwarder` and every
+   * other scope in this file clears it by name.
+   *
+   * SELECT only, on audit_entries and on the one row of audit_stream_cursor.
+   * The forwarder copies: 0002 already withholds UPDATE, DELETE and TRUNCATE on
+   * audit_entries from this role, so a forwarder cannot amend the log it is
+   * reading even if a policy said it could.
+   *
+   * NOT withSweeper, though the shape is identical. That declaration is set by
+   * four sweeps that have no business reading an audit log, and reusing it to
+   * save a setting would hand all four the whole audit trail of every tenant.
+   */
+  withAuditForwarder<T>(fn: (db: Db) => Promise<T>): Promise<T>
+  /**
    * Runs fn as an operator, for the administrative portal.
    *
    * The only scope in this file that can read across tenants, and the shape is
@@ -387,6 +411,7 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.github_delivery': '',
           'antifailure.pr_callback_hash': '',
           'antifailure.sweeper': '',
+          'antifailure.audit_forwarder': '',
           // Cleared for the same reason as every setting above it, and this pair
           // matters more than most: the policies they key are the only ones in the
           // schema that read ACROSS tenants.
@@ -445,6 +470,7 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.github_delivery': '',
           'antifailure.pr_callback_hash': '',
           'antifailure.sweeper': '',
+          'antifailure.audit_forwarder': '',
           // Cleared for the same reason as every setting above it, and this pair
           // matters more than most: the policies they key are the only ones in the
           // schema that read ACROSS tenants.
@@ -489,6 +515,7 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.github_delivery': '',
           'antifailure.pr_callback_hash': '',
           'antifailure.sweeper': '',
+          'antifailure.audit_forwarder': '',
           // Cleared for the same reason as every setting above it, and this pair
           // matters more than most: the policies they key are the only ones in the
           // schema that read ACROSS tenants.
@@ -533,6 +560,7 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.github_delivery': '',
           'antifailure.pr_callback_hash': '',
           'antifailure.sweeper': '',
+          'antifailure.audit_forwarder': '',
           // Cleared for the same reason as every setting above it, and this pair
           // matters more than most: the policies they key are the only ones in the
           // schema that read ACROSS tenants.
@@ -573,6 +601,7 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.github_delivery': id,
           'antifailure.pr_callback_hash': '',
           'antifailure.sweeper': '',
+          'antifailure.audit_forwarder': '',
           // Cleared for the same reason as every setting above it, and this pair
           // matters more than most: the policies they key are the only ones in the
           // schema that read ACROSS tenants.
@@ -609,6 +638,7 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.github_delivery': '',
           'antifailure.pr_callback_hash': hash.toString('hex'),
           'antifailure.sweeper': '',
+          'antifailure.audit_forwarder': '',
           // Cleared for the same reason as every setting above it, and this pair
           // matters more than most: the policies they key are the only ones in the
           // schema that read ACROSS tenants.
@@ -642,6 +672,7 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.github_delivery': '',
           'antifailure.pr_callback_hash': '',
           'antifailure.sweeper': 'on',
+          'antifailure.audit_forwarder': '',
           // Cleared for the same reason as every setting above it, and this pair
           // matters more than most: the policies they key are the only ones in the
           // schema that read ACROSS tenants.
@@ -652,6 +683,34 @@ export function createPool(options: PoolOptions): Pool {
           // reason given at the top of the file for writing every other setting
           // out longhand too. admin.test.ts checks the source for exactly that
           // and fails when a scope does not name both.
+          'antifailure.admin_session_hash': '',
+          'antifailure.admin_email': '',
+        },
+        fn,
+      )
+    },
+    withAuditForwarder(fn) {
+      return scoped(
+        {
+          'antifailure.org_id': '',
+          'antifailure.user_id': '',
+          'antifailure.session_hash': '',
+          'antifailure.engine_token_hash': '',
+          'antifailure.github_ids': '',
+          'antifailure.signin_user_id': '',
+          'antifailure.github_logins': '',
+          'antifailure.device_code_hash': '',
+          'antifailure.device_user_code': '',
+          'antifailure.github_account': '',
+          'antifailure.stripe_customer': '',
+          'antifailure.github_delivery': '',
+          'antifailure.pr_callback_hash': '',
+          // Cleared, not shared. The sweeps that enter withSweeper have no
+          // business reading an audit log, and a declaration that two callers
+          // set is a declaration that grants more than the one that asked for
+          // it. See migration 0043.
+          'antifailure.sweeper': '',
+          'antifailure.audit_forwarder': 'on',
           'antifailure.admin_session_hash': '',
           'antifailure.admin_email': '',
         },
@@ -682,6 +741,7 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.github_delivery': '',
           'antifailure.pr_callback_hash': '',
           'antifailure.sweeper': '',
+          'antifailure.audit_forwarder': '',
           'antifailure.admin_session_hash': sessionHash.toString('hex'),
           // Cleared even here. This scope resolves an operator by their live
           // session, never by the email somebody typed, and leaving the sign-in
@@ -713,6 +773,7 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.github_delivery': '',
           'antifailure.pr_callback_hash': '',
           'antifailure.sweeper': '',
+          'antifailure.audit_forwarder': '',
           // Lower-cased here rather than at the call site, for the reason
           // withGitHubAccount gives: the column is lower-cased by a CHECK
           // constraint, and one caller forgetting would produce a statement
@@ -747,6 +808,7 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.github_delivery': '',
           'antifailure.pr_callback_hash': '',
           'antifailure.sweeper': '',
+          'antifailure.audit_forwarder': '',
           'antifailure.invitation_token_hash': '',
           'antifailure.deletion_token_hash': '',
           'antifailure.mcp_client_id': '',

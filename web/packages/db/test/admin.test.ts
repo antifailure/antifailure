@@ -113,6 +113,7 @@ describe('the operator boundary', { skip: hasDb ? false : 'no database' }, () =>
         (p, read) => p.withPullRequestCallback(Buffer.from('abcd', 'hex'), read),
       ],
       ['withSweeper', (p, read) => p.withSweeper(read)],
+      ['withAuditForwarder', (p, read) => p.withAuditForwarder(read)],
     ]
 
     for (const [name, enter] of entered) {
@@ -144,7 +145,17 @@ describe('the operator boundary', { skip: hasDb ? false : 'no database' }, () =>
       const scopes = source.match(/return scoped\(/g)?.length ?? 0
       assert.ok(scopes >= 8, `found only ${scopes} scopes in client.ts, so this is not reading it`)
 
-      for (const setting of ['antifailure.admin_session_hash', 'antifailure.admin_email']) {
+      // The audit forwarder's declaration is held to the same rule and for the
+      // same reason. It keys the third policy in this schema that reads ACROSS
+      // tenants, migration 0043 says so in those words, and transaction
+      // locality already makes it empty on entry, so naming it in every scope
+      // is what makes the invariant checkable by READING client.ts rather than
+      // by trusting that nothing ever changes how these settings are applied.
+      for (const setting of [
+        'antifailure.admin_session_hash',
+        'antifailure.admin_email',
+        'antifailure.audit_forwarder',
+      ]) {
         const mentions = source.match(new RegExp(`'${setting.replace('.', '\\.')}':`, 'g'))?.length ?? 0
         assert.equal(
           mentions,

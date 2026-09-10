@@ -239,6 +239,35 @@ export const ENTITLEMENTS: Record<string, EntitlementSpec> = {
       'checks this entitlement in the one function every SCIM route is authenticated by, so ' +
       'a route added later cannot be the one that forgot.',
   },
+  audit_stream: {
+    kind: 'boolean',
+    description:
+      "Forward this organization's audit log, with its hash chain, to a SIEM or an archive.",
+    byPlan: { free: false, team: false, enterprise: true },
+    // THE ENTRY THAT WAS MISSING WHILE THE NAME EXISTED EVERYWHERE ELSE.
+    //
+    // `audit_stream` has been in the licence catalogue, in licensegen, in the
+    // pricing page and in the enterprise feature package since each of those
+    // was written. Named in prose rather than by path, because this file is
+    // community code and the edition boundary job greps this tree for the
+    // enterprise scope and for its directory, which is the correct boundary and
+    // catches a comment as readily as an import.
+    //
+    // It was never in THIS file, which is the authority for a hosted organization,
+    // so `licensed(pool, orgId, 'audit_stream', now)` resolved to undefined and
+    // answered false for every organization on every plan. That is the correct
+    // direction to fail in and it is still a gate nobody could ever pass, which
+    // would have been indistinguishable from a forwarder that did not work.
+    enforcedAt: null,
+    enforcedInTheEditionThatHasIt: true,
+    notEnforcedBecause:
+      'The community build writes the audit log and has nothing that forwards it, so there is ' +
+      'no forwarding for a check to refuse. The edition that carries the forwarder asks this ' +
+      'entitlement once per organization on every pass of the poll loop rather than once at ' +
+      'startup, so an organization whose entitlement is withdrawn stops being forwarded ' +
+      'without a restart, and the log itself is unaffected either way: it is written whatever ' +
+      'a sink does.',
+  },
   rbac: {
     kind: 'boolean',
     description: 'Custom roles and per repository scopes, beyond the four built-in roles.',

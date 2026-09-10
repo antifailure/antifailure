@@ -7,12 +7,19 @@ sidebar:
 
 *Requires an enterprise license with the `audit_stream` feature.*
 
-The engine records the privileged things it does and forwards them to
-destinations you configure. Nothing here replaces the control plane's own audit
-log, which is written regardless: a sink that is unreachable loses forwarding
-and never loses the entry.
+Two streams, from two places, and they are configured separately because they
+run on different machines. The engine forwards the privileged things it does
+from wherever you run it. The control plane forwards its own audit log, the one
+with the hash chain in it, from wherever you run that. Neither replaces the
+other and neither replaces the log itself, which is written regardless: a sink
+that is unreachable loses forwarding and never loses the entry.
 
-## What is forwarded
+Until this page said so, only the first half existed. The control plane's audit
+log carried a tamper evident chain and reached no destination at all, so single
+sign on logins, directory provisioning, operator impersonation and every admin
+action were recorded and forwarded nowhere.
+
+## What the engine forwards
 
 Five actions, and the list is deliberately short. An audit stream a security
 team can read is one where every entry is an act somebody could be asked about.
@@ -51,7 +58,7 @@ is wrong rather than evidence that is missing.
 absent. The operating system user is never consulted: on a CI runner it is
 `runner` for everybody, which reads as an attribution and is not one.
 
-## Turning it on
+## Turning the engine's stream on
 
 `AF_AUDIT_SINKS` lists the destinations, in the order they are written:
 
@@ -168,10 +175,95 @@ The environment still comes up, and the teardown still finishes. What is lost is
 the forwarding, and for the webhook not even that: an entry no receiver would
 take is in the dead letter file before `Write` returns.
 
+## The control plane's own audit log
+
+A different stream with a different shape, and the shape is the reason it is
+worth having. The engine forwards five actions from a machine with no database.
+The control plane forwards `audit_entries`, which is every sign on, every
+directory provisioning call, every operator impersonation and every
+administrative action, and which carries a hash chain: each entry holds the hash
+of the one before it, so altering an old entry breaks every entry after it.
+
+### What one batch looks like
+
+Batched rather than one entry per request, because the batch is what carries the
+proof:
+
+```json
+{"entries":[{"seq":82,"orgId":"2b8c3b13-cb7b-4a4b-b895-2ec495ac3138","actor":"scim","action":"scim.user.created","targetType":"user","targetId":"230bef84-511e-4abd-91b3-5d744778e3da","origin":"scim","detail":{"active":true,"userName":"ada@example.test"},"occurredAt":"2026-09-09T14:28:22.969Z","entryHash":"c9945c32d8080d853706af010221851cd81448008c72e7230a2967f97fc0df9e"}],"manifest":{"org":"2b8c3b13-cb7b-4a4b-b895-2ec495ac3138","count":1,"firstSeq":82,"lastSeq":82,"headHash":"c9945c32d8080d853706af010221851cd81448008c72e7230a2967f97fc0df9e","digest":"00b8b0b63b2ddaa329a59e00b3a520d870f5227ac34adde991280c6fe395029c","signature":"9bd6b494cf1f4de8a8e71af737346bb0a1d504c16f791d30bd81c517d44c58ab"}}
+```
+
+`headHash` is the chain hash of the last entry in the batch, and `digest` is a
+sha256 over the canonical batch body with `signature` an HMAC of that digest
+under `AF_AUDIT_STREAM_KEY`. That is what lets a batch sitting in an archive be
+checked without reaching back to the control plane that wrote it, which is the
+situation an auditor is usually in.
+
+One batch holds one organization. A manifest names an organization, so a batch
+carrying two would name one and cover both, and a receiver checking it would be
+checking the wrong claim.
+
+### Turning the control plane's stream on
+
+```sh
+export AF_AUDIT_STREAM_SINK=webhook
+export AF_AUDIT_STREAM_KEY="$(openssl rand -base64 32)"
+export AF_AUDIT_STREAM_WEBHOOK_URL=https://siem.example/ingest
+export AF_AUDIT_STREAM_WEBHOOK_SECRET=...
+```
+
+`AF_AUDIT_STREAM_SINK` takes `splunk`, `event_hubs` or `webhook`. Splunk reads
+`AF_AUDIT_STREAM_SPLUNK_URL` and `AF_AUDIT_STREAM_SPLUNK_TOKEN`, with
+`AF_AUDIT_STREAM_SPLUNK_INDEX` and `AF_AUDIT_STREAM_SPLUNK_SOURCETYPE` optional.
+Event Hubs reads `AF_AUDIT_STREAM_EVENT_HUBS_URL` and
+`AF_AUDIT_STREAM_EVENT_HUBS_AUTHORIZATION`, the second being a shared access
+signature you generate, so no key reaches this process and managed identity
+stays possible.
+
+`AF_AUDIT_STREAM_KEY` is required whenever a sink is named. A manifest signed
+under a key nobody chose is decoration rather than evidence.
+
+`AF_AUDIT_STREAM_INTERVAL_MS` is how often a pass runs, ten seconds by default.
+`AF_AUDIT_STREAM_BATCH` is how many entries one pass reads, 500 by default, and
+`AF_AUDIT_STREAM_DELIVERY_BATCH` is how many one request carries, defaulting to
+the pass size. They are two numbers rather than one because how fast the
+forwarder catches up and what your collector accepts in one request are
+different questions.
+
+A sink named with its variables missing stops the control plane at startup with
+the reason, for the same reason the engine's does.
+
+An object store sink exists in the code and cannot be turned on from the
+environment, because it needs a request signer this half of the product does not
+carry. Naming one is refused rather than accepted and then silently writing
+nowhere.
+
+### Delivery, and what happens when your collector is down
+
+At least once, never at most once. The cursor advances only past entries a sink
+accepted, so a collector that is down costs forwarding lag and never an entry,
+and the entries are redelivered when it comes back. A duplicate is visible in
+`seq`; a gap would not be visible at all, which is why the trade is made in that
+direction.
+
+A batch your endpoint will never accept, meaning it answers 400, 401, 403, 404
+or 413, is given up on rather than retried forever, because one batch nobody
+will ever take must not stop every entry behind it. The rest of the stream
+continues.
+
+### What is not forwarded, and it is stated rather than implied
+
+An organization that is not entitled to `audit_stream` is skipped and the stream
+moves on past it. It is not held for an entitlement that might arrive later, and
+that is the same behaviour the engine has. The cursor is one number for the
+whole installation, so an organization that never buys audit streaming would
+otherwise stall the stream for every organization that did.
+
 ## The licence is asked per action, not at startup
 
 Every sink checks `audit_stream` on every entry rather than once when it is
-registered. A licence that lapses while a long lived process is running stops
+registered, and the control plane's forwarder asks it once per organization on
+every pass. A licence that lapses while a long lived process is running stops
 forwarding immediately, without a restart, and one that renews starts again the
 same way. A configured sink on an installation without the feature accepts every
 entry and writes none, which is correct and is also silence, so the engine says
