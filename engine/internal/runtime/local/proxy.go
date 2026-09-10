@@ -427,6 +427,13 @@ type Decision struct {
 	Seq      uint64    `json:"seq"`
 	Via      string    `json:"via"`
 	HostOnly bool      `json:"host_only"`
+	// Stream marks a connection that was not HTTP, decided on the server name
+	// in its TLS handshake and forwarded without anything inside it being
+	// read. Present here because the sidecar writes it and because the two
+	// fields below are a standing record of what happens when it does not:
+	// waited_ms and synthesized were both written for months into a struct
+	// with no field for them and silently dropped.
+	Stream bool `json:"stream"`
 	// Substituted marks a request whose credential the sidecar replaced on
 	// the way out, so a reader can tell a sandbox call from a live one.
 	Substituted bool `json:"substituted"`

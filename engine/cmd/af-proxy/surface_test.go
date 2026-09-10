@@ -48,6 +48,7 @@ var notADecision = map[string]string{
 	"rules":       "on the ready line: how many rules loaded",
 	"default":     "on the ready line: the default mode",
 	"credentials": "on the ready line: how many sandbox values loaded",
+	"streams":     "on the ready line: how many non-HTTP ports the listener answers",
 }
 
 // builtBySurface are keys af net log composes rather than reads, so the

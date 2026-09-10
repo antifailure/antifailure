@@ -457,6 +457,9 @@ type DecisionJSON struct {
 	// reader comparing a rule to a decision needs to know the rule could only
 	// half apply.
 	HostOnly bool `json:"host_only,omitempty"`
+	// Stream marks a connection that was not HTTP, decided on the name in its
+	// handshake with nothing inside it read.
+	Stream bool `json:"stream,omitempty"`
 	// Seq is the sidecar's own ordering, which survives lines sharing a
 	// timestamp.
 	Seq uint64 `json:"seq,omitempty"`
@@ -554,7 +557,7 @@ func decisionDoc(d local.Decision) DecisionJSON {
 		Pack: d.Pack, Fixture: d.Fixture,
 		Emulator: d.Emulator, KeyID: d.KeyID,
 		Duration: d.Duration, WaitedMs: d.WaitedMs, Limit: d.Limit,
-		Via: d.Via, HostOnly: d.HostOnly, Seq: d.Seq,
+		Via: d.Via, HostOnly: d.HostOnly, Stream: d.Stream, Seq: d.Seq,
 	}
 }
 

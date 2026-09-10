@@ -1028,6 +1028,27 @@ func (v *validator) egress(m *schema.Manifest) {
 					fmt.Sprintf("A rate limit applies to allow and sandbox, and this rule is %s.", r.Mode), "")
 			}
 		}
+		// A mode that names a port Antifailure cannot read inside.
+		//
+		// Everything outside HTTP reaches an environment as an opaque byte
+		// stream: the sidecar decides it on the server name in the TLS
+		// handshake and forwards it without seeing a request. Four of the six
+		// modes need a request. Accepting one here and quietly behaving like
+		// allow is the defect this file exists to prevent, and for sandbox it
+		// is worse than a wrong label: forwarding without replacing the
+		// credential sends the application's own key to the real provider.
+		//
+		// Refused at the manifest, where the author can read it, rather than
+		// only at the connection, where it appears in a decision log after a
+		// broker call has already failed.
+		if proto, isStream := streamProtocolFor(r.Host); isStream {
+			if reason := streamModeRefusal(r.Mode); reason != "" {
+				v.add(base+".mode",
+					fmt.Sprintf("The rule for %q is %s, and port %d carries %s, which Antifailure does not read inside.",
+						r.Host, r.Mode, proto.Port, proto.Name),
+					reason)
+			}
+		}
 		if r.Mode == schema.ModeSynth {
 			v.add(base+".mode",
 				fmt.Sprintf("The rule for %q uses synth, so any workflow that touches it reports unverified rather than pass.", r.Host),
@@ -2487,3 +2508,43 @@ var validEngine = regexp.MustCompile(`^[a-z0-9]([a-z0-9_-]{0,38}[a-z0-9])?$`)
 // field in this manifest that reaches a credential holds instead of the
 // credential.
 var validEnvName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
+
+// streamProtocolFor reports the byte stream protocol a rule's host names, when
+// the host spells out a port that carries one.
+//
+// Only an explicit port answers here. A rule that names a host and no port is
+// about whatever port the application dials, which is not knowable until it
+// dials one, and the sidecar refuses an unhonourable mode on the connection
+// itself for exactly that case. This catches the half a manifest can state.
+func streamProtocolFor(host string) (schema.StreamProtocol, bool) {
+	_, portText, err := net.SplitHostPort(strings.TrimSpace(host))
+	if err != nil {
+		return schema.StreamProtocol{}, false
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		return schema.StreamProtocol{}, false
+	}
+	for _, proto := range schema.ByteStreamProtocols {
+		if proto.Port == port {
+			return proto, true
+		}
+	}
+	return schema.StreamProtocol{}, false
+}
+
+// streamModeRefusal says what a mode needs that a byte stream cannot give it,
+// and is empty for the two modes that need nothing.
+func streamModeRefusal(mode schema.Mode) string {
+	switch mode {
+	case schema.ModeCapture:
+		return "Capture has to understand a message before it can record one. Use block or allow for this host, or reach it over HTTP where the request can be read."
+	case schema.ModeMock:
+		return "Mock has to understand a request before it can choose a fixture for it. Use block or allow for this host, or reach it over HTTP where the request can be read."
+	case schema.ModeSynth:
+		return "Synth has to describe a request to a model before it can invent a response. Use block or allow for this host, or reach it over HTTP where the request can be read."
+	case schema.ModeSandbox:
+		return "Sandbox has to find the credential in the request before it can replace it, and forwarding without replacing would send the application's own credential to the real provider. Use block or allow for this host."
+	}
+	return ""
+}

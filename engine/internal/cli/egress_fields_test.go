@@ -91,6 +91,7 @@ var notADecisionField = map[string]string{
 	"rules":       "the rule count on the ready line, which is about the policy and not about a request",
 	"default":     "the default mode on the ready line, and af net explain is where a policy is read",
 	"credentials": "the count of sandbox values loaded, on the ready line, and never per request",
+	"streams":     "the count of non-HTTP ports the sidecar answers, on the ready line, and a property of what the listener can carry rather than a fact about any one request",
 }
 
 // Fields on a decision that af net log -o json does not carry under their own

@@ -127,15 +127,21 @@ type containmentDoc struct {
 	Sandbox     int `json:"sandbox_calls"`
 	Substituted int `json:"credential_substituted"`
 	// Unsubstituted is the count this tool exists to report.
-	Unsubstituted int       `json:"sandbox_credential_not_substituted"`
-	HostOnly      int       `json:"decided_on_host_only"`
-	RateLimited   int       `json:"rate_limited"`
-	HeldMs        int64     `json:"rate_limit_held_ms"`
-	Hosts         []hostDoc `json:"hosts"`
-	HostsTotal    int       `json:"hosts_total"`
-	HostsShown    int       `json:"hosts_shown"`
-	Truncated     bool      `json:"hosts_truncated"`
-	Note          string    `json:"note,omitempty"`
+	Unsubstituted int `json:"sandbox_credential_not_substituted"`
+	HostOnly      int `json:"decided_on_host_only"`
+	// Stream and StreamHosts are the connections nothing looked inside,
+	// because they were not HTTP. Reported separately from host_only, which
+	// they are always part of, because host_only says a path was not seen and
+	// this says one never could be.
+	Stream      int       `json:"decided_without_inspection"`
+	StreamHosts []string  `json:"hosts_decided_without_inspection,omitempty"`
+	RateLimited int       `json:"rate_limited"`
+	HeldMs      int64     `json:"rate_limit_held_ms"`
+	Hosts       []hostDoc `json:"hosts"`
+	HostsTotal  int       `json:"hosts_total"`
+	HostsShown  int       `json:"hosts_shown"`
+	Truncated   bool      `json:"hosts_truncated"`
+	Note        string    `json:"note,omitempty"`
 }
 
 type hostDoc struct {
@@ -291,7 +297,8 @@ func describeContainment(c egress.Containment) containmentDoc {
 		Decisions: c.Total, Allowed: c.Allowed, Refused: c.Refused,
 		Captured: c.Captured, Mocked: c.Mocked, Sandbox: c.Sandbox,
 		Substituted: c.Substituted, Unsubstituted: c.SandboxUnsubstituted,
-		HostOnly: c.HostOnly, RateLimited: c.RateLimited, HeldMs: c.WaitedMs,
+		HostOnly: c.HostOnly, Stream: c.Stream, StreamHosts: c.StreamHosts,
+		RateLimited: c.RateLimited, HeldMs: c.WaitedMs,
 		HostsTotal: len(c.Hosts),
 	}
 	hosts := c.Hosts
@@ -350,6 +357,16 @@ func egressSummary(c egress.Containment, fail, warn, read int) string {
 		fmt.Fprintf(&b,
 			"%d decisions were made on the host alone, without seeing the path or method, "+
 				"so a rule naming paths could only half apply. ", c.HostOnly)
+	}
+	if c.Stream > 0 {
+		// Named hosts rather than a count alone, because the count says how
+		// much was not inspected and the names say what. A twin whose broker
+		// traffic was never read is a twin with a blind spot somebody should
+		// be able to point at.
+		fmt.Fprintf(&b,
+			"%d of those were not HTTP at all: %s were decided on the name in the TLS "+
+				"handshake and nothing inside those connections was read, or could be. ",
+			c.Stream, strings.Join(c.StreamHosts, ", "))
 	}
 	if fail == 0 && warn == 0 {
 		b.WriteString("Nothing the project's policy treats as a problem.")

@@ -319,5 +319,88 @@ The refusal is per address rather than per name, so a host that resolves to
 both families is still reached over IPv4 with IPv6 off, and a host with only an
 IPv6 address is refused with that as the reason.
 
+## Protocols that are not HTTP
+
+An application talks to more than websites. A broker, a managed database, a
+mail relay and a cache are all outbound calls, and none of them is HTTP.
+
+Those connections reach the sidecar the same way an HTTPS call does. The
+environment's resolver answers every external name with the sidecar's own
+address, so the client connects to it believing it reached the broker.
+
+Which ports it answers on is the manifest's decision, and only the manifest's.
+A rule that spells out a port opens a listener for that port. A rule that names
+a host and no port opens none:
+
+```yaml
+    - host: broker.example.com:5671
+      mode: allow
+```
+
+That is stricter than it looks and it is deliberate. A connection accepted on
+this path is forwarded on the strength of the name in its handshake, and a rule
+that names no port applies to every port, so answering on a port nobody asked
+for would carry an allowed host's cache and its mail alongside its website.
+Writing the port down is the consent, in the same way that naming a private
+address is. A listener is shared by all destinations on its port, so the
+matched allow rule must name the port for this host too. Allowing
+`broker.example.com:5671` never grants `website.example.com` that port.
+
+Rules scoped to a path or method require inspection. If any rule for the host
+and port needs inspection, the opaque connection is refused, including when a
+broader allow rule would otherwise match. No synthetic path or method can
+stand in for the bytes the sidecar cannot read.
+
+Antifailure still knows what these ports usually carry: 5671 and 5672 for AMQP,
+9092 and 9093 for Kafka, 27017 for MongoDB, 6379 and 6380 for Redis, 5432 for
+PostgreSQL, 3306 for MySQL, 25, 465 and 587 for mail, 8883 for MQTT, 636 for
+LDAP, 4222 for NATS and 22 for SSH. That table is what lets a refusal name the
+protocol you were probably speaking, and what lets a rule be refused at
+validation rather than at the connection. It is not what decides which ports
+are answered.
+
+The decision is made on the server name in the TLS handshake, which is what the
+client wrote. Nothing inside the connection is read, and nothing about the
+design could read it.
+
+### What that means for a rule
+
+Two modes work on these connections and four do not.
+
+`block` and `allow` are decisions about whether a connection happens, and the
+handshake carries everything they need.
+
+`capture`, `mock`, `synth` and `sandbox` are decisions about a request.
+Capture has to understand a message before it can record one, mock has to
+understand a request before it can choose a fixture, synth has to describe one
+to a model, and sandbox has to find the credential before it can replace it.
+None of that exists in an opaque stream, so a rule that uses one of them on a
+port carrying one is refused rather than quietly treated as `allow`.
+
+Sandbox is the one worth stating on its own. A sandbox rule that forwarded
+without replacing the credential would send the application's own key to the
+real provider and report a successful sandbox call, which is worse than
+blocking and worse than refusing.
+
+### A connection with no name in it
+
+Most of these protocols have a cleartext form. AMQP on 5672, Redis on 6379 and
+Kafka on 9092 send no handshake, and PostgreSQL, MySQL and SMTP submission
+negotiate TLS after a cleartext exchange rather than before one. There is no
+host name anywhere in those bytes, so the connection cannot be attributed to a
+host, so no rule can apply to it and it is refused with that as the reason.
+
+For providers offering TLS from the first byte, use that form: `amqps` on 5671, `rediss` on 6380, Kafka's
+`SASL_SSL` on 9093, MongoDB Atlas, and mail on 465.
+
+### Reading it afterwards
+
+Every one of these decisions is recorded with `stream` set as well as
+`host_only`, and `af net log` and the containment report both count them and
+name the hosts. The two flags say different things: `host_only` means a path
+was not seen on a request that had one, and `stream` means there was no request
+to see. A twin whose broker traffic was never inspected is a twin with a blind
+spot, and it should be possible to point at it.
+
 Related: [mocking](/docs/guides/mocking), [sandbox credentials](/docs/guides/sandbox),
 [the inbox](/docs/guides/inbox), [webhooks](/docs/guides/webhooks).
