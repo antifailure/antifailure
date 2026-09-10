@@ -1,0 +1,49 @@
+name: Kubernetes conformance proof
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/k8s-conformance.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: k8s-proof-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 115
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+      - name: Install the pinned cluster tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y just
+          curl -fsSL https://github.com/k3d-io/k3d/releases/download/v5.9.0/k3d-linux-amd64 -o /tmp/k3d
+          echo '06d8f25bc3a971c4eb29e0ff08429b180402db0f4dec838c9eac427e296800a0  /tmp/k3d' | sha256sum -c
+          sudo install /tmp/k3d /usr/local/bin/k3d
+          curl -fsSL https://dl.k8s.io/release/v1.35.5/bin/linux/amd64/kubectl -o /tmp/kubectl
+          echo '90f75ea6ecc9ea5633262e1c0b83a40560003b30fc94a04cb099404fcef0c224  /tmp/kubectl' | sha256sum -c
+          sudo install /tmp/kubectl /usr/local/bin/kubectl
+          k3d version
+          kubectl version --client
+      - name: Prove the result reader can refuse an incomplete run
+        run: python3 -m unittest discover -s tools -p test_runtimeproof.py
+      - name: Run every runtime behavior on a disposable cluster
+        run: just k8s-conformance
+      - name: Keep the actual verdicts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kubernetes-conformance-${{ github.sha }}
+          path: .gate-reports/k8s-runtime.jsonl
+          if-no-files-found: error

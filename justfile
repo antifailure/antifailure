@@ -548,14 +548,11 @@ compliance:
 # guard is unchanged for everybody else: run the suite by hand and it still
 # refuses to move until you name a cluster yourself.
 #
-# WHY IT IS NOT IN CI. It needs a cluster whose CNI enforces NetworkPolicy, a
-# Docker daemon to build the sidecar image, and an export of every image into
-# the cluster's nodes, which is minutes before the first behaviour runs. On a
-# pull request that is half an hour of runner for a suite whose subject changes
-# rarely. tools/gatecheck only fails when CI runs something `just gate` does
-# not, so a recipe with no job is allowed; the deal is that the STATUS row
-# quotes a date, a cluster version and a count, and anybody can produce their
-# own with one line.
+# This runs in the dedicated Kubernetes conformance workflow, on an isolated
+# runner. It needs a NetworkPolicy enforcing cluster and image imports before
+# the first behaviour runs. The ordinary pull request gate stays separate.
+# The JSON result reader refuses a missing, skipped or failed behaviour, and
+# the workflow retains the actual test events as its evidence.
 #
 # k3d rather than kind, and that is not a preference. k3s enables its
 # NetworkPolicy controller by default, and kind's default CNI has historically
@@ -620,6 +617,7 @@ k8s-conformance cluster="af-conformance":
     # the next unqualified kubectl command in another terminal talk to
     # something that is about to be deleted.
     k3d cluster create {{cluster}} --servers 1 --agents 0 \
+      --image rancher/k3s:v1.35.5-k3s1@sha256:2074403abe1bded11ef3dde09d457e13be8e0b64c218b1c4f8269b4565cfbc65 \
       --kubeconfig-switch-context=false --wait --timeout 10m
     ctx="k3d-{{cluster}}"
     kubectl --context "$ctx" wait --for=condition=Ready nodes --all --timeout=5m
@@ -634,8 +632,15 @@ k8s-conformance cluster="af-conformance":
     # prints the word ok and a duration, which reads the same for the whole
     # roster and for the six a filter left, and the suite's own accounting says
     # so at the end.
-    cd engine && env -u AF_SKIP_SLOW AF_KUBE_CONTEXT="$ctx" \
-      go test ./internal/runtime/k8s -run TestConformance -count=1 -v -timeout 90m
+    mkdir -p .gate-reports
+    set +e
+    (cd engine && env -u AF_SKIP_SLOW AF_KUBE_CONTEXT="$ctx" \
+      flock /tmp/af-gobuild.lock go test ./internal/runtime/k8s -run '^TestConformance$' -count=1 -json -timeout 90m) \
+      > .gate-reports/k8s-runtime.jsonl
+    result=$?
+    set -e
+    python3 tools/runtimeproof.py .gate-reports/k8s-runtime.jsonl
+    exit "$result"
 
 # The numbers this repository is allowed to quote.
 #

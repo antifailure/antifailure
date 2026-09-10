@@ -14,6 +14,12 @@ k8s-conformance` creates a single node k3d cluster, names that cluster's own
 context in `AF_KUBE_CONTEXT`, runs every behaviour and deletes the cluster
 afterwards. The guard is untouched for everybody else.
 
+The dedicated Kubernetes workflow runs this command on an isolated runner,
+with pinned cluster tools and a pinned k3s image. It retains the Go test events
+and refuses a missing, skipped or failed roster entry. A successful command
+that ran fewer behaviours cannot become a conformance claim. The shared
+development machine is not used for this cluster.
+
 The count is the second half. Three documents stated how large the runtime
 conformance roster is: the product page, the plan's status row and the claims
 ledger. All three were right when they were written and all three said
