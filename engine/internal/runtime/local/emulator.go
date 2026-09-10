@@ -12,6 +12,7 @@ import (
 
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 )
 
@@ -263,8 +264,15 @@ func (r *Runtime) startCompanions(
 func (r *Runtime) ensureImageByRef(
 	ctx context.Context, ref, what string, progress func(string),
 ) error {
-	if _, err := r.cli.ImageInspect(ctx, ref); err == nil {
+	present, err := dockerutil.ImagePresent(ctx, r.cli, ref)
+	if err != nil {
+		return aferrors.Wrap(err, aferrors.AFRUN040, "detail", "checking the emulator image: "+err.Error())
+	}
+	if present {
 		return nil
+	}
+	if err := airgap.CheckImage(airgap.SiteImagePull, ref); err != nil {
+		return aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
 	}
 	progress(fmt.Sprintf("pulling the image for %s (once per digest)", what))
 	rc, err := r.cli.ImagePull(ctx, ref, image.PullOptions{})

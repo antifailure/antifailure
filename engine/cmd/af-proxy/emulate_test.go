@@ -216,14 +216,11 @@ func TestEmulate_TheDecisionRecordsTheKeyIDAndNeverTheSecret(t *testing.T) {
 	req.Header.Set("X-Amz-Content-Sha256", secret)
 	sendEmulated(t, s, req)
 
-	var decided *record
-	for _, r := range s.decisions() {
-		if r.Event == "decision" && r.Mode == string(schema.ModeEmulate) {
-			d := r
-			decided = &d
-		}
-	}
-	require.NotNil(t, decided, "the emulated request produced no decision line")
+	// The response can arrive before the handler appends its decision. Wait
+	// for that event rather than treating an in-flight log write as absence.
+	decided := s.waitFor(t, func(r record) bool {
+		return r.Event == "decision" && r.Mode == string(schema.ModeEmulate)
+	})
 	require.Equal(t, "localstack", decided.Emulator,
 		"the decision does not say which emulator answered, so an environment running two "+
 			"of them has a log nobody can read")
