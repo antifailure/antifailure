@@ -49,4 +49,5 @@ jobs:
         with:
           name: kubernetes-conformance-${{ github.sha }}
           path: .gate-reports/k8s-runtime.jsonl
+          include-hidden-files: true
           if-no-files-found: error

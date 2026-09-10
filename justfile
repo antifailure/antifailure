@@ -618,8 +618,13 @@ k8s-conformance cluster="af-conformance":
     # something that is about to be deleted.
     k3d cluster create {{cluster}} --servers 1 --agents 0 \
       --image rancher/k3s:v1.35.5-k3s1@sha256:2074403abe1bded11ef3dde09d457e13be8e0b64c218b1c4f8269b4565cfbc65 \
+      --port '127.0.0.1:80:80@loadbalancer' \
       --kubeconfig-switch-context=false --wait --timeout 10m
     ctx="k3d-{{cluster}}"
+    # The ingress behavior must run too. This public wildcard DNS spelling
+    # resolves only to loopback; the listener is not exposed on other hosts.
+    python3 -c 'import socket; assert socket.gethostbyname("proof.127.0.0.1.sslip.io") == "127.0.0.1"'
+    kubectl --context "$ctx" -n kube-system rollout status deployment/traefik --timeout=5m
     kubectl --context "$ctx" wait --for=condition=Ready nodes --all --timeout=5m
     # AF_SKIP_SLOW is removed rather than passed through, and it is announced
     # when it was there. The suite reads it and drops a behaviour, and the
@@ -634,7 +639,7 @@ k8s-conformance cluster="af-conformance":
     # so at the end.
     mkdir -p .gate-reports
     set +e
-    (cd engine && env -u AF_SKIP_SLOW AF_KUBE_CONTEXT="$ctx" \
+    (cd engine && env -u AF_SKIP_SLOW AF_KUBE_CONTEXT="$ctx" AF_KUBE_DOMAIN=127.0.0.1.sslip.io \
       flock /tmp/af-gobuild.lock go test ./internal/runtime/k8s -run '^TestConformance$' -count=1 -json -timeout 90m) \
       > .gate-reports/k8s-runtime.jsonl
     result=$?
