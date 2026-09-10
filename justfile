@@ -531,6 +531,112 @@ compliance:
       echo "No evidence was published, so the suite skipped. It says why above."; \
      fi
 
+# The Kubernetes runtime, against a real cluster.
+#
+# WHY THIS EXISTS. The runtime conformance suite in engine/conformance is the
+# only thing that decides whether a runtime is proved, and the Kubernetes one
+# had no command anybody could type. It is gated behind AF_KUBE_CONTEXT, which
+# is REQUIRED rather than defaulted to the current kubectl context, because the
+# suite creates namespaces, deletes namespaces and runs pods that try to reach
+# the internet, and a default would eventually run all of that against
+# somebody's real cluster. So the answer was a paragraph of setup nobody
+# repeated, and row 288 of docs/plan/STATUS.md carried numbers from runs that
+# could not be reproduced. This is the command.
+#
+# It does NOT default the variable away. It creates a throwaway cluster, names
+# that cluster's own context in AF_KUBE_CONTEXT, and deletes it afterwards. The
+# guard is unchanged for everybody else: run the suite by hand and it still
+# refuses to move until you name a cluster yourself.
+#
+# WHY IT IS NOT IN CI. It needs a cluster whose CNI enforces NetworkPolicy, a
+# Docker daemon to build the sidecar image, and an export of every image into
+# the cluster's nodes, which is minutes before the first behaviour runs. On a
+# pull request that is half an hour of runner for a suite whose subject changes
+# rarely. tools/gatecheck only fails when CI runs something `just gate` does
+# not, so a recipe with no job is allowed; the deal is that the STATUS row
+# quotes a date, a cluster version and a count, and anybody can produce their
+# own with one line.
+#
+# k3d rather than kind, and that is not a preference. k3s enables its
+# NetworkPolicy controller by default, and kind's default CNI has historically
+# accepted a NetworkPolicy and enforced nothing, which is the exact cluster the
+# runtime's own containment probe exists to refuse. Either tool works with the
+# suite; only one of them starts out able to say no.
+#
+# AF_KEEP_CLUSTER=1 leaves the cluster up so a failed behaviour can be read out
+# of it with kubectl. Nothing else is configurable, and the suite's own knobs
+# are deliberately not passed through: AF_SKIP_SLOW would drop a behaviour from
+# a run whose whole purpose is the count.
+
+# Every runtime conformance behaviour against a throwaway k3d cluster.
+k8s-conformance cluster="af-conformance":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for tool in k3d kubectl docker; do
+      command -v "$tool" > /dev/null || { echo "$tool is not installed"; exit 1; }
+    done
+    # Refused rather than reused, and refused rather than deleted. A cluster
+    # already carrying this name is either a previous run that died or somebody
+    # else's, and this recipe cannot tell those apart. Deleting the second kind
+    # is the one unrecoverable thing it could do, so it does neither and says
+    # the command to type.
+    #
+    # THREE outcomes, not two, and this recipe got that wrong while it was
+    # being written. `k3d cluster get <name>` exits 1 when the cluster is
+    # absent AND when the Docker daemon cannot be reached, which was proved by
+    # pointing DOCKER_HOST at a socket that does not exist and reading the two
+    # identical exit codes. On a machine whose daemon is answering
+    # intermittently that guard reads "I could not ask" as "it is not there"
+    # and creates over a cluster that is already running. A listing separates
+    # them: `k3d cluster list` exits zero with no rows when there is genuinely
+    # nothing, and non-zero when it could not look.
+    if ! clusters=$(k3d cluster list --no-headers 2>&1); then
+      echo "the Docker daemon did not answer, so whether a cluster named"
+      echo "{{cluster}} already exists is unknown. Nothing was created."
+      echo "$clusters"
+      exit 1
+    fi
+    if printf '%s\n' "$clusters" | awk '{print $1}' | grep -qx '{{cluster}}'; then
+      echo "a k3d cluster named {{cluster}} already exists."
+      echo "if it is a leftover of this recipe: k3d cluster delete {{cluster}}"
+      exit 1
+    fi
+    keep="${AF_KEEP_CLUSTER:-}"
+    cleanup() {
+      if [ -n "$keep" ]; then
+        echo "AF_KEEP_CLUSTER is set, so {{cluster}} is still up."
+        echo "delete it with: k3d cluster delete {{cluster}}"
+        return
+      fi
+      k3d cluster delete {{cluster}} > /dev/null 2>&1 || true
+    }
+    trap cleanup EXIT
+    # One node. The suite runs a sidecar, a probe pod and several services per
+    # behaviour, and a multi node cluster on a laptop buys nothing the suite
+    # asks about while costing memory the Docker daemon needs.
+    #
+    # --kubeconfig-switch-context=false because this machine is shared. A
+    # recipe that repointed `kubectl` at its own throwaway cluster would make
+    # the next unqualified kubectl command in another terminal talk to
+    # something that is about to be deleted.
+    k3d cluster create {{cluster}} --servers 1 --agents 0 \
+      --kubeconfig-switch-context=false --wait --timeout 10m
+    ctx="k3d-{{cluster}}"
+    kubectl --context "$ctx" wait --for=condition=Ready nodes --all --timeout=5m
+    # AF_SKIP_SLOW is removed rather than passed through, and it is announced
+    # when it was there. The suite reads it and drops a behaviour, and the
+    # point of this recipe is the count: a run that quietly measured one fewer
+    # than it reported is the failure the whole status row is recovering from.
+    if [ -n "${AF_SKIP_SLOW:-}" ]; then
+      echo "AF_SKIP_SLOW was set and is being ignored: this run measures every behaviour."
+    fi
+    # -v so the run prints one line per behaviour. Without it a passing package
+    # prints the word ok and a duration, which reads the same for the whole
+    # roster and for the six a filter left, and the suite's own accounting says
+    # so at the end.
+    cd engine && env -u AF_SKIP_SLOW AF_KUBE_CONTEXT="$ctx" \
+      go test ./internal/runtime/k8s -run TestConformance -count=1 -v -timeout 90m
+
 # The numbers this repository is allowed to quote.
 #
 # No number is quotable unless the harness that produced it is in this
