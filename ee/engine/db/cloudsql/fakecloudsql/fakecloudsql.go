@@ -35,11 +35,15 @@
 package fakecloudsql
 
 import (
+	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -72,13 +76,15 @@ type Options struct {
 
 // Server is the fake control plane.
 type Server struct {
-	mu        sync.Mutex
-	instances map[string]*fakeInstance
-	ops       map[string]*fakeOperation
-	admin     *sql.DB
-	opts      Options
-	http      *httptest.Server
-	seq       int
+	rolesMu      sync.Mutex
+	createdRoles map[string]bool
+	mu           sync.Mutex
+	instances    map[string]*fakeInstance
+	ops          map[string]*fakeOperation
+	admin        *sql.DB
+	opts         Options
+	http         *httptest.Server
+	seq          int
 
 	// bytesCopied is what this fake moved, which a real fast clone would not.
 	bytesCopied int64
@@ -109,7 +115,14 @@ type fakeInstance struct {
 	// credential path a real one would be. A fake that only remembered the
 	// password would let the provider's password reset be deleted with every
 	// test still green.
-	Role string
+	Role          string
+	ExtraUsers    map[string]*fakeUser
+	DatabaseFlags map[string]string
+}
+
+type fakeUser struct {
+	Name, Type, Role, Password string
+	Listed                     bool
 }
 
 type fakeOperation struct {
@@ -142,10 +155,11 @@ func New(opts Options) (*Server, error) {
 	admin.SetMaxOpenConns(1)
 
 	s := &Server{
-		instances: map[string]*fakeInstance{},
-		ops:       map[string]*fakeOperation{},
-		admin:     admin,
-		opts:      opts,
+		instances:    map[string]*fakeInstance{},
+		createdRoles: map[string]bool{},
+		ops:          map[string]*fakeOperation{},
+		admin:        admin,
+		opts:         opts,
 	}
 
 	source := &fakeInstance{
@@ -161,6 +175,8 @@ func New(opts Options) (*Server, error) {
 		CreateTime:       opts.Now().UTC(),
 		Password:         "production-password",
 		Role:             "postgres",
+		ExtraUsers:       map[string]*fakeUser{},
+		DatabaseFlags:    map[string]string{},
 	}
 	if err := s.createDatabase(source.Database); err != nil {
 		return nil, err
@@ -201,6 +217,9 @@ func (s *Server) Close() []error {
 		if in.Role != "" && in.Role != "postgres" {
 			roles = append(roles, in.Role)
 		}
+		for _, u := range in.ExtraUsers {
+			roles = append(roles, u.Role)
+		}
 	}
 	s.instances = map[string]*fakeInstance{}
 	s.mu.Unlock()
@@ -211,6 +230,11 @@ func (s *Server) Close() []error {
 			problems = append(problems, fmt.Errorf("dropping %s: %w", database, err))
 		}
 	}
+	s.rolesMu.Lock()
+	for role := range s.createdRoles {
+		roles = append(roles, role)
+	}
+	s.rolesMu.Unlock()
 	// Roles after databases: a role owning objects in a database that still
 	// exists cannot be dropped, and a leaked role on a shared server is the
 	// same class of defect as a leaked database.
@@ -395,17 +419,80 @@ func (s *Server) pgUser() string {
 // real one would be. A fake that only remembered the password would let the
 // provider's password reset be deleted with every test still green.
 func (s *Server) ensureRole(role, password string) error {
+	s.rolesMu.Lock()
+	s.createdRoles[role] = true
+	s.rolesMu.Unlock()
 	owner := s.pgUser()
-	for _, statement := range []string{
-		`DROP ROLE IF EXISTS ` + quoteIdent(role),
-		`CREATE ROLE ` + quoteIdent(role) + ` LOGIN INHERIT PASSWORD ` +
-			quoteLiteral(password) + ` IN ROLE ` + quoteIdent(owner),
-	} {
-		if _, err := s.admin.Exec(statement); err != nil {
-			return fmt.Errorf("fakecloudsql: %s: %w", statement, err)
+	var exists bool
+	if err := s.admin.QueryRow("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname=$1)", role).Scan(&exists); err != nil {
+		return err
+	}
+	statement := "CREATE ROLE " + quoteIdent(role) + " LOGIN INHERIT PASSWORD " + quoteLiteral(password) + " IN ROLE " + quoteIdent(owner)
+	if exists {
+		statement = "ALTER ROLE " + quoteIdent(role) + " LOGIN PASSWORD " + quoteLiteral(password)
+	}
+	if _, err := s.admin.Exec(statement); err != nil {
+		return fmt.Errorf("fakecloudsql: preparing role %q: %w", role, err)
+	}
+
+	return nil
+}
+
+// AddUser installs a real, separately authenticating source role. Clones copy
+// its password into their own independent role, just as the vendor does.
+func (s *Server) AddUser(instance, name, kind, password string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	in, ok := s.instances[instance]
+	if !ok {
+		return fmt.Errorf("fakecloudsql: unknown instance %q", instance)
+	}
+	role := s.userRole(instance, name)
+	if err := s.ensureRole(role, password); err != nil {
+		return err
+	}
+	in.ExtraUsers[name] = &fakeUser{Name: name, Type: kind, Role: role, Password: password, Listed: true}
+	if in.Role != "" && in.Role != "postgres" {
+		if _, err := s.admin.Exec("GRANT " + quoteIdent(role) + " TO " + quoteIdent(in.Role) + " WITH ADMIN OPTION"); err != nil {
+			return err
 		}
 	}
+
+	if kind != "" && kind != "BUILT_IN" {
+		in.DatabaseFlags["cloudsql.iam_authentication"] = "on"
+	}
+	// A real unrelated setting guards against replacing the whole flag set.
+	in.DatabaseFlags["log_min_duration_statement"] = "1234"
 	return nil
+}
+
+// UserURL uses the caller's credential against the real role for this instance.
+func (s *Server) UserURL(instance, name, password string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	in, ok := s.instances[instance]
+	if !ok {
+		return "", fmt.Errorf("fakecloudsql: unknown instance %q", instance)
+	}
+	u, ok := in.ExtraUsers[name]
+	if !ok {
+		return "", fmt.Errorf("fakecloudsql: unknown user %q", name)
+	}
+	parsed, err := url.Parse(replaceDatabase(s.opts.AdminURL, in.Database))
+	if err != nil {
+		return "", err
+	}
+	parsed.User = url.UserPassword(u.Role, password)
+	return parsed.String(), nil
+}
+
+func (s *Server) userRole(instance, name string) string {
+	sum := sha256.Sum256([]byte(name))
+	base := s.roleFor(instance)
+	if len(base) > 49 {
+		base = base[:49]
+	}
+	return base + "u" + hex.EncodeToString(sum[:])[:10]
 }
 
 // roleFor is the role name for one instance, inside Postgres's 63 byte limit.
@@ -420,4 +507,67 @@ func (s *Server) roleFor(instance string) string {
 // quoteLiteral quotes a string for use as a SQL literal.
 func quoteLiteral(in string) string {
 	return `'` + strings.ReplaceAll(in, `'`, `''`) + `'`
+}
+
+// CustomerLogins is the explicit shared-cluster fixture boundary. It still
+// reads actual pg_roles flags, but only for roles owned by this fake instance.
+func (s *Server) CustomerLogins(ctx context.Context, db *sql.DB) ([]string, error) {
+	var database string
+	if err := db.QueryRowContext(ctx, "SELECT current_database()").Scan(&database); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	found := false
+	var roles []string
+	for _, in := range s.instances {
+		if in.Database == database {
+			found = true
+			for _, user := range in.ExtraUsers {
+				roles = append(roles, user.Role)
+			}
+			break
+		}
+	}
+	s.mu.Unlock()
+	if !found {
+		return nil, fmt.Errorf("fakecloudsql: login catalog requested for a database this fixture does not own")
+	}
+	if len(roles) == 0 {
+		return nil, nil
+	}
+	rows, err := db.QueryContext(ctx, "SELECT rolname FROM pg_catalog.pg_roles WHERE (rolcanlogin OR EXISTS(SELECT 1 FROM pg_catalog.pg_stat_activity WHERE usename=rolname)) AND rolname=ANY($1::text[]) AND rolname<>current_user ORDER BY rolname", roles)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	return names, rows.Err()
+}
+
+func (s *Server) AddSQLLogin(instance, name, password string) error {
+	if err := s.AddUser(instance, name, "BUILT_IN", password); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.instances[instance].ExtraUsers[name].Listed = false
+	return nil
+}
+
+func (s *Server) UserPasswordMatches(instance, name, password string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	in, ok := s.instances[instance]
+	if !ok {
+		return false
+	}
+	user, ok := in.ExtraUsers[name]
+	return ok && user.Password == password
 }
