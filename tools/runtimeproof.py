@@ -26,6 +26,7 @@ def roster(source):
 
 def verify(lines, names):
     expected = {'TestConformance/' + name for name in names}
+    roots = {'TestConformance', 'TestImmediateStartupCannotBypassContainment'}
     verdicts = {}
     package_passed = False
     for line in lines:
@@ -37,7 +38,7 @@ def verify(lines, names):
             if action in ('pass', 'fail', 'skip'):
                 package_passed = action == 'pass'
             continue
-        if not name.startswith('TestConformance') or action not in ('pass', 'fail', 'skip'):
+        if name.split('/')[0] not in roots or action not in ('pass', 'fail', 'skip'):
             continue
         if action != 'pass':
             raise ValueError(f'{name} reported {action}, so the runtime is not proved')
@@ -46,10 +47,10 @@ def verify(lines, names):
         if name in verdicts:
             raise ValueError(f'{name} has more than one verdict')
         verdicts[name] = action
-    observed = set(verdicts) - {'TestConformance'}
-    if not package_passed or 'TestConformance' not in verdicts or observed != expected:
+    observed = {name for name in verdicts if name.startswith('TestConformance/')}
+    if not package_passed or not roots.issubset(verdicts) or observed != expected:
         missing, extra = sorted(expected - observed), sorted(observed - expected)
-        raise ValueError(f'incomplete runtime proof: missing={missing}, unexpected={extra}, package_passed={package_passed}')
+        raise ValueError(f'incomplete runtime proof: missing={missing}, missing_roots={sorted(roots-set(verdicts))}, unexpected={extra}, package_passed={package_passed}')
     return len(expected)
 
 
@@ -58,7 +59,7 @@ if __name__ == '__main__':
         root = Path(__file__).resolve().parents[1]
         names = roster((root / 'engine/conformance/runtime.go').read_text())
         count = verify(Path(sys.argv[1]).read_text().splitlines(), names)
-        print(f'runtimeproof: {count} of {count} behaviors passed, zero skipped')
+        print(f'runtimeproof: {count} of {count} behaviors and immediate startup containment passed, zero skipped')
     except (ValueError, OSError, IndexError) as error:
         print(f'runtimeproof: {error}', file=sys.stderr)
         sys.exit(1)

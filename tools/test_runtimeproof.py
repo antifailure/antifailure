@@ -7,7 +7,7 @@ class RuntimeProofTests(unittest.TestCase):
     def events(self, action='pass'):
         package = 'github.com/antifailure/antifailure/engine/internal/runtime/k8s'
         return [json.dumps({'Package': package, 'Test': name, 'Action': action})
-                for name in ['TestConformance/A', 'TestConformance/B', 'TestConformance', None]]
+                for name in ['TestConformance/A', 'TestConformance/B', 'TestConformance', 'TestImmediateStartupCannotBypassContainment', None]]
 
     def test_complete_run_is_accepted(self):
         self.assertEqual(verify(self.events(), ['A', 'B']), 2)
@@ -23,6 +23,11 @@ class RuntimeProofTests(unittest.TestCase):
     def test_missing_behavior_is_refused(self):
         with self.assertRaises(ValueError):
             verify(self.events()[1:], ['A', 'B'])
+
+    def test_missing_startup_proof_is_refused(self):
+        events = [line for line in self.events() if json.loads(line).get('Test') != 'TestImmediateStartupCannotBypassContainment']
+        with self.assertRaises(ValueError):
+            verify(events, ['A', 'B'])
 
     def test_duplicate_verdict_is_refused(self):
         with self.assertRaises(ValueError):

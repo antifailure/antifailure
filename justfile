@@ -641,7 +641,7 @@ k8s-conformance cluster="af-conformance":
     mkdir -p .gate-reports
     set +e
     (cd engine && env -u AF_SKIP_SLOW AF_KUBE_CONTEXT="$ctx" AF_KUBE_DOMAIN=127.0.0.1.sslip.io \
-      flock /tmp/af-gobuild.lock go test ./internal/runtime/k8s -run '^TestConformance$' -count=1 -json -timeout 90m) \
+      flock /tmp/af-gobuild.lock go test ./internal/runtime/k8s -run '^(TestConformance|TestImmediateStartupCannotBypassContainment)$' -count=1 -json -timeout 90m) \
       > .gate-reports/k8s-runtime.jsonl
     result=$?
     set -e

@@ -684,7 +684,7 @@ func uncalledByGate(recipes []recipe, reachable map[string]bool) []string {
 		// The result validator refuses missing or skipped behaviors; its tests
 		// run before the isolated workflow attempts the real suite.
 		"k8s-conformance": true,
-		"vuln": true,
+		"vuln":            true,
 		// The npm half of the same scan, out of `gate` for the same reason and
 		// running in the same workflow.
 		"npmaudit": true,

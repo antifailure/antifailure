@@ -7,6 +7,16 @@ on:
       - '.github/workflows/k8s-conformance.yml'
       - 'engine/internal/runtime/k8s/**'
       - 'engine/conformance/runtime.go'
+      # The startup gate is the only thing standing between a new pod and the
+      # window before its NetworkPolicy is programmed, and it is built from the
+      # engine's own proxy image rather than from the runtime package.
+      - 'engine/cmd/af-proxy/**'
+      - 'engine/internal/proxyimage/**'
+      # The verdict reader and the recipe decide what a successful process exit
+      # is allowed to claim, so a change to either changes the proof itself.
+      - 'tools/runtimeproof.py'
+      - 'tools/test_runtimeproof.py'
+      - 'justfile'
 
 permissions:
   contents: read
