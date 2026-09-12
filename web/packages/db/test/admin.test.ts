@@ -29,7 +29,7 @@ import { available, setup, seedTenant, type Harness, type Fixture } from './harn
 
 const hasDb = await available()
 
-describe('the operator boundary', { skip: hasDb ? false : 'no database' }, () => {
+describe('the operator boundary', { skip: hasDb ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: Harness
   let alice: Fixture
   let bob: Fixture

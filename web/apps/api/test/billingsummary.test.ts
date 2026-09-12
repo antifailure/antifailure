@@ -16,7 +16,7 @@ import { available, seedOrg, startApi, type ApiHarness, type Org } from './harne
 
 const hasDatabase = await available()
 
-describe('one organization s billing summary', { skip: hasDatabase ? false : 'no database' }, () => {
+describe('one organization s billing summary', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: ApiHarness
   let org: Org
   const now = new Date('2026-03-01T00:00:00.000Z')

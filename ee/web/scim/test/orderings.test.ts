@@ -402,7 +402,7 @@ describe('SCIM provisioning', { skip: hasDatabase ? false : 'no Postgres at AF_T
   })
 })
 
-describe('deprovisioning latency', { skip: hasDatabase ? false : 'no database' }, () => {
+describe('deprovisioning latency', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: Harness
   let tenant: Tenant
 

@@ -76,7 +76,7 @@ const PAGING_TYPE = `paging.probe.${RUN}`
  *  else, which is the constraint doing its job. */
 const DIGEST = createHash('sha256').update(RUN).digest('hex')
 
-describe('the operations routes', { skip: hasDb ? false : 'no database' }, () => {
+describe('the operations routes', { skip: hasDb ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: ApiHarness
   let org: Org
   let other: Org

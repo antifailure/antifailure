@@ -122,7 +122,7 @@ describe('the MCP section describes the engine that exists', () => {
  * The routes
  * ---------------------------------------------------------------------- */
 
-describe('the developer platform routes', { skip: hasDb ? false : 'no database' }, () => {
+describe('the developer platform routes', { skip: hasDb ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: ApiHarness
   let alice: Org
   let bob: Org

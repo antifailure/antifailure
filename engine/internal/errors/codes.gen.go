@@ -1703,7 +1703,7 @@ var catalog = map[Code]Entry{
 		Code:      AFRUN001,
 		Area:      "RUN",
 		Message:   "The command '{command}' is not available in this version.",
-		NextStep:  "See the roadmap for when it lands; 'af version' reports the version you are running.",
+		NextStep:  "Run 'af --help' for the commands this binary carries and 'af version' for which build it is. 'af update' replaces it in place with the newest release, which may carry more.",
 		Docs:      "reference/cli",
 		Retryable: false,
 		ExitCode:  ExitUsage,

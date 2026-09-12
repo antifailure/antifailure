@@ -13,7 +13,7 @@ const start = '2026-09-01T23:00:00Z'
 const end = '2026-09-02T02:00:00Z'
 const now = '2026-09-02T04:00:00Z'
 
-describe('usage survives disposable environments', { skip: has ? false : 'no database' }, () => {
+describe('usage survives disposable environments', { skip: has ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: Harness
   const orgs: string[] = []
   before(async () => { h = await setup() })

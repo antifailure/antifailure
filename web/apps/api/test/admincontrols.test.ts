@@ -24,7 +24,15 @@ const src = (rel: string) => fileURLToPath(new URL(`../src/${rel}`, import.meta.
 
 describe('the emergency switches actually stop things', { concurrency: 1 }, async () => {
   if (!(await available())) {
-    test('skipped: no database', { skip: true }, () => {})
+    // The whole suite, not one test. A skip option set to the bare literal
+    // true reports one skipped test whatever the file holds, and states no
+    // condition, so a reader cannot tell a suite that was turned off from
+    // one whose database was absent. Both halves are here: what was
+    // measured, and the variable that makes it run.
+    test('the whole suite did not run', {
+      skip: 'no Postgres answered at AF_TEST_DATABASE_URL, so none of this suite ran. '
+        + 'Run `just db`, or set AF_REQUIRE_DATABASE=1 to make its absence a failure.',
+    }, () => {})
     return
   }
 
