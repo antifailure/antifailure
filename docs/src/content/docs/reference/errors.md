@@ -1612,6 +1612,18 @@ This runtime cannot place the sizes the manifest asks for: {detail}
 | Retryable | Yes. The engine retries automatically where it can. |
 | More | [reference/manifest](/docs/reference/manifest) |
 
+### AF-RUN-048
+
+The egress sidecar image could not be obtained: {detail}
+
+**What to do.** A release publishes this image, so an official build fetches it in seconds. Set AF_PROXY_IMAGE_TIMEOUT higher if this machine is slow, or name an image you host in AF_PROXY_IMAGE so nothing is compiled here.
+
+| | |
+| --- | --- |
+| Exit code | `1` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [guides/local-runtime](/docs/guides/local-runtime) |
+
 ## Scheduling
 
 ### AF-SCH-001

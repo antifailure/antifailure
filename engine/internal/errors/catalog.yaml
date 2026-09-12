@@ -601,6 +601,13 @@ errors:
     docs: reference/manifest
     retryable: true
     exit_code: 1
+  - code: AF-RUN-048
+    area: RUN
+    message: "The egress sidecar image could not be obtained: {detail}"
+    next_step: "A release publishes this image, so an official build fetches it in seconds. Set AF_PROXY_IMAGE_TIMEOUT higher if this machine is slow, or name an image you host in AF_PROXY_IMAGE so nothing is compiled here."
+    docs: guides/local-runtime
+    retryable: true
+    exit_code: 1
   - code: AF-RUN-009
     area: RUN
     message: "No free port was found in the range {range} to publish the environment on."
