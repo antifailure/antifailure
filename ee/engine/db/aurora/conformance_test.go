@@ -38,7 +38,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/antifailure/antifailure/ee/engine/db/aurora"
 	"github.com/antifailure/antifailure/engine/conformance"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 )
@@ -47,7 +46,7 @@ func TestConformance(t *testing.T) {
 	server := newFake(t, conformance.DefaultSeedSQL, "")
 
 	conformance.RunDatabase(t, func(t *testing.T) provider.Database {
-		p, err := aurora.New(context.Background(), options(t, server))
+		p, err := scopedNew(context.Background(), options(t, server))
 		require.NoError(t, err)
 		return p
 	}, conformanceOptions())

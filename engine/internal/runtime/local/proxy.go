@@ -59,10 +59,11 @@ type sidecarConfig struct {
 	// rule names an emulator and the sidecar looks the address up here, so a
 	// manifest can never name a place to send traffic to: only something a
 	// registration already declared and the registry already checked.
-	Emulators map[string]emulatorRoute `json:"emulators,omitempty"`
-	Resolver  string                   `json:"resolver,omitempty"`
-	CACert    string                   `json:"ca_cert,omitempty"`
-	CAKey     string                   `json:"ca_key,omitempty"`
+	Emulators      map[string]emulatorRoute `json:"emulators,omitempty"`
+	Resolver       string                   `json:"resolver,omitempty"`
+	CACert         string                   `json:"ca_cert,omitempty"`
+	CAKey          string                   `json:"ca_key,omitempty"`
+	DatabaseRoutes []provider.DatabaseRoute `json:"database_routes,omitempty"`
 }
 
 // emulatorRoute mirrors the sidecar's own type of the same name, declared here
@@ -95,17 +96,63 @@ func (r *Runtime) startProxy(
 	nets networks,
 	journal func(string, string) error,
 	progress func(string),
+	databaseRoutes ...provider.DatabaseRoute,
 ) (string, error) {
 	if err := r.ensureProxyImage(ctx, progress); err != nil {
 		return "", err
 	}
+
+	subnet, err := r.networkSubnet(ctx, nets.inner)
+	if err != nil {
+		return "", err
+	}
+
+	// Written in rather than baked into the image, so that editing a rule
+	// rebuilds nothing and one image serves every environment on the machine.
+	//
+	// The subnet is passed rather than the address, because Docker does not
+	// assign an address until the container starts, which is after this file
+	// has to exist. The sidecar finds its own inside it.
+	cfg := sidecarConfig{
+		Egress: orEmptyEgress(egress),
+		Subnet: subnet,
+		// The emulator aliases are internal names, exactly as the datastore
+		// names are and for exactly the same reason: the sidecar answers DNS
+		// for the environment, and a name it answered for itself is a name it
+		// could never forward to. Leaving them out would make the sidecar
+		// resolve af-emu-localstack to its own address and forward the
+		// request to itself, forever.
+		Internal: emulatorAliases(append(
+			append([]string{DatabaseAlias, ProxyAlias}, serviceNames...), datastores...), emulators),
+		EnvID:          envID,
+		Emulators:      emulatorRoutes(emulators),
+		DatabaseRoutes: databaseRoutes,
+	}
+	if ca != nil {
+		cfg.CACert, cfg.CAKey = ca.CertPEM, ca.KeyPEM.Reveal()
+	}
+	cfg.MockPacks = mockPacks
+	if len(credentials) > 0 {
+		cfg.Credentials = make(map[string]string, len(credentials))
+		for name, value := range credentials {
+			cfg.Credentials[name] = value.Reveal()
+		}
+	}
+	compiled, err := json.Marshal(cfg)
+	if err != nil {
+		return "", aferrors.Wrap(err, aferrors.AFRUN040, "detail", "compiling the policy: "+err.Error())
+	}
+	fingerprint := configurationFingerprint(string(compiled), strings.Join(modelEnv, "\x00"))
 
 	name := proxyName(envID)
 	if err := journal(kindContainer, name); err != nil {
 		return "", err
 	}
 	if existing, err := r.cli.ContainerInspect(ctx, name); err == nil {
-		if existing.State != nil && existing.State.Running {
+		if existing.Config == nil || !dockerutil.IsOurs(existing.Config.Labels) || existing.Config.Labels[dockerutil.LabelEnv] != envID {
+			return "", aferrors.Coded(aferrors.AFRUN040, "detail", "the existing proxy does not belong to this environment")
+		}
+		if existing.State != nil && existing.State.Running && r.runsImage(ctx, existing, proxyimage.Tag()) && existing.Config.Labels[configurationLabel] == fingerprint {
 			return runningProxyIP(existing.NetworkSettings, nets.inner)
 		}
 		if rmErr := dockerutil.RemoveContainer(ctx, r.cli, existing.ID); rmErr != nil {
@@ -115,6 +162,7 @@ func (r *Runtime) startProxy(
 
 	labels := r.managed(dockerutil.KindSidecar, envID)
 	labels[dockerutil.LabelService] = ProxyAlias
+	labels[configurationLabel] = fingerprint
 
 	resp, err := r.cli.ContainerCreate(ctx,
 		&container.Config{
@@ -144,45 +192,6 @@ func (r *Runtime) startProxy(
 		&network.EndpointSettings{Aliases: []string{ProxyAlias}}); err != nil {
 		return "", aferrors.Wrap(err, aferrors.AFRUN040,
 			"detail", "attaching the egress proxy: "+err.Error())
-	}
-	subnet, err := r.networkSubnet(ctx, nets.inner)
-	if err != nil {
-		return "", err
-	}
-
-	// Written in rather than baked into the image, so that editing a rule
-	// rebuilds nothing and one image serves every environment on the machine.
-	//
-	// The subnet is passed rather than the address, because Docker does not
-	// assign an address until the container starts, which is after this file
-	// has to exist. The sidecar finds its own inside it.
-	cfg := sidecarConfig{
-		Egress: orEmptyEgress(egress),
-		Subnet: subnet,
-		// The emulator aliases are internal names, exactly as the datastore
-		// names are and for exactly the same reason: the sidecar answers DNS
-		// for the environment, and a name it answered for itself is a name it
-		// could never forward to. Leaving them out would make the sidecar
-		// resolve af-emu-localstack to its own address and forward the
-		// request to itself, forever.
-		Internal: emulatorAliases(append(
-			append([]string{DatabaseAlias, ProxyAlias}, serviceNames...), datastores...), emulators),
-		EnvID:     envID,
-		Emulators: emulatorRoutes(emulators),
-	}
-	if ca != nil {
-		cfg.CACert, cfg.CAKey = ca.CertPEM, ca.KeyPEM.Reveal()
-	}
-	cfg.MockPacks = mockPacks
-	if len(credentials) > 0 {
-		cfg.Credentials = make(map[string]string, len(credentials))
-		for name, value := range credentials {
-			cfg.Credentials[name] = value.Reveal()
-		}
-	}
-	compiled, err := json.Marshal(cfg)
-	if err != nil {
-		return "", aferrors.Wrap(err, aferrors.AFRUN040, "detail", "compiling the policy: "+err.Error())
 	}
 	// Readable only by root, and the sidecar is the one container that runs
 	// as root, because this file carries the authority's private key.

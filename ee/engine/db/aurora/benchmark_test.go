@@ -33,6 +33,7 @@ package aurora_test
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"os/exec"
@@ -41,6 +42,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -91,8 +93,8 @@ type sizeResult struct {
 	// actions is every control plane call the branch made, in order.
 	actions []string
 	// connections is how many times the provider opened the database while
-	// branching. It is zero and the harness proves it rather than asserting it
-	// from the code: the branch is made while the database is unreachable.
+	// branching, counted at the one SQL path it has. It is one: the step that
+	// disables the logins a clone inherits.
 	connections int
 	// elapsed is the provider's own wall clock, which against this control
 	// plane is the fake's local copy and is NOT Aurora's.
@@ -104,15 +106,26 @@ func measureAtVolume(t *testing.T, ctx context.Context, gb int64) sizeResult {
 	server := newFake(t, seedSQL, "")
 	server.SetSourceStorage(sourceCluster, gb)
 
-	// sslmode require against a Postgres that speaks no TLS, so any connection
-	// the provider opened while branching would fail and the branch would
-	// fail with it. Zero connections is therefore measured rather than
-	// asserted from reading the code.
+	// Branching connects once, to disable the logins a clone inherits from
+	// its source. That is counted rather than read off the code: the one SQL
+	// path the provider has opens its own handle, so distinct handles are
+	// distinct connections. The catalog is the fixture's scoped one, because
+	// the production query would disable every role on the shared server.
 	opts := options(t, server)
-	opts.TLSMode = "require"
 	p, err := aurora.New(ctx, opts)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = p.Close() })
+	var mu sync.Mutex
+	counting := false
+	handles := map[*sql.DB]bool{}
+	aurora.SetLoginCatalogForTest(p, func(ctx context.Context, db *sql.DB) ([]string, error) {
+		mu.Lock()
+		if counting {
+			handles[db] = true
+		}
+		mu.Unlock()
+		return scopedLogins(ctx, db)
+	})
 
 	golden, _ := spec(fmt.Sprintf("%08x", gb))
 	version, err := p.RefreshGolden(ctx, golden)
@@ -120,21 +133,24 @@ func measureAtVolume(t *testing.T, ctx context.Context, gb int64) sizeResult {
 	require.Equal(t, gb*(1<<30), version.SizeBytes)
 
 	server.Reset()
+	mu.Lock()
+	counting = true
+	mu.Unlock()
 	started := time.Now()
 	branch, err := p.Branch(ctx, version.ID, fmt.Sprintf("env_benchmark_%d", gb))
 	elapsed := time.Since(started)
 	require.NoError(t, err)
 	require.NotEmpty(t, branch.ProviderRef)
 
-	// The branch exists and the database really is unreachable, which is what
-	// stops the zero above being vacuous.
 	connection, err := p.ConnString(ctx, branch, provider.ConnDirect)
 	require.NoError(t, err)
-	require.Error(t, dial(connection),
-		"the database was reachable, so this measured nothing about whether the "+
-			"provider connected")
+	require.NoError(t, dial(connection))
+	mu.Lock()
+	opened := len(handles)
+	mu.Unlock()
+	require.Equal(t, 1, opened, "branching did not connect exactly once to disable inherited logins")
 
-	return sizeResult{volumeGB: gb, actions: server.Actions(), connections: 0, elapsed: elapsed}
+	return sizeResult{volumeGB: gb, actions: server.Actions(), connections: opened, elapsed: elapsed}
 }
 
 // rowResult is one row of the second table: what COPYING a database of this
@@ -253,7 +269,7 @@ func writeReport(t *testing.T, sizes []sizeResult, rows []rowResult) {
 		"halves and only one of them can be measured without an AWS account.\n\n")
 	fmt.Fprintf(&b, "**Measured.** The provider's own work per branch, at a volume Aurora "+
 		"reports as 1 GiB and at one it reports as 1024 GiB. Same control plane calls, in "+
-		"the same order, and no database content read or written at all.\n\n")
+		"the same order, and no customer table read or written.\n\n")
 	fmt.Fprintf(&b, "**Not measured, and not estimated either.** How long Aurora takes to "+
 		"answer, and how long a writer instance takes to come up. Those are the numbers a "+
 		"person feels, they are properties of AWS rather than of this code, and nothing in "+
@@ -270,16 +286,17 @@ func writeReport(t *testing.T, sizes []sizeResult, rows []rowResult) {
 		"Rows read or written | Aurora wall clock |\n")
 	fmt.Fprintf(&b, "| --- | --- | --- | --- | --- |\n")
 	for _, s := range sizes {
-		fmt.Fprintf(&b, "| %s | %d | %d | 0 | UNMEASURED, no AWS account |\n",
+		fmt.Fprintf(&b, "| %s | %d | %d | 0 customer rows | UNMEASURED, no AWS account |\n",
 			humanGB(s.volumeGB), len(s.actions), s.connections)
 	}
 	fmt.Fprintf(&b, "\nIdentical call sequence at both sizes: **%v**.\n\n", same)
 	fmt.Fprintf(&b, "The calls, in order, at both sizes:\n\n")
 	fmt.Fprintf(&b, "```\n%s\n```\n\n", strings.Join(sizes[0].actions, "\n"))
-	fmt.Fprintf(&b, "The zero in the connections column is measured rather than read off "+
-		"the source. The branch is made while `sslmode` is `require` against a Postgres "+
-		"that speaks no TLS, so a provider that opened the database while branching would "+
-		"have failed, and the harness then proves the database really was unreachable.\n\n")
+	fmt.Fprintf(&b, "The one in the connections column is counted rather than read off "+
+		"the source. A clone inherits every login its source had, so branching connects "+
+		"once to disable them and end their sessions. That connection reads pg_roles and "+
+		"pg_stat_activity and alters roles. The zero customer rows beside it is read off "+
+		"that code path, not measured: no query in it names a customer table.\n\n")
 
 	fmt.Fprintf(&b, "## What copying the same database costs, which Aurora does not pay\n\n")
 	fmt.Fprintf(&b, "The fake control plane clones with `CREATE DATABASE ... TEMPLATE`, "+

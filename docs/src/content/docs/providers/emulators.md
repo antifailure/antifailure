@@ -2,7 +2,7 @@
 title: Emulators
 description: How a third party API is answered inside an environment, why Antifailure writes none of them, and what a declaration has to carry.
 sidebar:
-  order: 11
+  order: 13
 ---
 
 An emulator is a third party API answered inside the environment: an S3, a

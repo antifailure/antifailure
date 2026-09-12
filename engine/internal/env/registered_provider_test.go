@@ -3,6 +3,7 @@ package env
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -256,7 +257,12 @@ func TestAnEnvironmentComesUpOnRegisteredProvidersAndGoesDownAgain(t *testing.T)
 	// The registered database provider is the one that branched it, and the
 	// services were handed its connection string rather than a Docker one.
 	require.Len(t, db.branches, 1)
-	require.Contains(t, rt.ups[0].DatabaseURL.Reveal(), "postgres://fake/branch-")
+	inside, err := url.Parse(rt.ups[0].DatabaseURL.Reveal())
+	require.NoError(t, err)
+	require.Equal(t, "fake", inside.Hostname())
+	require.True(t, strings.HasPrefix(inside.Path, "/branch-"))
+	require.Equal(t, "45000", inside.Port())
+	require.Equal(t, []provider.DatabaseRoute{{Port: 45000, Upstream: "fake:5432"}}, rt.ups[0].DatabaseRoutes)
 
 	// What the engine told each registration about itself.
 	require.Equal(t, o.opts.Root, dbp.seen.Root)

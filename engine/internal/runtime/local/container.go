@@ -210,12 +210,14 @@ func (r *Runtime) startInstance(
 	// with no address. It now takes the same path as a fresh one from the
 	// ingress onwards.
 	var id string
+	fingerprint := r.serviceFingerprint(spec, s, proxyIP, "")
 	if existing, err := r.cli.ContainerInspect(ctx, name); err == nil {
 		switch {
-		case existing.State != nil && existing.State.Running && r.runsImage(ctx, existing, s.Image):
+		case existing.State != nil && existing.State.Running && r.runsImage(ctx, existing, s.Image) &&
+			existing.Config != nil && existing.Config.Labels[configurationLabel] == fingerprint:
 			id = existing.ID
 		case existing.State != nil && existing.State.Running:
-			progress(fmt.Sprintf("%s: replacing the running container, which runs an image this tree no longer builds", instanceLabel(s.Name, ordinal, want)))
+			progress(fmt.Sprintf("%s: replacing the running container because its image or configuration changed", instanceLabel(s.Name, ordinal, want)))
 			fallthrough
 		default:
 			if rmErr := dockerutil.RemoveContainer(ctx, r.cli, existing.ID); rmErr != nil {
@@ -286,6 +288,7 @@ func (r *Runtime) create(
 	labels := r.managed(dockerutil.KindService, spec.EnvID)
 	labels[dockerutil.LabelService] = s.Name
 	labels[dockerutil.LabelServiceKind] = s.Kind
+	labels[configurationLabel] = r.serviceFingerprint(spec, s, proxyIP, overrideCmd)
 
 	cfg := &container.Config{
 		Image:  s.Image,
@@ -651,15 +654,20 @@ func (r *Runtime) envList(spec provider.EnvSpec, s provider.ServiceSpec) []strin
 // installCA writes the environment certificate into a container before it
 // starts, so that the runtime finds it at the path the variables name.
 func (r *Runtime) installCA(ctx context.Context, id string, spec provider.EnvSpec) error {
-	if spec.CACertPEM == "" {
-		return nil
-	}
 	// World readable, because a certificate authority's certificate is public
 	// by construction and the service does not run as root. Copying it in at
 	// 0600 produced a container whose runtime could see the file, could not
 	// open it, and reported a self-signed certificate error that pointed
 	// nowhere near the permissions.
-	return r.copyInto(ctx, id, envcert.BundlePath, 0o644, []byte(spec.CACertPEM))
+	if spec.CACertPEM != "" {
+		if err := r.copyInto(ctx, id, envcert.BundlePath, 0o644, []byte(spec.CACertPEM)); err != nil {
+			return err
+		}
+	}
+	if spec.DatabaseCACertPEM != "" {
+		return r.copyInto(ctx, id, provider.DatabaseTrustBundlePath, 0o644, []byte(spec.DatabaseCACertPEM))
+	}
+	return nil
 }
 
 // runOnce runs a command to completion in a throwaway container.

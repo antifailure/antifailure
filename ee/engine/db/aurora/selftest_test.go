@@ -35,7 +35,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/antifailure/antifailure/ee/engine/db/aurora"
 	"github.com/antifailure/antifailure/ee/engine/db/aurora/fakerds"
 	"github.com/antifailure/antifailure/engine/conformance"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
@@ -73,7 +72,7 @@ func proofs() []proof {
 				"the control plane would report it healthy",
 		},
 		{
-			fakerds.FaultTagsAreNotRecorded, "List_ReturnsWhatWasCreated",
+			fakerds.FaultTagsAreNotRecorded, "Refresh_ProducesAVerifiedGolden",
 			"a refresh would report a published golden that nothing can find afterwards",
 		},
 		{
@@ -82,7 +81,7 @@ func proofs() []proof {
 				"detector would be reading the same list the provider is",
 		},
 		{
-			fakerds.FaultPasswordIsNotRotated, "Health_ReportsAReachableBranch",
+			fakerds.FaultPasswordIsNotRotated, "Refresh_ProducesAVerifiedGolden",
 			"the derived credential would not open the database it was derived for, " +
 				"which is the whole rotation this provider does",
 		},
@@ -158,7 +157,7 @@ func TestConformanceChild(t *testing.T) {
 		// an instance in creating for ever, and every behaviour would
 		// otherwise wait the full timeout to learn the same thing.
 		opts.ReadyTimeout = 5 * time.Second
-		p, err := aurora.New(context.Background(), opts)
+		p, err := scopedNew(context.Background(), opts)
 		require.NoError(t, err)
 		return p
 	}, conformance.Options{Timeout: 90 * time.Second})

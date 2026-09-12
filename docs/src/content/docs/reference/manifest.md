@@ -233,7 +233,7 @@ exported on the laptop that started it.
 
 | Key | Notes |
 | --- | --- |
-| `provider` | `docker` (default), `neon`, `supabase`, `dblab`, `pgurl`, or `aurora`. `aurora` is in the enterprise edition; a community build names it and refuses it. |
+| `provider` | `docker` (default), `neon`, `supabase`, `dblab`, `pgurl`, `aurora`, `cloudsql`, or `azurepg`. The last three require the enterprise cloud provider entitlement; a community build names them and refuses them. |
 | `version` | Postgres major, 14 through 18, default 17. Match it to production: a golden on a different major is an environment running a Postgres your application does not. |
 | `url_env` | The variable services receive the connection string in. |
 | `source_url_env` | Names the variable holding production's read only URL. |

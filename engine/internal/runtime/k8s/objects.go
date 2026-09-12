@@ -33,15 +33,16 @@ const configKey = "proxy.json"
 // runtime's copy does and for the same reason: the runtime must not depend on
 // a main package.
 type sidecarConfig struct {
-	Egress      schema.Egress     `json:"egress"`
-	Subnet      string            `json:"subnet"`
-	Internal    []string          `json:"internal"`
-	EnvID       string            `json:"env_id"`
-	MockPacks   []string          `json:"mock_packs,omitempty"`
-	Credentials map[string]string `json:"credentials,omitempty"`
-	Resolver    string            `json:"resolver,omitempty"`
-	CACert      string            `json:"ca_cert,omitempty"`
-	CAKey       string            `json:"ca_key,omitempty"`
+	Egress         schema.Egress            `json:"egress"`
+	Subnet         string                   `json:"subnet"`
+	Internal       []string                 `json:"internal"`
+	EnvID          string                   `json:"env_id"`
+	MockPacks      []string                 `json:"mock_packs,omitempty"`
+	Credentials    map[string]string        `json:"credentials,omitempty"`
+	Resolver       string                   `json:"resolver,omitempty"`
+	CACert         string                   `json:"ca_cert,omitempty"`
+	CAKey          string                   `json:"ca_key,omitempty"`
+	DatabaseRoutes []provider.DatabaseRoute `json:"database_routes,omitempty"`
 }
 
 // falseRef is a pointer to false, needed by several pod fields.
@@ -400,9 +401,10 @@ func (r *Runtime) proxyObjects(
 		MockPacks: spec.MockPacks,
 		// The sidecar forwards to an endpoint, so the port goes on here and
 		// nowhere else. A pod's nameserver is a bare address.
-		Credentials: credentials,
-		Resolver:    net.JoinHostPort(resolver, strconv.Itoa(dnsPort)),
-		CACert:      spec.CACertPEM,
+		Credentials:    credentials,
+		Resolver:       net.JoinHostPort(resolver, strconv.Itoa(dnsPort)),
+		CACert:         spec.CACertPEM,
+		DatabaseRoutes: spec.DatabaseRoutes,
 	}
 	if spec.CAKeyPEM.Reveal() != "" {
 		cfg.CAKey = spec.CAKeyPEM.Reveal()
@@ -426,6 +428,8 @@ func (r *Runtime) proxyObjects(
 
 	labels := labelsFor(envID, ComponentProxy)
 	labels[LabelService] = ProxyName
+	fingerprint := configurationFingerprint(append([]string{string(body), proxyRef}, spec.ModelEnv...)...)
+	labels[configurationLabel] = fingerprint
 
 	var env []corev1.EnvVar
 	for _, kv := range spec.ModelEnv {
@@ -439,6 +443,7 @@ func (r *Runtime) proxyObjects(
 			Name: ProxyName, Namespace: namespace, Labels: labels,
 		},
 		Spec: appsv1.DeploymentSpec{
+			Strategy: appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType},
 			// One, always, and not the count any service asked for. The
 			// sidecar is the environment's resolver and its only route out,
 			// and every service is pointed at one address for it. A second
@@ -458,6 +463,10 @@ func (r *Runtime) proxyObjects(
 						Image: proxyRef,
 						Args:  []string{"-config", configPath},
 						Env:   env,
+						ReadinessProbe: &corev1.Probe{
+							ProbeHandler:  corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(ProxyPort)}},
+							PeriodSeconds: 1, TimeoutSeconds: 1,
+						},
 						Ports: []corev1.ContainerPort{
 							{ContainerPort: ProxyPort, Protocol: corev1.ProtocolTCP},
 							{ContainerPort: dnsPort, Protocol: corev1.ProtocolUDP},
@@ -514,6 +523,15 @@ func (r *Runtime) proxyObjects(
 					TargetPort: intstr.FromInt32(dnsPort)},
 			},
 		},
+	}
+	for _, route := range spec.DatabaseRoutes {
+		port := int32(route.Port)
+		deployment.Spec.Template.Spec.Containers[0].Ports = append(deployment.Spec.Template.Spec.Containers[0].Ports,
+			corev1.ContainerPort{ContainerPort: port, Protocol: corev1.ProtocolTCP})
+		service.Spec.Ports = append(service.Spec.Ports, corev1.ServicePort{
+			Name: "database-" + strconv.Itoa(route.Port), Port: port,
+			Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt32(port),
+		})
 	}
 	return secret, deployment, service, nil
 }
@@ -634,7 +652,7 @@ func containerFor(spec provider.EnvSpec, s provider.ServiceSpec, migration bool)
 		c.Ports = []corev1.ContainerPort{{ContainerPort: int32(s.Port), Protocol: corev1.ProtocolTCP}}
 		c.ReadinessProbe = readinessProbe(s)
 	}
-	if spec.CACertPEM != "" {
+	if spec.CACertPEM != "" || spec.DatabaseCACertPEM != "" {
 		c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{
 			Name: "af-ca", MountPath: "/etc/antifailure", ReadOnly: true,
 		})
@@ -694,6 +712,7 @@ func (r *Runtime) deploymentFor(
 	labels := labelsFor(spec.EnvID, ComponentService)
 	labels[LabelService] = s.Name
 	labels[LabelServiceKind] = s.Kind
+	labels[configurationLabel] = r.serviceFingerprint(spec, s, resolverIP)
 
 	dnsPolicy, dnsConfig := podDNS(namespace, resolverIP)
 	pod := corev1.PodSpec{
@@ -718,7 +737,7 @@ func (r *Runtime) deploymentFor(
 		Containers:     []corev1.Container{containerFor(spec, s, false)},
 		InitContainers: []corev1.Container{r.networkGate(resolverIP, resourcesFor(s))},
 	}
-	if spec.CACertPEM != "" {
+	if spec.CACertPEM != "" || spec.DatabaseCACertPEM != "" {
 		pod.Volumes = append(pod.Volumes, corev1.Volume{
 			Name: "af-ca",
 			VolumeSource: corev1.VolumeSource{
@@ -732,6 +751,7 @@ func (r *Runtime) deploymentFor(
 			Name: s.Name, Namespace: namespace, Labels: labels,
 		},
 		Spec: appsv1.DeploymentSpec{
+			Strategy: appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType},
 			// What the manifest asked for, and one where it asked for
 			// nothing. This used to be a hardcoded one, so a manifest saying
 			// replicas: 3 got a single pod and the run went green having
@@ -835,7 +855,7 @@ func (r *Runtime) oneShotJob(
 		Containers:                   []corev1.Container{container},
 		InitContainers:               []corev1.Container{r.networkGate(resolverIP, container.Resources)},
 	}
-	if spec.CACertPEM != "" {
+	if spec.CACertPEM != "" || spec.DatabaseCACertPEM != "" {
 		pod.Volumes = append(pod.Volumes, corev1.Volume{
 			Name: "af-ca",
 			VolumeSource: corev1.VolumeSource{

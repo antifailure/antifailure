@@ -33,6 +33,8 @@ import (
 	"github.com/antifailure/antifailure/ee/engine/cloudgate"
 	"github.com/antifailure/antifailure/ee/engine/compliance"
 	"github.com/antifailure/antifailure/ee/engine/db/aurora"
+	"github.com/antifailure/antifailure/ee/engine/db/azurepg"
+	"github.com/antifailure/antifailure/ee/engine/db/cloudsql"
 	"github.com/antifailure/antifailure/ee/engine/feature"
 	"github.com/antifailure/antifailure/ee/engine/license"
 	"github.com/antifailure/antifailure/ee/engine/policyenforce"
@@ -226,6 +228,24 @@ func main() {
 	// licence rather than disappear from the list of providers this build has
 	// and answer "which this build does not have".
 	aurora.Register(extension.Default)
+
+	// Google Cloud SQL for PostgreSQL and Azure Database for PostgreSQL
+	// Flexible Server, which are the other two clouds' managed Postgres.
+	//
+	// Before these existed a manifest could name the managed database of ONE
+	// of the three clouds. The runtimes, the emulators and the secret stores
+	// were all symmetric across AWS, GCP and Azure and the database was not,
+	// so "support for aws, gcp and azure" was true of three dimensions out of
+	// four and the fourth was the one holding the data.
+	//
+	// The two are not equivalent to aurora and their own package comments say
+	// where each stops. cloudsql declares CopyOnWrite because a Cloud SQL fast
+	// clone is created from an Instant Snapshot; azurepg declares it FALSE,
+	// because a point in time restore creates an independent server and the
+	// sentence about a snapshot restore being size independent is only half of
+	// Microsoft's own paragraph.
+	cloudsql.Register(extension.Default)
+	azurepg.Register(extension.Default)
 
 	// The licence gate on the managed cloud providers, and it goes LAST,
 	// after every registration above, because it wraps what is registered at

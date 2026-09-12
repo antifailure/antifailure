@@ -189,6 +189,11 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 	if spec.EnvID == "" {
 		return provider.Env{}, aferrors.Coded(aferrors.AFRUN040, "detail", "the environment has no id")
 	}
+	databaseRoutes, err := provider.ResolveDatabaseRoutes(ctx, spec.DatabaseRoutes)
+	if err != nil {
+		return provider.Env{}, aferrors.Wrap(err, aferrors.AFRUN040, "detail", "the database route cannot be used: "+err.Error())
+	}
+	spec.DatabaseRoutes = databaseRoutes
 	journal := spec.Journal
 	if journal == nil {
 		journal = func(string, string) error { return nil }
@@ -237,7 +242,7 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 	}
 	proxyIP, err := r.startProxy(ctx, spec.EnvID, spec.Egress, names, spec.Datastores, ca,
 		spec.SandboxCredentials, spec.MockPacks, spec.ModelEnv, spec.Emulators,
-		nets, journal, progress)
+		nets, journal, progress, spec.DatabaseRoutes...)
 	if err != nil {
 		return env, err
 	}

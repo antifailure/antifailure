@@ -85,6 +85,8 @@ const (
 	SiteSupabase        Site = "the Supabase management API"
 	SiteDBLab           Site = "the Database Lab API"
 	SiteAurora          Site = "the Aurora control API"
+	SiteCloudSQL        Site = "the Cloud SQL control API"
+	SiteAzurePostgres   Site = "the Azure PostgreSQL control API"
 	SiteClickHouse      Site = "the ClickHouse HTTP interface"
 	SiteServiceProbe    Site = "the service readiness probe"
 	SiteWebhookDelivery Site = "the webhook delivery"
