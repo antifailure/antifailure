@@ -60,7 +60,7 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
       'audit_stream_positions',
       'forwarder bookkeeping. A tenant reads its own row and no other, and writes none, which ' +
         'the generic loops cannot express because a tenant cannot insert here; tested explicitly ' +
-        'in ee/web/audit and below. See migrations/0043 and 0044.',
+        'in the enterprise audit suite and below. See migrations/0043 and 0044.',
     ],
   ])
 
