@@ -62,6 +62,8 @@ type fakeProber struct {
 	dockerVersion string
 	dockerOS      string
 	dockerErr     error
+	dockerAPI     string
+	dockerAPIErr  error
 	stat          func(string) (os.FileInfo, error)
 }
 
@@ -77,6 +79,19 @@ func (f fakeProber) DockerInfo(context.Context) (string, string, error) {
 		return "", "", f.dockerErr
 	}
 	return f.dockerVersion, f.dockerOS, nil
+}
+
+// DockerAPIVersion answers with what the test set. A probe that set neither is
+// an unread version rather than a silently current one, so a test that reaches
+// the floor check without choosing an answer is told so by the check itself.
+func (f fakeProber) DockerAPIVersion(context.Context) (string, error) {
+	if f.dockerAPIErr != nil {
+		return "", f.dockerAPIErr
+	}
+	if f.dockerAPI == "" {
+		return "", errors.New("this probe was given no API version")
+	}
+	return f.dockerAPI, nil
 }
 
 func (fakeProber) DialTimeout(string, string, time.Duration) error { return nil }
@@ -102,7 +117,7 @@ func startProbeFor(t *testing.T, home string) startProbe {
 	return startProbe{
 		Prober: fakeProber{
 			lookPath:      map[string]string{"docker": "/usr/bin/docker", "git": "/usr/bin/git"},
-			dockerVersion: "28.5.1", dockerOS: "linux",
+			dockerVersion: "28.5.1", dockerOS: "linux", dockerAPI: "1.51",
 		},
 		environments: func(context.Context, *Env) ([]environment, error) { return nil, nil },
 		home:         func() (string, error) { return home, nil },

@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	dockerclient "github.com/moby/moby/client"
+	"github.com/moby/moby/client/pkg/versions"
 	"github.com/spf13/cobra"
 
 	"github.com/antifailure/antifailure/engine/internal/db/pgcopy"
@@ -67,6 +69,8 @@ type Prober interface {
 	LookPath(name string) (string, error)
 	// DockerInfo returns the daemon's version and platform, or an error.
 	DockerInfo(ctx context.Context) (version, osType string, err error)
+	// DockerAPIVersion returns the API version the daemon speaks, or an error.
+	DockerAPIVersion(ctx context.Context) (string, error)
 	// DialTimeout attempts a TCP connection.
 	DialTimeout(network, address string, timeout time.Duration) error
 	// LookupHost resolves a name.
@@ -101,6 +105,24 @@ func (p systemProber) DockerInfo(ctx context.Context) (string, string, error) {
 		return "", "", fmt.Errorf("docker info returned %q", strings.TrimSpace(string(out)))
 	}
 	return fields[0], fields[1], nil
+}
+
+func (p systemProber) DockerAPIVersion(ctx context.Context) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	// The CLI again, for the reason DockerInfo gives. `docker info` has no API
+	// version in it, which is why this is a second command rather than a third
+	// field on the first.
+	out, err := exec.CommandContext(ctx, "docker", "version",
+		"--format", "{{.Server.APIVersion}}").Output()
+	if err != nil {
+		return "", fmt.Errorf("docker version: %w", err)
+	}
+	v := strings.TrimSpace(string(out))
+	if v == "" {
+		return "", fmt.Errorf("docker version returned no API version")
+	}
+	return v, nil
 }
 
 func (p systemProber) DialTimeout(network, address string, timeout time.Duration) error {
@@ -438,6 +460,24 @@ func checkDocker(ctx context.Context, _ *Env, p Prober) CheckResult {
 		r.Status = CheckFail
 		r.Detail = "the daemon did not respond"
 		r.Remediation = dockerStartHint()
+		return r
+	}
+	// The floor is the Docker client library's, not a policy of ours. Below it
+	// the client refuses to negotiate a version and sends every request
+	// unversioned, so the daemon answers in whatever shape it has and the
+	// failure surfaces halfway through an environment as something that reads
+	// like a bug in the engine. Said here instead, before anything is created.
+	api, apiErr := p.DockerAPIVersion(ctx)
+	switch {
+	case apiErr != nil:
+		r.Status = CheckWarn
+		r.Detail = fmt.Sprintf("version %s, %s containers; its API version could not be read, so whether this release can speak to it was not checked", version, osType)
+		r.Remediation = "Run 'docker version' and confirm the server's API version is " + dockerclient.MinAPIVersion + " or later."
+		return r
+	case versions.LessThan(api, dockerclient.MinAPIVersion):
+		r.Status = CheckFail
+		r.Detail = fmt.Sprintf("version %s speaks API %s, older than the %s this release's Docker client can negotiate", version, api, dockerclient.MinAPIVersion)
+		r.Remediation = "Upgrade Docker to a release whose API version is " + dockerclient.MinAPIVersion + " or later, then run 'af doctor' again."
 		return r
 	}
 	r.Status = CheckPass
