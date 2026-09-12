@@ -5127,7 +5127,7 @@ the honest way to reach two collectors is one collector that fans out after
 receiving.
 
 ` + "`" + "`" + "`" + `sh
-curl -X PUT https://app.antifailure.dev/enterprise/audit-stream \
+curl -X PUT https://<your-control-plane>/enterprise/audit-stream \
   -H "x-antifailure-csrf: $CSRF" -H 'content-type: application/json' \
   --cookie "af_session=$SESSION" \
   -d '{"kind":"webhook","url":"https://siem.example/ingest","credential":"..."}'

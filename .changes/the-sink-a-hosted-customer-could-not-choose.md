@@ -24,3 +24,13 @@ previously visible only in the operator's container log.
 A destination supplied by a customer is untrusted input and is held to a
 stricter rule than an operator's: HTTPS always with no loopback exception, no
 credentials in the URL, and no literal address that is not a public one.
+
+The path is served by the enterprise edition of the control plane, like single
+sign on and directory provisioning. A deployment running the community image
+answers it with 404, which is what `app.antifailure.dev` answered when this was
+written, so the guide names the host as `<your-control-plane>` rather than
+showing a command that fails. The enterprise pages were already written that way
+and no gate read a path after that placeholder, so a new suite beside the
+enterprise entry point now holds every documented path to the routes a server
+built by `registerEnterprise` answers, and refuses an enterprise path named on a
+page outside the enterprise section.
