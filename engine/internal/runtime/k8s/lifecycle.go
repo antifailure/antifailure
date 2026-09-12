@@ -469,7 +469,7 @@ func (r *Runtime) startService(
 			return running, err
 		}
 		if running.URL != "" {
-			if err := waitForIngress(ctx, running.URL, s.HealthPath, timeout); err != nil {
+			if err := r.probeIngress(ctx, running.URL, s.HealthPath, timeout); err != nil {
 				return running, aferrors.Coded(aferrors.AFRUN004, "service", s.Name, "timeout", timeout.Round(time.Second).String(), "health", err.Error())
 			}
 		}

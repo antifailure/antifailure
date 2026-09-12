@@ -10,6 +10,15 @@ import (
 	"github.com/antifailure/antifailure/engine/pkg/airgap"
 )
 
+// probeIngress is the one call site, so a test can observe that startService
+// actually reaches it rather than that the probe below compiles.
+func (r *Runtime) probeIngress(ctx context.Context, address, path string, timeout time.Duration) error {
+	if r.ingressProbe != nil {
+		return r.ingressProbe(ctx, address, path, timeout)
+	}
+	return waitForIngress(ctx, address, path, timeout)
+}
+
 // Pod readiness precedes ingress reconciliation. A ready pod can still have
 // an ingress controller answering "no available server" for its published URL.
 func waitForIngress(ctx context.Context, address, path string, timeout time.Duration) error {

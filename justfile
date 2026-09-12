@@ -634,10 +634,10 @@ k8s-conformance cluster="af-conformance":
     if [ -n "${AF_SKIP_SLOW:-}" ]; then
       echo "AF_SKIP_SLOW was set and is being ignored: this run measures every behaviour."
     fi
-    # -v so the run prints one line per behaviour. Without it a passing package
-    # prints the word ok and a duration, which reads the same for the whole
-    # roster and for the six a filter left, and the suite's own accounting says
-    # so at the end.
+    # -json so the run records one verdict per behaviour. Without it a passing
+    # package prints the word ok and a duration, which reads the same for the
+    # whole roster and for the six a filter left. The events are what
+    # tools/runtimeproof.py reads, and what the workflow keeps as its artifact.
     mkdir -p .gate-reports
     set +e
     (cd engine && env -u AF_SKIP_SLOW AF_KUBE_CONTEXT="$ctx" AF_KUBE_DOMAIN=127.0.0.1.sslip.io \

@@ -43,3 +43,34 @@ class RuntimeProofTests(unittest.TestCase):
 
     def test_roster_names_are_read_from_the_declared_entries(self):
         self.assertEqual(roster('var runtimeBehaviors = []Behavior{\n {"A", "description", ""},\n}'), ['A'])
+
+    def test_a_failed_package_is_refused(self):
+        # Every behavior can report pass while the package itself fails, and
+        # then the package verdict is the only thing left that knows. A test
+        # outside the two roots is filtered out before its own fail is read,
+        # and a panic in setup produces no per test event at all.
+        events = self.events()
+        package = json.loads(events[-1])
+        package['Action'] = 'fail'
+        events[-1] = json.dumps(package)
+        with self.assertRaises(ValueError):
+            verify(events, ['A', 'B'])
+
+    def test_failed_behavior_is_refused(self):
+        events = self.events()
+        row = json.loads(events[0])
+        row['Action'] = 'fail'
+        events[0] = json.dumps(row)
+        with self.assertRaises(ValueError):
+            verify(events, ['A', 'B'])
+
+    def test_another_package_cannot_supply_the_startup_proof(self):
+        # The recipe runs one package. A passing test of the same name in some
+        # other package is not this runtime's startup proof, and a reader that
+        # accepted it would certify a run of something else.
+        startup = 'TestImmediateStartupCannotBypassContainment'
+        events = [line for line in self.events() if json.loads(line).get('Test') != startup]
+        events.append(json.dumps({'Package': 'github.com/antifailure/antifailure/engine/internal/runtime/local',
+                                  'Test': startup, 'Action': 'pass'}))
+        with self.assertRaises(ValueError):
+            verify(events, ['A', 'B'])
