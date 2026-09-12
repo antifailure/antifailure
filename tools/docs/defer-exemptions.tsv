@@ -1,0 +1,57 @@
+# Lines tools/defercheck reports that are not deferred work, with the reason
+# each one is allowed to stay.
+#
+# FOUR tab separated fields: the tracked path, the RULE the row excuses, a
+# literal FRAGMENT of the line it excuses, and why that line is not a deferral.
+#
+# THE FRAGMENT IS THE POINT OF THIS FILE and it is what makes it different from
+# a list of directories to ignore. A row that named only a path would excuse
+# that file forever, so the row below for .github/workflows/ci.yml, which
+# describes a marker in another project's parser, would silently cover the next
+# marker somebody writes anywhere in that 900 line workflow. A row has to quote
+# a piece of the line it excuses, so it covers that line and nothing else.
+#
+# A FRAGMENT MUST NOT CONTAIN THE PHRASE ITS RULE MATCHES. This file is tracked,
+# so the gate reads it like any other, and a row quoting the marker it excuses
+# is itself a hit. Two rows did exactly that the first time this file was
+# committed, and the gate refused them. Quote a neighbouring piece of the line.
+#
+# A row that matches nothing FAILS the gate. An exemption that excuses nothing
+# is a claim about the tree that stopped being true, and left alone it becomes a
+# licence nobody granted.
+#
+# There are four reasons here and they are genuinely four different things.
+# None of them is "this file is allowed to be unfinished".
+#
+#   A QUOTATION. Three rows quote another project's own words: dependabot-core's
+#   parser, Docker's deprecation notice for the legacy builder, and Astro's
+#   warning about a route collision. Each is a sentence about somebody else's
+#   software, and each is load bearing where it stands, because it is the
+#   evidence for a decision this repository made.
+#
+#   A FORMAT PLACEHOLDER. One row is the shape of an error code, three capital
+#   letters between a prefix and a number, written in a comment that explains
+#   how a code is recognised. The letters are the format rather than a slot
+#   nobody filled.
+#
+#   A SIBLING GATE'S OWN RULE. tools/docs/forbidden.sh refuses these markers in
+#   documentation, so its rule list and its tests have to contain them. A
+#   checker cannot be exempted from itself, which is why this tool assembles its
+#   own marker words from fragments rather than appearing here.
+#
+#   A FIXTURE. tools/extdoc's test writes a page that says the product is about
+#   to do something, because refusing that page is what the test is for.
+#
+# path	rule	fragment	reason
+.github/workflows/ci.yml	an unfinished note	dependabot-core issue	Describes a marker in dependabot-core's own github-actions parser, which is why a digest here is refreshed by a person. A sentence about another project's code.
+CHANGELOG.md	work handed to a later change	a route collision becomes a hard error	Quotes the Astro build warning verbatim. The later version is Astro's, and the entry records why this site keeps its own 404 page.
+docs/plan/notes/dogfood.md	work handed to a later change	Measured here, `FROM alpine`	Quotes Docker's own deprecation notice for builder v1, which is the evidence for the measurement in the same paragraph.
+ee/engine/db/aurora/coded.go	an unfinished note	shaped token in the rendered	The shape of an error code, three capital letters between the prefix and the number, in the comment that explains how one is recognised. A format rather than an unfilled slot.
+tools/docs/forbidden.sh	an unfinished note	markers rather than words	The sibling gate explaining why its own scan is case sensitive. It has to name the markers to refuse them.
+tools/docs/forbidden.sh	an unfinished note	unfinished note|	The sibling gate's rule itself. This is the pattern that refuses these markers in documentation.
+tools/docs/forbidden_test.go	an unfinished note	Limits are	A fixture for the sibling gate. The test proves the scan refuses this page, so the page has to contain the marker.
+tools/docs/forbidden_test.go	an unfinished note	this section is wrong	A fixture for the sibling gate, same reason as the row above.
+tools/docs/forbidden_test.go	an unfinished note	Providers (	A fixture for the sibling gate, same reason as the row above.
+tools/docs/forbidden_test.go	a promise instead of a capability	Kubernetes support is	A fixture for the sibling gate. The test proves the scan refuses a page that promises a capability instead of describing one.
+tools/extdoc/extdoc_test.go	a promise instead of a capability	title: Golden stores	A fixture for tools/extdoc, which is the tool that finds a page like this one.
+tools/docs/forbidden_test.go	work marked as not the real thing	is to restart it	A fixture for the sibling gate, which has the same rule for documentation. The test proves that scan refuses a page offering a stopgap instead of a fix.
