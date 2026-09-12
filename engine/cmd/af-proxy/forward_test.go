@@ -46,6 +46,28 @@ func (l *logLines) text() string {
 	return strings.Join(l.lines, "\n")
 }
 
+// lockedBuffer is a buffer exec's copy goroutine writes while the test reads
+// it. A bytes.Buffer shared between those two is a data race: exec copies the
+// child's output on a goroutine of its own for as long as the child runs, and
+// the test reads that output while the child is still running, to explain a
+// failure and to check what was never printed.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 // upstream runs a TCP server on the loopback that hands every connection to
 // serve, and waits for every handler when the test ends so goleak sees none.
 func upstream(t *testing.T, serve func(net.Conn)) string {
@@ -411,9 +433,9 @@ func TestForward_TheCommandLineRunsTheForwarderWithoutReadingConfiguration(t *te
 	cmd := exec.Command(executable, "-test.run=^TestForward_TheCommandLineRunsTheForwarderWithoutReadingConfiguration$")
 	cmd.Env = append(os.Environ(), "AF_TEST_FORWARD_MAIN=1",
 		"AF_TEST_FORWARD_LISTEN="+listen, "AF_TEST_FORWARD_TO="+target)
-	var output bytes.Buffer
-	cmd.Stdout = &output
-	cmd.Stderr = &output
+	output := &lockedBuffer{}
+	cmd.Stdout = output
+	cmd.Stderr = output
 	require.NoError(t, cmd.Start())
 	exited := make(chan error, 1)
 	go func() { exited <- cmd.Wait() }()
