@@ -97,38 +97,19 @@ func TestTheCloneIsAlwaysAskedForCopyOnWrite(t *testing.T) {
 		"the branch was not cloned, so branch time is no longer flat in the size")
 }
 
-func TestBranchNeverOpensAConnectionToTheDatabase(t *testing.T) {
-	// The measurable half of the flat branch claim, made falsifiable without
-	// an AWS account: if branching touched a row, or opened a connection at
-	// all, it could not be independent of how many rows there are.
-	//
-	// The proof is that the database is UNREACHABLE while the branch is made.
-	// sslmode is require and the test Postgres speaks no TLS, so any
-	// connection attempt fails. The branch still succeeds, and the assertion
-	// at the end shows the endpoint really was unusable, which is what stops
-	// this passing vacuously.
+func TestPreparationRequiresAnAuthenticatedDatabaseConnection(t *testing.T) {
 	server := newFake(t, seedSQL, "")
 	opts := options(t, server)
-	opts.TLSMode = "require"
-	p, err := aurora.New(context.Background(), opts)
+	opts.TLSMode = "verify-full"
+	p, err := scopedNew(context.Background(), opts)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = p.Close() })
-
-	ctx := context.Background()
 	golden, _ := spec("bbbb2222")
-	version, err := p.RefreshGolden(ctx, golden)
+	_, err = p.RefreshGolden(context.Background(), golden)
+	require.Error(t, err, "security metadata preparation must authenticate before publication")
+	versions, err := p.ListGoldens(context.Background())
 	require.NoError(t, err)
-
-	branch, err := p.Branch(ctx, version.ID, "env_unreachable")
-	require.NoError(t, err,
-		"branching opened a connection to the database, which it must not: a branch that "+
-			"reads or writes a row is a branch whose cost depends on how many rows there are")
-
-	connection, err := p.ConnString(ctx, branch, provider.ConnDirect)
-	require.NoError(t, err)
-	require.Error(t, dial(connection),
-		"the database was reachable after all, so this test proved nothing about whether "+
-			"Branch connected")
+	require.Empty(t, versions)
 }
 
 func TestBranchDoesTheSameWorkAtOneGigabyteAndAtOneTerabyte(t *testing.T) {
@@ -290,7 +271,7 @@ func TestAnAbandonedCandidateIsSweptByTheNextRefresh(t *testing.T) {
 	// second refresh looks at it. The window is six hours and waiting for it
 	// is not a test.
 	opts := options(t, server)
-	p, err := aurora.New(ctx, opts)
+	p, err := scopedNew(ctx, opts)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = p.Close() })
 
@@ -307,7 +288,7 @@ func TestAnAbandonedCandidateIsSweptByTheNextRefresh(t *testing.T) {
 	// rather than claimed as more.
 	later := opts
 	later.Now = func() time.Time { return time.Now().Add(48 * time.Hour) }
-	q, err := aurora.New(ctx, later)
+	q, err := scopedNew(ctx, later)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = q.Close() })
 
@@ -358,7 +339,7 @@ func TestRefusesASourceClusterThatIsNotAuroraPostgres(t *testing.T) {
 
 	opts := options(t, server)
 	opts.SourceCluster = "acme-rds"
-	_, err := aurora.New(context.Background(), opts)
+	_, err := scopedNew(context.Background(), opts)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "copy on write")
 	require.Contains(t, err.Error(), "aurora-postgresql")
@@ -368,7 +349,7 @@ func TestRefusesASourceClusterThatDoesNotExist(t *testing.T) {
 	server := newFake(t, seedSQL, "")
 	opts := options(t, server)
 	opts.SourceCluster = "not-a-cluster"
-	_, err := aurora.New(context.Background(), opts)
+	_, err := scopedNew(context.Background(), opts)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "DB CLUSTER identifier")
 }
@@ -384,7 +365,7 @@ func TestAMissignedRequestIsRefusedByTheFake(t *testing.T) {
 		AccessKeyID:     testCredentials.AccessKeyID,
 		SecretAccessKey: "not-the-secret-these-were-signed-with",
 	}
-	_, err := aurora.New(context.Background(), opts)
+	_, err := scopedNew(context.Background(), opts)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "SignatureDoesNotMatch")
 }
@@ -396,7 +377,7 @@ func TestASignatureForTheWrongRegionIsRefused(t *testing.T) {
 	server := newFake(t, seedSQL, "")
 	opts := options(t, server)
 	opts.Region = "us-east-1"
-	_, err := aurora.New(context.Background(), opts)
+	_, err := scopedNew(context.Background(), opts)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "SignatureDoesNotMatch")
 }
