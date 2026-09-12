@@ -287,7 +287,13 @@ describe('registering the enterprise edition', () => {
       encryptionKey: Buffer.alloc(32, 7),
     })
 
-    assert.deepEqual(registeredExtensions().map((e) => e.name).sort(), ['scim', 'sso'])
+    // Three now, and the third is the audit stream's configuration routes. They
+    // are registration doing route work beside the two sign-on extensions, and
+    // they are mounted whether or not this installation can seal a credential:
+    // with no AF_PROVIDER_KEY_SECRET a save answers 503 naming the variable,
+    // because a 404 would be indistinguishable from a build that never had it.
+    assert.deepEqual(
+      registeredExtensions().map((e) => e.name).sort(), ['audit-stream', 'scim', 'sso'])
     assert.equal(
       hasSignInPolicy(),
       true,
