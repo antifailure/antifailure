@@ -446,13 +446,7 @@ func (o *Orchestrator) previousSpec(
 	if err != nil {
 		return spec, err
 	}
-	for i := range spec.Services {
-		for name := range spec.Services[i].Env {
-			if value, ok := resolved.Service[name]; ok {
-				spec.Services[i].Env[name] = value
-			}
-		}
-	}
+	applyResolved(spec.Services, resolved)
 	spec.SandboxCredentials = resolved.Sidecar
 	spec.ModelEnv = o.modelEnv(ctx)
 

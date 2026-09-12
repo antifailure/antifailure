@@ -506,7 +506,7 @@ var knownKeys = []string{
 	"path", "kind", "build", "command", "port", "health_path", "health_timeout",
 	"env", "replicas", "resources", "schedule", "migrate", "depends_on",
 	"strategy", "dockerfile", "target", "context", "image", "args", "allow_hosts",
-	"required", "sandbox", "value", "from", "cpu", "memory",
+	"required", "sandbox", "value", "from", "scope", "cpu", "memory",
 	"provider", "source_url_env", "url_env", "masking_rules", "golden", "subset", "seed",
 	"max_age", "retain", "storage", "storage_url", "volume", "profile",
 	"engine", "stance", "because",

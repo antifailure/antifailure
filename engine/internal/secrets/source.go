@@ -55,8 +55,12 @@ type Source interface {
 // The value is deliberately absent. This is what gets written to an audit
 // event, printed by af explain, and included in a support bundle.
 type Resolution struct {
-	Name   string
-	Source string
+	Name string
+	// Service names who received this value when it was not the whole
+	// environment's: a scope: service variable, or one name that services
+	// read from different places. Empty for the environment's own value.
+	Service string
+	Source  string
 	// Fingerprint is a short, non-reversible tag, so that two environments can
 	// be compared without either value being shown. Empty when the value was
 	// not found.
@@ -544,7 +548,12 @@ func (k *KeyringSource) Lookup(_ context.Context, name string) (Value, bool, err
 
 // SortResolutions orders by name, so an audit event is comparable between runs.
 func SortResolutions(rs []Resolution) {
-	sort.Slice(rs, func(i, j int) bool { return rs[i].Name < rs[j].Name })
+	sort.Slice(rs, func(i, j int) bool {
+		if rs[i].Name != rs[j].Name {
+			return rs[i].Name < rs[j].Name
+		}
+		return rs[i].Service < rs[j].Service
+	})
 }
 
 // ---------------------------------------------------------------------------

@@ -717,7 +717,8 @@ const defaultTuning = `{
         "services[].resources",
         "load.thresholds.query_count_increase",
         "services[].env[].from",
-        "services[].env[].sandbox"
+        "services[].env[].sandbox",
+        "services[].env[].scope"
       ],
       "append": {
         "services": [
@@ -811,7 +812,8 @@ const defaultTuning = `{
         "services[].resources",
         "load.thresholds.query_count_increase",
         "services[].env[].from",
-        "services[].env[].sandbox"
+        "services[].env[].sandbox",
+        "services[].env[].scope"
       ],
       "append": {
         "services": [
@@ -864,7 +866,8 @@ const defaultTuning = `{
         "services[].resources",
         "load.thresholds.query_count_increase",
         "services[].env[].from",
-        "services[].env[].sandbox"
+        "services[].env[].sandbox",
+        "services[].env[].scope"
       ],
       "append": {
         "services": [
@@ -1280,7 +1283,21 @@ func TestSchemaConstraintReport(t *testing.T) {
 // because #367 moved the fact and left the sentence about it alone. Corrected
 // here rather than carried, since a comment that disagrees with its own
 // constant teaches the next reader to trust neither.
-const wantConstraints = 630
+// It is 632. The two are services[].env[].scope, which declares a type and an
+// enum of one value, and both come back ENFORCED because validation refuses a
+// scope that is not a scope by name.
+//
+// COUNTED TWICE AND NOT INCREMENTED, for the reason the paragraph above gives.
+// The gate's own walk reports 632, and a separate walk of the published
+// document written for this branch reports 632 as well, resolving only #/$defs/
+// and stopping at the same depth. The tuning above gained one prune line per
+// base for the same field: the generator fills every property it can, so a base
+// carried scope: service beside a literal value, which the engine refuses
+// because a literal is that service's own already. Three of the four bases were
+// refused outright by it, which is the #315 failure exactly: the gate reported
+// red while measuring nothing. The seed base prunes value, so it is the base
+// the two new constraints are measured in.
+const wantConstraints = 632
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and

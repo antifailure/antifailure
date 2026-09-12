@@ -1510,6 +1510,17 @@
       "planned": false
     },
     {
+      "code": "AF-SEC-007",
+      "area": "SEC",
+      "areaName": "Secrets",
+      "message": "The sandbox credential {name} is declared by {services} with a scope or from more than one place, so it would need more than one value, and the egress proxy holds one value per credential for the whole environment.",
+      "resolution": "Give every service that declares {name} the same source and no scope. The proxy substitutes the credential into every request to that provider whichever service sent it, so a value that belongs to one service cannot be kept to that service.",
+      "docs": "https://antifailure.dev/docs/guides/secrets",
+      "retryable": false,
+      "exitCode": 3,
+      "planned": false
+    },
+    {
       "code": "AF-SEC-010",
       "area": "SEC",
       "areaName": "Secrets",

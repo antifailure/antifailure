@@ -186,10 +186,11 @@ One variable a service needs. The manifest declares the name and where the value
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `from` | string | no | Where to read the value: a secrets adapter name, or the name of a different variable to copy. Max length 256. |
+| `from` | string | no | The name the value is stored under, when it differs from the name the service reads. The service receives it under name. With scope set to service, this stored name is the one spelled as the service's own. Max length 256. |
 | `name` | string | **yes** | Max length 128, matches `^[A-Za-z_][A-Za-z0-9_.]*$`. |
 | `required` | boolean | no | Whether the environment fails to start without it. Defaults to true, because a service silently missing configuration is the failure this product exists to prevent. Defaults to `true`. |
 | `sandbox` | boolean | no | Marks a credential that must be a sandbox one. The secrets subsystem refuses a value carrying a known live prefix, and the proxy trips a wire if one reaches the network anyway. Defaults to `false`. |
+| `scope` | `service` | no | Whose value this is. Leave it out for a value every service that declares the name shares. service makes it this service's own: it is looked up as the service's name in capitals with hyphens as underscores, two underscores, then the name, so the storage service's DATABASE_URL is looked up as STORAGE__DATABASE_URL and no other service receives it. A sandbox credential cannot be scoped, because the egress proxy holds one value per credential for the whole environment. |
 | `value` | string | no | A literal value for a variable that is configuration rather than a secret, such as a feature flag or a public URL. A value that looks like a credential is rejected. Max length 2048. |
 
 ## Explore

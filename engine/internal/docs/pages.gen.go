@@ -11726,6 +11726,48 @@ The first source that has the value wins. The order is the point: a temporary
 override beats a file, and a file beats a stored default, which is what makes
 "try it with a different key" a one line thing.
 
+## One name, two services
+
+Two services can need different values for one variable name. Supabase's
+` + "`" + `storage` + "`" + ` and ` + "`" + `supavisor` + "`" + ` both read ` + "`" + `DATABASE_URL` + "`" + ` and each needs a different
+connection string. Both are credentials, so neither can be a literal in the
+manifest, and a lookup by name alone could only ever hand both services the
+same one.
+
+` + "`" + `scope: service` + "`" + ` says the value is this service's own:
+
+` + "`" + "`" + "`" + `yaml
+services:
+  - name: storage
+    env:
+      - name: DATABASE_URL
+        scope: service
+  - name: supavisor
+    env:
+      - name: DATABASE_URL
+        scope: service
+` + "`" + "`" + "`" + `
+
+The value is then looked up under the service's name in capitals, two
+underscores, then the variable, so those two are stored as
+` + "`" + `STORAGE__DATABASE_URL` + "`" + ` and ` + "`" + `SUPAVISOR__DATABASE_URL` + "`" + `. Every source can hold a
+name of that shape, including the enterprise secret stores, and the order above
+is unchanged: the shell is still asked first, then ` + "`" + `.env` + "`" + `, then the local store,
+then the keyring.
+
+A scoped variable is looked up under the scoped name only, and does not fall
+back to the bare one, because a single bare value is what cannot be right for
+both services. ` + "`" + `af explain` + "`" + ` names the service beside each value it is one
+service's own, and a value nothing supplies is reported under the scoped name,
+so the message says the name to set rather than the name the service reads.
+
+A sandbox credential cannot be scoped. The proxy holds one value per credential
+for the whole environment and substitutes it into every request to that provider
+whichever service sent it, so there is no value it could use for two, and
+choosing one would hand a service another service's key. Two services reading
+one sandbox credential from different places is refused with AF-SEC-007, which
+names the variable and the services.
+
 ## Nothing found
 
 ` + "`" + "`" + "`" + `
@@ -20054,6 +20096,18 @@ The credential stored in {location} is not in this tool's format: {detail}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/signing-in](/docs/guides/signing-in) |
 
+### AF-SEC-007
+
+The sandbox credential {name} is declared by {services} with a scope or from more than one place, so it would need more than one value, and the egress proxy holds one value per credential for the whole environment.
+
+**What to do.** Give every service that declares {name} the same source and no scope. The proxy substitutes the credential into every request to that provider whichever service sent it, so a value that belongs to one service cannot be kept to that service.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `3` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/secrets](/docs/guides/secrets) |
+
 ### AF-SEC-010
 
 The environment certificate could not be created: {detail}
@@ -20445,14 +20499,32 @@ report exactly what a correct one reports.
         sandbox: true
       - name: LOG_LEVEL
         value: debug
-      - name: API_URL
-        from: web
+      - name: DATABASE_URL
+        from: PROD_DATABASE_URL
+      - name: REDIS_URL
+        scope: service
 ` + "`" + "`" + "`" + `
 
 A name, never a secret. ` + "`" + `sandbox: true` + "`" + ` marks a variable that must hold a
 sandbox credential and never a live one, which is checked before anything
-starts. ` + "`" + `from` + "`" + ` takes the value from another service's URL, so a worker can be
-told where the web service is without hardcoding a port.
+starts. ` + "`" + `from` + "`" + ` is the name the value is stored under when that differs from the
+name the service reads: the value above is looked up as ` + "`" + `PROD_DATABASE_URL` + "`" + ` and
+arrives as ` + "`" + `DATABASE_URL` + "`" + `.
+
+` + "`" + `scope: service` + "`" + ` makes the value this service's own. It is looked up under the
+service's name in capitals, two underscores, then the variable, so the ` + "`" + `storage` + "`" + `
+service's ` + "`" + `REDIS_URL` + "`" + ` is stored as ` + "`" + `STORAGE__REDIS_URL` + "`" + ` and no other service
+receives it. Leave ` + "`" + `scope` + "`" + ` out for a value that every service declaring the name
+shares.
+
+Two services can need different values for one name, and a published stack does:
+Supabase's ` + "`" + `storage` + "`" + ` and ` + "`" + `supavisor` + "`" + ` both read ` + "`" + `DATABASE_URL` + "`" + ` with a different
+connection string in each. Both are credentials, so neither can be a literal
+here. Without a scope the two are one lookup and both services receive one of
+the two values. A sandbox credential cannot be scoped, because the proxy holds
+one value per credential for the whole environment and substitutes it whichever
+service sent the request, so a per service value is refused with AF-SEC-007
+rather than resolved to whichever was seen first.
 
 A service receives what it declares and nothing else. The engine's own
 environment is not passed through, or a preview would inherit whatever is
@@ -22188,10 +22260,11 @@ One variable a service needs. The manifest declares the name and where the value
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| ` + "`" + `from` + "`" + ` | string | no | Where to read the value: a secrets adapter name, or the name of a different variable to copy. Max length 256. |
+| ` + "`" + `from` + "`" + ` | string | no | The name the value is stored under, when it differs from the name the service reads. The service receives it under name. With scope set to service, this stored name is the one spelled as the service's own. Max length 256. |
 | ` + "`" + `name` + "`" + ` | string | **yes** | Max length 128, matches ` + "`" + `^[A-Za-z_][A-Za-z0-9_.]*$` + "`" + `. |
 | ` + "`" + `required` + "`" + ` | boolean | no | Whether the environment fails to start without it. Defaults to true, because a service silently missing configuration is the failure this product exists to prevent. Defaults to ` + "`" + `true` + "`" + `. |
 | ` + "`" + `sandbox` + "`" + ` | boolean | no | Marks a credential that must be a sandbox one. The secrets subsystem refuses a value carrying a known live prefix, and the proxy trips a wire if one reaches the network anyway. Defaults to ` + "`" + `false` + "`" + `. |
+| ` + "`" + `scope` + "`" + ` | ` + "`" + `service` + "`" + ` | no | Whose value this is. Leave it out for a value every service that declares the name shares. service makes it this service's own: it is looked up as the service's name in capitals with hyphens as underscores, two underscores, then the name, so the storage service's DATABASE_URL is looked up as STORAGE__DATABASE_URL and no other service receives it. A sandbox credential cannot be scoped, because the egress proxy holds one value per credential for the whole environment. |
 | ` + "`" + `value` + "`" + ` | string | no | A literal value for a variable that is configuration rather than a secret, such as a feature flag or a public URL. A value that looks like a credential is rejected. Max length 2048. |
 
 ## Explore

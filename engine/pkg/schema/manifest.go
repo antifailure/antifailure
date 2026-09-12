@@ -109,7 +109,22 @@ type EnvVar struct {
 	Sandbox  bool   `json:"sandbox,omitempty" yaml:"sandbox,omitempty"`
 	Value    string `json:"value,omitempty" yaml:"value,omitempty"`
 	From     string `json:"from,omitempty" yaml:"from,omitempty"`
+	// Scope says whose value this is. Empty is the environment's: every
+	// service that declares the name and reads it from the same place gets
+	// the same value. ScopeService is this service's own, stored under
+	// ScopedName and never readable by another service.
+	Scope EnvScope `json:"scope,omitempty" yaml:"scope,omitempty"`
 }
+
+// EnvScope names whose value a variable is.
+type EnvScope string
+
+// ScopeService is a value that belongs to one service. It exists because a
+// published stack can give two services one variable name with two different
+// credentials in it, Supabase's storage and supavisor both reading
+// DATABASE_URL, and a lookup keyed by the name alone could only ever hand both
+// of them the same one.
+const ScopeService EnvScope = "service"
 
 // IsRequired reports the effective value of Required.
 func (e EnvVar) IsRequired() bool { return e.Required == nil || *e.Required }

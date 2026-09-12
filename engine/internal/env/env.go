@@ -600,7 +600,7 @@ func (o *Orchestrator) withEnvironmentSources(chain *secrets.Chain) *secrets.Cha
 func (o *Orchestrator) resolveSecrets(ctx context.Context) (*secrets.Resolved, error) {
 	chain := o.secretChain()
 	resolved, err := secrets.Resolve(ctx, chain, secrets.Request{
-		Declared: secrets.DeclaredVars(o.opts.Manifest),
+		Services: secrets.DeclaredFor(o.opts.Manifest),
 		Sandbox:  secrets.SandboxNames(o.opts.Manifest),
 		EnvID:    o.envID,
 	})
@@ -612,6 +612,15 @@ func (o *Orchestrator) resolveSecrets(ctx context.Context) (*secrets.Resolved, e
 			// to that provider, which is the opposite of what sandbox mode is
 			// for and charges real cards.
 			return nil, aferrors.Coded(aferrors.AFSEC003, "name", live.Name)
+		}
+		var conflict *secrets.SandboxConflictError
+		if errors.As(err, &conflict) {
+			// Refused rather than resolved. The proxy holds one value per
+			// credential, so a sandbox credential two services read from two
+			// places has no right answer, and the old behaviour of keeping the
+			// first one handed a service somebody else's key without a word.
+			return nil, aferrors.Coded(aferrors.AFSEC007,
+				"name", conflict.Name, "services", strings.Join(conflict.Services, ", "))
 		}
 		var rejected *extension.CredentialRejectedError
 		if errors.As(err, &rejected) {
@@ -633,6 +642,10 @@ func (o *Orchestrator) resolveSecrets(ctx context.Context) (*secrets.Resolved, e
 	// where the fifth should go. Names and sources, never values, because this
 	// is what a support bundle carries.
 	for _, r := range resolved.Resolutions {
+		if r.Service != "" {
+			o.progress(fmt.Sprintf("  %s for %s from %s", r.Name, r.Service, r.Source))
+			continue
+		}
 		o.progress(fmt.Sprintf("  %s from %s", r.Name, r.Source))
 	}
 	for _, m := range resolved.Optional {
@@ -656,10 +669,7 @@ func (o *Orchestrator) resolveSecrets(ctx context.Context) (*secrets.Resolved, e
 
 	// Registered before anything is built, so a value cannot reach a log line
 	// between being read and being registered.
-	for _, value := range resolved.Service {
-		o.opts.Redactor.Register(value.Reveal())
-	}
-	for _, value := range resolved.Sidecar {
+	for _, value := range resolved.Values() {
 		o.opts.Redactor.Register(value.Reveal())
 	}
 
@@ -1937,13 +1947,7 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	// builder, because the lookup is per environment and the builder runs per
 	// service. Each service still receives only the names it declared, so one
 	// service's variable does not travel to another's.
-	for i := range spec.Services {
-		for name := range spec.Services[i].Env {
-			if value, ok := resolved.Service[name]; ok {
-				spec.Services[i].Env[name] = value
-			}
-		}
-	}
+	applyResolved(spec.Services, resolved)
 
 	packs, err := o.mockPacks()
 	if err != nil {
@@ -2529,6 +2533,23 @@ func orDefault(s, fallback string) string {
 		return fallback
 	}
 	return s
+}
+
+// applyResolved hands each service the values it declared: its own where it
+// has one, and the environment's otherwise.
+//
+// Keyed by the service's name as well as the variable's. Keyed by the variable
+// alone, which is what this was, Supabase's storage and supavisor both read
+// DATABASE_URL from one flat map and both received whichever credential the
+// resolver had kept, with nothing anywhere saying one of them was wrong.
+func applyResolved(services []provider.ServiceSpec, resolved *secrets.Resolved) {
+	for i := range services {
+		for name := range services[i].Env {
+			if value, ok := resolved.Lookup(services[i].Name, name); ok {
+				services[i].Env[name] = value
+			}
+		}
+	}
 }
 
 func serviceEnv(svc schema.Service) map[string]secrets.Value {

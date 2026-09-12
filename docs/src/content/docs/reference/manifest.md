@@ -216,14 +216,32 @@ report exactly what a correct one reports.
         sandbox: true
       - name: LOG_LEVEL
         value: debug
-      - name: API_URL
-        from: web
+      - name: DATABASE_URL
+        from: PROD_DATABASE_URL
+      - name: REDIS_URL
+        scope: service
 ```
 
 A name, never a secret. `sandbox: true` marks a variable that must hold a
 sandbox credential and never a live one, which is checked before anything
-starts. `from` takes the value from another service's URL, so a worker can be
-told where the web service is without hardcoding a port.
+starts. `from` is the name the value is stored under when that differs from the
+name the service reads: the value above is looked up as `PROD_DATABASE_URL` and
+arrives as `DATABASE_URL`.
+
+`scope: service` makes the value this service's own. It is looked up under the
+service's name in capitals, two underscores, then the variable, so the `storage`
+service's `REDIS_URL` is stored as `STORAGE__REDIS_URL` and no other service
+receives it. Leave `scope` out for a value that every service declaring the name
+shares.
+
+Two services can need different values for one name, and a published stack does:
+Supabase's `storage` and `supavisor` both read `DATABASE_URL` with a different
+connection string in each. Both are credentials, so neither can be a literal
+here. Without a scope the two are one lookup and both services receive one of
+the two values. A sandbox credential cannot be scoped, because the proxy holds
+one value per credential for the whole environment and substitutes it whichever
+service sent the request, so a per service value is refused with AF-SEC-007
+rather than resolved to whichever was seen first.
 
 A service receives what it declares and nothing else. The engine's own
 environment is not passed through, or a preview would inherit whatever is

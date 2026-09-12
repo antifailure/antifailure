@@ -1712,6 +1712,18 @@ The credential stored in {location} is not in this tool's format: {detail}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/signing-in](/docs/guides/signing-in) |
 
+### AF-SEC-007
+
+The sandbox credential {name} is declared by {services} with a scope or from more than one place, so it would need more than one value, and the egress proxy holds one value per credential for the whole environment.
+
+**What to do.** Give every service that declares {name} the same source and no scope. The proxy substitutes the credential into every request to that provider whichever service sent it, so a value that belongs to one service cannot be kept to that service.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/secrets](/docs/guides/secrets) |
+
 ### AF-SEC-010
 
 The environment certificate could not be created: {detail}
