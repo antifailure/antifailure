@@ -52,7 +52,30 @@ the second name and the first is the one people create.
 | `command` | The command that ran. |
 | `environment` | Whether `af change` selected an environment for this change. `true` or `false`. |
 | `selected` | The checks `af change` selected, comma separated. |
-| `handled` | Whether a control plane took the report. When it is `true` the action leaves no comment, because the control plane maintains one. |
+| `handled` | Whether a control plane took the report. `true` only when it answered 200, and then the action leaves no comment, because the control plane maintains one. |
+
+## When the control plane says no
+
+With `control-plane` set, the action talks to it twice, and it treats a refusal
+and an absence of an answer as different facts, because the job runs in your
+repository and only one of them is yours to fix.
+
+- **The credential is refused**, which the control plane answers with a 4xx and
+  a sentence: a repository it does not know, a suspended organization, a commit
+  with no check waiting on it. The job is not failed, the report goes on the
+  pull request as a comment, and the last step warns with that sentence.
+- **The report is refused** after a credential was issued. The check on the
+  commit is waiting for exactly that report, so the step fails the job with the
+  control plane's sentence, and the comment still carries the report.
+- **The control plane does not answer**, a 5xx or no connection at all. The job
+  is not failed for somebody else's outage. It warns, and the report goes on the
+  pull request as a comment.
+- **No workflow identity**, which is what GitHub gives a fork's pull request on
+  purpose. Nothing is reported and nothing is failed.
+
+A re-run of the job from the Actions tab is a new attempt of the same run, and
+it is issued a credential of its own, so its verdict replaces the previous
+attempt's on the check.
 
 ## Inputs of the reusable workflow
 

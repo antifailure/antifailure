@@ -410,3 +410,67 @@ func TestTheActionsReportingStepsAreWiredToEachOther(t *testing.T) {
 			"worth hearing it about skip it: %q", last.If)
 	}
 }
+
+// The last step only SAYS. It runs in somebody else's repository under
+// `set -euo pipefail`, so an unset variable or a branch that exits non zero
+// would fail a customer's build over what is meant to be a sentence. Every
+// outcome the claim step can record is driven through it here, together with
+// the one it records when it did not run at all.
+func TestTheActionsLastStepSaysWhatItKnowsAndNeverFailsTheBuild(t *testing.T) {
+	steps := actionSteps(t)
+	last := steps[len(steps)-1]
+	for _, key := range []string{"OUTCOME", "REASON", "DELIVERED", "HEAD_SHA", "ON_A_PULL_REQUEST"} {
+		if _, ok := last.Env[key]; !ok {
+			t.Fatalf("the last step declares no %s, so this test would drive a script that reads "+
+				"something else and prove nothing about it", key)
+		}
+	}
+	const reason = "no check is waiting on c78bc27"
+
+	for _, c := range []struct {
+		name        string
+		outcome     string
+		delivered   string
+		pullRequest bool
+		wantSaid    string
+		wantWarning bool
+	}{
+		{name: "claimed and delivered", outcome: "claimed", delivered: "true", pullRequest: true,
+			wantSaid: "has this run's verdict"},
+		{name: "claimed and delivered nothing", outcome: "claimed", pullRequest: true,
+			wantSaid: "delivered no report", wantWarning: true},
+		{name: "a fork", outcome: "no-identity", pullRequest: true,
+			wantSaid: "nothing here is wrong"},
+		{name: "refused", outcome: "refused", pullRequest: true,
+			wantSaid: reason, wantWarning: true},
+		{name: "unreachable", outcome: "unreachable", pullRequest: true,
+			wantSaid: reason, wantWarning: true},
+		{name: "no outcome on a pull request", pullRequest: true,
+			wantSaid: "recorded no outcome", wantWarning: true},
+		{name: "no outcome off a pull request"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			exit, log, _, _ := runActionScript(t, last.Run, map[string]string{
+				"OUTCOME":           c.outcome,
+				"REASON":            reason,
+				"DELIVERED":         c.delivered,
+				"HEAD_SHA":          "c78bc279185f9ab7ddb69ffb3a6bce5f43639041",
+				"ON_A_PULL_REQUEST": fmt.Sprint(c.pullRequest),
+			})
+			if exit != 0 {
+				t.Errorf("outcome %q exited %d, so a sentence about the control plane failed a "+
+					"customer's build:\n%s", c.outcome, exit, log)
+			}
+			if strings.Contains(log, "::error::") {
+				t.Errorf("outcome %q wrote an ::error:: annotation from a step that only says:\n%s",
+					c.outcome, log)
+			}
+			if c.wantSaid != "" && !strings.Contains(log, c.wantSaid) {
+				t.Errorf("outcome %q never says %q:\n%s", c.outcome, c.wantSaid, log)
+			}
+			if got := strings.Contains(log, "::warning::"); got != c.wantWarning {
+				t.Errorf("outcome %q wrote a warning: %v, want %v:\n%s", c.outcome, got, c.wantWarning, log)
+			}
+		})
+	}
+}

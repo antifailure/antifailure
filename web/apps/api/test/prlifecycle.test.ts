@@ -1567,6 +1567,62 @@ describe(
       assert.equal(checkFor(head)?.conclusion, 'success')
     })
 
+    it('ordering: two claims from the same re-run arrive together, and one credential is issued', async () => {
+      // THE READ AND THE WRITE ARE TWO STATEMENTS, and a job whose first request
+      // timed out asks again, so one attempt can be inside the window between
+      // them twice. Nothing about the timing is left to chance: a transaction
+      // here holds the generation's row lock, both claims read the concluded
+      // check and queue on that lock, and only once BOTH are seen waiting in
+      // pg_stat_activity is the lock released. Under READ COMMITTED the second
+      // UPDATE then re-reads the row the first one wrote, so the comparison in
+      // its WHERE clause, and nothing else, decides what it does. Without it
+      // both are issued a credential, the attempt is reopened twice, and the
+      // first credential is one the row no longer holds.
+      const head = sha('rerun-concurrent-claims')
+      await deliver('pull_request', pullRequestPayload('opened', 303, head))
+      const first = await claim(head, 6010, 1)
+      assert.equal((await report(first.token!, head, ['pass'])).status, 200)
+      assert.equal((await generation(head))?.state, 'passed')
+
+      let racing: Promise<Awaited<ReturnType<typeof claim>>[]> | undefined
+      await h.admin.begin(async (tx) => {
+        await tx`SELECT id FROM pr_generations WHERE head_sha = ${head} FOR UPDATE`
+        racing = Promise.all([claim(head, 6010, 2), claim(head, 6010, 2)])
+        const deadline = Date.now() + 10_000
+        for (;;) {
+          const [row] = await h.admin<{ n: number }[]>`
+            SELECT count(*)::int AS n FROM pg_stat_activity
+            WHERE pid <> pg_backend_pid() AND wait_event_type = 'Lock'
+              AND query LIKE '%UPDATE pr_generations%'`
+          if (row!.n >= 2) break
+          if (Date.now() > deadline) {
+            assert.fail(
+              `only ${row!.n} of the two claims reached the write while the row was held, so ` +
+                `this ordering was never produced and nothing below would be measuring it`,
+            )
+          }
+          await new Promise((resolve) => setTimeout(resolve, 20))
+        }
+      })
+
+      const answers = await racing!
+      const statuses = answers.map((a) => a.status)
+      const issued = answers.filter((a) => a.status === 200)
+      const refused = answers.filter((a) => a.status !== 200)
+      assert.equal(issued.length, 1, `two claims for one attempt were answered ${statuses}`)
+      assert.equal(refused[0]?.status, 409)
+      assert.match(refused[0]?.error ?? '', /changed underneath this claim/)
+
+      const reopened = await generation(head)
+      assert.equal(reopened?.state, 'running')
+      assert.equal(reopened?.attempt, 2, 'one attempt was counted twice')
+      assert.equal(reopened?.verdict, null, 'the reopened check kept the replaced verdict')
+      assert.equal((await report(issued[0]!.token!, head, ['pass'])).status, 200)
+      assert.equal((await generation(head))?.state, 'passed')
+      assert.equal(checkFor(head)?.conclusion, 'success')
+      assert.equal(checksFor(head).length, 2, 'one attempt was given two check runs')
+    })
+
     it('ordering: the replaced attempt’s completion arrives after the re-run claimed', async () => {
       // GitHub delivers `workflow_run` completed for attempt 1 whenever it
       // delivers it, and a redelivery can be minutes late. By then attempt 2

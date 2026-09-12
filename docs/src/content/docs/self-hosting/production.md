@@ -337,6 +337,15 @@ check and the second when they re-run all of them from the checks page, so
 subscribing to only one leaves the other doing nothing at all. Each is handled
 in `web/apps/api/src/github/lifecycle.ts`.
 
+The third Re-run button, the one in the Actions tab, sends neither of those. It
+starts another attempt of the same workflow run, which arrives as **Workflow
+run**, and that attempt then asks for a credential of its own. The control
+plane reads the attempt number GitHub signed into the run's identity and
+reopens the check for a later attempt of the run already checking the commit,
+so a re-run from either place produces a new check run with a fresh verdict.
+Before this, a re-run from the Actions tab was refused a credential and the
+check went on showing the verdict of the attempt it replaced.
+
 **Push** is still deliberately absent: nothing handles it, and an event nobody
 consumes is delivery-log noise that makes a real failed delivery harder to find.
 **Member** and **Membership** are absent for a sharper reason: the handler names
@@ -356,7 +365,7 @@ as it took somebody to look at the installation rather than at the App.
 1. The App's settings, **Permissions and events**, Repository permissions,
    **Checks** to Read and write, then **Save**.
 2. The same page, **Subscribe to events**, tick **Pull request**, **Workflow
-   run** and **Check run**, then **Save**. Event subscriptions take effect
+   run**, **Check run** and **Check suite**, then **Save**. Event subscriptions take effect
    without anybody accepting anything; only the permission needs step 3.
 3. For every account the App is installed on: its **Installed GitHub Apps**
    settings, the App, **Review request**, **Accept new permissions**.

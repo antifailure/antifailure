@@ -1868,10 +1868,13 @@ export async function issueCallback(
         //
         // THE STATE IS COMPARED AND SET IN THE WHERE CLAUSE, not trusted from
         // the read above, because the read and this write are two statements and
-        // anything holding an identity token can reach this endpoint. Said out
-        // loud as a limit: no test drives two claims into the same read window,
-        // because this harness serialises them, so what every tested ordering
-        // rests on is the comparison above rather than this clause. There was a
+        // anything holding an identity token can reach this endpoint. A job whose
+        // first request timed out asks again, so one attempt can be inside that
+        // window twice, and without this clause both requests are issued a
+        // credential while the row holds only the second. The ordering "two
+        // claims from the same re-run arrive together" in prlifecycle.test.ts
+        // holds the row lock until both claims are waiting on it, so it is this
+        // clause, not the comparison above, that the test measures. There was a
         // second clause here refusing the run and attempt already recorded; it
         // is gone, because the comparison above refuses that on a concluded
         // check and on a running one a job asking twice is a job whose first
