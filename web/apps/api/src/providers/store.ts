@@ -19,7 +19,7 @@ import type { Analytics } from '../analytics/record.ts'
 import {
   checkKeyShape,
   fingerprintOf,
-  KEY_VERSION,
+  type Keyring,
   open,
   seal,
   type Provider,
@@ -142,14 +142,14 @@ export interface SaveInput {
 export async function saveKey(
   pool: Pool,
   clock: Clock,
-  sealingKey: Buffer,
+  keyring: Keyring,
   input: SaveInput,
 ): Promise<{ stored: StoredKey; replaced: boolean; sameAsBefore: boolean }> {
   const key = input.key.trim()
   const complaint = checkKeyShape(input.provider, key)
   if (complaint) throw new ProviderKeyError(complaint)
 
-  const sealed = seal(sealingKey, key, { orgId: input.orgId, provider: input.provider })
+  const sealed = seal(keyring, key, { orgId: input.orgId, provider: input.provider })
 
   return pool.withTenant({ orgId: input.orgId, userId: input.actorUserId ?? undefined }, async (db) => {
     const existing = await db.execute<{ id: string; fingerprint: string }>(sql`
@@ -173,7 +173,7 @@ export async function saveKey(
         (org_id, provider, ciphertext, nonce, key_version, fingerprint, last4, created_by,
          created_at, rotated_at)
       VALUES (${input.orgId}::uuid, ${input.provider}, ${sealed.ciphertext}, ${sealed.nonce},
-              ${KEY_VERSION}, ${sealed.fingerprint}, ${sealed.last4},
+              ${sealed.keyVersion}, ${sealed.fingerprint}, ${sealed.last4},
               ${input.actorUserId}::uuid, ${clock.now().toISOString()},
               ${previous ? clock.now().toISOString() : null})
       RETURNING id, created_at`)
@@ -280,7 +280,7 @@ export interface Borrowed {
 export async function borrowKey(
   pool: Pool,
   clock: Clock,
-  sealingKey: Buffer,
+  keyring: Keyring,
   input: { orgId: string; provider: Provider; estimatedUsd?: number },
 ): Promise<Borrowed> {
   const period = periodOf(clock.now())
@@ -309,12 +309,18 @@ export async function borrowKey(
       )
     }
 
+    // key_version is selected because the row decides which key opens it, and
+    // because the associated data carries the version: opening a v1 row with
+    // the version this process happens to be sealing under fails even while
+    // holding both keys. Reading it here is the whole of what makes a rotation
+    // possible, and the column existed for exactly this and was never read.
     const rows = await db.execute<{
       ciphertext: Buffer
       nonce: Buffer
+      key_version: string
       fingerprint: string
     }>(sql`
-      SELECT ciphertext, nonce, fingerprint FROM provider_keys
+      SELECT ciphertext, nonce, key_version, fingerprint FROM provider_keys
       WHERE provider = ${input.provider} AND revoked_at IS NULL`)
     const row = rows[0]
     if (!row) {
@@ -324,10 +330,11 @@ export async function borrowKey(
       )
     }
 
-    const key = open(sealingKey, { ciphertext: row.ciphertext, nonce: row.nonce }, {
-      orgId: input.orgId,
-      provider: input.provider,
-    })
+    const key = open(
+      keyring,
+      { ciphertext: row.ciphertext, nonce: row.nonce, keyVersion: row.key_version },
+      { orgId: input.orgId, provider: input.provider },
+    )
     return { key, fingerprint: row.fingerprint, budget }
   })
 }

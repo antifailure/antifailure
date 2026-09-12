@@ -111,7 +111,7 @@ import {
 import { readHeldExport } from './enterprise/deletion.ts'
 import { mountConsole } from './console/index.ts'
 import type { ConsoleBuild } from './console/static.ts'
-import { PROVIDERS, type Provider } from './providers/seal.ts'
+import { MissingSealingKeyError, PROVIDERS, type Keyring, type Provider } from './providers/seal.ts'
 import { verifySignature } from './github/app.ts'
 import { forward, ProxyError } from './providers/proxy.ts'
 import { PricingError, type Price } from './providers/pricing.ts'
@@ -255,9 +255,10 @@ export interface ServerOptions {
    *  alone, which is a legitimate way to run this and is logged as such rather
    *  than answering blank 404s that read like a routing bug. */
   consoleBuild?: ConsoleBuild
-  /** The secret that seals provider keys. Null means keys cannot be stored,
-   *  which the console says out loud rather than failing on submit. */
-  sealingKey?: Buffer | null
+  /** The sealing keys, plural so that a rotation can hold the old one and the
+   *  new one at once. Null means keys cannot be stored, which the console says
+   *  out loud rather than failing on submit. */
+  keyring?: Keyring | null
   /** The GitHub App's webhook secret. Null means no App is configured, and the
    *  webhook endpoint refuses every delivery rather than accepting unsigned
    *  ones. */
@@ -2215,7 +2216,7 @@ export function createServer(options: ServerOptions) {
       // Whether a key CAN be stored at all. Reported rather than discovered on
       // a failed write, so `af provider list` on an installation with no
       // sealing secret says so instead of looking merely empty.
-      sealing: Boolean(options.sealingKey),
+      sealing: Boolean(options.keyring),
       keys: keys.map((k) => ({
         provider: k.provider,
         last4: k.last4,
@@ -2240,7 +2241,7 @@ export function createServer(options: ServerOptions) {
     if (!provider) {
       return c.json({ error: `Unknown provider. Known: ${PROVIDERS.join(', ')}.` }, 400)
     }
-    if (!options.sealingKey) {
+    if (!options.keyring) {
       return c.json(
         {
           error:
@@ -2260,7 +2261,7 @@ export function createServer(options: ServerOptions) {
     if (!key.trim()) return c.json({ error: 'The body needs a key.' }, 400)
 
     try {
-      const result = await saveKey(options.pool, clock, options.sealingKey, {
+      const result = await saveKey(options.pool, clock, options.keyring, {
         analytics,
         orgId: caller.orgId,
         provider,
@@ -2474,7 +2475,7 @@ export function createServer(options: ServerOptions) {
     if (!(PROVIDERS as string[]).includes(provider)) {
       return c.json({ error: { message: `Unknown provider ${provider}.` } }, 404)
     }
-    if (!options.sealingKey) {
+    if (!options.keyring) {
       return c.json(
         { error: { message: 'This control plane cannot hold provider keys: AF_PROVIDER_KEY_SECRET is not set.' } },
         503,
@@ -2520,7 +2521,7 @@ export function createServer(options: ServerOptions) {
         {
           pool: options.pool,
           clock,
-          sealingKey: options.sealingKey!,
+          keyring: options.keyring!,
           prices: options.modelPrices ?? {},
           ...(options.providerBases ? { bases: options.providerBases } : {}),
           ...(options.postHogSink ? { postHog: options.postHogSink } : {}),
@@ -3655,7 +3656,7 @@ export function createServer(options: ServerOptions) {
       clock,
       analytics,
       secureCookies: secure,
-      sealingKey: options.sealingKey ?? null,
+      keyring: options.keyring ?? null,
       build: options.consoleBuild ?? {
         dir: '',
         present: false,

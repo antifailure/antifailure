@@ -27,6 +27,8 @@ import {
   OperatorBootstrapRefused,
 } from './admin/bootstrap.ts'
 import { listLeads, handleLead, LeadsRefused } from './enterprise/leadstore.ts'
+import { describe as describeReseal, reseal, ResealRefused } from './providers/reseal.ts'
+import { keyringFrom, SealError, SEALING_KEYS_ENV, SEALING_KEY_ENV, SEALING_VERSION_ENV } from './providers/seal.ts'
 
 function usage(): never {
   console.error(`af-control-plane-backup <command>
@@ -96,6 +98,25 @@ function usage(): never {
             claiming it, because a record that named nobody would be a record of
             nothing.
 
+  reseal    [--url <admin connection string>, or AF_RESEAL_DATABASE_URL]
+            [--to <version>] [--batch <n>] [--dry-run] [--check] [--live-only]
+            Re-seals every stored credential under a new sealing key, so that
+            replacing the sealing secret is no longer a one way door. The keys
+            come from the environment and never from an argument: set
+            AF_PROVIDER_KEY_SECRET or AF_PROVIDER_KEY_SECRETS to hold the OLD
+            key and the new one at the same time, and AF_PROVIDER_KEY_VERSION to
+            name the new one. The connection string is read from
+            AF_RESEAL_DATABASE_URL when --url is absent, which is how the hosted
+            job supplies it. --to overrides which version rows are written
+            under. It is idempotent, it is resumable, it holds one batch of rows
+            in memory rather than the table, and a row it cannot open is left
+            exactly as it was.
+            --dry-run opens every row that still needs re-sealing and writes
+            nothing. --check opens EVERY row whatever version it is at, which is
+            the different question and the one to ask before removing the old
+            key: "nothing left to re-seal" and "every row is at the new version
+            and none of them open" look identical otherwise.
+
   break-glass --url <admin connection string>
             --org <slug or id> --github-login <login>
             --role <owner|admin|member|viewer> --reason <why> [--dry-run]
@@ -114,8 +135,9 @@ command says so and leaves the decision to you; the drill treats it as a
 failure, because finding this out before the day it matters is the whole job.
 
 Exit codes: 0 sound, 1 the work failed, 2 the arguments are wrong, 3 the restore
-completed and does not match the backup, which is the one that matters, 4 the
-restore was sound and slower than the budget it was given.`)
+completed and does not match the backup, which is the one that matters, or a
+re-seal left rows that could not be opened, 4 the restore was sound and slower
+than the budget it was given.`)
   process.exit(2)
 }
 
@@ -296,6 +318,79 @@ try {
       break
     }
 
+    case 'reseal': {
+      const keyring = keyringFrom(process.env)
+      if (!keyring) {
+        console.error(
+          `no sealing key is configured, so nothing can be opened or re-sealed. Set ` +
+            `${SEALING_KEY_ENV} or ${SEALING_KEYS_ENV} in this process's environment. They are ` +
+            `deliberately not arguments: an argument is visible in ps and lands in shell history.`,
+        )
+        process.exit(2)
+      }
+      const batch = flag(argv, 'batch')
+      const mode = argv.includes('--check') ? 'check' : argv.includes('--dry-run') ? 'dry run' : 'apply'
+      const url = flag(argv, 'url') ?? process.env.AF_RESEAL_DATABASE_URL
+      if (!url) {
+        console.error(
+          'no connection string. Pass --url, or set AF_RESEAL_DATABASE_URL, which is what the ' +
+            'hosted reseal job does: a container app job command is not run through a shell, and ' +
+            'a connection string in an argument is a database password in ps and in the revision.',
+        )
+        process.exit(2)
+      }
+      const report = await reseal({
+        adminUrl: url,
+        keyring,
+        to: flag(argv, 'to'),
+        mode,
+        batchSize: batch === undefined ? undefined : Number(batch),
+        includeRevoked: !argv.includes('--live-only'),
+        log: (line) => console.log(line),
+      })
+
+      console.log('')
+      // Versions and counts. Never a key, a plaintext or a ciphertext: this
+      // output goes into a runbook, a ticket and a terminal somebody screenshots.
+      console.log(`sealing keys held  ${keyring.versions().join(', ')}`)
+      console.log(`re-sealing to      ${report.to}`)
+      console.log(`mode               ${report.mode}`)
+      console.log('')
+      for (const line of describeReseal(report)) console.log(line)
+      console.log('')
+      console.log(`${report.seconds.toFixed(1)}s`)
+
+      if (report.problems.length > 0) {
+        console.error('')
+        console.error(`${report.problems.length} ROW${report.problems.length === 1 ? '' : 'S'} COULD NOT BE OPENED.`)
+        console.error('Do NOT remove any sealing key until this is zero. A row under a version')
+        console.error('nothing holds is a configuration; a row that will not authenticate under a')
+        console.error('version that IS held is not, and the lines above say which you have.')
+        process.exit(3)
+      }
+      if (report.mode === 'check') {
+        console.log(`every row opened, and ${report.remaining} ${report.remaining === 1 ? 'is' : 'are'} not yet at ${report.to}.`)
+        if (report.remaining === 0) {
+          console.log('')
+          console.log('This is the state in which removing the older sealing keys is safe.')
+          console.log('Remove them, restart, and run this again: it must still say the same thing.')
+        }
+        break
+      }
+      if (report.mode === 'dry run') {
+        console.log('DRY RUN. Nothing was written.')
+        break
+      }
+      if (report.remaining > 0) {
+        // Not an error. Something wrote a row at an older version while this was
+        // running, which is exactly what the guarded update exists to tolerate.
+        console.log(`${report.remaining} row${report.remaining === 1 ? '' : 's'} still not at ${report.to}. Run it again; it is idempotent.`)
+        break
+      }
+      console.log(`every row is sealed under ${report.to}. Run it with --check before removing the old key.`)
+      break
+    }
+
     case 'break-glass': {
       const dryRun = argv.includes('--dry-run')
       const result = await breakGlass({
@@ -433,6 +528,8 @@ try {
   // rather than 1. At three in the morning the difference between "you typed
   // the wrong thing" and "the database refused" is most of the diagnosis.
   if (
+    err instanceof ResealRefused ||
+    err instanceof SealError ||
     err instanceof BreakGlassRefused ||
     err instanceof BootstrapRefused ||
     err instanceof OperatorBootstrapRefused ||

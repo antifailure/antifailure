@@ -349,6 +349,40 @@ variable "provider_key_secret_enabled" {
   description = "Generate and store a sealing secret so provider keys can be saved."
 }
 
+# ROTATING THE SEALING SECRET, which used to be impossible.
+#
+# provider-key-secret above is OWNED: Terraform generated it, so a value written
+# by hand is drift the next apply corrects. That is right for the key an
+# installation starts with and it is the reason a rotation could not be performed
+# by editing it.
+#
+# So a rotation ADDS a key rather than replacing one. The application reads
+# AF_PROVIDER_KEY_SECRET as version v1 and AF_PROVIDER_KEY_SECRETS as further
+# versions, and MERGES them: v1 stays exactly where Terraform put it, the new key
+# goes in a vault secret this module does not own, and nobody has to read the old
+# value back out to compose a combined string. That last point is the security
+# half: composing one string would put a live sealing key on somebody's terminal.
+#
+# The secret is ADDRESSED and NOT READ, the same shape as the GitHub App's two
+# secrets: the container app wants the versionless id, which is a function of the
+# vault uri and the name, so no identity planning this stack needs vault read
+# access. An operator creates it with `az keyvault secret set --file`, which is
+# what self-hosting/rotating-secrets.md says to do.
+#
+# Empty is the state every installation that has never rotated is in, and it
+# renders no secret block and no environment variable at all.
+variable "provider_key_secrets_name" {
+  type        = string
+  default     = ""
+  description = "Key Vault secret holding further sealing keys as version=base64, comma separated. Empty means only the generated v1 key is configured. The operator writes its value; Terraform only addresses it."
+}
+
+variable "provider_key_version" {
+  type        = string
+  default     = ""
+  description = "Which sealing key version new provider keys are sealed under. Empty leaves it unset, which the application accepts only while exactly one key is configured. It must name a version the app holds or the container refuses to start."
+}
+
 
 variable "database_extensions" {
   type        = list(string)

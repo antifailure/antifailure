@@ -49,7 +49,7 @@ import { parseAllowlist, describeAllowlist, signupUrlFrom, sweepOAuthStates } fr
 import { selfServeSignupFrom, describeSelfServeSignup } from './auth/provision.ts'
 import { leadNotifierFrom } from './enterprise/leads.ts'
 import { siteOriginsFrom, siteOriginsSummary } from './siteorigin.ts'
-import { sealingKeyFrom } from './providers/seal.ts'
+import { keyringFrom } from './providers/seal.ts'
 import { findConsoleBuild } from './console/static.ts'
 import { appConfigFrom, InstallationTokens } from './github/app.ts'
 import { RealRepositoryApi } from './github/api.ts'
@@ -338,10 +338,20 @@ export async function startControlPlane(hooks: BootHooks = {}): Promise<ControlP
 
   // Read at start-up rather than on first use, so a secret of the wrong length
   // stops the process here instead of on the one request the feature exists for.
-  const sealingKey = sealingKeyFrom(process.env.AF_PROVIDER_KEY_SECRET)
+  //
+  // The line it prints names the VERSIONS held, not a boolean, and that is the
+  // one check a rotation otherwise has no way to make: "the new revision picked
+  // up the new key" is unprovable from the outside without decrypting somebody's
+  // credential, and this says it in the log the deploy already tails. Versions
+  // are operators' own labels; no key material is printed here or anywhere.
+  const keyring = keyringFrom({
+    AF_PROVIDER_KEY_SECRET: process.env.AF_PROVIDER_KEY_SECRET,
+    AF_PROVIDER_KEY_SECRETS: process.env.AF_PROVIDER_KEY_SECRETS,
+    AF_PROVIDER_KEY_VERSION: process.env.AF_PROVIDER_KEY_VERSION,
+  })
   console.log(
-    sealingKey
-      ? 'provider keys can be stored: AF_PROVIDER_KEY_SECRET is set'
+    keyring
+      ? keyring.summary()
       : 'provider keys CANNOT be stored: AF_PROVIDER_KEY_SECRET is not set',
   )
 
@@ -576,7 +586,7 @@ export async function startControlPlane(hooks: BootHooks = {}): Promise<ControlP
     postHog: postHogRegion ? { bases: POSTHOG_REGIONS[postHogRegion] } : null,
     postHogSink,
     leadNotifier: leads.notifier,
-    sealingKey,
+    keyring,
     githubWebhookSecret: appConfig?.webhookSecret ?? null,
     // The webhook's way of invalidating a cached token. Bound to the same
     // InstallationTokens the GitHub client mints from, because dropping a token

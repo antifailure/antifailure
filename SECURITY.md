@@ -99,6 +99,24 @@ implied: it scans the tree and not the full history, and a push to a topic
 branch with no pull request open runs nothing, because there is no pre-push
 hook.
 
+**A customer's provider key is sealed, and the key that seals it can be
+rotated.** Anthropic and OpenAI keys are stored as ciphertext under AES-256-GCM,
+with the sealing key supplied by the environment and never written to Postgres, so
+a database dump on its own decrypts nothing. The associated data binds each
+ciphertext to the organization, the provider and the sealing key version it was
+sealed for, so a row copied between tenants does not open.
+
+The control plane holds a SET of sealing keys addressed by version rather than
+one, and `af-control-plane-backup reseal` moves every stored credential from an
+old key to a new one while the application serves. That is a gap this file used to
+carry: replacing the sealing secret made every stored key stop opening,
+permanently, and silently, because a value that will not decrypt looks exactly like
+one somebody altered. A row whose version is not held now raises a distinct error
+naming the missing version and no key material. The procedure is in
+`docs/src/content/docs/self-hosting/rotating-secrets.md` and its last step removes
+the old key, which is what distinguishes a completed rotation from one that only
+appears complete. It has not been rehearsed against the live deployment.
+
 **Dependency pinning.** Go dependencies are pinned by `go.sum`. Every GitHub
 Action is pinned to a commit rather than a tag, because a tag is mutable and
 `@v4` is a promise the publisher can change after it was reviewed.
