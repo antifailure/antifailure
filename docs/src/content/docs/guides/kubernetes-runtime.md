@@ -269,6 +269,15 @@ shared conformance behaviour, without skips. The isolated workflow retains
 the individual test events, rather than turning a successful process exit into
 a conformance claim.
 
+It has now been measured. One isolated run reported 37 runtime conformance
+behaviours passing with zero skipped, alongside the immediate startup proof, on
+a single node k3s 1.35.5 cluster under k3d 5.9.0 with the policy controller that
+ships with it. Read that as one cluster rather than as Kubernetes: no other CNI,
+no multi node cluster and no managed offering is covered by it. The count is
+worth what the reader behind it is worth, and that reader refuses a missing,
+skipped or failed behaviour, a missing startup proof, a failed package and a
+same named test from another package.
+
 Response-based probes do not prove the absence of every one-way packet. Use a
 CNI that implements NetworkPolicy; the gates test observable paths and refuse
 an incomplete answer rather than certify arbitrary CNI implementations.
