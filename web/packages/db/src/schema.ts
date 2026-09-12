@@ -1613,7 +1613,7 @@ export const auditStreamDestinations = pgTable('audit_stream_destinations', {
 /* ---------------------------------------------------------------------------
  * Custom roles (0044)
  *
- * The enterprise role model, one table per list in ee/web/rbac's Model. Every
+ * The enterprise role model, one table per list in that edition's Model. Every
  * reference is composite on org_id, because a foreign key is checked as the
  * table owner and ignores row level security: see the migration.
  * ------------------------------------------------------------------------- */

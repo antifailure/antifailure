@@ -240,14 +240,15 @@ export function hasPermissionResolver(): boolean {
  * promise is a throw for that purpose, which is why the await is inside the try.
  *
  * A resolver is asked ONLY where the table said no. It can widen a role and it
- * can never narrow one, which is the rule ee/web/rbac states for every scope
- * ("a narrower scope grants, it never revokes") and which this function did not
- * hold until a resolver was installed in production: it returned the
- * resolver's false over the table's true, and the test beside the resolver that
- * is named "a resolver cannot take away what a built-in role grants" asserted
- * that it had. The second reason is cost. A stored model is a database read,
- * and asking it only when the built-in answer is a refusal means an owner or an
- * admin, who is refused almost nothing, almost never pays for one.
+ * can never narrow one, which is the rule the enterprise role model states for
+ * every scope ("a narrower scope grants, it never revokes") and which this
+ * function did not hold until a resolver was installed in production: it
+ * returned the resolver's false over the table's true, and the test beside the
+ * resolver that is named "a resolver cannot take away what a built-in role
+ * grants" asserted that it had. The second reason is cost. A stored model is a
+ * database read, and asking it only when the built-in answer is a refusal means
+ * an owner or an admin, who is refused almost nothing, almost never pays for
+ * one.
  */
 export async function permits(req: PermissionRequest): Promise<boolean> {
   const builtin = roleHas(req.role, req.permission)

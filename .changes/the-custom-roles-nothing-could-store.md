@@ -31,3 +31,10 @@ built-in table has already refused, so a custom role can widen a role and can
 never narrow one. That was the documented rule and not the behaviour: `permits`
 returned a resolver's `false` over the table's `true`, under a test named "a
 resolver cannot take away what a built-in role grants" that asserted it had.
+
+`members.list` now returns each member's `user_id`. A grant names a person by
+that id, and no route an organisation can call answered it: the list stripped the
+field from every row, while `nextCursor` carried the last row's id to the same
+caller anyway. So the feature above could be used only by somebody with a
+database console. The id rather than a GitHub login, because a member who signs
+in through single sign-on can have no GitHub login at all.

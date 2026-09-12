@@ -5680,13 +5680,19 @@ groups:
       - acme/billing
       - acme/invoices
 grants:
-  - userId: 4f1c8e02-6b1a-4c77-9a3e-0d51d1a2b3c4
+  - userId: <the member's user_id>
     roleId: deployer
     scope:
       kind: group
       name: payments
 approvals: []
 ` + "`" + "`" + "`" + `
+
+A grant names a person by their user id, which is the ` + "`" + `user_id` + "`" + ` the members
+list returns for each member of the organization. A GitHub login would read
+better in a review, and it is not used because a member who signs in through
+single sign-on can have no GitHub login at all. A grant for somebody who is not a
+member is refused, naming them.
 
 A description is required. A role called ` + "`" + `ops` + "`" + ` with no description is a role
 nobody can review, and reviewing it is the point of writing it down. A
@@ -5729,7 +5735,7 @@ it.
 
 ## What is not here
 
-` + "`" + `approvals` + "`" + ` is part of the file format and nothing enforces it yet, so a file
+` + "`" + `approvals` + "`" + ` is part of the file format and nothing enforces it, so a file
 that carries a non-empty ` + "`" + `approvals` + "`" + ` section is refused whole, naming it. A
 stored approval requirement that nothing checks would be a control reporting
 itself as held, which is worse than not having one.

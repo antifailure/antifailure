@@ -201,6 +201,27 @@ describe('custom roles, end to end', { skip: hasDatabase ? false : 'no Postgres 
     await assertRefused(viewer, other, 'assigned at a different repository')
   })
 
+  it('a grant written with the id the members list returns lets that member through', async () => {
+    // The path a customer actually has. Every case above takes the id from the
+    // harness, which inserted the row; an organization has only the routes, and
+    // until the members list returned user_id no route it could call answered
+    // the id a grant names. So every case here passed while nobody outside a
+    // database console could write their first grant.
+    const listed = await callProcedure(h, owner, 'members.list', 'query', {})
+    assert.equal(listed.status, 200, JSON.stringify(listed.body))
+    const rows = (listed.body as { result: { data: { members: { role: string; user_id?: unknown }[] } } })
+      .result.data.members
+    const viewers = rows.filter((m) => m.role === 'viewer')
+    assert.equal(viewers.length, 1, JSON.stringify(rows))
+    const id = viewers[0]!.user_id
+    assert.equal(typeof id, 'string', `the members list gave no user_id to grant: ${JSON.stringify(viewers[0])}`)
+
+    await assertRefused(viewer, org.repository, 'before the grant')
+    const assigned = await put(owner, policy([deployer], [onRepository(id as string, org.repository)]))
+    assert.equal(assigned.status, 200, JSON.stringify(assigned.body))
+    await assertAllowed(viewer, org.repository, 'granted by the id the members list returned')
+  })
+
   it('a grant at a repository group covers the group and nothing else, and an organization grant covers all', async () => {
     const grouped = await put(
       owner,
