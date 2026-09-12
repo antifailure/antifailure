@@ -623,10 +623,10 @@ them and routes to them instead.
 ` + "`" + "`" + "`" + `yaml
     - host: "s3.*.amazonaws.com"
       mode: emulate
-      emulator: localstack
+      emulator: aws
     - host: "*.s3.*.amazonaws.com"
       mode: emulate
-      emulator: localstack
+      emulator: aws
       note: "the bucket is in the hostname, so this is a second rule"
 ` + "`" + "`" + "`" + `
 
@@ -659,8 +659,8 @@ The destination is rewritten. The request is not.
 The ` + "`" + `Host` + "`" + ` header keeps the name your application asked for. Virtual hosted
 addressing puts the S3 bucket in the hostname, so
 ` + "`" + `mybucket.s3.us-east-1.amazonaws.com` + "`" + ` **is** the request, and an emulator told
-the host is ` + "`" + `af-emu-localstack:4566` + "`" + ` has been told the bucket is called
-` + "`" + `af-emu` + "`" + `. LocalStack, Azurite and fake-gcs-server all read it from the header.
+the host is ` + "`" + `af-emu-aws-<environment>:4566` + "`" + ` has been told a different
+request. LocalStack, Azurite and fake-gcs-server all read it from the header.
 
 The ` + "`" + `Authorization` + "`" + ` header is forwarded untouched. ` + "`" + `sandbox` + "`" + ` replaces a
 credential because the request leaves the environment and a real provider is on
@@ -5950,7 +5950,7 @@ is where it gets published.
 | ` + "`" + `billing` + "`" + ` | Subscriptions, invoices and the plan an organization is on. | Nothing changes, because the capability is not built yet. |
 | ` + "`" + `cloud_database` + "`" + ` | Managed cloud database providers, the ones that need an organization behind them rather than a developer's own card. | Withheld. ` + "`" + `cloudgate/cloudgate.go:gatedDatabase.Branch` + "`" + ` asks the license, and the feature is off when the answer is no. |
 | ` + "`" + `cloud_runtime` + "`" + ` | Managed cloud runtime providers, on the same rule as the databases. | Withheld. ` + "`" + `cloudgate/cloudgate.go:gatedRuntime.Up` + "`" + ` asks the license, and the feature is off when the answer is no. |
-| ` + "`" + `compliance_packs` + "`" + ` | SOC 2 and ISO 27001 evidence gathered from the control plane's own records. | Withheld. ` + "`" + `compliance/command.go:Command` + "`" + ` asks the license, and the feature is off when the answer is no. |
+| ` + "`" + `compliance_packs` + "`" + ` | SOC 2 and HIPAA evidence gathered from the control plane's own records. | Withheld. ` + "`" + `compliance/command.go:Command` + "`" + ` asks the license, and the feature is off when the answer is no. |
 | ` + "`" + `enterprise_dashboard` + "`" + ` | The console: environments, masking, egress, audit and workloads. | Nothing changes, because the capability is not built yet. |
 | ` + "`" + `enterprise_secrets` + "`" + ` | Declared variables resolved from Vault or a cloud secret manager. | Withheld. ` + "`" + `secrets/source.go:Source.Available` + "`" + ` asks the license, and the feature is off when the answer is no. |
 | ` + "`" + `multi_runtime` + "`" + ` | Placing an environment across several runtimes at once, by requirement and by tag. | Withheld. ` + "`" + `engine/internal/env/env.go:Orchestrator.placement` + "`" + ` asks the license, and the feature is off when the answer is no. |
@@ -7832,6 +7832,196 @@ piece, and the page opens by saying what still works without it, which is all
 of it. Read that one when you want environments that outlive a workflow run, a
 shared address for them, or a record across repositories.
 `,
+	"guides/aws.md": `---
+title: AWS
+description: The AWS surface an environment will answer for itself, the surface it refuses, and how much of it is built.
+sidebar:
+  order: 25
+---
+
+An environment answers AWS calls itself, with **no endpoint override in the
+application**. Every name resolves to the sidecar, the sidecar terminates TLS
+with the certificate authority the environment already trusts, and it answers
+for ` + "`" + `s3.amazonaws.com` + "`" + ` itself. The code that runs is the code that ships: no
+` + "`" + `AWS_ENDPOINT_URL` + "`" + `, no client constructed differently in tests, no branch on an
+environment variable. Select the emulator in the manifest's egress rules.
+
+## Select the AWS emulator
+
+` + "`" + "`" + "`" + `yaml
+egress:
+  default: block
+  rules:
+    - host: s3.amazonaws.com
+      mode: emulate
+      emulator: aws
+    - host: '*.s3.amazonaws.com'
+      mode: emulate
+      emulator: aws
+` + "`" + "`" + "`" + `
+
+Add rules for the covered hosts your application uses. The Docker runtime
+starts the registered emulator on the contained network and the sidecar routes
+matching requests to it. No live AWS account is needed for this emulator.
+
+What exists: ` + "`" + `engine/pkg/emulator` + "`" + ` holds the declaration, with the hosts, the
+pinned digest and the licence; a build registers it into the extension registry
+at startup, which is the only place the engine ever resolves an emulator from;
+` + "`" + `THIRD_PARTY_NOTICES.md` + "`" + ` is generated from that same declaration; and
+` + "`" + `tools/emulatorcheck` + "`" + ` drives the AWS SDK for Go and the AWS SDK for JavaScript
+at the pinned image on every run of CI, with zero endpoint overrides, which is
+what makes the numbers on this page measurements rather than claims.
+
+The SDK suite uses a focused routing fixture. Separate Docker runtime tests
+prove unchanged-application routing, containment and teardown through the real
+runtime. Neither suite establishes equivalence with every live AWS API.
+
+The emulator behind it is [LocalStack](https://github.com/localstack/localstack).
+Antifailure does not write emulators. S3 alone has a decade of edge cases in it,
+a hand written replacement would be worse on day one and probably for two years,
+and nobody buys this product because its S3 emulator is good. What is worth
+building is the part people hate about using an emulator, which is changing the
+application to reach it.
+
+## The surface
+
+**This table is the surface.** An AWS host that is not in it is not routed to
+the emulator: it falls through to the environment's egress policy, whose default
+is ` + "`" + `block` + "`" + `, and it is refused. That is deliberate. A silent wrong answer from an
+emulator is worse than a refusal, because the wrong answer will be trusted.
+
+| Service | Hosts answered | Proved by |
+| --- | --- | --- |
+| Amazon S3 | ` + "`" + `s3.amazonaws.com` + "`" + `, ` + "`" + `s3.*.amazonaws.com` + "`" + `, ` + "`" + `*.s3.amazonaws.com` + "`" + `, ` + "`" + `*.s3.*.amazonaws.com` + "`" + ` | CreateBucket, PutObject and GetObject, in both addressing styles |
+| Amazon SQS | ` + "`" + `sqs.*.amazonaws.com` + "`" + ` | CreateQueue, SendMessage and ReceiveMessage |
+| Amazon SNS | ` + "`" + `sns.*.amazonaws.com` + "`" + ` | CreateTopic and Publish |
+| Amazon DynamoDB | ` + "`" + `dynamodb.*.amazonaws.com` + "`" + `, ` + "`" + `streams.dynamodb.*.amazonaws.com` + "`" + ` | CreateTable, PutItem and GetItem |
+| Amazon Kinesis | ` + "`" + `kinesis.*.amazonaws.com` + "`" + ` | CreateStream and PutRecord |
+| Amazon EventBridge | ` + "`" + `events.*.amazonaws.com` + "`" + ` | PutRule and PutEvents |
+| AWS Secrets Manager | ` + "`" + `secretsmanager.*.amazonaws.com` + "`" + ` | CreateSecret and GetSecretValue |
+| AWS Systems Manager Parameter Store | ` + "`" + `ssm.*.amazonaws.com` + "`" + ` | PutParameter and GetParameter |
+| AWS STS | ` + "`" + `sts.amazonaws.com` + "`" + `, ` + "`" + `sts.*.amazonaws.com` + "`" + ` | GetCallerIdentity and AssumeRole |
+
+A star stands for one whole label, so ` + "`" + `sqs.*.amazonaws.com` + "`" + ` is every region and
+` + "`" + `*.s3.*.amazonaws.com` + "`" + ` is a virtual hosted bucket in every region. The leading
+star covers one label or more, which is what makes a bucket whose name contains
+a dot reachable.
+
+The "proved by" column is not decoration. Each of those calls is made by the
+vendor's own SDK against a running emulator in this repository's own test suite.
+A service listed with nothing proving it is a claim, and a claim in a table
+somebody trusts is the failure this table exists to avoid.
+
+### STS is in the surface on purpose
+
+Most AWS SDKs resolve credentials before the first real call, and several
+credential chains call ` + "`" + `sts.amazonaws.com` + "`" + ` to do it. An emulated surface without
+STS fails at startup, with an error naming the credential chain rather than the
+service anybody was trying to reach, and the person reading it goes looking at
+S3.
+
+## What is outside it, and why
+
+| Not answered | Why |
+| --- | --- |
+| AWS Lambda, ECS, EKS, Batch and Step Functions | LocalStack runs these by starting further containers through the Docker socket. An environment does not hand a container the Docker socket, so this is refused rather than half answered. |
+| Amazon RDS, Aurora, ElastiCache and OpenSearch | A datastore is not emulated. Postgres is branched from a golden, and a second store is declared in the manifest with a stance. An emulator with an empty schema in it is a worse answer than either. |
+| Amazon SES and SESv2 | Mail is captured into the environment's [inbox](/docs/guides/inbox), where an agent can read it and no real address receives anything. An emulator would swallow it instead. |
+| Amazon API Gateway, CloudFormation, IAM, CloudWatch and everything else AWS runs | Outside the surface, and refused by the egress policy rather than answered. |
+| S3 dualstack, transfer acceleration and S3 Express One Zone | Further spellings of the S3 endpoint that resolve under different names. They reach nothing, and the refusal says no rule matches rather than naming S3. |
+
+### Where the refusal actually happens
+
+The refusal is in the ROUTING, and it is worth being precise about that rather
+than claiming a second wall that does not exist.
+
+The container is started with ` + "`" + `SERVICES` + "`" + ` listing the nine and
+` + "`" + `STRICT_SERVICE_LOADING` + "`" + ` set. Measured against the pinned digest on 2026-09-08,
+that leaves 23 of the 35 services LocalStack knows about reporting ` + "`" + `disabled` + "`" + `
+and twelve reporting ` + "`" + `available` + "`" + `: the nine above, DynamoDB Streams which the
+surface routes, and KMS and Lambda, which load because services in the list
+depend on them. A GET to ` + "`" + `/2015-03-31/functions` + "`" + ` with a Lambda ` + "`" + `Host` + "`" + ` header is
+then answered ` + "`" + `200 {"Functions": []}` + "`" + ` by the container.
+
+That is exactly the silent wrong answer a declared surface exists to prevent,
+and what prevents it is that ` + "`" + `lambda.*.amazonaws.com` + "`" + ` is not a host any covered
+service claims. Nothing routes the request to the emulator, so the environment's
+egress policy decides it, and the default is ` + "`" + `block` + "`" + `. The container allowlist is
+a smaller attack surface and a shorter start, not the refusal.
+
+## How the application reaches it, which is DNS and not a proxy variable
+
+**Zero endpoint overrides is achieved by DNS interception, not by proxy
+configuration.** It is worth reading that sentence twice if you were planning
+around the proxy variables, because one of the two SDKs below ignores them
+completely.
+
+An environment reaches the sidecar two ways. The proxy variables are the weaker
+one: a library is free to ignore them, and the AWS SDK for JavaScript ignores
+them entirely, so ` + "`" + `HTTPS_PROXY` + "`" + ` does nothing for a Node application. The one
+that always holds is the network. Every external name resolves to the sidecar,
+the sidecar terminates TLS with a certificate authority the environment already
+trusts, and a client that reads no variable at all still arrives there. A
+service that somehow bypassed both has nowhere to send the packet, because the
+inner network has no route out.
+
+The suite that proves this drives both paths on purpose. The AWS SDK for Go is
+driven through the proxy variables, and the AWS SDK for JavaScript is driven
+through DNS, on an internal Docker network with a router answering on 443 and
+one name mapped per hostname. Neither application names an endpoint.
+
+## What the sidecar rewrites, and what it does not
+
+**The destination is rewritten. The ` + "`" + `Host` + "`" + ` header and the ` + "`" + `Authorization` + "`" + ` header
+are preserved.** Both of those are facts about the protocols rather than
+preferences:
+
+- Virtual hosted S3 addressing carries the bucket name in the ` + "`" + `Host` + "`" + ` header, and
+  that is where LocalStack reads it from. Rewriting ` + "`" + `Host` + "`" + ` destroys the bucket
+  name and breaks the case this guide is loudest about.
+- SigV4 signs the ` + "`" + `Host` + "`" + ` header. Rewriting ` + "`" + `Authorization` + "`" + ` without re-signing
+  produces a signature that disagrees with its own request, which is fragile
+  against any emulator that parses the key id.
+
+The credential cannot escape regardless of what the header holds, and that is a
+property of the network rather than a promise: the emulator is attached to the
+environment's inner network only, which Docker creates with ` + "`" + `internal` + "`" + ` set, so
+it has no route out. The sidecar refuses a request signed with a key that
+[livekey](/docs/concepts/egress) recognises as a live one, so a real ` + "`" + `AKIA` + "`" + ` key does
+not reach the emulator either.
+
+## The LocalStack image, and a fact worth reading before you plan around it
+
+**LocalStack's Community edition was archived in March 2026.** The project moved
+to a single "LocalStack for AWS" image which requires an auth token, and the
+final community build is published as the ` + "`" + `community-archive` + "`" + ` tag. The image
+this build starts is that final community build, pinned by digest:
+
+` + "`" + "`" + "`" + `
+localstack/localstack@sha256:6b6172cfceb04b4fbc35097a55f717c365a35fafa572be49f7341771cf9023ed
+` + "`" + "`" + "`" + `
+
+It is pinned by digest rather than by tag because an emulator is the thing
+answering for production's API, and a tag that moves changes what an environment
+was tested against with nothing in this repository changing. A tag is refused by
+the registry's validation.
+
+What that means in practice:
+
+- Running the suite needs **no LocalStack account and no token**. The archived
+  community image starts offline and answers for the nine services above.
+- The archived image does not gain new AWS behaviour. When AWS changes an API in
+  a way the archive predates, this surface is what it is, and the gap register
+  is where that is recorded rather than discovered.
+- An organisation with a LocalStack licence can point the environment at the
+  supported image instead, by registering an emulator named ` + "`" + `aws` + "`" + ` from a build
+  of their own through ` + "`" + `extension.AddEmulator` + "`" + `. The registry refuses two
+  emulators under one name, so that is a replacement rather than a shadow.
+
+LocalStack is licensed under the Apache License 2.0 and is recorded in
+` + "`" + `THIRD_PARTY_NOTICES.md` + "`" + `, which is generated from the same declaration the
+engine starts the container from.
+`,
 	"guides/azure-container-apps.md": `---
 title: Why there is no Azure Container Apps runtime
 description: What a containment claim on Container Apps would have to say, and why Microsoft's own documentation refuses it.
@@ -7839,7 +8029,8 @@ sidebar:
   order: 22
 ---
 
-Antifailure runs on AKS. It does not run on raw Azure Container Apps, and
+On Azure, the runtime to use is ` + "`" + `kubernetes` + "`" + ` on AKS. Antifailure does not run
+on raw Azure Container Apps, and
 ` + "`" + `runtime.provider: aca` + "`" + ` in a manifest exits with the reason rather than with a
 list of the runtimes that do exist.
 
@@ -7943,10 +8134,14 @@ the path. It does not mean Azure was seen enforcing it.
 
 ## What to use
 
-Use ` + "`" + `runtime.provider: kubernetes` + "`" + ` against AKS. It is the same containment
-argument as any other cluster, it is proved by a probe that runs before any
-application image starts, and AKS is where most organisations on Azure already
-run containers.
+Use ` + "`" + `runtime.provider: kubernetes` + "`" + ` against AKS. It makes the same containment
+argument there as on any other cluster: a probe tries to get out before any
+application image starts, and a cluster that does not enforce the policy is
+refused. What has not happened is a run on AKS. The Kubernetes runtime has been
+run against k3s and nowhere else, it is recorded as ` + "`" + `written` + "`" + ` rather than
+` + "`" + `proven` + "`" + `, and its own page says why, including the window after a pod starts
+that the probe does not close. AKS is the recommendation because it is where
+most organisations on Azure already run containers, not because it was measured.
 
 See [The Kubernetes runtime](/docs/guides/kubernetes-runtime).
 `,
@@ -13203,9 +13398,9 @@ database:
 | [` + "`" + `dblab` + "`" + `](/docs/providers/dblab) | A Database Lab Engine you run | Flat, because clones are copy on write | A Database Lab Engine, ZFS, and its verification token |
 | [` + "`" + `supabase` + "`" + `](/docs/providers/supabase) | A Supabase branch, which is a whole separate project | Grows with the database, because a Supabase branch is created empty | A Supabase project on a paid plan and an access token |
 | [` + "`" + `pgurl` + "`" + `](/docs/providers/pgurl) | A database on any Postgres server you name | Grows with the database, because a branch is a server side file copy | A reachable Postgres and a role that may create databases |
-| [` + "`" + `aurora` + "`" + `](/docs/providers/aurora) | A clone of an Amazon Aurora PostgreSQL cluster | Flat, because a clone shares the source's storage volume | An Aurora PostgreSQL cluster, an IAM role, and the enterprise edition |
-| [` + "`" + `cloudsql` + "`" + `](/docs/providers/cloudsql) | A fast clone of a Google Cloud SQL for PostgreSQL instance | Flat, because a fast clone is created from an Instant Snapshot. Cloud SQL's other clone workflow is not flat, and the provider is built so it cannot ask for that one | A Cloud SQL instance, a service account, and the enterprise edition |
-| [` + "`" + `azurepg` + "`" + `](/docs/providers/azurepg) | A point in time restore of an Azure Database for PostgreSQL Flexible Server | Grows with the database. The snapshot half is flat and the log replay half is not, so this provider does not claim copy on write | A flexible server, a service principal, and the enterprise edition |
+| [` + "`" + `aurora` + "`" + `](/docs/providers/aurora) | A clone of an Amazon Aurora PostgreSQL cluster | Expected to be flat, because a clone shares the source's storage volume. Never timed on AWS | An Aurora PostgreSQL cluster, an IAM role, and the enterprise edition |
+| [` + "`" + `cloudsql` + "`" + `](/docs/providers/cloudsql) | A fast clone of a Google Cloud SQL for PostgreSQL instance | Expected to be flat, because a fast clone is created from an Instant Snapshot. Cloud SQL's other clone workflow is not flat, and the provider is built so it cannot ask for that one. Never timed on Google Cloud | A Cloud SQL instance, a service account, and the enterprise edition |
+| [` + "`" + `azurepg` + "`" + `](/docs/providers/azurepg) | A point in time restore of an Azure Database for PostgreSQL Flexible Server | Expected to grow with the database. The snapshot half is flat and the log replay half is not, so this provider does not claim copy on write. Never timed on Azure | A flexible server, a service principal, and the enterprise edition |
 
 ` + "`" + `docker` + "`" + ` is the default and needs nothing. Its branch time is flat, measured
 rather than assumed: the conformance suite branches an 8 MiB golden and a 512 MiB
@@ -13236,21 +13431,54 @@ and the golden has to be copied in, but what you get back is a real Supabase
 project with the Auth, Storage and Realtime services your application is
 calling, which neither of the others can offer. A branch is billed by the hour.
 
-` + "`" + `aurora` + "`" + ` is the flat one for a production that already runs on Aurora
-PostgreSQL, and it is in the enterprise edition, because it needs an IAM role
-somebody in an organization has to grant. A branch is an Aurora clone, so
-branching moves no data whatever the size. What it does not give you is
-seconds: a clone has no instances, a preview environment needs one, and
-provisioning a writer takes minutes. That number is flat in the size too, and
-the provider page says so before you buy rather than after.
+` + "`" + `aurora` + "`" + ` is the one for a production that already runs on Aurora PostgreSQL,
+and it is in the enterprise edition, because it needs an IAM role somebody in
+an organization has to grant. A branch is an Aurora clone. What has been
+measured is the provider's half of that: the requests a branch makes are
+identical at a one gigabyte volume and at a one terabyte one, and the provider
+reads and writes no database content while making them. That is what flat
+branch time needs from the code. What it needs from AWS is a clone that is
+fast whatever the size, and a writer instance for the preview environment,
+because a clone has none. Neither has been timed. Nobody who wrote this
+provider has an Aurora account, and its benchmark prints every wall clock cell
+as unmeasured rather than guessing one, so the table's "flat" is an
+expectation, and the [provider page](/docs/providers/aurora) says the same.
 
-` + "`" + `cloudsql` + "`" + ` is the flat one for a production on Google Cloud, and it is in the
+### What is proved, and what is not
+
+The table mixes providers that have answered their real service with one that
+has not, so here is the split, in the terms the
+[golden stores](/docs/providers/stores) page uses:
+
+- **` + "`" + `docker` + "`" + ` and ` + "`" + `pgurl` + "`" + ` are proved on every pull request**, by the shared
+  conformance suite against a real Docker daemon and a real Postgres server.
+  For ` + "`" + `pgurl` + "`" + ` the real server is the whole of the provider's service, so there
+  is nothing a fake would be standing in for.
+- **` + "`" + `neon` + "`" + `, ` + "`" + `supabase` + "`" + ` and ` + "`" + `dblab` + "`" + ` are proved against the real service, by
+  hand.** Each needs an account or a Database Lab Engine that CI does not have,
+  so the runs that passed were made by a person rather than by a pull request.
+- **` + "`" + `aurora` + "`" + ` is proved against a fake, and not against AWS.** The same suite
+  runs every line of the provider on every pull request, with a fake RDS
+  control plane in front of a real Postgres, so the claims about bytes are
+  checked against bytes. What it cannot show is that AWS accepts those
+  requests, or how long a clone and its writer take, because no test in this
+  repository may need a cloud account.
+- **` + "`" + `cloudsql` + "`" + ` and ` + "`" + `azurepg` + "`" + ` are proved against fakes, and not against Google
+  or Azure.** The same arrangement as ` + "`" + `aurora` + "`" + `: every line of each provider
+  runs on every pull request, against a fake Cloud SQL Admin API and a fake
+  Azure Resource Manager, each with a real Postgres behind it. Neither has met
+  the real service, and no connection has met a certificate Google or Microsoft
+  issued.
+
+` + "`" + `cloudsql` + "`" + ` is the one for a production on Google Cloud, and it is in the
 enterprise edition for the same reason ` + "`" + `aurora` + "`" + ` is. A branch is a Cloud SQL
-FAST clone, created from an Instant Snapshot, so it moves no data whatever the
-size. The thing to know before choosing it is that Cloud SQL also has a slower
-clone whose duration scales with the database, it picks between the two from
-the shape of the request rather than from anything you ask for, and it tells you
-nothing about which you got. The provider is built so it cannot ask for the slow
+FAST clone, created from an Instant Snapshot, which Google documents as moving
+no data whatever the size. That is Google's claim rather than a measurement:
+nobody who wrote this provider has run a clone on Google Cloud, so the table's
+"flat" is an expectation. The thing to know before choosing it is that Cloud
+SQL also has a slower clone whose duration scales with the database, it picks
+between the two from the shape of the request rather than from anything you ask
+for, and it tells you nothing about which you got. The provider is built so it cannot ask for the slow
 one, and its page explains the three conditions that would have selected it.
 
 ` + "`" + `azurepg` + "`" + ` is the one for a production on Azure, and it is the only provider here
@@ -13258,7 +13486,9 @@ that does NOT claim flat branch time. A branch is a point in time restore, whose
 snapshot half is flat in the size of the data and whose log replay half is not,
 so the honest number is one that grows. Microsoft gives the overall recovery as
 a few minutes up to a few hours. Its page says why claiming otherwise would be
-quoting the fast half of that.
+quoting the fast half of that. No restore this provider requested has been
+timed on Azure either, so the growth is Microsoft's description rather than a
+number anybody here measured.
 
 A provider named in the manifest and neither built into this binary nor
 registered with it is refused at startup rather than substituted. Falling back
@@ -18511,7 +18741,7 @@ so the measurement is not silently half missing; that the recorder bundle, the
 largest and most blockable request the library makes, arrives rather than failing
 while ingestion looks healthy; and that the reader's address is dropped in
 passing. It does not buy the sentence "no third party sees this", and the
-published subprocessor list says so.
+privacy page says so.
 
 ### What this process reports about itself
 
@@ -22653,7 +22883,7 @@ Where the environment's Postgres comes from, and how the production copy is made
 | ` + "`" + `max_branches` + "`" + ` | integer | no | The plan's concurrent branch limit, where the provider has one it cannot read from its own API. Reaching it fails with AF-DB-006 rather than hanging. Minimum 1. |
 | ` + "`" + `migrations` + "`" + ` | [Migrations](#migrations) | no | Where the project's own SQL migrations live, for a project whose migrate command is its own script rather than a tool the rehearsal recognises. |
 | ` + "`" + `project` + "`" + ` | string | no | The account-side project a hosted provider creates branches in, such as a Neon project. Not a secret, which is why it lives here and the key that reaches it does not. |
-| ` + "`" + `provider` + "`" + ` | string | no | Which provider creates branches. docker is local and needs nothing; neon, supabase, and dblab talk to a service; pgurl is any reachable Postgres, which is where the goldens and the branches are kept as databases on a server you name. aurora clones an Amazon Aurora PostgreSQL cluster and is in the enterprise edition, so a community build names it here and refuses it when a manifest selects it. cloudsql fast clones a Google Cloud SQL for PostgreSQL instance and azurepg restores an Azure Database for PostgreSQL Flexible Server to a point in time; both are enterprise for the same reason. azurepg is the one provider here that does not branch in time flat in the size of the database, because a restore replays write ahead logs after the snapshot and that half is not flat. Defaults to ` + "`" + `docker` + "`" + `. |
+| ` + "`" + `provider` + "`" + ` | string | no | Which provider creates branches. docker is local and needs nothing; neon, supabase, and dblab talk to a service; pgurl is any reachable Postgres, which is where the goldens and the branches are kept as databases on a server you name. aurora clones an Amazon Aurora PostgreSQL cluster and is in the enterprise edition, so a community build names it here and refuses it when a manifest selects it. ` + "`" + `cloudsql` + "`" + ` fast clones a Google Cloud SQL for PostgreSQL instance and ` + "`" + `azurepg` + "`" + ` restores an Azure Database for PostgreSQL Flexible Server to a point in time; both are enterprise for the same reason. ` + "`" + `azurepg` + "`" + ` is the one provider here that does not branch in time flat in the size of the database, because a restore replays write ahead logs after the snapshot and that half is not flat. Defaults to ` + "`" + `docker` + "`" + `. |
 | ` + "`" + `seed` + "`" + ` | string | no | Command that fills the golden with data, for a project with no production database yet. It runs once per refresh with DATABASE_URL set, and every branch is a copy of what it made, so the cost is paid once rather than per environment. Mutually exclusive with source_url_env. Max length 1024. |
 | ` + "`" + `source_url_env` + "`" + ` | string | no | Name of the environment variable holding the read only connection string of the production database. The value is read once, during a golden refresh, on the operator's machine or runner, and never stored. Max length 128, matches ` + "`" + `^[A-Za-z_][A-Za-z0-9_]*$` + "`" + `. |
 | ` + "`" + `subset` + "`" + ` | [Subset](#subset) | no | Take a production shaped slice rather than the whole database. |
@@ -23754,8 +23984,8 @@ cal.com's document on cal.com's origin, not a client in this repository, and it
 is written down because a reader's browser opens the connection either way.
 
 **The marketing website at antifailure.dev does send, to PostHog Cloud US, for
-product analytics and session replay.** It is on the subprocessor list under
-PostHog, Inc. with the categories written out: page addresses and titles, the
+product analytics and session replay.** The privacy page names PostHog, Inc.
+as the processor and writes the categories out: page addresses and titles, the
 referrer, scroll depth, autocaptured clicks and form submissions, browser,
 operating system, device type, screen size, language and timezone, and a session
 recording. The raw user agent string is stripped before anything is sent, which
