@@ -164,6 +164,7 @@ jobs:
           if [ -z "$request_token" ] || [ -z "$request_url" ]; then
             echo "This job was granted no workflow identity, so it cannot introduce itself."
             echo "On a pull request from a fork GitHub withholds one, which is deliberate."
+            echo "outcome=no-identity" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -178,24 +179,64 @@ jobs:
             jq -r '.value // empty' || true)
           if [ -z "$identity" ]; then
             echo "GitHub would not mint a workflow identity for this job."
+            echo "outcome=no-identity" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          token=$(curl -sS -X POST "${AF_CONTROL_PLANE}/v1/pr/callback-token" \
+          # THE STATUS AND THE REASON, NOT JUST WHETHER A TOKEN CAME BACK.
+          #
+          # This used to pipe the answer straight into `jq -r '.token'` and keep
+          # only whether one arrived. Every other answer the control plane can
+          # give collapsed into the same empty string: a repository nobody
+          # connected, a suspended organization, a commit with no check on it,
+          # and a re-run of this workflow run, which the control plane refused
+          # because the generation for the commit had already concluded. The
+          # report step below is guarded on that empty token, so it skipped, and
+          # the job went green having verified nothing. That is what every one of
+          # the six re-runs done on this repository on 2026-09-04 produced, on
+          # pull requests 224 through 229, and four of those six were done in
+          # order to confirm a fix.
+          #
+          # The refusal itself is gone from the control plane, which now treats a
+          # re-run as the attempt it is. This is the half that makes the NEXT
+          # silence visible, whatever it turns out to be.
+          #
+          # The answer lands in RUNNER_TEMP and not in the workspace, for the
+          # reason the mask below gives one size larger: the credential is in
+          # that body, the workspace is what the artifact step uploads, and a
+          # published artifact is a published credential. `|| true` keeps a curl
+          # that could not connect from ending the step, and curl writes `000` as
+          # the code in that case, which is why the code is read at all.
+          answer="${RUNNER_TEMP:-.}/af-claim.json"
+          code=$(curl -sS -o "$answer" -w '%{http_code}' \
+            -X POST "${AF_CONTROL_PLANE}/v1/pr/callback-token" \
             -H "Authorization: Bearer ${identity}" \
             -H 'content-type: application/json' \
-            -d "{\"head_sha\":\"${HEAD_SHA}\"}" |
-            jq -r '.token // empty' || true)
-          if [ -z "$token" ]; then
-            echo "The control plane issued no callback credential for ${HEAD_SHA}."
-            echo "That is not a failure of this run: it reports through the comment below."
+            -d "{\"head_sha\":\"${HEAD_SHA}\"}" || true)
+          token=$(jq -r '.token // empty' "$answer" 2>/dev/null || true)
+          if [ -n "$token" ]; then
+            # Masked so that no later step can print it into a public log, and
+            # written to the step output rather than to a file the artifact
+            # upload would then publish.
+            echo "::add-mask::$token"
+            echo "token=$token" >> "$GITHUB_OUTPUT"
+            echo "outcome=claimed" >> "$GITHUB_OUTPUT"
+            echo "The control plane is expecting a report from this run."
             exit 0
           fi
-          # Masked so that no later step can print it into a public log, and
-          # written to the step output rather than to a file the artifact
-          # upload would then publish.
-          echo "::add-mask::$token"
-          echo "token=$token" >> "$GITHUB_OUTPUT"
-          echo "The control plane is expecting a report from this run."
+
+          # Flattened to one line, deliberately. A step output carrying a newline
+          # needs a delimiter, and a value that could contain the delimiter is a
+          # value that can write its own lines into $GITHUB_OUTPUT. The reason is
+          # one sentence from the control plane and one line is all it needs.
+          reason=$(jq -r '.error // empty' "$answer" 2>/dev/null | tr '\n\r' '  ' || true)
+          if [ -z "$reason" ]; then
+            reason="the control plane answered HTTP ${code} and gave no reason"
+          fi
+          echo "outcome=refused" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+          echo "The control plane issued no callback credential for ${HEAD_SHA}."
+          echo "HTTP ${code}: ${reason}"
+          echo "This run therefore has no way to report a verdict, which the last step reads."
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -379,12 +420,15 @@ jobs:
       # reading, and because a run that fails is exactly the run whose check
       # must not stay amber.
       #
-      # Skipped without a credential, which is the fork case and the case where
-      # the control plane refused the claim, and in both of those the comment
-      # below is the whole answer. It is NOT skipped when the report is
-      # missing: a run that produced no report still has to say so, because a
-      # check that hears nothing is the state this whole change is about.
+      # Skipped without a credential, because there is nothing to present. The
+      # two ways that happens are no longer treated alike: a fork, where GitHub
+      # withholds the identity on purpose and the comment below is the whole
+      # answer, and a refusal, which the last step of this job turns into a red
+      # job. It is NOT skipped when the report is missing: a run that produced
+      # no report still has to say so, because a check that hears nothing is the
+      # state this whole change is about.
       - name: Tell the control plane what this commit did
+        id: report
         if: always() && steps.claim.outputs.token != ''
         env:
           TOKEN: ${{ steps.claim.outputs.token }}
@@ -483,6 +527,92 @@ jobs:
           # three paths never read as a problem.
           include-hidden-files: true
           if-no-files-found: warn
+
+      # THE LAST WORD, AND THE ONE THIS JOB DID NOT HAVE.
+      #
+      # Everything above can succeed while nothing is verified. `af ci` exits
+      # zero on a run that reached no agent, the harness above turns that into a
+      # report, and the report reaches the check only if the step before this one
+      # ran. That step is guarded on a credential, and until this step existed a
+      # missing credential was indistinguishable from a fork: the job went green,
+      # the check kept whatever the previous attempt had said, and nobody learned
+      # that this run had checked nothing.
+      #
+      # It is exactly what re-running this workflow did on all six of the pull
+      # requests it was tried on: 224 through 229. Every one came back
+      # `completed/success` with this step's predecessor skipped. Run 33927593837
+      # on c78bc27 is the one read line by line: it was re-run, did the whole
+      # twenty minutes, was refused a credential because the generation for that
+      # commit had already concluded, printed one line about it, and reported
+      #
+      #   dogfood, against the control plane: success
+      #     Tell the control plane what this commit did: SKIPPED
+      #
+      # while the check on the commit still read "Nothing was verified" about the
+      # attempt that had been replaced. The control plane now reopens a concluded
+      # generation for a re-run, so that refusal is gone; this step is what makes
+      # the next one visible, whatever it turns out to be. A check that cannot
+      # say no is worse than no check.
+      #
+      # THE ONE CASE THAT STAYS GREEN IS THE ONE NOBODY CAN FIX. GitHub withholds
+      # the workflow identity from a fork's pull request on purpose, so an outside
+      # contributor's run cannot report and must not be failed for it; the comment
+      # job says what happened instead. Everything else, a control plane that is
+      # down included, is a run of this repository's own product that produced no
+      # verdict where one was expected, and this repository would rather see that
+      # than not. The customer-facing action.yml draws that last line differently
+      # and says why: a customer's build is not the place to notice that somebody
+      # else's service is unreachable.
+      #
+      # `!cancelled()`, so a run stopped by a newer push is not also called a
+      # failure. The control plane hears that from GitHub as `cancelled` and says
+      # so itself.
+      - name: A run that reported nothing is not a pass
+        if: always() && !cancelled()
+        env:
+          OUTCOME: ${{ steps.claim.outputs.outcome }}
+          REASON: ${{ steps.claim.outputs.reason }}
+          REPORT: ${{ steps.report.outcome }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          # A pull request has a check waiting on it. The nightly schedule and a
+          # manual dispatch run against a commit with no pull request, where "no
+          # check is waiting on this commit" is the right answer and not a
+          # defect, so the refusal is printed and the job is left alone.
+          ON_A_PULL_REQUEST: ${{ github.event_name == 'pull_request' }}
+        run: |
+          set -euo pipefail
+          case "$OUTCOME" in
+            claimed)
+              if [ "$REPORT" != "success" ]; then
+                echo "::error::this run held a callback credential for ${HEAD_SHA} and the report" \
+                  "step came out '${REPORT}' rather than success, so the control plane was told" \
+                  "nothing and this job would otherwise be green having verified nothing"
+                exit 1
+              fi
+              echo "The control plane has this run's verdict on ${HEAD_SHA}."
+              ;;
+            no-identity)
+              echo "This job was granted no workflow identity, so it could not report and is not"
+              echo "failed for it. On a fork's pull request GitHub withholds one deliberately."
+              ;;
+            refused)
+              echo "The control plane issued no credential for ${HEAD_SHA}: ${REASON}"
+              if [ "$ON_A_PULL_REQUEST" != "true" ]; then
+                echo "Not a pull request, so there is no check waiting on this commit to report to."
+                exit 0
+              fi
+              echo "::error::this run checked ${HEAD_SHA} and could not report a verdict:" \
+                "${REASON}. The check on the commit therefore says nothing about this run, so" \
+                "this job is red rather than green and silent"
+              exit 1
+              ;;
+            *)
+              echo "::error::the step that introduces this run to the control plane recorded no" \
+                "outcome at all, so whether anything was reported about ${HEAD_SHA} is unknown." \
+                "Unknown is not a pass"
+              exit 1
+              ;;
+          esac
 
   comment:
     name: post the comment

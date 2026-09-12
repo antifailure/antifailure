@@ -149,6 +149,7 @@ runs:
         if [ -z "$request_token" ] || [ -z "$request_url" ]; then
           echo "This job was granted no workflow identity, so it cannot introduce itself."
           echo "On a pull request from a fork GitHub withholds one, which is deliberate."
+          echo "outcome=no-identity" >> "$GITHUB_OUTPUT"
           exit 0
         fi
         identity=$(curl -sS -H "Authorization: Bearer $request_token" \
@@ -156,20 +157,60 @@ runs:
           jq -r '.value // empty' || true)
         if [ -z "$identity" ]; then
           echo "GitHub would not mint a workflow identity for this job."
+          echo "outcome=no-identity" >> "$GITHUB_OUTPUT"
           exit 0
         fi
-        token=$(curl -sS -X POST "${AF_CONTROL_PLANE}/v1/pr/callback-token" \
+        # THE STATUS AND THE REASON, NOT JUST WHETHER A TOKEN CAME BACK.
+        #
+        # This read `.token` and kept only whether one arrived, so every answer
+        # the control plane can give collapsed into one empty string and one
+        # sentence: a repository nobody connected, an organization whose billing
+        # is stopped, a commit with no check waiting on it, a fork, and a re-run
+        # the control plane turned away. The step said the same thing and exited
+        # zero for all of them, and the publish step below is guarded on the
+        # empty token, so it skipped and this job was green having told the check
+        # on the commit nothing at all.
+        #
+        # The answer is kept in RUNNER_TEMP rather than the workspace, because
+        # the credential is in that body and the workspace is what an upload step
+        # publishes. `|| true` keeps a curl that could not connect from ending
+        # the step; it writes `000` as the code, which is why the code is read.
+        answer="${RUNNER_TEMP:-.}/af-claim.json"
+        code=$(curl -sS -o "$answer" -w '%{http_code}' \
+          -X POST "${AF_CONTROL_PLANE}/v1/pr/callback-token" \
           -H "Authorization: Bearer ${identity}" \
           -H 'content-type: application/json' \
-          -d "{\"head_sha\":\"${HEAD_SHA}\"}" |
-          jq -r '.token // empty' || true)
-        if [ -z "$token" ]; then
-          echo "The control plane issued no callback credential for ${HEAD_SHA}."
-          echo "This run reports through the comment below instead."
+          -d "{\"head_sha\":\"${HEAD_SHA}\"}" || true)
+        token=$(jq -r '.token // empty' "$answer" 2>/dev/null || true)
+        if [ -n "$token" ]; then
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+          echo "outcome=claimed" >> "$GITHUB_OUTPUT"
+          echo "The control plane is expecting a report from this run."
           exit 0
         fi
-        echo "::add-mask::$token"
-        echo "token=$token" >> "$GITHUB_OUTPUT"
+        # One line, because a step output carrying a newline needs a delimiter
+        # and a value that can carry the delimiter can write its own lines into
+        # $GITHUB_OUTPUT.
+        reason=$(jq -r '.error // empty' "$answer" 2>/dev/null | tr '\n\r' '  ' || true)
+        if [ -z "$reason" ]; then
+          reason="the control plane answered HTTP ${code} and gave no reason"
+        fi
+        # AN ANSWER AND AN ABSENCE OF ONE ARE DIFFERENT FACTS, and this workflow
+        # runs in somebody else's repository, so the difference decides what it
+        # is fair to do about it. A 4xx is the control plane saying no, with a
+        # sentence naming something in this repository or its account. Anything
+        # else, a 5xx or the `000` curl writes when it could not connect at all,
+        # is a service that did not answer, which nobody reading this build can
+        # fix. The last step of this action acts on that difference.
+        case "$code" in
+          4??) echo "outcome=refused" >> "$GITHUB_OUTPUT" ;;
+          *) echo "outcome=unreachable" >> "$GITHUB_OUTPUT" ;;
+        esac
+        echo "reason=$reason" >> "$GITHUB_OUTPUT"
+        echo "The control plane issued no callback credential for ${HEAD_SHA}."
+        echo "HTTP ${code}: ${reason}"
+        echo "This run therefore has no verdict to report, which the last step reads."
 
     # What this change touches, and which variables the manifest reads.
     #
@@ -286,11 +327,53 @@ runs:
               --rawfile markdown "$AF_REPORT" \
               --slurpfile report report.json \
               '{head_sha: $sha, markdown: $markdown, report: $report[0]}' > payload.json
-        curl -sS -X POST "${AF_CONTROL_PLANE}/v1/pr/report" \
+        # THE ANSWER IS READ, AND UNTIL IT WAS THIS STEP COULD NOT FAIL.
+        #
+        # `handled=true` was written whatever came back, and curl without -f
+        # exits zero on a 409. So a refused report produced a green step, a check
+        # on the commit that never heard this run's verdict, AND no comment
+        # either, because the fallback comment below is skipped when this step
+        # says it handled the report. A run whose verdict reached nobody looked
+        # exactly like one whose verdict landed.
+        #
+        # handled stays unset on anything but a 200, so the comment below carries
+        # the report the check did not get.
+        answer="${RUNNER_TEMP:-.}/af-report.json"
+        code=$(curl -sS -o "$answer" -w '%{http_code}' \
+          -X POST "${AF_CONTROL_PLANE}/v1/pr/report" \
           -H "Authorization: Bearer ${TOKEN}" \
           -H 'content-type: application/json' \
-          --data-binary @payload.json
-        echo "handled=true" >> "$GITHUB_OUTPUT"
+          --data-binary @payload.json || true)
+        cat "$answer" 2>/dev/null || true
+        echo
+        if [ "$code" = "200" ]; then
+          echo "handled=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        reason=$(jq -r '.error // empty' "$answer" 2>/dev/null | tr '\n\r' '  ' || true)
+        if [ -z "$reason" ]; then
+          reason="the control plane answered HTTP ${code} and gave no reason"
+        fi
+        # The same line as the claim step draws, for the same reason. A 4xx is
+        # the control plane refusing THIS run's verdict while a check waits for
+        # it, which is the failure this product exists to make visible, and this
+        # run is the only party that can see it. A 5xx or a connection that never
+        # opened is somebody else's outage, and a build in this repository is not
+        # the place to learn about it.
+        case "$code" in
+          4??)
+            echo "::error::this run checked ${HEAD_SHA} and the control plane refused its report:" \
+              "${reason}. The check on the commit therefore says nothing about this run, so this" \
+              "job is red rather than green and silent"
+            exit 1
+            ;;
+          *)
+            echo "::warning::this run could not deliver its report for ${HEAD_SHA}: ${reason}." \
+              "The check on the commit will say nothing came back. The report is on the pull" \
+              "request as a comment instead"
+            exit 0
+            ;;
+        esac
 
     - name: Keep the workload result
       if: always() && hashFiles('workload-result.json') != ''
@@ -326,3 +409,68 @@ runs:
           gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
             -F body=@"$AF_REPORT" > /dev/null
         fi
+
+    # WHAT THE CHECK ON THIS COMMIT WILL AND WILL NOT HEAR FROM THIS RUN.
+    #
+    # The claim step records which silence it hit and this is what reads it.
+    # Without a step reading it, the outcome it writes would be a value nothing
+    # consumes, and the whole defect here was a signal nothing consumed.
+    #
+    # This one only SAYS. The step that fails a build is the publish step above,
+    # and it fails on one thing: a 4xx to a report this run held a credential to
+    # send, which is a verdict the check was waiting for and did not get. Not
+    # failing here is deliberate and it is the difference between this file and
+    # .github/workflows/dogfood.yml, which runs this product against its own
+    # control plane and fails on every silence: two of the ways a claim comes
+    # back empty are things nobody reading a build in this repository can fix,
+    # GitHub withholding a fork's identity and a control plane that did not
+    # answer, and a run that was never issued a credential leaves the check
+    # honest anyway, saying nothing came back once its deadline passes.
+    - name: What the control plane knows about this run
+      if: always() && !cancelled() && inputs.control-plane != ''
+      shell: bash
+      env:
+        OUTCOME: ${{ steps.claim.outputs.outcome }}
+        REASON: ${{ steps.claim.outputs.reason }}
+        DELIVERED: ${{ steps.publish.outputs.handled }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        ON_A_PULL_REQUEST: ${{ github.event_name == 'pull_request' }}
+      run: |
+        set -euo pipefail
+        case "$OUTCOME" in
+          claimed)
+            if [ "$DELIVERED" = "true" ]; then
+              echo "The control plane has this run's verdict on ${HEAD_SHA}."
+              exit 0
+            fi
+            # Two innocent ways to get here and one that is not, and this step
+            # cannot tell them apart: a command other than `af ci`, which owes no
+            # verdict, a change the manifest says needs no environment, so the
+            # check never ran, or a report that was never produced. Said as a
+            # warning rather than guessed at, because whether a verdict was owed
+            # is the manifest's business and not this file's. The check on the
+            # commit says nothing came back either way, which is true.
+            echo "::warning::this run was issued a credential for ${HEAD_SHA} and delivered no" \
+              "report, so the check on the commit will say nothing came back. That is expected" \
+              "for a run that was not checking a change, and a defect for one that was"
+            ;;
+          no-identity)
+            echo "GitHub granted this job no workflow identity, so it could not introduce itself."
+            echo "On a pull request from a fork that is deliberate and nothing here is wrong."
+            ;;
+          refused)
+            echo "::warning::the control plane issued no credential for ${HEAD_SHA}: ${REASON}." \
+              "Nothing this run did will reach the check on the commit. Connect the repository," \
+              "or take the control-plane input out of this workflow if it should not report"
+            ;;
+          unreachable)
+            echo "::warning::the control plane could not be reached about ${HEAD_SHA}: ${REASON}." \
+              "This build is not failed for it. The check on the commit will say nothing came back"
+            ;;
+          *)
+            if [ "$ON_A_PULL_REQUEST" = "true" ]; then
+              echo "::warning::the step that introduces this run to the control plane recorded no" \
+                "outcome, so whether the check on ${HEAD_SHA} heard anything is unknown"
+            fi
+            ;;
+        esac

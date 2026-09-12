@@ -77,6 +77,13 @@ export interface CheckRunInput {
   name: string
   headSha: string
   status: 'queued' | 'in_progress' | 'completed'
+  /** This run's identity in THIS system, which GitHub stores and gives back on
+   *  the listing. It is what makes "the check run for this attempt" a question
+   *  that can be asked of GitHub, and a re-run needs it asked: a completed check
+   *  run cannot be moved back out of completed, so another attempt is another
+   *  check run, and adopting the previous attempt's would leave its conclusion
+   *  on the pull request while the new attempt ran. */
+  externalId?: string
   conclusion?: string
   detailsUrl?: string
   startedAt?: string
@@ -117,6 +124,11 @@ export interface RepositoryApi {
     repository: string,
     headSha: string,
     name: string,
+    /** Which attempt's run is wanted. A run of the right name whose external id
+     *  is something else belongs to an attempt that is over, so it is not
+     *  adopted and the caller creates one. Null asks for any run of the name,
+     *  which is what a caller with no attempt to name wants. */
+    externalId: string | null,
   ): Promise<number | null>
   createCheckRun(installationId: number, repository: string, input: CheckRunInput): Promise<number>
   updateCheckRun(
@@ -292,6 +304,7 @@ export class RealRepositoryApi implements RepositoryApi {
     repository: string,
     headSha: string,
     name: string,
+    externalId: string | null,
   ): Promise<number | null> {
     const res = await this.call(
       installationId,
@@ -312,8 +325,18 @@ export class RealRepositoryApi implements RepositoryApi {
       // One element at a time, skipping what does not decode. A single
       // malformed entry must not make this conclude there is no check run and
       // create a second one.
-      const row = item as { id?: unknown; name?: unknown }
-      if (typeof row.id === 'number' && row.name === name) return row.id
+      const row = item as { id?: unknown; name?: unknown; external_id?: unknown }
+      if (typeof row.id !== 'number' || row.name !== name) continue
+      // The listing's own default is `filter=latest`, so what comes back is the
+      // most recent run of each name, which is also the one GitHub shows and the
+      // one a required rule reads. When an attempt was named, only that
+      // attempt's run is this attempt's: a run left over from an attempt that
+      // has concluded is not adopted, because PATCHing it would either be
+      // refused or leave its conclusion standing. A run written before external
+      // ids existed here carries none and so is not adopted either, which costs
+      // one extra check run once, on a generation whose cached id was lost.
+      if (externalId !== null && row.external_id !== externalId) continue
+      return row.id
     }
     return null
   }
@@ -695,6 +718,7 @@ function checkBody(input: CheckRunInput): Record<string, unknown> {
     name: input.name,
     head_sha: input.headSha,
     status: input.status,
+    ...(input.externalId ? { external_id: input.externalId } : {}),
     ...(input.conclusion ? { conclusion: input.conclusion } : {}),
     ...(input.detailsUrl ? { details_url: input.detailsUrl } : {}),
     ...(input.startedAt ? { started_at: input.startedAt } : {}),

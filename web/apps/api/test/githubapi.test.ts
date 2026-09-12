@@ -92,6 +92,7 @@ describe('the GitHub repository client', () => {
     name: 'Antifailure',
     headSha: 'a'.repeat(40),
     status: 'completed' as const,
+    externalId: 'gen-1:attempt-1',
     conclusion: 'action_required',
     output: { title: 'Nothing was verified', summary: 'Commit `aaaaaaa`.' },
   }
@@ -112,6 +113,11 @@ describe('the GitHub repository client', () => {
     assert.equal(sent.head_sha, 'a'.repeat(40))
     assert.equal(sent.conclusion, 'action_required')
     assert.equal(sent.name, 'Antifailure')
+    // Which attempt this run is, on the wire under the name GitHub stores it
+    // under. Without it GitHub gives nothing back that tells one attempt's run
+    // from another's, so a re-run would adopt the completed run whose tick is on
+    // the pull request and its conclusion would stand while the re-run ran.
+    assert.equal(sent.external_id, 'gen-1:attempt-1')
   })
 
   it('reads a 403 as the permission it is, rather than as a missing resource', async () => {
@@ -171,7 +177,48 @@ describe('the GitHub repository client', () => {
         ],
       },
     )
-    assert.equal(await client().findCheckRun(7, 'acme/app', 'a'.repeat(40), 'Antifailure'), 77)
+    assert.equal(await client().findCheckRun(7, 'acme/app', 'a'.repeat(40), 'Antifailure', null), 77)
+  })
+
+  it('does not adopt another attempt\u2019s check run for the attempt it was asked about', async () => {
+    // THE RENDERING HALF OF THE RE-RUN DEFECT. A completed check run cannot be
+    // moved back out of completed at GitHub, so the attempt starting now needs
+    // its own run. Adopting the previous attempt's, which is what matching on
+    // the NAME alone does, means PATCHing a completed run with a status of
+    // in_progress: the conclusion on the pull request stays exactly as it was,
+    // and the check goes on reporting the attempt that was replaced for as long
+    // as the new one runs.
+    answers.clear()
+    answer(
+      `GET /repos/acme/app/commits/${'a'.repeat(40)}/check-runs?check_name=Antifailure&per_page=100`,
+      200,
+      {
+        check_runs: [
+          { id: 77, name: 'Antifailure', external_id: 'gen-1:attempt-1' },
+          { id: 78, name: 'Antifailure', external_id: 'gen-1:attempt-2' },
+        ],
+      },
+    )
+    const find = (externalId: string | null) =>
+      client().findCheckRun(7, 'acme/app', 'a'.repeat(40), 'Antifailure', externalId)
+    assert.equal(await find('gen-1:attempt-2'), 78)
+    assert.equal(
+      await find('gen-1:attempt-3'),
+      null,
+      'a third attempt adopted a check run belonging to an attempt that has concluded',
+    )
+    // And a run written before external ids were sent carries none, so it is
+    // not adopted either. One extra check run, once, beats a check that cannot
+    // move.
+    answers.clear()
+    answer(
+      `GET /repos/acme/app/commits/${'a'.repeat(40)}/check-runs?check_name=Antifailure&per_page=100`,
+      200,
+      { check_runs: [{ id: 77, name: 'Antifailure' }] },
+    )
+    assert.equal(await find('gen-1:attempt-1'), null)
+    // Asked without an attempt, the newest run of the name is still the answer.
+    assert.equal(await find(null), 77)
   })
 
   it('finds the comment it maintains by its marker, and skips what does not decode', async () => {

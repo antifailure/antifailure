@@ -55,9 +55,13 @@ export interface FakeCheckRun extends CheckRunInput {
   repository: string
   installationId: number
   /** How many times this run has been written since it was created. The
-   *  lifecycle promises one stable check per head, so a test can assert that a
-   *  second push did not create a second run. */
+   *  lifecycle promises one stable check per head and one check run per attempt,
+   *  so a test can assert that a second push did not create a second run. */
   updates: number
+  /** How many writes tried to move this run out of `completed` and were kept.
+   *  Zero is the claim worth making: a caller reaching for that transition has
+   *  found a GitHub that will not perform it. */
+  refusedRegressions: number
 }
 
 export interface FakeComment extends IssueComment {
@@ -256,14 +260,21 @@ export class FakeRepositoryApi implements RepositoryApi {
     repository: string,
     headSha: string,
     name: string,
+    externalId: string | null,
   ): Promise<number | null> {
     this.require('checks: write')
+    // The MOST RECENT run of the name, which is what GitHub's own listing
+    // returns by default and what it shows on the pull request, and only when it
+    // is the attempt that was asked for. A fake that returned the oldest, or
+    // returned any attempt's run, would let the code under test adopt a
+    // completed check run and look correct doing it.
+    let found: FakeCheckRun | null = null
     for (const run of this.checkRuns.values()) {
-      if (run.repository === repository && run.headSha === headSha && run.name === name) {
-        return run.id
-      }
+      if (run.repository !== repository || run.headSha !== headSha || run.name !== name) continue
+      if (externalId !== null && run.externalId !== externalId) continue
+      found = run
     }
-    return null
+    return found?.id ?? null
   }
 
   async rerunWorkflowRun(
@@ -289,7 +300,7 @@ export class FakeRepositoryApi implements RepositoryApi {
   ): Promise<number> {
     this.require('checks: write')
     const id = this.nextId++
-    this.checkRuns.set(id, { ...input, id, repository, installationId, updates: 0 })
+    this.checkRuns.set(id, { ...input, id, repository, installationId, updates: 0, refusedRegressions: 0 })
     return id
   }
 
@@ -310,6 +321,31 @@ export class FakeRepositoryApi implements RepositoryApi {
         `check run ${checkRunId} is for ${existing.headSha} and was updated with ${input.headSha}`,
         422,
       )
+    }
+    // A CHECK RUN THAT HAS CONCLUDED DOES NOT GO BACK, AND THIS FAKE SAYS SO.
+    //
+    // GitHub's own reset on a rerequest is the check SUITE's, and its
+    // documentation is explicit that "the check run itself is not updated"; the
+    // one way anybody has found to make a concluded run read as running again is
+    // to create another with the same name. So a PATCH that carries a status of
+    // queued or in_progress and no conclusion is taken here the way it is taken
+    // there: the title and summary are written, and the status and the
+    // conclusion stay exactly as they were.
+    //
+    // Modelled rather than refused, because "ignored" is the weaker assumption
+    // of the two and a design that is right under it is right under a refusal
+    // too. What it costs to leave out is the whole point of this comment: with
+    // Object.assign alone a test could watch a completed check run move back to
+    // in_progress, believe a re-run was visible on the pull request, and ship a
+    // green tick that outlived the attempt it was about.
+    if (existing.status === 'completed' && !input.conclusion) {
+      Object.assign(existing, input, {
+        status: existing.status,
+        conclusion: existing.conclusion,
+        refusedRegressions: existing.refusedRegressions + 1,
+        updates: existing.updates + 1,
+      })
+      return
     }
     Object.assign(existing, input, { updates: existing.updates + 1 })
   }

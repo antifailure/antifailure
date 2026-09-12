@@ -2815,8 +2815,12 @@ export function createServer(options: ServerOptions) {
       repository: identity.repository,
       headSha,
       workflowRunId: identity.runId,
-      // Which workflow, and which attempt of it, out of the verified token.
-      reportedBy: `${identity.jobWorkflowRef} attempt ${identity.runAttempt}`,
+      // Which workflow, and which attempt of it, out of the verified token. The
+      // attempt is passed rather than pasted into a sentence here, because the
+      // claim now decides on it: a higher attempt of the run already recorded is
+      // a re-run, and the same one is a replay.
+      jobWorkflowRef: identity.jobWorkflowRef,
+      runAttempt: identity.runAttempt,
     })
     if ('refused' in issued) {
       return c.json({ error: issued.refused }, 409)
