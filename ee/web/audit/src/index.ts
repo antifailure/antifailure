@@ -7,6 +7,8 @@ export {
   PermanentError,
   sign,
   verify,
+  manifestKeyFor,
+  MANIFEST_KEY_LABEL,
   type Entry,
   type Batch,
   type Manifest,
@@ -39,6 +41,7 @@ export {
 
 export {
   fromEnvironment,
+  scheduleFromEnvironment,
   known,
   SinkRefused,
   SinkEnv,
@@ -57,4 +60,31 @@ export {
   DEFAULT_INTERVAL_MS,
   DEFAULT_BATCH,
   type StreamConfig,
+  type Schedule,
 } from './configure.ts'
+
+export {
+  KINDS,
+  isKind,
+  checkCustomerDestination,
+  read as readDestination,
+  delivery as readDelivery,
+  save as saveDestination,
+  setEnabled as setDestinationEnabled,
+  remove as removeDestination,
+  sinkFor,
+  sealingKeyFrom,
+  SealError,
+  DestinationRefused,
+  type Kind,
+  type Destination,
+  type Delivery,
+  type SaveInput,
+  type Route,
+} from './destinations.ts'
+
+export {
+  auditStreamExtension,
+  MAY_CONFIGURE,
+  type AuditStreamRoutesOptions,
+} from './routes.ts'

@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@antifailure/api": "file:../../../web/apps/api",
     "@antifailure/db": "file:../../../web/packages/db"
   },
   "devDependencies": {

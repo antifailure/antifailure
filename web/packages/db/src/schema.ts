@@ -1552,13 +1552,50 @@ export const auditStreamPositions = pgTable('audit_stream_positions', {
   orgId: uuid('org_id').primaryKey().references(() => organizations.id, { onDelete: 'cascade' }),
   deliveredSeq: bigint('delivered_seq', { mode: 'number' }).notNull().default(0),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+  /* Delivery state the organization reads about its own stream. A credential the
+   * customer's own system revoked makes a permanent refusal, which the queue
+   * correctly drops rather than retrying forever, and without these columns the
+   * only record of that was a line in the operator's container log. See 0044. */
+  lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
+  lastDeliveredAt: timestamp('last_delivered_at', { withTimezone: true }),
+  lastError: text('last_error'),
+  consecutiveFailures: integer('consecutive_failures').notNull().default(0),
+})
+
+/* ---------------------------------------------------------------------------
+ * The collector one organization chose
+ *
+ * One row per organization, holding where its audit log goes and the sealed
+ * credential it goes with. The shape is provider_keys': ciphertext, nonce, key
+ * version, fingerprint and last four, under a sealing key the database never
+ * holds. The tenant reads and writes its own row; the forwarder reads every row
+ * and can write none of them. See migration 0044.
+ * ------------------------------------------------------------------------ */
+
+export const auditStreamDestinations = pgTable('audit_stream_destinations', {
+  orgId: uuid('org_id').primaryKey().references(() => organizations.id, { onDelete: 'cascade' }),
+  kind: text('kind').notNull(),
+  url: text('url').notNull(),
+  indexName: text('index_name'),
+  sourcetype: text('sourcetype'),
+  ciphertext: bytea('ciphertext').notNull(),
+  nonce: bytea('nonce').notNull(),
+  keyVersion: text('key_version').notNull().default('v1'),
+  fingerprint: text('fingerprint').notNull(),
+  last4: text('last4').notNull(),
+  enabled: boolean('enabled').notNull().default(true),
+  fromSeq: bigint('from_seq', { mode: 'number' }).notNull().default(0),
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
 })
 
 export const tenantScopedTables = [
   environmentUsage, environmentUsageDaily, usageRollupState,
   members, githubInstallations, repositories, environments, goldenVersions,
   runs, verdicts, artifacts, maskingRules, networkRules, runtimes, engineTokens,
-  events, auditEntries, auditStreamPositions, providerKeys, providerBudgets,
+  events, auditEntries, auditStreamPositions, auditStreamDestinations,
+  providerKeys, providerBudgets,
   ssoConnections, ssoConnectionSecrets, ssoDomains, ssoLoginStates,
   ssoAssertionsSeen, ssoBreakGlassCodes,
   scimTokens, scimResources, scimGroups, scimGroupMembers,

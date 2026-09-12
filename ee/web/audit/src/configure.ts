@@ -119,10 +119,26 @@ export function fromEnvironment(
     )
   }
 
+  return { sink: build(name, env, fetcher), key, ...scheduleFromEnvironment(env) }
+}
+
+export interface Schedule {
+  intervalMs: number
+  batchSize: number
+  deliveryBatchSize: number
+}
+
+/**
+ * How often and how much, whether or not the installation has a sink of its own.
+ *
+ * Separate from `fromEnvironment` because an installation whose organizations
+ * choose their own destinations runs a forwarder with no installation sink at
+ * all, and the operator's interval and batch settings must still apply to it.
+ * Refuses a malformed number for the reason `positive` gives.
+ */
+export function scheduleFromEnvironment(env: NodeJS.ProcessEnv): Schedule {
   const batchSize = positive(env, BatchEnv, DEFAULT_BATCH)
   return {
-    sink: build(name, env, fetcher),
-    key,
     intervalMs: positive(env, IntervalEnv, DEFAULT_INTERVAL_MS),
     batchSize,
     deliveryBatchSize: positive(env, DeliveryBatchEnv, batchSize),

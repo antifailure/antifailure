@@ -3867,6 +3867,21 @@ export { DEFAULT_PLAN } from './limits.ts'
 
 export { type Clock, systemClock, FakeClock } from './clock.ts'
 
+// The sealing a customer supplied credential is stored under, re-exported so an
+// edition that stores another kind of customer credential uses this one rather
+// than growing a second. The enterprise audit stream seals a customer's collector
+// token here, under the same AF_PROVIDER_KEY_SECRET that already reaches every
+// deployment, with associated data that keeps the two kinds of value apart.
+export {
+  seal,
+  open,
+  sealingKeyFrom,
+  fingerprintOf,
+  SealError,
+  KEY_VERSION,
+  type Sealed,
+} from './providers/seal.ts'
+
 // The router's request context, re-exported for the same reason the database
 // exports drizzle's sql tag: a package that imports hono itself gets a second
 // copy, and an extension handler typed against that copy does not satisfy the
