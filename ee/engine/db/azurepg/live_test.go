@@ -40,6 +40,7 @@ func TestLivePrivateAzureRestoreMaskBranchAndDelete(t *testing.T) {
 	require.NoError(t, err)
 	defer p.Close()
 	t.Log("source seeded; starting private golden restore")
+	goldenStarted := time.Now()
 	query := func(ctx context.Context, connection secret.Value, statement string) (string, error) {
 		db, err := sql.Open("pgx", connection.Reveal())
 		if err != nil {
@@ -68,17 +69,28 @@ func TestLivePrivateAzureRestoreMaskBranchAndDelete(t *testing.T) {
 	}})
 	require.NoError(t, err)
 	require.True(t, golden.Verified)
+	t.Logf("AF_MEASURED golden_seconds=%.1f (restore of the source, mask, verify)", time.Since(goldenStarted).Seconds())
 	t.Log("golden masked and verified; starting branch restore")
+	branchStarted := time.Now()
 	branch, err := p.Branch(ctx, golden.ID, "live-private-proof")
 	require.NoError(t, err)
+	t.Logf("AF_MEASURED branch_seconds=%.1f (Branch returning a published branch)", time.Since(branchStarted).Seconds())
 	connection, err := p.ConnString(ctx, branch, provider.ConnDirect)
 	require.NoError(t, err)
 	value, err := query(ctx, connection, "SELECT value FROM af_live_proof WHERE id=1")
 	require.NoError(t, err)
 	require.Equal(t, "masked", value)
+	// A write to the branch must land there and nowhere else: the source keeps
+	// its original row, and the branch reads back what was written.
+	written, err := query(ctx, connection, "UPDATE af_live_proof SET value='written-on-branch' WHERE id=1 RETURNING value")
+	require.NoError(t, err)
+	require.Equal(t, "written-on-branch", written)
+	value, err = query(ctx, connection, "SELECT value FROM af_live_proof WHERE id=1")
+	require.NoError(t, err)
+	require.Equal(t, "written-on-branch", value)
 	var original string
 	require.NoError(t, source.QueryRowContext(ctx, "SELECT value FROM af_live_proof WHERE id=1").Scan(&original))
-	require.Equal(t, "synthetic-original", original)
+	require.Equal(t, "synthetic-original", original, "a write to the branch reached the source")
 	readerURL, err := url.Parse(connection.Reveal())
 	require.NoError(t, err)
 	readerURL.User = url.UserPassword("af_proof_reader", "AF_FAKE_INHERITED_PASSWORD")
