@@ -38,3 +38,11 @@ field from every row, while `nextCursor` carried the last row's id to the same
 caller anyway. So the feature above could be used only by somebody with a
 database console. The id rather than a GitHub login, because a member who signs
 in through single sign-on can have no GitHub login at all.
+
+Any member of an organisation can read these ids, viewers included, because
+`members.list` needs only `environments.view`, which all four built-in roles
+hold. A viewer already sees every member's login, name and role, and an id is
+not a credential: writing a grant with one needs `members.manage`. The list is
+bounded to the caller's own organisation by two row level security policies,
+one on `members` and one on `users`, and either one alone holds. A test proves
+that with no cursor and with a cursor forged from another organisation's member.
