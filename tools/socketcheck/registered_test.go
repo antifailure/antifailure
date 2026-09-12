@@ -384,6 +384,35 @@ func (builder) AddPolicy(n int) {}
 	}
 }
 
+// TestTheReportSaysWhatItCouldNotCheckAndHowMuchItRead: a report that names
+// only what it checked reads as though it checked everything, and this is the
+// instrument whose whole subject is a check that looked complete. So the output
+// carries its own denominator and its own limits, where somebody reading CI
+// sees them rather than only somebody reading the source.
+func TestTheReportSaysWhatItCouldNotCheckAndHowMuchItRead(t *testing.T) {
+	t.Parallel()
+	report, err := check(tree(t, goodExtension, goodEngine), fixture(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := report.String()
+	// Four packages, one file each: the binary, the cli it calls, the
+	// extension package and the provider package extension names. The count
+	// is the coverage claim, so it is asserted rather than described.
+	if !strings.Contains(out, "reading 4 packages and 4 files") {
+		t.Fatalf("the report did not say how much it read:\n%s", out)
+	}
+	for _, limit := range []string{
+		"what this report did NOT check:",
+		"does not\ntype check",
+		"outside this repository",
+	} {
+		if !strings.Contains(out, strings.ReplaceAll(limit, "\n", " ")) {
+			t.Fatalf("the report did not say it cannot see %q:\n%s", limit, out)
+		}
+	}
+}
+
 // checkErr runs the check and returns its error, which is how a tree the gate
 // cannot read has to come back: as a failure, never as a pass over less.
 func checkErr(t *testing.T, root string) string {

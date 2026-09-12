@@ -154,6 +154,15 @@ type Report struct {
 	// because a report that names only what it checked reads as if it
 	// checked everything.
 	NotRead []string
+	// NotChecked are the questions this report does not answer, printed for
+	// the same reason. A gate that names a socket it cannot inspect is worse
+	// than one that omits it, because the listing is what stops anybody
+	// asking.
+	NotChecked []string
+	// PackagesRead and FilesRead are how much was read to decide registered,
+	// so the answer carries its own denominator.
+	PackagesRead int
+	FilesRead    int
 }
 
 func (r Report) String() string {
@@ -198,6 +207,16 @@ func (r Report) String() string {
 	}
 	for _, n := range r.NotRead {
 		fmt.Fprintf(&b, "  not read, because no customer runs it: %s\n", n)
+	}
+	if r.PackagesRead > 0 {
+		fmt.Fprintf(&b, "registered was decided by reading %d packages and %d files those "+
+			"binaries can contain\n", r.PackagesRead, r.FilesRead)
+	}
+	if len(r.NotChecked) > 0 {
+		fmt.Fprintln(&b, "what this report did NOT check:")
+		for _, n := range r.NotChecked {
+			fmt.Fprintf(&b, "  %s\n", n)
+		}
 	}
 	for _, p := range r.Problems {
 		fmt.Fprintln(&b, "socketcheck: "+p)

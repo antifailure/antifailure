@@ -21,6 +21,14 @@ package main
 // ships decides whether its registrations count and that is not something to
 // infer from a directory name.
 //
+// A SHIPPED BINARY THAT FILLS ALMOST NOTHING is not a finding either, and the
+// table reads as though it were. Every MIT provider is built into the engine and
+// reached by the engine's own switch before the registry is asked, so the
+// community binary registers only the emulators and the enterprise binary is
+// what fills the rest. That is the edition rule working, and the shipped list
+// below says so in words, because the first person to read this report will
+// otherwise read it as seven sockets nobody plugged in.
+//
 // Some sockets are empty ON PURPOSE, and telling those from the emulator is the
 // whole difficulty. The golden store and the datastore provider have built in
 // switches that run before the registry is asked, so an empty socket there is
@@ -118,7 +126,11 @@ var notRegistered = map[string]string{
 // an entry naming a main package that no longer exists.
 var shipped = map[string]string{
 	"engine/cmd/af": "the community binary. tools/release/build.sh builds ./cmd/af into " +
-		"every release archive, and it is the only Go program that script ships.",
+		"every release archive, and it is the only Go program that script ships. That it fills " +
+		"almost no socket is the edition rule rather than a gap: every MIT provider is built " +
+		"into the engine and reached by the engine's own switch before the registry is asked, so " +
+		"a registration is something an organization added. The emulators are the exception, " +
+		"because one this repository ships has to arrive the way one written outside it does.",
 	"ee/engine/cmd/af": "the enterprise binary. The enterprise documentation tells a licensed " +
 		"customer to run the binary built from ee/, and its main.go is where every enterprise " +
 		"feature is registered. The release workflow does not build it, which is why this " +
@@ -840,6 +852,22 @@ func checkRegistered(root string, report *Report, calls map[string]string, l lis
 			}
 		}
 	}
+
+	for _, p := range ld.pkgs {
+		report.PackagesRead++
+		report.FilesRead += len(p.files)
+	}
+	report.NotChecked = append(report.NotChecked,
+		"whether a consultation reached a registry any way other than by calling the reader "+
+			"method this tool looks for by name",
+		"a registration made from a module outside this repository, which nothing here imports",
+		"which type a method call belongs to, because this reads the syntax tree and does not "+
+			"type check, so a call is attributed by the method's name and a second declaration "+
+			"of that name is refused rather than guessed at",
+		"a method reached only through an interface the standard library calls, such as "+
+			"ServeHTTP, which is reported as unreached rather than assumed to run",
+		"the platforms the enterprise binary is built for, because no workflow declares any, so "+
+			"the release matrix above was used for every binary")
 
 	for i := range report.Sockets {
 		s := &report.Sockets[i]

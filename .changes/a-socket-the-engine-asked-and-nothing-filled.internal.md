@@ -24,8 +24,17 @@ answer without somebody deciding whether it ships.
 Three sockets are empty on purpose and listed. The golden store and the
 datastore provider have built in switches that run before the registry is asked,
 and nothing in the repository implements the lifecycle hook. The emulator is
-not listed, so the gate fails on it until something shipped registers the
-emulators. An exemption with a blank reason, one naming no socket, and one whose
+not listed, and it passes because `engine/internal/cli/root.go` now calls
+`emulator.RegisterBuiltin`; delete that line and the gate fails on the emulator
+socket again. An exemption with a blank reason, one naming no socket, and one whose
 socket a shipped binary has since started filling are each refused, and the
 older list of sockets the engine does not consult is held to the first two rules
 as well.
+
+The report also says how much it read to decide, as a count of packages and
+files, and lists what it did not check: a consultation that reaches a registry
+without calling its reader by name, a registration from a module outside this
+repository, which type a method call belongs to, a method only the standard
+library calls through an interface, and the enterprise binary's platforms,
+which no workflow declares. A report that names only what it checked reads as
+though it checked everything.
