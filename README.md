@@ -237,6 +237,8 @@ cannot run on a fork's pull request, so the rows below say where each one ran.
 | DBLab | A real Database Lab Engine over a ZFS pool. Found a clone that left the API before its dataset was released. | No, by hand |
 | pgurl | A real Postgres server, which is the whole of this provider's service | Yes |
 | Aurora | A fake RDS control plane with a real Postgres behind it, and not AWS. Nobody who wrote the provider has an Aurora account, so this row is **written**, not proven. | Yes, against the fake |
+| Cloud SQL | A fake Cloud SQL Admin API with a real Postgres behind it, and not Google Cloud. The only Google billing account available is closed, so this row is **written**, not proven. | Yes, against the fake |
+| Azure Database for PostgreSQL | A fake Azure Resource Manager control plane with a real Postgres behind it. One private restore reached a real source server and was stopped by a subscription SKU policy, and no restore has completed on Azure, so this row is **written**, not proven. | Yes, against the fake |
 
 The interface they all implement declares 26 behaviours in
 `engine/conformance/db.go`, and a provider that cannot support one skips it by

@@ -43,7 +43,10 @@ cleans up with a fresh context instead of leaving an untracked billed server.
 Neither has been run against the real service. Both suites drive a fake control
 plane with a real Postgres behind it, so the behaviours that are claims about
 bytes are checked against bytes, and neither asserts `RealService`, so the
-service owned verdicts report unproven rather than passed.
+service owned verdicts report unproven rather than passed. Both carry an entry
+in the copy on write ledger saying so, recorded from a conformance run that
+reported UNPROVEN for each, and the database providers page says "expected"
+and "never timed" of both, as it already did of Aurora.
 
 One question is recorded unanswered rather than guessed: Google's documentation
 does not say whether a STOPPED Cloud SQL instance can be cloned, in either
