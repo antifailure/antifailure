@@ -48,10 +48,12 @@ const maxResponse = 8 << 20
 
 // client is the RDS control plane.
 type client struct {
-	region   string
-	endpoint string
-	chain    *cloudauth.AWSChain
-	http     *http.Client
+	subnet         string
+	securityGroups []string
+	region         string
+	endpoint       string
+	chain          *cloudauth.AWSChain
+	http           *http.Client
 
 	// calls counts control plane requests, which is the measurement the
 	// benchmark reports. It is a property of the provider rather than of AWS,
@@ -159,11 +161,14 @@ func (c *client) do(ctx context.Context, action string, params url.Values) ([]by
 		// The endpoint, never the headers. An Authorization header carries a
 		// signature and a key id, and a transport failure that printed the
 		// request would print both.
-		return nil, fmt.Errorf("%s: %s: %w", action, c.endpoint, unwrapURL(err))
+		return nil, &uncertainResponseError{fmt.Errorf("%s: %s: %w", action, c.endpoint, unwrapURL(err))}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	read, err := io.ReadAll(io.LimitReader(resp.Body, maxResponse))
 	if err != nil {
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			return nil, &acceptedResponseError{fmt.Errorf("%s: reading the response: %w", action, err)}
+		}
 		return nil, fmt.Errorf("%s: reading the response: %w", action, err)
 	}
 	if resp.StatusCode >= 300 {
@@ -240,6 +245,12 @@ func truncate(s string, n int) string {
 
 // dbCluster is what this provider reads off a cluster.
 type dbCluster struct {
+	Subnet         string `xml:"DBSubnetGroup"`
+	SecurityGroups []struct {
+		ID string `xml:"VpcSecurityGroupId"`
+	} `xml:"VpcSecurityGroups>VpcSecurityGroupMembership"`
+	IAMEnabled     bool    `xml:"IAMDatabaseAuthenticationEnabled"`
+	ARN            string  `xml:"DBClusterArn"`
 	Identifier     string  `xml:"DBClusterIdentifier"`
 	Status         string  `xml:"Status"`
 	Engine         string  `xml:"Engine"`
@@ -362,10 +373,7 @@ func (c *client) describeClusters(ctx context.Context, identifier string) ([]dbC
 		}
 		clusters = append(clusters, more.Clusters...)
 		if more.Marker == marker {
-			// A server repeating its marker would spin here for ever. Stopping
-			// is the only safe answer and it is not silent: the count returned
-			// is what the caller sees.
-			break
+			return nil, fmt.Errorf("DescribeDBClusters: repeated pagination marker")
 		}
 		marker = more.Marker
 	}
@@ -405,6 +413,11 @@ func (c *client) cloneCluster(ctx context.Context, source, target string, tags m
 	params.Set("SourceDBClusterIdentifier", source)
 	params.Set("DBClusterIdentifier", target)
 	params.Set("RestoreType", "copy-on-write")
+	params.Set("EnableIAMDatabaseAuthentication", "false")
+	params.Set("DBSubnetGroupName", c.subnet)
+	for i, id := range c.securityGroups {
+		params.Set(fmt.Sprintf("VpcSecurityGroupIds.VpcSecurityGroupId.%d", i+1), id)
+	}
 	params.Set("UseLatestRestorableTime", "true")
 	addTags(params, tags)
 
@@ -416,7 +429,10 @@ func (c *client) cloneCluster(ctx context.Context, source, target string, tags m
 		Cluster dbCluster `xml:"RestoreDBClusterToPointInTimeResult>DBCluster"`
 	}
 	if err := xml.Unmarshal(body, &out); err != nil {
-		return dbCluster{}, fmt.Errorf("RestoreDBClusterToPointInTime: %w", err)
+		return dbCluster{}, &acceptedResponseError{fmt.Errorf("RestoreDBClusterToPointInTime: %w", err)}
+	}
+	if out.Cluster.Identifier != target {
+		return dbCluster{}, &acceptedResponseError{fmt.Errorf("RestoreDBClusterToPointInTime: response omitted the created cluster identity")}
 	}
 	return out.Cluster, nil
 }
@@ -441,6 +457,13 @@ func (c *client) createInstance(ctx context.Context, cluster, instance, class st
 	addTags(params, tags)
 	_, err := c.do(ctx, "CreateDBInstance", params)
 	if err != nil && isCode(err, faultInstanceExists) {
+		existing, found, lookupErr := c.describeInstance(ctx, instance)
+		if lookupErr != nil {
+			return lookupErr
+		}
+		if !found || existing.Cluster != cluster {
+			return fmt.Errorf("aurora: existing writer belongs to another cluster")
+		}
 		// Idempotent by identifier, which is what the interface requires: the
 		// engine retries after a timeout and a retry that made a second
 		// instance would be an orphan nothing names.
@@ -483,6 +506,7 @@ func (c *client) setMasterPassword(ctx context.Context, cluster string, password
 	params := url.Values{}
 	params.Set("DBClusterIdentifier", cluster)
 	params.Set("MasterUserPassword", password)
+	params.Set("EnableIAMDatabaseAuthentication", "false")
 	params.Set("ApplyImmediately", "true")
 	_, err := c.do(ctx, "ModifyDBCluster", params)
 	return err
