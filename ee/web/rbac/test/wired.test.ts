@@ -455,8 +455,17 @@ describe('custom roles, end to end', { skip: hasDatabase ? false : 'no Postgres 
   it('a file carrying approval policies is refused whole, because nothing enforces them', async () => {
     const refused = await put(
       owner,
+      // Deliberately an approval policy the diff itself would NOT refuse: a
+      // requirement nobody in the file can satisfy is already refused by
+      // dryRun, and a fixture like that passes this test with the approvals
+      // rule deleted. The requirement here is one the granted role holds.
       policy([deployer], [onRepository(viewer.userId, org.repository)], [], [
-        { kind: 'masking.rules', approvals: 1, requires: 'masking.approve' as Permission, reason: 'Two sets of eyes.' },
+        {
+          kind: 'masking.rules',
+          approvals: 1,
+          requires: 'environments.create' as Permission,
+          reason: 'Two sets of eyes.',
+        },
       ] as unknown as PolicyFile['approvals']),
     )
     assert.equal(refused.status, 409, JSON.stringify(refused.body))
