@@ -70,6 +70,10 @@ gets its own, created at a lower hook weight than the Job that needs it.
 {{- default (printf "%s-github" (include "cp.fullname" .)) .Values.github.existingSecret -}}
 {{- end -}}
 
+{{- define "cp.enterpriseSecretName" -}}
+{{- default (printf "%s-enterprise" (include "cp.fullname" .)) .Values.enterprise.existingSecret -}}
+{{- end -}}
+
 {{- define "cp.providerKeysSecretName" -}}
 {{- default (printf "%s-provider-keys" (include "cp.fullname" .)) .Values.providerKeys.existingSecret -}}
 {{- end -}}
@@ -157,6 +161,29 @@ that nothing will read.
   {{- if .Values.github.webhookSecret -}}{{- $orphan = append $orphan "github.webhookSecret" -}}{{- end -}}
   {{- if gt (len $orphan) 0 -}}
     {{- fail (printf "%s is set and github.appId is not, so nothing reads it: without the App id there is no App, and /webhooks/github answers 503. Set github.appId, or remove the value." (join " and " $orphan)) -}}
+  {{- end -}}
+{{- end -}}
+{{/*
+The enterprise edition, measured before it was written: its entry point exits
+before listening without AF_EE_SSO_KEY, and refuses a licence with no AF_ORG or
+no trusted key. existingSecret counts for the sealing key, because a Secret
+named for the enterprise edition exists for it. It cannot be read, so a licence
+inside it is referenced as optional rather than assumed.
+*/}}
+{{- if .Values.enterprise.enabled -}}
+  {{- if not (or .Values.enterprise.ssoKey .Values.enterprise.existingSecret) -}}
+    {{- fail "enterprise.enabled is true and enterprise.ssoKey is not set. The enterprise entry point exits before it listens without it, because single sign-on seals what it stores under that key. Generate one with `openssl rand -base64 32`, or put it in the Secret named by enterprise.existingSecret." -}}
+  {{- end -}}
+  {{- if and .Values.enterprise.licenseKey (not (and .Values.enterprise.org .Values.enterprise.licensePublicKeys)) -}}
+    {{- fail "enterprise.licenseKey is set and enterprise.org or enterprise.licensePublicKeys is not. The entry point refuses at start-up a licence it has no organization to compare against or no key to verify. Set both." -}}
+  {{- end -}}
+{{- else -}}
+  {{- $orphan := list -}}
+  {{- range $k := list "ssoKey" "licenseKey" "existingSecret" "org" "licensePublicKeys" -}}
+    {{- if index $.Values.enterprise $k -}}{{- $orphan = append $orphan (printf "enterprise.%s" $k) -}}{{- end -}}
+  {{- end -}}
+  {{- if gt (len $orphan) 0 -}}
+    {{- fail (printf "%s is set and enterprise.enabled is not, so nothing reads it. Set enterprise.enabled=true with image.repository pointing at the enterprise image, or remove the value." (join " and " $orphan)) -}}
   {{- end -}}
 {{- end -}}
 {{/*

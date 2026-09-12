@@ -349,6 +349,41 @@ variable "provider_key_secret_enabled" {
   description = "Generate and store a sealing secret so provider keys can be saved."
 }
 
+# ---------------------------------------------------------------------------
+# The enterprise edition.
+#
+# ON ONE SWITCH, BECAUSE THE IMAGE DECIDES AND NOT THIS FILE. The container's
+# image belongs to deploy/cd/deploy.sh and is in ignore_changes, so Terraform
+# cannot know which edition a revision runs. The enterprise image's entry point
+# refuses to start without the single sign-on sealing key, and refuses a licence
+# with no organization or no trusted key, so a deployment that runs it needs all
+# four of these and a deployment that runs the community image needs none. This
+# switch is the tfvars file saying which one it is.
+# ---------------------------------------------------------------------------
+variable "enterprise_edition" {
+  type        = bool
+  default     = false
+  description = "The app runs ghcr.io/antifailure/control-plane-enterprise: generate the single sign-on sealing key and reference the licence."
+}
+
+variable "license_org" {
+  type        = string
+  default     = ""
+  description = "AF_ORG, the organization the licence was issued to. Required with enterprise_edition, because a licence with no organization to compare against is refused at start-up."
+}
+
+variable "license_public_keys" {
+  type        = string
+  default     = ""
+  description = "AF_LICENSE_PUBLIC_KEYS as kid=base64, the public keys a licence may be signed by. Public by construction. Required with enterprise_edition, because no build carries a stamped key."
+}
+
+variable "license_key_secret_name" {
+  type        = string
+  default     = "license-key"
+  description = "The Key Vault secret holding the licence. Put it there yourself; Terraform never sees the value."
+}
+
 
 variable "database_extensions" {
   type        = list(string)

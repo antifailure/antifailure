@@ -224,6 +224,32 @@ variable "provider_key_secret_enabled" {
   description = "Generate a sealing secret so customers' provider keys can be stored."
 }
 
+# The enterprise edition. The module's copies carry the reason each exists;
+# the short version is that the enterprise image will not start without them.
+variable "enterprise_edition" {
+  type        = bool
+  default     = false
+  description = "The app runs the enterprise image, so it gets the single sign-on sealing key and a licence."
+}
+
+variable "license_org" {
+  type        = string
+  default     = ""
+  description = "AF_ORG, the organization the licence was issued to."
+}
+
+variable "license_public_keys" {
+  type        = string
+  default     = ""
+  description = "AF_LICENSE_PUBLIC_KEYS as kid=base64. Public keys, not secrets."
+}
+
+variable "license_key_secret_name" {
+  type        = string
+  default     = "license-key"
+  description = "The Key Vault secret holding the licence."
+}
+
 # Empty means no GitHub App, which is a supported state: sign-in works and the
 # webhook endpoint refuses deliveries rather than accepting unsigned ones. Set
 # it and the two secrets must already be in the vault, because GitHub mints the

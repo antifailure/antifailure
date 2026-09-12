@@ -60,6 +60,14 @@ helm	value	database.secretKeys.adminUrl	string	optional
 helm	value	database.secretKeys.migrationUrl	string	optional
 helm	value	database.secretKeys.url	string	optional
 helm	value	database.url	string	optional
+helm	value	enterprise.enabled	bool	optional
+helm	value	enterprise.existingSecret	string	optional
+helm	value	enterprise.licenseKey	string	optional
+helm	value	enterprise.licensePublicKeys	string	optional
+helm	value	enterprise.org	string	optional
+helm	value	enterprise.secretKeys.licenseKey	string	optional
+helm	value	enterprise.secretKeys.ssoKey	string	optional
+helm	value	enterprise.ssoKey	string	optional
 helm	value	extraEnv	list	optional
 helm	value	failureStore.enabled	bool	optional
 helm	value	failureStore.retentionDays	string	optional
@@ -206,6 +214,7 @@ terraform:modules/control-plane	variable	deployer_principal_id	string	optional
 terraform:modules/control-plane	variable	diagnostics_enabled	bool	optional
 terraform:modules/control-plane	variable	dns_zone_name	string	optional
 terraform:modules/control-plane	variable	dns_zone_resource_group	string	optional
+terraform:modules/control-plane	variable	enterprise_edition	bool	optional
 terraform:modules/control-plane	variable	event_retention_months	number	optional
 terraform:modules/control-plane	variable	failure_retention_days	number	optional
 terraform:modules/control-plane	variable	failure_store	bool	optional
@@ -229,6 +238,9 @@ terraform:modules/control-plane	variable	image_tag	string	optional
 terraform:modules/control-plane	variable	key_vault_name	string	optional
 terraform:modules/control-plane	variable	key_vault_purge_protection	bool	optional
 terraform:modules/control-plane	variable	lead_notify_email	string	optional
+terraform:modules/control-plane	variable	license_key_secret_name	string	optional
+terraform:modules/control-plane	variable	license_org	string	optional
+terraform:modules/control-plane	variable	license_public_keys	string	optional
 terraform:modules/control-plane	variable	location	string	required
 terraform:modules/control-plane	variable	log_analytics_id	string	optional
 terraform:modules/control-plane	variable	mail_from	string	optional
@@ -305,6 +317,7 @@ terraform:stacks/control-plane	variable	database_storage_mb	number	optional
 terraform:stacks/control-plane	variable	deployer_principal_id	string	optional
 terraform:stacks/control-plane	variable	dns_zone_name	string	optional
 terraform:stacks/control-plane	variable	dns_zone_resource_group	string	optional
+terraform:stacks/control-plane	variable	enterprise_edition	bool	optional
 terraform:stacks/control-plane	variable	event_retention_months	number	optional
 terraform:stacks/control-plane	variable	geo_redundant_backup	bool	optional
 terraform:stacks/control-plane	variable	github_api_base	string	optional
@@ -320,6 +333,9 @@ terraform:stacks/control-plane	variable	image_repository	string	optional
 terraform:stacks/control-plane	variable	image_tag	string	optional
 terraform:stacks/control-plane	variable	key_vault_name	string	optional
 terraform:stacks/control-plane	variable	lead_notify_email	string	optional
+terraform:stacks/control-plane	variable	license_key_secret_name	string	optional
+terraform:stacks/control-plane	variable	license_org	string	optional
+terraform:stacks/control-plane	variable	license_public_keys	string	optional
 terraform:stacks/control-plane	variable	location	string	optional
 terraform:stacks/control-plane	variable	log_retention_days	number	optional
 terraform:stacks/control-plane	variable	mail_from	string	optional

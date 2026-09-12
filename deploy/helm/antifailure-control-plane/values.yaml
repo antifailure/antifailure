@@ -211,6 +211,34 @@ providerKeys:
   secretKeys:
     secret: AF_PROVIDER_KEY_SECRET
 
+# The enterprise edition, for an installation running
+# ghcr.io/antifailure/control-plane-enterprise as image.repository.
+#
+# The entry point in that image REFUSES TO START without ssoKey: single sign-on
+# seals every client secret and service provider key it stores under it. So
+# `enabled` with no ssoKey and no existingSecret refuses to render rather than
+# installing a pod that exits before it listens. 32 bytes of base64, from
+# `openssl rand -base64 32`, and it must not change afterwards, because a new
+# key cannot open anything the old one sealed.
+#
+# The licence is optional, and that is the one state here that is not a
+# refusal: with no licenseKey every enterprise route is mounted and answers 402
+# naming the feature. A licenseKey needs org and licensePublicKeys beside it,
+# because the entry point refuses at start-up a licence it has no organization
+# to compare against or no key to verify.
+enterprise:
+  enabled: false
+  ssoKey: ""
+  licenseKey: ""
+  existingSecret: ""
+  secretKeys:
+    ssoKey: AF_EE_SSO_KEY
+    licenseKey: AF_LICENSE_KEY
+  # AF_ORG, the organization the licence was issued to.
+  org: ""
+  # AF_LICENSE_PUBLIC_KEYS, as kid=base64. Public keys, not secrets.
+  licensePublicKeys: ""
+
 # Mail, and the enterprise leads that are announced over it.
 #
 # Setting leadNotifyEmail WITHOUT a mailer is its own state and the startup log

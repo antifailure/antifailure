@@ -125,6 +125,11 @@ module "control_plane" {
   provider_key_secret_enabled = var.provider_key_secret_enabled
   github_app_id               = var.github_app_id
 
+  enterprise_edition      = var.enterprise_edition
+  license_org             = var.license_org
+  license_public_keys     = var.license_public_keys
+  license_key_secret_name = var.license_key_secret_name
+
   assign_deployer_secret_officer = var.assign_deployer_secret_officer
   deployer_principal_id          = var.deployer_principal_id
 

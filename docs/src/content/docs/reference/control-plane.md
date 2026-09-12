@@ -64,6 +64,36 @@ has the order for the four features whose credential Terraform must not hold.
 | `AF_OPERATOR_SETS_PLAN` | unset | Set to `1` on an installation where whoever runs the control plane also decides each organization's plan. Unset, `billing.set` is refused and the plan can only come from a signed Stripe delivery, which is the right answer anywhere the people signing in are not the operator: the first person into an organization becomes its owner, an owner holds `billing.manage`, and on a plane that takes no payment that would be a signed-in stranger granting themselves the largest plan. It is off by default rather than on because the dangerous configuration is the one where nothing has been configured yet, and a flag that has to be remembered would be forgotten by exactly that operator. Set it when you run the control plane for yourself; you can already write the column with `psql`, and this is the same act with an audit entry. Setting it together with any Stripe variable or with `AF_HOSTED_REQUIRED_PLAN` stops the process, because a plan that can be granted by hand is not a plan anybody has to buy. Any value other than `1`, `0`, `true`, `false` or unset stops the process. |
 | `AF_CONSOLE_DIR` | `/app/console-out` | Where the console's build is. The published image carries it at the default and nothing needs setting. Point it elsewhere only if you build `console/` yourself. A directory that is not there is not fatal: the API serves normally, the start-up log says the console is missing, and every page answers with that sentence rather than a blank 404 that reads like a routing bug. |
 
+## Read by the enterprise edition
+
+These are read by the enterprise entry point, the one in
+`ghcr.io/antifailure/control-plane-enterprise`, and by nothing in the community
+image, which ignores them. The hosted control plane runs the enterprise image.
+A deployment running the community image sets none of them.
+
+Each was measured against the entry point with the variable present, absent and
+wrong, rather than read off the code, and the table says what the process did.
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `AF_EE_SSO_KEY` | unset, and **required** | 32 bytes of base64 that single sign-on seals every stored client secret and service provider key under, with the organization id bound as additional data. Without it the process exits before it listens, whatever the licence says. Generate one with `openssl rand -base64 32` and never change it, because a new key cannot open anything the old one sealed. The Terraform module generates it into Key Vault, so no person ever holds it. |
+| `AF_LICENSE_KEY` | unset | The licence. Unset or empty is the one state that is not a refusal: every enterprise route is mounted and answers 402 naming the feature and the licence state. A key that does not parse, or one signed by a key this installation does not trust, stops the process at start-up with exit status 2, because that is a deployment mistake rather than a commercial state. An expired licence starts, keeps working through its grace period, then answers 402 with every enterprise setting kept. |
+| `AF_ORG` | unset | The organization the licence was issued to. Required whenever `AF_LICENSE_KEY` is set, because a licence with nothing to compare against stops the process. A licence issued to a different organization starts and answers 402 as `wrong_org`. |
+| `AF_LICENSE_PUBLIC_KEYS` | unset | The keys a licence may be signed by, as `kid=base64,kid=base64`. Public keys, not secrets. Required whenever `AF_LICENSE_KEY` is set, because no build carries a stamped key, so without one no licence can be verified and the process stops. |
+
+`AF_ENTERPRISE_BASE_URL` is where single sign-on and SCIM publish themselves. It
+defaults to `AF_APP_BASE_URL`, which is the right answer wherever one origin
+serves the console and the API, as the hosted control plane does, and the
+process stops at start-up when neither is set. `AF_LICENSE_REVOKED` takes a
+comma separated list of licence identifiers this installation refuses as
+revoked; nothing publishes such a list, so it is set by hand when one is needed.
+The audit stream's variables are on
+[the audit stream page](/docs/enterprise/audit-stream).
+
+The process says what it decided on every start: the extensions it mounted, what
+the licence permits right now, and whether the audit log is being forwarded.
+Read those lines after a deploy rather than assuming.
+
 ## Read by a command, not by the server
 
 | Variable | Where it is set | What it is |
