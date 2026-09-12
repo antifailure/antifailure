@@ -26,6 +26,7 @@ import { randomBytes } from 'node:crypto'
 import { createServer as createHttpServer, type Server } from 'node:http'
 import { available, startApi, seedOrg, dropOrg, type ApiHarness, type Org, testAnalytics } from './harness.ts'
 import { saveKey, setBudget, listBudgets, borrowKey, recordSpend } from '../src/providers/store.ts'
+import { Keyring } from '../src/providers/seal.ts'
 import { costOf, pricesFrom, PricingError, usageFrom, DEFAULT_PRICES } from '../src/providers/pricing.ts'
 import { createPostHogSink } from '../src/analytics/posthog-sink.ts'
 
@@ -119,7 +120,7 @@ describe('spending a key against a budget', {
   let org: Org
   let stub: Server
   let stubUrl: string
-  const sealingKey = randomBytes(32)
+  const keyring = Keyring.of(randomBytes(32))
 
   /** What the stubbed provider was sent, so the key can be asserted on. */
   let seen: { headers: Record<string, string>; body: string }[] = []
@@ -146,7 +147,7 @@ describe('spending a key against a budget', {
     stubUrl = `http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`
 
     api = await startApi({
-      sealingKey,
+      keyring,
       modelPrices: PRICES,
       providerBases: { anthropic: stubUrl, openai: stubUrl },
       // The REAL sink with a fake transport, so what is asserted below is the
@@ -210,7 +211,7 @@ describe('spending a key against a budget', {
       orgId: org.orgId, provider: 'anthropic', capUsd,
       actorLabel: 'a test', actorUserId: null,
     })
-    await saveKey(api.pool, api.clock, sealingKey, {
+    await saveKey(api.pool, api.clock, keyring, {
       analytics: testAnalytics(),
       orgId: org.orgId, provider: 'anthropic', key: KEY,
       actorLabel: 'a test', actorUserId: null,
@@ -254,7 +255,7 @@ describe('spending a key against a budget', {
   test('a provider with no budget row cannot spend at all', async () => {
     // A missing cap reads as zero, not unlimited. The key is stored and there
     // is no allowance, so nothing goes out.
-    await saveKey(api.pool, api.clock, sealingKey, {
+    await saveKey(api.pool, api.clock, keyring, {
       analytics: testAnalytics(),
       orgId: org.orgId, provider: 'anthropic', key: KEY,
       actorLabel: 'a test', actorUserId: null,
@@ -386,7 +387,7 @@ describe('spending a key against a budget', {
     api.clock.advance(toJanuary)
     await ready(100)
 
-    const borrowed = await borrowKey(api.pool, api.clock, sealingKey, {
+    const borrowed = await borrowKey(api.pool, api.clock, keyring, {
       orgId: org.orgId, provider: 'anthropic',
     })
     assert.equal(borrowed.budget.period, '2026-01-01')

@@ -13,6 +13,7 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { available, seedOrg, signInAs, startApi, type ApiHarness, type Org } from './harness.ts'
+import { Keyring } from '../src/providers/seal.ts'
 
 /**
  * A stand-in for the export.
@@ -203,10 +204,10 @@ describe('running without a console build', { skip: ok ? false : 'no database' }
 describe('provider keys from a browser', { skip: ok ? false : 'no database' }, () => {
   let h: ApiHarness
   let org: Org
-  const sealing = Buffer.alloc(32, 7)
+  const sealing = Keyring.of(Buffer.alloc(32, 7))
 
   before(async () => {
-    h = await startApi({ sealingKey: sealing })
+    h = await startApi({ keyring: sealing })
     org = await seedOrg(h.admin, 'console-keys')
   })
   after(async () => h.close())
@@ -365,7 +366,7 @@ describe('a control plane with no sealing secret', { skip: ok ? false : 'no data
   let h: ApiHarness
   let org: Org
   before(async () => {
-    h = await startApi({ sealingKey: null })
+    h = await startApi({ keyring: null })
     org = await seedOrg(h.admin, 'console-nosealing')
   })
   after(async () => h.close())

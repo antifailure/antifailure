@@ -338,6 +338,21 @@ locals {
   }
 }
 
+# The extra sealing keys a rotation adds, addressed and not read.
+#
+# See variables.tf: provider-key-secret is owned by Terraform and cannot be
+# rotated in place, so a rotation adds a second secret whose value is the
+# operator's. This module only needs its versionless id, which is a function of
+# the vault uri and the name, so planning this stack needs no vault read access
+# and the value never appears in state, in a plan, or in a workflow log.
+#
+# Empty is every installation that has never rotated, and renders nothing.
+locals {
+  provider_key_secrets_id = var.provider_key_secrets_name == "" ? {} : {
+    (var.provider_key_secrets_name) = "${trimsuffix(azurerm_key_vault.this.vault_uri, "/")}/secrets/${var.provider_key_secrets_name}"
+  }
+}
+
 # Stripe credentials are addressed by their versionless IDs, like the GitHub
 # App credentials above. The Container App identity reads their values. The
 # identity planning production holds no vault read permission and needs none.
