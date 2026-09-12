@@ -13,8 +13,11 @@ package aurora
 //
 // The query protocol rather than the newer JSON one because RDS has only the
 // query protocol. Parameters go in the body as application/x-www-form-urlencoded
-// with Action and Version, lists are Name.member.1 style, and the response is
-// XML. None of that is a choice this file made.
+// with Action and Version, and the response is XML. A list is numbered form
+// fields whose middle name comes from RDS's service model rather than from a
+// convention: Tags.Tag.1 and VpcSecurityGroupIds.VpcSecurityGroupId.1, with
+// member only where the model names no member, which for the lists this file
+// sends is never. None of that is a choice this file made.
 
 import (
 	"context"
@@ -545,7 +548,11 @@ func (c *client) deleteCluster(ctx context.Context, cluster string) error {
 	return err
 }
 
-// addTags writes a tag map into the query API's member form.
+// addTags writes a tag map as Tags.Tag.N, the spelling every AWS SDK sends.
+//
+// Not Tags.member.N, which this sent until 2026-09-12. RDS's service model gives
+// TagList's member the locationName Tag, and the query serializer uses a member's
+// name whenever the model has one. tags_test.go carries the citation.
 //
 // Sorted by key, because the form is signed and a map iterated in Go's random
 // order would produce a different body on every retry. That is not a
@@ -561,8 +568,8 @@ func addTags(params url.Values, tags map[string]string) {
 	sort.Strings(keys)
 	for i, k := range keys {
 		n := strconv.Itoa(i + 1)
-		params.Set("Tags.member."+n+".Key", k)
-		params.Set("Tags.member."+n+".Value", tags[k])
+		params.Set("Tags.Tag."+n+".Key", k)
+		params.Set("Tags.Tag."+n+".Value", tags[k])
 	}
 }
 
