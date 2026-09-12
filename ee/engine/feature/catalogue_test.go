@@ -198,50 +198,6 @@ func TestAFeatureThatCannotBeSoldIsNotDescribedAsSomethingCustomersHave(t *testi
 	t.Logf("features that cannot be sold, all absent: %v", notShipped)
 }
 
-func TestAFeatureGatedNowhereIsNotDescribedAsRefused(t *testing.T) {
-	t.Parallel()
-	// THE SECOND AUTHORITY IN license.go, and it arrived after this catalogue
-	// did, which is how it came to be unheld for a while.
-	//
-	// notShipped answers "was it built". unenforced answers a different
-	// question, "is it gated anywhere", and its own comment says a feature can
-	// be shipped and unenforced, which is the ungated case. #360 added it and
-	// the check above could not be widened to cover it: notShipped forces the
-	// single state absent, and a feature that IS built and is gated nowhere may
-	// honestly be free or unmounted, so the assertion has to be a refusal of
-	// three states rather than a demand for one.
-	//
-	// Held in this direction rather than both. A catalogue entry may be free or
-	// unmounted with nothing in license.go recording it, and that is correct
-	// today: support_access is gated nowhere by the licence and is enforced in
-	// the community control plane by an operator permission, so demanding a
-	// record for every ungated row would demand a false one. What cannot stand
-	// is the opposite, a row claiming a refusal for a feature license.go says
-	// is refused nowhere, because those are two answers to one question and the
-	// catalogue is the copy a customer reads.
-	unenforced := license.UnenforcedFeatures()
-	require.NotEmpty(t, unenforced,
-		"nothing is recorded as gated nowhere, so this test is asserting nothing")
-
-	for _, f := range unenforced {
-		entry, ok := feature.Of(f)
-		require.Truef(t, ok, "%s is recorded as gated nowhere and has no catalogue entry", f)
-		require.NotContainsf(t,
-			[]feature.State{
-				feature.StateGated,
-				feature.StateControlPlaneGated,
-				feature.StateEditionGated,
-			},
-			entry.State,
-			"license.go records %s as gated nowhere and the catalogue calls it %q, which "+
-				"claims somebody is refused it for not paying. One of the two is false. If "+
-				"the gate was built, delete the entry in license.go's unenforced map; that "+
-				"entry says what building it would mean. Reason recorded there: %s",
-			f, entry.State, license.UnenforcedBecause(f))
-	}
-	t.Logf("features gated nowhere, none described as refused: %v", unenforced)
-}
-
 func TestAGatedEntryNamesAFileThatChecksThatExactFeature(t *testing.T) {
 	t.Parallel()
 	// The claim that matters, and the reason the reference is path:symbol

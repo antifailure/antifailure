@@ -18,6 +18,7 @@
   "dependencies": {
     "@antifailure-ee/audit": "*",
     "@antifailure-ee/features": "*",
+    "@antifailure-ee/rbac": "*",
     "@antifailure-ee/scim": "*",
     "@antifailure-ee/sso": "*",
     "@antifailure/api": "file:../../../web/apps/api",

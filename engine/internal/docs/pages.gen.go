@@ -5338,6 +5338,135 @@ level security disabled.
 The reports that run produces, and a note saying what it did not check, are kept
 as a build artifact. Run it yourself with ` + "`" + `just compliance` + "`" + `.
 `,
+	"enterprise/custom-roles.md": `---
+title: Custom roles
+description: A role your organisation defines, granted to a member at one repository or group, on top of the four built-in roles.
+sidebar:
+  order: 11
+---
+
+The four built-in roles, owner, admin, member and viewer, are the right four for
+a team and they are in every edition. A large organisation is shaped
+differently: somebody administers two repositories and reads the rest, a
+compliance team approves masking changes and creates no environments, a
+contractor sees one repository and nothing about the others.
+
+A custom role is a name, a description and a set of permissions from the same
+fixed catalogue every route already declares. A grant gives one person one role
+at one scope: the whole organisation, a named group of repositories, one
+repository, or one environment.
+
+This is an enterprise feature. It lives in ` + "`" + `ee/web/rbac` + "`" + `, under the Antifailure
+Enterprise License, and the community build has the four built-in roles and
+nothing that stores or reads a custom one.
+
+## Two rules that make a model predictable
+
+**A narrower scope grants, it never revokes.** A grant at a repository adds to
+what the organisation level already gave. It cannot take something away. The
+other reading looks tidy and is unusable: an administrator adds a role to give
+somebody access to one repository and silently removes their access to every
+other, and nobody can say what anyone can do without evaluating every rule in
+order.
+
+**A custom role cannot narrow a built-in one.** Every permission a built-in role
+holds stays held. A custom role is asked only where the built-in role has
+already refused, so the worst a wrong model can do is grant too little.
+
+## The model is a file
+
+There is no route that adds one role or one grant, on purpose. A permission
+model edited one click at a time is a model nobody reviews. It is exported as
+YAML, reviewed as a pull request the way every other change is, and applied
+whole after a dry run.
+
+` + "`" + "`" + "`" + `yaml
+version: 1
+roles:
+  - id: deployer
+    name: Deployer
+    description: Brings environments up for the payments repositories.
+    permissions:
+      - environments.view
+      - environments.create
+      - environments.teardown
+groups:
+  - name: payments
+    repositories:
+      - acme/billing
+      - acme/invoices
+grants:
+  - userId: 4f1c8e02-6b1a-4c77-9a3e-0d51d1a2b3c4
+    roleId: deployer
+    scope:
+      kind: group
+      name: payments
+approvals: []
+` + "`" + "`" + "`" + `
+
+A description is required. A role called ` + "`" + `ops` + "`" + ` with no description is a role
+nobody can review, and reviewing it is the point of writing it down. A
+permission that is not in the catalogue is refused rather than ignored, because a
+typo that grants nothing looks exactly like a grant.
+
+The catalogue is the one every route already declares, and every permission in it
+carries the sentence a security team reads. ` + "`" + `GET /roles/members/<id>/permissions` + "`" + `
+below answers what one person holds and where each permission came from.
+
+## The routes
+
+All four need a signed-in session, the CSRF header every mutation needs, and
+` + "`" + `members.manage` + "`" + ` in your **built-in** role. That last part is deliberate: a
+custom role granting ` + "`" + `members.manage` + "`" + ` does not open the model to its holder, or
+one grant would be every grant.
+
+| Request | What it does |
+| --- | --- |
+| ` + "`" + `GET /roles/policy` + "`" + ` | The current model, as YAML. |
+| ` + "`" + `POST /roles/policy/dry-run` + "`" + ` | What applying a file would change, and anything that would stop it. |
+| ` + "`" + `PUT /roles/policy` + "`" + ` | Applies a file, whole, in one transaction. |
+| ` + "`" + `GET /roles/members/<id>/permissions` + "`" + ` | What one person can do and where each permission came from. You may always read your own. |
+
+A dry run is worth taking. The person applying a permission model is usually the
+person a wrong one would lock out.
+
+## You cannot grant what you do not hold
+
+A file is refused if it would give anybody a permission your own built-in role
+does not have. An admin holds ` + "`" + `members.manage` + "`" + ` and deliberately holds neither
+` + "`" + `billing.manage` + "`" + ` nor ` + "`" + `organization.delete` + "`" + `, so an admin cannot define a role
+holding those, and cannot grant a role an owner defined that holds them. Without
+that rule the permission to edit the model would quietly be every permission
+there is.
+
+The rule applies to what changes. An owner may define a role an admin could not,
+and the admin can go on editing the rest of the file without being refused for
+it.
+
+## What is not here
+
+` + "`" + `approvals` + "`" + ` is part of the file format and nothing enforces it yet, so a file
+that carries a non-empty ` + "`" + `approvals` + "`" + ` section is refused whole, naming it. A
+stored approval requirement that nothing checks would be a control reporting
+itself as held, which is worse than not having one.
+
+## What happens without the entitlement
+
+Custom roles are refused per organisation and per installation, and the two are
+different answers:
+
+- The installation's licence does not permit ` + "`" + `rbac` + "`" + `: every route above answers
+  402 naming the feature and the state of the licence.
+- The organisation is not entitled on its plan: every route answers 403 with the
+  sentence that says so, and a stored grant widens nothing.
+
+Neither removes anything. Built-in roles keep what they had, the stored model is
+left alone, and restoring the entitlement restores the grants exactly as they
+were.
+
+Related: [licensing](/docs/enterprise/licensing), [single sign-on](/docs/enterprise/sso),
+[SCIM provisioning](/docs/enterprise/scim).
+`,
 	"enterprise/issuing-licenses.md": `---
 title: Issuing a license
 description: How an enterprise license key is signed, delivered, reissued and withdrawn.
@@ -5449,25 +5578,22 @@ acting on it, and the generator is the only place the set can be closed.
 Before that check existed, ` + "`" + `"features": ["ssoo"]` + "`" + ` signed cleanly, verified
 cleanly, reported the license active, and permitted nothing.
 
-## Features that are issued with a warning
+## No feature is issued with a warning any more
 
-` + "`" + `rbac` + "`" + ` and ` + "`" + `air_gapped` + "`" + ` are issued, and the generator prints a warning naming
-them beside the key. Both are real: the custom roles library is written and
-tested, and air gapped operation is a property every installation already has.
-What is not true of either is that the license is what grants it, so withdrawing
-the license would not withdraw the capability, and a renewal conversation that
-treats one of them as a thing being bought is a conversation about nothing.
+The generator used to print a warning beside a key naming ` + "`" + `rbac` + "`" + `, and before that
+` + "`" + `air_gapped` + "`" + `. Both were real capabilities the license did not grant: air gapped
+operation was a property every installation had, and the custom roles library
+was written and tested with nothing storing a role model. A renewal conversation
+that treated either as a thing being bought would have been a conversation about
+nothing, and the warning put that sentence in front of whoever issued the key.
 
-That is a warning rather than a refusal on purpose. Refusing would refuse a
-customer something they can have, and a refusal placed where somebody has
-already promised the feature is a refusal that acquires an override flag within
-a week. The person who needs the sentence is the one issuing the key, before
-they answer a question about it, which is where it prints.
-
-The two lists are different answers and the generator keeps them apart.
-` + "`" + `billing` + "`" + ` and ` + "`" + `enterprise_dashboard` + "`" + ` are not built, so they cannot be sold.
-These two are built and are not gated, so they can be sold and should not be
-described as something the license turns on.
+Both are now gated. ` + "`" + `air_gapped` + "`" + ` left when the mode that refuses was built.
+` + "`" + `rbac` + "`" + ` left on 2026-09-11, when the enterprise control plane gained a stored
+role model, routes to define one, and a resolver that asks the license and the
+organization's entitlement before a custom role widens anything. With nothing
+left for it to name, the warning was deleted rather than kept as a line that can
+never print. If a feature is ever built and deliberately gated nowhere again,
+` + "`" + `ee/engine/license/license.go` + "`" + ` says how to bring the warning back.
 
 ## Features that cannot be issued
 
@@ -5718,7 +5844,7 @@ The features a license can name are ` + "`" + `air_gapped` + "`" + `, ` + "`" + 
 <!-- entitlement-names:end -->
 
 <!-- entitlement-count:start -->
-Of the 14 features a license can carry, **10 are refused when the license does not name them**, 8 by the engine and 3 by the control plane, with some checked by both. The rest are listed here anyway, with what actually happens without each one, because a feature that is sold and never checked is worth knowing about and the number is only useful if it can come back unflattering.
+Of the 14 features a license can carry, **11 are refused when the license does not name them**, 8 by the engine and 4 by the control plane, with some checked by both. The rest are listed here anyway, with what actually happens without each one, because a feature that is sold and never checked is worth knowing about and the number is only useful if it can come back unflattering.
 <!-- entitlement-count:end -->
 
 The table is generated from ` + "`" + `ee/engine/feature/catalogue.go` + "`" + `, which is the one
@@ -5748,7 +5874,7 @@ is where it gets published.
 | ` + "`" + `enterprise_secrets` + "`" + ` | Declared variables resolved from Vault or a cloud secret manager. | Withheld. ` + "`" + `secrets/source.go:Source.Available` + "`" + ` asks the license, and the feature is off when the answer is no. |
 | ` + "`" + `multi_runtime` + "`" + ` | Placing an environment across several runtimes at once, by requirement and by tag. | Withheld. ` + "`" + `engine/internal/env/env.go:Orchestrator.placement` + "`" + ` asks the license, and the feature is off when the answer is no. |
 | ` + "`" + `policy_enforcement` + "`" + ` | Organization policy that refuses an environment the manifest would have allowed. | Withheld. ` + "`" + `policyenforce/policyenforce.go:Hook.Check` + "`" + ` asks the license, and the feature is off when the answer is no. |
-| ` + "`" + `rbac` + "`" + ` | Roles, and a permission on every route. | Nothing changes. It is implemented and deliberately available to everyone. |
+| ` + "`" + `rbac` + "`" + ` | Custom roles: a role an organization defines, granted to a member at a scope, on top of the four built-in roles. | Withheld by the control plane. ` + "`" + `ee/web/rbac/src/enforce.ts:customRoleResolver` + "`" + ` asks the license, and an unlicensed installation is answered 402 naming the feature rather than 404. |
 | ` + "`" + `scim` + "`" + ` | Directory provisioning, so joiners and leavers arrive from the identity provider. | Withheld by the control plane. ` + "`" + `ee/web/scim/src/routes.ts:guard` + "`" + ` asks the license, and an unlicensed installation is answered 402 naming the feature rather than 404. |
 | ` + "`" + `sso` + "`" + ` | Single sign on against the organization's own identity provider. | Withheld by the control plane. ` + "`" + `ee/web/sso/src/store.ts:connectionByHandle` + "`" + ` asks the license, and an unlicensed installation is answered 402 naming the feature rather than 404. |
 | ` + "`" + `support_access` + "`" + ` | A supported way for the vendor to see what a customer sees. | Nothing changes. It is implemented and deliberately available to everyone. |
@@ -5775,21 +5901,24 @@ working feature from every direction and is harder to find than the gap it
 covers. A feature nobody can buy and nobody can be granted cannot be mistaken
 for one that ships.
 
-### One more is not enforced
+### Custom roles were in a third state until 2026-09-11
 
-A third case, and a different one from the two above: ` + "`" + `rbac` + "`" + `. It names something
-real, and the license is not what provides it.
+` + "`" + `rbac` + "`" + ` named something real that the license did not provide. The custom roles
+library was complete and tested, and nothing stored a role model, so no
+organization could have one. It was reported and not enforced, written down
+rather than gated, because a check on a path nothing reaches is worse than no
+check, and ` + "`" + `tools/licensegen` + "`" + ` printed a warning naming it beside every key it
+signed.
 
-The custom roles library is complete and tested, and nothing stores a role
-model, so an organization has no way to have one.
-
-It is reported and not enforced, and that is written down rather than gated, for
-the reason the paragraph above gives: a check on a path nothing reaches is worse
-than no check. Unlike ` + "`" + `billing` + "`" + ` and ` + "`" + `enterprise_dashboard` + "`" + ` it is not refused at
-issue, because refusing it would refuse a customer a capability they can have.
-` + "`" + `tools/licensegen` + "`" + ` prints a warning naming it beside the key it signs instead,
-so that whoever issues it reads what the license does and does not grant before
-a customer asks.
+That stopped being true on 2026-09-11. The enterprise control plane now stores a
+role model per organization, mounts the routes that define one, and installs the
+resolver every permission check asks, and that resolver asks the license and
+then the organization's entitlement before a stored grant widens anything. The
+table above reads Withheld for ` + "`" + `rbac` + "`" + `, and the site it names is the one that
+asks. The warning is gone with the state it described. The four built-in roles
+are unchanged and are not what the license sells: every organization on every
+plan has them. [Custom roles](/docs/enterprise/custom-roles) says how a model is
+written, reviewed and applied.
 
 ` + "`" + `air_gapped` + "`" + ` was in this state and said so nowhere until 2026-09-08. Every
 occurrence of the name in the repository was a copy of the catalogue, the
@@ -5803,12 +5932,14 @@ code rather than written beside it. The table now reads Withheld for
 ` + "`" + `air_gapped` + "`" + `, and the site it names is the one that asks.
 
 All three lists are held to the code by a test rather than by a habit.
-` + "`" + `notShipped` + "`" + ` and ` + "`" + `unenforced` + "`" + ` in ` + "`" + `ee/engine/license/license.go` + "`" + ` are the single
-place each statement lives, and this page, the generator and the enterprise
-feature registry are all checked against them in both directions. A fourth
-check asks the question none of those could: that every feature a license can
-grant is refused, recorded as unenforced, or gated at a real site in one half of
-the product or the other.
+` + "`" + `notShipped` + "`" + ` in ` + "`" + `ee/engine/license/license.go` + "`" + ` is the single place the refused
+set lives, and this page, the generator and the enterprise feature registry are
+all checked against it in both directions. A fourth check asks the question none
+of those could: that every feature a license can grant is either refused or
+gated at a real site in one half of the product or the other. A third answer,
+built and deliberately gated nowhere, was recorded in a map called ` + "`" + `unenforced` + "`" + `
+until custom roles, its last entry, were gated, and ` + "`" + `license.go` + "`" + ` says how to
+bring it back with its checks if a feature is ever in that state again.
 
 ## Contributing
 
@@ -15706,9 +15837,9 @@ egress, captured mail, agents, load, insights, and teardown. None of it expires
 and none of it phones home.
 
 A license adds the enterprise edition, which is a separate binary built from
-the ee directory of the same repository: single sign on, SCIM, custom roles and
-approvals, SIEM streaming, organization wide policy enforcement, customer owned
-runtime clusters, enterprise secret managers, and billing.
+the ee directory of the same repository: single sign on, SCIM, custom roles,
+SIEM streaming, organization wide policy enforcement, customer owned runtime
+clusters, enterprise secret managers, and billing.
 
 ` + "`" + "`" + "`" + `
 af license

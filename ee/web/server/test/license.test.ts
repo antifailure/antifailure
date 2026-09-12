@@ -10,7 +10,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { generateKeyPairSync, randomUUID, sign } from 'node:crypto'
-import { clearExtensions, hasSignInPolicy, registeredExtensions, setSignInPolicy, FakeClock } from '@antifailure/api'
+import { clearExtensions, hasSignInPolicy, registeredExtensions, setSignInPolicy, FakeClock, setPermissionResolver, hasPermissionResolver } from '@antifailure/api'
 import {
   LicenseRefused,
   evaluate,
@@ -287,7 +287,7 @@ describe('registering the enterprise edition', () => {
       encryptionKey: Buffer.alloc(32, 7),
     })
 
-    assert.deepEqual(registeredExtensions().map((e) => e.name).sort(), ['scim', 'sso'])
+    assert.deepEqual(registeredExtensions().map((e) => e.name).sort(), ['rbac', 'scim', 'sso'])
     assert.equal(
       hasSignInPolicy(),
       true,
@@ -296,5 +296,42 @@ describe('registering the enterprise edition', () => {
     )
     clearExtensions()
     setSignInPolicy(null)
+    setPermissionResolver(null)
+  })
+
+  it('installs the custom role resolver beside the routes that define a model, never one', () => {
+    // The resolver that makes a stored custom role change an answer had no
+    // production caller: permits() asked a socket nothing filled, and the only
+    // call to setPermissionResolver outside the community API was in
+    // ee/web/rbac's own test. Routes without it would let an organization write
+    // a model nothing reads, which looks complete from the screen that edits it.
+    clearExtensions()
+    setPermissionResolver(null)
+    assert.equal(hasPermissionResolver(), false)
+
+    registerEnterprise({
+      pool: {} as never,
+      clock: new FakeClock(),
+      baseUrl: 'https://enterprise.test',
+      appBaseUrl: 'https://enterprise.test/',
+      secureCookies: true,
+      env: {},
+      log: () => {},
+      encryptionKey: Buffer.alloc(32, 7),
+    })
+
+    assert.ok(
+      registeredExtensions().some((e) => e.name === 'rbac'),
+      'the enterprise entry point mounted no custom role routes, so no organization can define one',
+    )
+    assert.equal(
+      hasPermissionResolver(),
+      true,
+      'the custom role routes were mounted and no resolver was installed, so a stored model ' +
+        'would change no answer anywhere',
+    )
+    clearExtensions()
+    setSignInPolicy(null)
+    setPermissionResolver(null)
   })
 })

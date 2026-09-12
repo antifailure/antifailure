@@ -272,28 +272,34 @@ export const ENTITLEMENTS: Record<string, EntitlementSpec> = {
     kind: 'boolean',
     description: 'Custom roles and per repository scopes, beyond the four built-in roles.',
     byPlan: { free: false, team: false, enterprise: true },
-    // REPORTED AND NOT ENFORCED, IN EITHER EDITION, and the sentence below is
-    // the finding rather than an apology for one.
+    // ENFORCED IN THE EDITION THAT HAS IT, AS OF 2026-09-11, and the entry
+    // above this one is the precedent it follows.
     //
-    // Measured on 2026-09-08. The enterprise edition carries a complete and
-    // tested library for custom roles: validation, scope resolution, the
-    // approval policy, and a reviewable YAML form of the whole model. It has no
-    // table, no route, no loader and no caller. There is no way for an
-    // organization to have a custom role model in this product, so there is
-    // nothing for a check to refuse, in this build or in that one.
+    // This read "reported and not enforced, in either edition" from 2026-09-08,
+    // and it was the finding rather than an apology: the enterprise edition
+    // carried a complete library for custom roles and nothing stored a model,
+    // so there was no request a check could refuse. What was missing was one
+    // persistence layer, as this entry said. It now exists: migration 0044
+    // stores a model per organization under row level security, the enterprise
+    // edition mounts routes that define one, and its entry point installs the
+    // resolver permits() has always asked. The resolver asks THIS entitlement,
+    // per request, in the transaction that reads the model, and a stored grant
+    // widens nothing for an organization that is not entitled.
     //
-    // A licence check was deliberately NOT added in front of it. A gate on a
-    // path nothing reaches is a declared enforcement site that never runs,
-    // which reads as a working feature from every direction and is harder to
-    // find than the gap it covers. The entry stays, because the plan values are
-    // real and the capability is one persistence layer from existing, and this
-    // sentence is what stops the next person believing the gate is there.
+    // Named in prose rather than by path, for the reason audit_stream gives: the
+    // edition boundary job greps this tree for the enterprise directory and
+    // catches a comment as readily as an import. The four built-in roles are
+    // not this entitlement and never consult it, which is why withdrawing it
+    // removes nobody's built-in access.
     enforcedAt: null,
+    enforcedInTheEditionThatHasIt: true,
     notEnforcedBecause:
-      'Custom roles exist as a library and not as a feature. Nothing stores a role model, no ' +
-      'route defines one, and the resolver that would apply one has no caller outside its own ' +
-      'tests, so there is no request a check could refuse. Gating it would declare an ' +
-      'enforcement site that never runs.',
+      'The community build has the four built-in roles and nothing that stores or reads a ' +
+      'custom one, so there is no custom grant for a check to refuse. The edition that carries ' +
+      'custom roles asks this entitlement on every request a built-in role would refuse and a ' +
+      'stored grant would allow, and on every route that reads or writes the model, so an ' +
+      'organization whose entitlement is withdrawn stops being widened by its custom roles on ' +
+      'the next request, and keeps its built-in access and its stored model untouched.',
   },
   support_access: {
     kind: 'boolean',

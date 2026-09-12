@@ -895,9 +895,9 @@ egress, captured mail, agents, load, insights, and teardown. None of it expires
 and none of it phones home.
 
 A license adds the enterprise edition, which is a separate binary built from
-the ee directory of the same repository: single sign on, SCIM, custom roles and
-approvals, SIEM streaming, organization wide policy enforcement, customer owned
-runtime clusters, enterprise secret managers, and billing.
+the ee directory of the same repository: single sign on, SCIM, custom roles,
+SIEM streaming, organization wide policy enforcement, customer owned runtime
+clusters, enterprise secret managers, and billing.
 
 ```
 af license

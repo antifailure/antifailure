@@ -156,7 +156,7 @@ function Admins() {
 
         <Card
           title="What each permission grants"
-          note="The catalog the server compiles with. There is no custom role table, so this is the whole of it."
+          note="The catalog the server compiles with. An operator role is one of these four and nothing else: the custom roles a CUSTOMER can define are a tenant feature and reach no operator permission."
         >
           <Loaded state={catalog} skeleton={<CardSkeleton count={2} />}>
             {(data) => <PermissionCatalog catalog={data} />}

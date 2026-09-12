@@ -7,10 +7,11 @@
 // case. main.ts is the process; this is the decision, and the decision is what
 // is worth proving.
 
-import { registerExtension, setSignInPolicy, type Clock } from '@antifailure/api'
+import { registerExtension, setPermissionResolver, setSignInPolicy, type Clock } from '@antifailure/api'
 import type { Pool } from '@antifailure/db'
 import { ssoExtension, signInPolicy, keyFromEnv } from '@antifailure-ee/sso'
 import { scimExtension } from '@antifailure-ee/scim'
+import { customRoleResolver, rbacExtension } from '@antifailure-ee/rbac'
 import { declare, licensed } from '@antifailure-ee/features'
 import {
   Forwarder,
@@ -191,15 +192,57 @@ export function registerEnterprise(options: RegisterOptions): Registered {
     gate,
   )
 
+  const rbac = gated(
+    rbacExtension({ pool: options.pool, clock: options.clock, log: options.log }),
+    'rbac',
+    gate,
+  )
+
   registerExtension(sso)
   registerExtension(scim)
+  registerExtension(rbac)
   setSignInPolicy(signInPolicy(options.pool))
+  installCustomRoles(options, gate)
 
   return {
     claims,
-    mounted: [sso.name, scim.name],
+    mounted: [sso.name, scim.name, rbac.name],
     auditStream: startAuditStream(options, gate),
   }
+}
+
+/**
+ * Installs the custom role resolver, which had no production caller.
+ *
+ * BOTH HALVES, always, for the reason the sign on registration above gives. The
+ * routes let an organization store a model and the resolver is what makes a
+ * stored model change an answer. Routes without the resolver would be a model
+ * anybody could write and nothing would read, which is a feature that looks
+ * complete from the screen that edits it and enforces nothing. The resolver
+ * without the routes would read a table nothing can write.
+ *
+ * web/apps/api/src/permissions.ts has asked an installed resolver on every
+ * refused request since it was written, and ee/web/rbac's own test installed
+ * one to prove the two fit. This is the first call that installs one outside a
+ * test, and it is here rather than in the community boot path because the
+ * community control plane must not be able to name enterprise code at all.
+ */
+export function installCustomRoles(
+  options: RegisterOptions,
+  gate: { claims: Claims | null; org: string; now: () => Date; revoked: ReadonlySet<string> },
+): void {
+  setPermissionResolver(
+    customRoleResolver({
+      pool: options.pool,
+      clock: options.clock,
+      // The licence key, asked per request against the clock, so a licence that
+      // lapses stops custom roles on the next refused request and not at the
+      // next restart. The organization's own entitlement is asked inside the
+      // resolver, in the transaction that reads the model.
+      installationPermits: () => statusNow(gate).enabled('rbac'),
+      log: options.log,
+    }),
+  )
 }
 
 /**

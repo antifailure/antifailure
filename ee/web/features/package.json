@@ -16,6 +16,7 @@
     "@antifailure/db": "file:../../../web/packages/db"
   },
   "devDependencies": {
+    "@antifailure-ee/rbac": "*",
     "@antifailure-ee/scim": "*",
     "@antifailure-ee/server": "*",
     "@antifailure-ee/sso": "*",
