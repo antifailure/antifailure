@@ -29,7 +29,7 @@ func TestResolve_HandsServicesWhatTheManifestDeclaresAndNothingElse(t *testing.T
 	}))
 
 	got, err := secrets.Resolve(t.Context(), chain, secrets.Request{
-		Declared: []schema.EnvVar{required("DATABASE_URL")},
+		Services: unowned([]schema.EnvVar{required("DATABASE_URL")}),
 		EnvID:    "af-1",
 	})
 	require.NoError(t, err)
@@ -46,7 +46,7 @@ func TestResolve_ASandboxCredentialNeverReachesTheService(t *testing.T) {
 	}))
 
 	got, err := secrets.Resolve(t.Context(), chain, secrets.Request{
-		Declared: []schema.EnvVar{required("STRIPE_SECRET_KEY")},
+		Services: unowned([]schema.EnvVar{required("STRIPE_SECRET_KEY")}),
 		Sandbox:  []string{"STRIPE_SECRET_KEY"},
 		EnvID:    "af-shopfront-feature-checkout",
 	})
@@ -94,7 +94,7 @@ func TestResolve_ALiveCredentialInASandboxSlotIsRefused(t *testing.T) {
 	chain := secrets.NewChain(envSource("shell", map[string]string{"STRIPE_SECRET_KEY": live}))
 
 	_, err := secrets.Resolve(t.Context(), chain, secrets.Request{
-		Declared: []schema.EnvVar{required("STRIPE_SECRET_KEY")},
+		Services: unowned([]schema.EnvVar{required("STRIPE_SECRET_KEY")}),
 		Sandbox:  []string{"STRIPE_SECRET_KEY"},
 		EnvID:    "af-1",
 	})
@@ -116,7 +116,7 @@ func TestResolve_ALiveCredentialInAnOrdinarySlotIsNotRefused(t *testing.T) {
 	chain := secrets.NewChain(envSource("shell", map[string]string{"SOME_KEY": live}))
 
 	got, err := secrets.Resolve(t.Context(), chain, secrets.Request{
-		Declared: []schema.EnvVar{required("SOME_KEY")}, EnvID: "af-1",
+		Services: unowned([]schema.EnvVar{required("SOME_KEY")}), EnvID: "af-1",
 	})
 	require.NoError(t, err)
 	require.Equal(t, live, got.Service["SOME_KEY"].Reveal())
@@ -128,7 +128,7 @@ func TestResolve_ReportsEveryMissingVariableAtOnce(t *testing.T) {
 	// command three times.
 	chain := secrets.NewChain(envSource("shell", map[string]string{}))
 	got, err := secrets.Resolve(t.Context(), chain, secrets.Request{
-		Declared: []schema.EnvVar{required("A"), required("B"), required("C")},
+		Services: unowned([]schema.EnvVar{required("A"), required("B"), required("C")}),
 		EnvID:    "af-1",
 	})
 	require.NoError(t, err)
@@ -144,7 +144,7 @@ func TestResolve_AnOptionalVariableIsReportedSeparatelyFromAMissingOne(t *testin
 	// learn to ignore both.
 	chain := secrets.NewChain(envSource("shell", map[string]string{}))
 	got, err := secrets.Resolve(t.Context(), chain, secrets.Request{
-		Declared: []schema.EnvVar{required("NEEDED"), optional("NICE_TO_HAVE")},
+		Services: unowned([]schema.EnvVar{required("NEEDED"), optional("NICE_TO_HAVE")}),
 		EnvID:    "af-1",
 	})
 	require.NoError(t, err)
@@ -158,7 +158,7 @@ func TestResolve_ASandboxCredentialIsAlwaysRequired(t *testing.T) {
 	// there is nothing to substitute.
 	chain := secrets.NewChain(envSource("shell", map[string]string{}))
 	got, err := secrets.Resolve(t.Context(), chain, secrets.Request{
-		Declared: []schema.EnvVar{optional("STRIPE_SECRET_KEY")},
+		Services: unowned([]schema.EnvVar{optional("STRIPE_SECRET_KEY")}),
 		Sandbox:  []string{"STRIPE_SECRET_KEY"},
 		EnvID:    "af-1",
 	})
@@ -173,7 +173,7 @@ func TestResolve_ALiteralInTheManifestIsNotLookedUp(t *testing.T) {
 	// nobody considered private into the redactor and the audit trail.
 	chain := secrets.NewChain(envSource("shell", map[string]string{"NODE_ENV": "production"}))
 	got, err := secrets.Resolve(t.Context(), chain, secrets.Request{
-		Declared: []schema.EnvVar{{Name: "NODE_ENV", Value: "preview"}},
+		Services: unowned([]schema.EnvVar{{Name: "NODE_ENV", Value: "preview"}}),
 		EnvID:    "af-1",
 	})
 	require.NoError(t, err)
@@ -186,7 +186,7 @@ func TestResolve_ARenameLooksUpOneNameAndDeliversAnother(t *testing.T) {
 	t.Parallel()
 	chain := secrets.NewChain(envSource("shell", map[string]string{"PROD_DATABASE_URL": "postgres://x"}))
 	got, err := secrets.Resolve(t.Context(), chain, secrets.Request{
-		Declared: []schema.EnvVar{{Name: "DATABASE_URL", From: "PROD_DATABASE_URL"}},
+		Services: unowned([]schema.EnvVar{{Name: "DATABASE_URL", From: "PROD_DATABASE_URL"}}),
 		EnvID:    "af-1",
 	})
 	require.NoError(t, err)
@@ -203,7 +203,7 @@ func TestResolve_ARenameThatIsMissingNamesTheNameToSet(t *testing.T) {
 	// PROD_DATABASE_URL is a message that actively misleads.
 	chain := secrets.NewChain(envSource("shell", map[string]string{}))
 	got, err := secrets.Resolve(t.Context(), chain, secrets.Request{
-		Declared: []schema.EnvVar{{Name: "DATABASE_URL", From: "PROD_DATABASE_URL"}},
+		Services: unowned([]schema.EnvVar{{Name: "DATABASE_URL", From: "PROD_DATABASE_URL"}}),
 		EnvID:    "af-1",
 	})
 	require.NoError(t, err)
@@ -216,7 +216,7 @@ func TestResolve_WhereTwoServicesDisagreeTheStricterWins(t *testing.T) {
 
 	// One service says optional, the other required.
 	got, err := secrets.Resolve(t.Context(), chain, secrets.Request{
-		Declared: []schema.EnvVar{optional("SHARED"), required("SHARED")},
+		Services: unowned([]schema.EnvVar{optional("SHARED"), required("SHARED")}),
 		EnvID:    "af-1",
 	})
 	require.NoError(t, err)
@@ -227,7 +227,7 @@ func TestResolve_WhereTwoServicesDisagreeTheStricterWins(t *testing.T) {
 	// one service's view is a credential.
 	chain = secrets.NewChain(envSource("shell", map[string]string{"K": "v"}))
 	got, err = secrets.Resolve(t.Context(), chain, secrets.Request{
-		Declared: []schema.EnvVar{{Name: "K"}, {Name: "K", Sandbox: true}},
+		Services: unowned([]schema.EnvVar{{Name: "K"}, {Name: "K", Sandbox: true}}),
 		EnvID:    "af-1",
 	})
 	require.NoError(t, err)
@@ -243,7 +243,7 @@ func TestResolve_ProducesOneRecordPerVariableSorted(t *testing.T) {
 		"B": "1", "A": "2", "C": "3",
 	}))
 	got, err := secrets.Resolve(t.Context(), chain, secrets.Request{
-		Declared: []schema.EnvVar{required("C"), required("A"), required("B"), required("A")},
+		Services: unowned([]schema.EnvVar{required("C"), required("A"), required("B"), required("A")}),
 		EnvID:    "af-1",
 	})
 	require.NoError(t, err)
@@ -259,7 +259,7 @@ func TestAuditFields_CarryNamesAndSourcesAndNeverValues(t *testing.T) {
 		"STRIPE_SECRET_KEY": "sk_test_distinctive",
 	}))
 	got, err := secrets.Resolve(t.Context(), chain, secrets.Request{
-		Declared: []schema.EnvVar{required("STRIPE_SECRET_KEY")}, EnvID: "af-1",
+		Services: unowned([]schema.EnvVar{required("STRIPE_SECRET_KEY")}), EnvID: "af-1",
 	})
 	require.NoError(t, err)
 
@@ -291,6 +291,14 @@ func TestFingerprint_IsStableAndDoesNotRevealTheValue(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+
+// unowned declares variables with no service attached, which is how every
+// test written before a resolution could tell services apart asked for them.
+// They land in one group per name, so each of those tests still asks the
+// question it was written to ask.
+func unowned(vars []schema.EnvVar) []secrets.ServiceVars {
+	return []secrets.ServiceVars{{Vars: vars}}
+}
 
 func keys(m map[string]secrets.Value) []string {
 	out := make([]string, 0, len(m))
@@ -338,7 +346,7 @@ func TestResolve_ARenameCanPointAtAValueTheEngineProvides(t *testing.T) {
 		Prepended(secrets.NewProvidedSource("the environment's webhook signing secrets",
 			map[string]string{"STRIPE_WEBHOOK_SECRET": "whsec_derived"}))
 	got, err := secrets.Resolve(t.Context(), chain, secrets.Request{
-		Declared: []schema.EnvVar{{Name: "AF_STRIPE_WEBHOOK_SECRET", From: "STRIPE_WEBHOOK_SECRET"}},
+		Services: unowned([]schema.EnvVar{{Name: "AF_STRIPE_WEBHOOK_SECRET", From: "STRIPE_WEBHOOK_SECRET"}}),
 		EnvID:    "af-1",
 	})
 	require.NoError(t, err)

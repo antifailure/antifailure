@@ -135,7 +135,7 @@ var _ = aferrors.ExitSuccess
 // fingerprint is enough to answer the other common question, which is whether
 // two machines have the same value without either person reading theirs out.
 func explainSecrets(ctx context.Context, e *Env, m *schema.Manifest, root string) {
-	declared := secrets.DeclaredVars(m)
+	declared := secrets.DeclaredFor(m)
 	sandbox := secrets.SandboxNames(m)
 	if len(declared) == 0 && len(sandbox) == 0 {
 		return
@@ -159,7 +159,7 @@ func explainSecrets(ctx context.Context, e *Env, m *schema.Manifest, root string
 	}
 
 	resolved, err := secrets.Resolve(ctx, chain, secrets.Request{
-		Declared: declared, Sandbox: sandbox, EnvID: "explain",
+		Services: declared, Sandbox: sandbox, EnvID: "explain",
 	})
 	if err != nil {
 		// A live credential in a sandbox slot stops af up, and explain is
@@ -191,7 +191,14 @@ func explainSecrets(ctx context.Context, e *Env, m *schema.Manifest, root string
 			// spend an hour wondering why their application sees a placeholder.
 			source += "  (to the proxy; the service gets a marker)"
 		}
-		block.Add(r.Name, source)
+		// The service is named when the value is one service's own, because
+		// two rows with the same variable and different sources otherwise
+		// read as a contradiction rather than as the answer.
+		label := r.Name
+		if r.Service != "" {
+			label += " for " + r.Service
+		}
+		block.Add(label, source)
 	}
 	for _, mi := range resolved.Optional {
 		block.Add(mi.Name, "not set, and not required")

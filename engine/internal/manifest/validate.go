@@ -32,6 +32,7 @@ func validate(m *schema.Manifest, doc *yaml.Node, root string) []Problem {
 	v := &validator{doc: doc, root: root}
 
 	v.services(m)
+	v.envScopes(m)
 	v.database(m)
 	v.datastores(m)
 	v.egress(m)
@@ -395,6 +396,74 @@ func (v *validator) env(base string, s *schema.Service) {
 			v.add(p, fmt.Sprintf("The variable %q is marked sandbox and has a literal value.", e.Name),
 				"A sandbox credential comes from the secrets subsystem so that it can be checked against the live key formats.")
 		}
+	}
+}
+
+// envScopes refuses a scope the resolver could not honour.
+//
+// A value scoped to one service is looked up under a name spelled from the
+// service, and the promise is that no other service can read it. The spelling
+// is made of the characters a variable name already uses, so the promise can be
+// broken by a coincidence of names: another service reading the same stored
+// name without a scope, or a second service whose scoped spelling lands on the
+// same one. Both are refused here, naming both services, rather than left to
+// hand one service another's credential.
+func (v *validator) envScopes(m *schema.Manifest) {
+	type reader struct{ path, service, name string }
+	plain := map[string]reader{}
+	scoped := map[string]reader{}
+	var order []string
+
+	for i := range m.Services {
+		s := &m.Services[i]
+		for j, e := range s.Env {
+			p := fmt.Sprintf("services[%d].env[%d]", i, j)
+			switch e.Scope {
+			case "":
+				if stored := e.StoredName(s.Name); stored != "" {
+					if _, seen := plain[stored]; !seen {
+						plain[stored] = reader{p, s.Name, e.Name}
+					}
+				}
+				continue
+			case schema.ScopeService:
+			default:
+				v.add(p+".scope",
+					fmt.Sprintf("The variable %q has the scope %q, which is not a scope.", e.Name, string(e.Scope)),
+					"The one scope is service, which makes the value this service's own. Leave scope out for a value every service shares.")
+				continue
+			}
+			if e.Value != "" {
+				v.add(p+".scope",
+					fmt.Sprintf("The variable %q is scoped to %s and has a literal value.", e.Name, s.Name),
+					"A literal is written under this service already, so it is this service's own. Scope is for a value looked up from a secret source; remove one or the other.")
+				continue
+			}
+			stored := e.StoredName(s.Name)
+			if first, seen := scoped[stored]; seen {
+				if first.service != s.Name {
+					v.add(p+".scope",
+						fmt.Sprintf("The variable %q is scoped to %s and is stored as %s, which is also where %s's %q is stored.",
+							e.Name, s.Name, stored, first.service, first.name),
+						"A value scoped to one service must not be readable by another. Rename the variable, or the service, so that the two spell different names.")
+				}
+				continue
+			}
+			scoped[stored] = reader{p, s.Name, e.Name}
+			order = append(order, stored)
+		}
+	}
+
+	for _, stored := range order {
+		own := scoped[stored]
+		other, clash := plain[stored]
+		if !clash {
+			continue
+		}
+		v.add(own.path+".scope",
+			fmt.Sprintf("The variable %q is scoped to %s and is stored as %s, and %s reads %s without a scope.",
+				own.name, own.service, stored, other.service, stored),
+			"A value scoped to one service must not be readable by another. Rename the variable one of them reads.")
 	}
 }
 

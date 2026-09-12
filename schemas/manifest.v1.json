@@ -280,7 +280,14 @@
         "from": {
           "type": "string",
           "maxLength": 256,
-          "description": "Where to read the value: a secrets adapter name, or the name of a different variable to copy."
+          "description": "The name the value is stored under, when it differs from the name the service reads. The service receives it under name. With scope set to service, this stored name is the one spelled as the service's own."
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "service"
+          ],
+          "description": "Whose value this is. Leave it out for a value every service that declares the name shares. service makes it this service's own: it is looked up as the service's name in capitals with hyphens as underscores, two underscores, then the name, so the storage service's DATABASE_URL is looked up as STORAGE__DATABASE_URL and no other service receives it. A sandbox credential cannot be scoped, because the egress proxy holds one value per credential for the whole environment."
         }
       }
     },

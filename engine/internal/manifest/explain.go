@@ -110,6 +110,9 @@ func Explain(m *schema.Manifest, width int) string {
 				if e.Sandbox {
 					n += " (sandbox)"
 				}
+				if e.Scope == schema.ScopeService {
+					n += " (scoped)"
+				}
 				if !e.IsRequired() {
 					n += " (optional)"
 				}

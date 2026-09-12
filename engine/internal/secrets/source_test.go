@@ -479,13 +479,17 @@ func TestDeclaredAndSandboxNames(t *testing.T) {
 		}},
 	}
 
-	declared := secrets.DeclaredVars(m)
-	require.Len(t, declared, 3, "every declaration is kept; deduplication happens at resolution")
+	declared := secrets.DeclaredFor(m)
+	require.Len(t, declared, 2, "one entry per service that declares anything")
+	require.Equal(t, "web", declared[0].Service)
+	require.Len(t, declared[0].Vars, 2, "every declaration is kept; deduplication happens at resolution")
+	require.Equal(t, "worker", declared[1].Service)
+	require.Len(t, declared[1].Vars, 1)
 
 	// One name even though two rules use it, because it is one credential.
 	require.Equal(t, []string{"STRIPE_SECRET_KEY"}, secrets.SandboxNames(m))
 	require.Nil(t, secrets.SandboxNames(nil))
-	require.Nil(t, secrets.DeclaredVars(nil))
+	require.Nil(t, secrets.DeclaredFor(nil))
 }
 
 // ---------------------------------------------------------------------------
