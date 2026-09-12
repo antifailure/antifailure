@@ -838,11 +838,12 @@ Push the tag. The production job's configuration apply now plans an
 environment and secret reference change and nothing else, so `configguard`
 accepts it and names the four variables it added. `edition-check.sh
 configured` finds all four in the template, `deploy.sh` moves the image and the
-traffic, and `edition-check.sh serving` asks the public origin for
-`/scim/v2/ServiceProviderConfig`, which must answer 200, and `/sso/start`, which
-must answer 400 asking for an email address. A 404 from either is the community
-image. A 402 is the enterprise image with a licence that does not permit that
-feature, and the body names the licence state.
+traffic, and `edition-check.sh serving` asks the public origin for the provisioning discovery
+document, which must answer 200, and for the single sign-on discovery route with
+no email address, which must answer 400 asking for one. Both routes are on the
+[single sign-on](/docs/enterprise/sso) and [SCIM](/docs/enterprise/scim) pages. A
+404 from either is the community image. A 402 is the enterprise image with a
+licence that does not permit that feature, and the body names the licence state.
 
 ### Then move the image defaults, in a commit after the tag
 
@@ -863,13 +864,13 @@ what the process said it decided, because a route that answers is not the same
 claim as a licence that says what you issued:
 
 ```sh
-curl -sS -o /dev/null -w '%{http_code}\n' https://app.antifailure.dev/scim/v2/ServiceProviderConfig
-curl -sS https://app.antifailure.dev/sso/start
+deploy/cd/edition-check.sh serving https://app.antifailure.dev 1 0
 az containerapp logs show -n afcpprod-app -g af-cp-prod-centralus --tail 200 \
   | grep -E 'license|licence|mounted|audit stream'
 ```
 
-200, then the email address sentence, then a start-up line naming the licence as
+The check names both routes and says they are mounted and licensed, then the
+log shows a start-up line naming the licence as
 active for `antifailure` with its features and expiry, the two extensions
 mounted, and the audit stream line. With no `AF_AUDIT_STREAM_SINK` set, that
 line says the audit log is written and not forwarded, which is correct for a
