@@ -128,10 +128,10 @@ them and routes to them instead.
 ```yaml
     - host: "s3.*.amazonaws.com"
       mode: emulate
-      emulator: localstack
+      emulator: aws
     - host: "*.s3.*.amazonaws.com"
       mode: emulate
-      emulator: localstack
+      emulator: aws
       note: "the bucket is in the hostname, so this is a second rule"
 ```
 
@@ -164,8 +164,8 @@ The destination is rewritten. The request is not.
 The `Host` header keeps the name your application asked for. Virtual hosted
 addressing puts the S3 bucket in the hostname, so
 `mybucket.s3.us-east-1.amazonaws.com` **is** the request, and an emulator told
-the host is `af-emu-localstack:4566` has been told the bucket is called
-`af-emu`. LocalStack, Azurite and fake-gcs-server all read it from the header.
+the host is `af-emu-aws-<environment>:4566` has been told a different
+request. LocalStack, Azurite and fake-gcs-server all read it from the header.
 
 The `Authorization` header is forwarded untouched. `sandbox` replaces a
 credential because the request leaves the environment and a real provider is on

@@ -206,14 +206,34 @@ a real release is a question you can settle yourself rather than take on trust: 
 release that carries `checksums.txt.sigstore.json` and `sbom.spdx.json` ran them,
 and a release that carries neither did not. v0.1.0 and v0.1.1 were both built
 before those steps existed and carry neither. v1.0.0 is the first tag whose
-release workflow runs them. Until a release carries those two files, the pipeline
-is held up by its own tests and by the release workflow refusing a tampered
-`checksums.txt`, and not by a published artifact you can download and check for
-yourself.
+release workflow ran them, and every release from v1.0.0 to v1.3.5 carries both
+files, each beside its own sigstore bundle. That was read off the published
+releases on 2026-09-11 rather than inferred from the workflow, so it is a check
+you can repeat against any of them.
 
-There is no adversarial test suite attempting sandbox escape and proxy bypass.
-For a product whose central promise is containment, this is the most important
-missing test here. It is tracked and it is not done.
+Two adversarial suites try to get out, and every attack in them asserts that
+it failed. `engine/internal/runtime/local/containment_test.go` runs against a
+real Docker daemon: an escape script from inside a live environment, with a
+control that must reach an allowed host through the sidecar in the same
+container, so a container that can reach nothing fails the suite rather than
+passing it; the identical script on a network built without containment, where
+it must get out, which is what shows the script attacks anything; a live
+credential over plain HTTP; the metadata endpoint under a default allow policy;
+and an inspection of every container for a path to the daemon or the host.
+`engine/cmd/af-proxy/adversarial_test.go` attacks the sidecar directly, with
+redirects, confusable hosts, a `Host` header choosing the port, a DNS tunnel, a
+name that resolves to the metadata address, and a TLS connection with no server
+name.
+
+Neither suite reaches the Kubernetes runtime, which has a gate of its own.
+Since #373 each customer pod there starts behind a trusted init container,
+built from the engine's own sidecar image, which holds customer code until it
+has observed its own escape routes denied. The shared runtime conformance suite
+then reported 37 of 37 behaviours and immediate startup containment, with
+nothing skipped. Hold that to what it measured: one isolated single node k3s
+cluster on a CI runner, not AKS, EKS or GKE, and not a cluster running a
+customer's own network policy controller. What it does not prove is in
+`docs/security/pentest-readiness.md`.
 
 ## Incident history
 

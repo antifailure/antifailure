@@ -313,7 +313,7 @@ are 31 findings that predate the config, spread across packages several people
 are editing at once, and turning the gate on before they are cleared would fail
 every branch for something none of them did. `gofmt` and `go vet` are gates
 today. If you are clearing findings in a package you own, that is welcome, and
-the gate goes on when the count reaches zero. TypeScript is strict, no `any`, formatted by Biome. Prose in
+the gate goes on when the count reaches zero. TypeScript compiles with `strict` on, and that is the only check on it: no linter or formatter runs over TypeScript here, so keeping out `any` is a review convention rather than a gate. Prose in
 comments, docs, commit messages, and user-facing strings does not use em dashes
 or double hyphens as punctuation. Error messages are written in the second
 person, name the thing that failed, and say what to do next.

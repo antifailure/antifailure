@@ -314,7 +314,7 @@ var catalogue = []Entitlement{
 	},
 	{
 		Feature:    license.FeatureCompliance,
-		Summary:    "SOC 2 and ISO 27001 evidence gathered from the control plane's own records.",
+		Summary:    "SOC 2 and HIPAA evidence gathered from the control plane's own records.",
 		EnforcedAt: "compliance/command.go:Command",
 		State:      StateGated,
 	},

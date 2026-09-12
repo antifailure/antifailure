@@ -8,12 +8,12 @@ Two licenses, split by directory.
 | [`ee/`](./ee) | [Antifailure Enterprise License](./ee/LICENSE.md) | Source visible and modifiable. Running it in production requires a valid license key or subscription. No reselling, and no offering it to third parties as a hosted service. |
 
 The community edition is complete rather than a demo. Masking, verification,
-every database provider, the egress and mocking layer, the agent runner,
+the database providers outside `ee/engine/db`, the egress and mocking layer, the agent runner,
 insights, load, and the control plane are MIT and stay MIT. What is in `ee/` is
 the set of things a large company requires before a rollout and an individual
 developer never uses: single sign on, SCIM, custom roles, SIEM streaming of
 the engine's privileged actions and of the control plane's own audit log,
-policy enforcement, customer owned runtimes, and billing. `ee/README.md` says
+policy enforcement, customer owned runtimes, and managed cloud databases. `ee/README.md` says
 exactly which actions the engine forwards and what the control plane's stream
 carries, because a one word summary of a feature is where a product oversells
 itself first, and this sentence did: it named the streaming and the hash chain

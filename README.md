@@ -173,10 +173,9 @@ codex mcp add antifailure -- af mcp
 
 The [MCP reference](https://antifailure.dev/docs/reference/mcp) has the current
 configuration for Gemini CLI, Cursor, Windsurf, VS Code, Cline, Continue,
-Claude Desktop, the ChatGPT desktop app, JetBrains AI Assistant and Zed. In
-v1.1.1 the built in transport is local STDIO. Browser clients need an
-authenticated Streamable HTTP service, and Antifailure does not host that
-endpoint yet.
+Claude Desktop, the ChatGPT desktop app, JetBrains AI Assistant and Zed. The
+built in transport is local STDIO. Browser clients need an authenticated
+Streamable HTTP service, and Antifailure hosts no such endpoint.
 
 The part worth reading twice is what an agent cannot do with it. The agent
 chooses the hypothesis and Antifailure chooses the safety controls, and that is
@@ -236,8 +235,10 @@ cannot run on a fork's pull request, so the rows below say where each one ran.
 | Neon | The real Neon API. Found three bugs a fake would have agreed with. | No, by hand |
 | Supabase | The real Supabase Management API, zero skips. Took four runs, and all three bugs it found were orderings rather than states. | No, by hand |
 | DBLab | A real Database Lab Engine over a ZFS pool. Found a clone that left the API before its dataset was released. | No, by hand |
+| pgurl | A real Postgres server, which is the whole of this provider's service | Yes |
+| Aurora | A fake RDS control plane with a real Postgres behind it, and not AWS. Nobody who wrote the provider has an Aurora account, so this row is **written**, not proven. | Yes, against the fake |
 
-The interface they all implement declares 24 behaviours in
+The interface they all implement declares 26 behaviours in
 `engine/conformance/db.go`, and a provider that cannot support one skips it by
 name rather than passing quietly. The suite is itself proved able to fail: a
 provider that violates exactly one guarantee has to go red in that named
@@ -268,8 +269,11 @@ also names what is deliberately not covered, which is the half worth reading
 first.
 
 Builds are reproducible, and that is a gate rather than an aspiration: two
-builds in two directories with two caches produce identical archives on all
-four platforms, checked in CI on every pull request.
+builds in two directories with two caches produce an identical archive,
+checked in CI on every pull request. CI builds the one platform its runner is,
+linux on amd64. The other three come out of the same script with only the
+target operating system and architecture changed, which is an argument for
+them rather than a measurement of them.
 
 Every release from v1.0.0 carries `checksums.txt.sigstore.json` and
 `sbom.spdx.json`: the checksums and a bill of materials read out of the built
