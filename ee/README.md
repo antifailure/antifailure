@@ -15,10 +15,13 @@ removed. The MIT-licensed engine masks your data, seals your network, runs
 your agents, and tears everything down, and it does that completely, forever,
 for free, self hosted. What lives here is the set of things a large company
 asks for before a rollout, which is also the set of things a large company is
-willing to pay for: single sign on, SCIM provisioning, custom roles and
-approvals, SIEM streaming of the engine's privileged actions, organization wide
-policy enforcement, customer owned runtime clusters, enterprise secret
-managers, billing and metering, and support tooling.
+willing to pay for: single sign on, SCIM provisioning, custom roles, SIEM
+streaming of the engine's privileged actions, organization wide policy
+enforcement, customer owned runtime clusters, enterprise secret managers,
+billing and metering, and support tooling. Custom roles are roles an
+organization defines and grants at a scope, on top of the four built-in ones;
+the approvals this line named with them are a section of the policy file that
+nothing enforces yet, and a file carrying one is refused rather than stored.
 
 ### What "SIEM streaming with a tamper evident hash chain" means, exactly
 
