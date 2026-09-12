@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/network"
+	"github.com/moby/moby/client"
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
@@ -58,8 +58,11 @@ type dockerBranch struct {
 func (b *dockerBranch) AttachToNetwork(
 	ctx context.Context, ref, networkID, alias string,
 ) (int, error) {
-	err := b.cli.NetworkConnect(ctx, networkID, ref, &network.EndpointSettings{
-		Aliases: []string{alias},
+	_, err := b.cli.NetworkConnect(ctx, networkID, client.NetworkConnectOptions{
+		Container: ref,
+		EndpointConfig: &network.EndpointSettings{
+			Aliases: []string{alias},
+		},
 	})
 	return 5432, err
 }
@@ -91,16 +94,17 @@ func requireBranchContainer(t *testing.T, name string) *dockerBranch {
 
 	full := "af-lane6-" + name
 	_ = dockerutil.RemoveContainer(ctx, cli, full)
-	created, err := cli.ContainerCreate(ctx,
-		&container.Config{
+	created, err := cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config: &container.Config{
 			Image: "postgres:17-alpine",
 			Env: []string{
 				"POSTGRES_PASSWORD=test", "POSTGRES_USER=postgres", "POSTGRES_DB=postgres",
 			},
 			Labels: dockerutil.Managed("test", name, time.Now().UTC()),
 		},
-		&container.HostConfig{RestartPolicy: container.RestartPolicy{Name: "no"}},
-		nil, nil, full)
+		HostConfig: &container.HostConfig{RestartPolicy: container.RestartPolicy{Name: "no"}},
+		Name:       full,
+	})
 	if err != nil {
 		skipOrFail(t, "the branch container could not be created: %v", err)
 	}
@@ -109,7 +113,7 @@ func requireBranchContainer(t *testing.T, name string) *dockerBranch {
 		defer done()
 		_ = dockerutil.RemoveContainer(c, cli, created.ID)
 	})
-	if err := cli.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
+	if _, err := cli.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
 		skipOrFail(t, "the branch container could not be started: %v", err)
 	}
 
@@ -130,7 +134,7 @@ func waitForBranch(t *testing.T, b *dockerBranch) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
 
-	probe, err := b.cli.NetworkCreate(ctx, b.name+"-probe", network.CreateOptions{
+	probe, err := b.cli.NetworkCreate(ctx, b.name+"-probe", client.NetworkCreateOptions{
 		Driver: "bridge", Internal: true,
 		Labels: dockerutil.Managed("test", "probe", time.Now().UTC()),
 	})
@@ -138,8 +142,11 @@ func waitForBranch(t *testing.T, b *dockerBranch) string {
 	t.Cleanup(func() {
 		c, done := context.WithTimeout(context.Background(), time.Minute)
 		defer done()
-		_ = b.cli.NetworkDisconnect(c, probe.ID, b.id, true)
-		_ = b.cli.NetworkRemove(c, probe.ID)
+		_, _ = b.cli.NetworkDisconnect(c, probe.ID, client.NetworkDisconnectOptions{
+			Container: b.id,
+			Force:     true,
+		})
+		_, _ = b.cli.NetworkRemove(c, probe.ID, client.NetworkRemoveOptions{})
 	})
 	_, err = b.AttachToNetwork(ctx, b.id, probe.ID, "db")
 	require.NoError(t, err)
@@ -165,14 +172,14 @@ func waitForBranch(t *testing.T, b *dockerBranch) string {
 func runOnNetwork(
 	ctx context.Context, cli *client.Client, netID, command string,
 ) (int64, string) {
-	created, err := cli.ContainerCreate(ctx,
-		&container.Config{
+	created, err := cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config: &container.Config{
 			Image: "postgres:17-alpine",
 			Cmd:   []string{"sh", "-lc", command},
 			Env:   []string{"PGPASSWORD=test"},
 		},
-		&container.HostConfig{NetworkMode: container.NetworkMode(netID)},
-		nil, nil, "")
+		HostConfig: &container.HostConfig{NetworkMode: container.NetworkMode(netID)},
+	})
 	if err != nil {
 		return -1, err.Error()
 	}
@@ -181,7 +188,7 @@ func runOnNetwork(
 		defer done()
 		_ = dockerutil.RemoveContainer(c, cli, created.ID)
 	}()
-	if err := cli.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
+	if _, err := cli.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
 		return -1, err.Error()
 	}
 	code, err := dockerutil.AwaitExit(ctx, cli, created.ID)
@@ -294,14 +301,14 @@ func TestContainerApplier_LeavesNothingBehind(t *testing.T) {
 
 	// A rehearsal that leaves a container holding a connection to a copy of
 	// production's data is the leak this product exists to prevent.
-	containers, err := b.cli.ContainerList(ctx, container.ListOptions{All: true})
+	containers, err := b.cli.ContainerList(ctx, client.ContainerListOptions{All: true})
 	require.NoError(t, err)
-	for _, c := range containers {
+	for _, c := range containers.Items {
 		require.NotContains(t, strings.Join(c.Names, " "), "af-rehearse-lane6clean")
 	}
-	nets, err := b.cli.NetworkList(ctx, network.ListOptions{})
+	nets, err := b.cli.NetworkList(ctx, client.NetworkListOptions{})
 	require.NoError(t, err)
-	for _, n := range nets {
+	for _, n := range nets.Items {
 		require.NotEqual(t, "af-rehearse-lane6clean", n.Name)
 	}
 }

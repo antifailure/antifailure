@@ -3,7 +3,8 @@ package local
 import (
 	"context"
 
-	"github.com/docker/docker/api/types/container"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/client"
 
 	"github.com/antifailure/antifailure/engine/internal/capacity"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
@@ -33,7 +34,7 @@ func (r *Runtime) checkCapacity(ctx context.Context, spec provider.EnvSpec) erro
 	if len(asks) == 0 {
 		return nil
 	}
-	info, err := r.cli.Info(ctx)
+	info, err := r.cli.Info(ctx, client.InfoOptions{})
 	if err != nil {
 		// Not a refusal. A daemon that will not describe itself is one this
 		// cannot check, and every other call in Up is about to report the
@@ -41,9 +42,9 @@ func (r *Runtime) checkCapacity(ctx context.Context, spec provider.EnvSpec) erro
 		return nil
 	}
 	node := capacity.Node{
-		Name:        daemonName(info.Name),
-		MilliCPU:    int64(info.NCPU) * 1000,
-		MemoryBytes: info.MemTotal,
+		Name:        daemonName(info.Info.Name),
+		MilliCPU:    int64(info.Info.NCPU) * 1000,
+		MemoryBytes: info.Info.MemTotal,
 	}
 	if node.MilliCPU <= 0 || node.MemoryBytes <= 0 {
 		return nil
@@ -73,11 +74,11 @@ func daemonName(name string) string {
 // daemon rounded to less than one thousandth reads as zero, which is the same
 // answer validation gives to a value that fine.
 func (r *Runtime) appliedResources(ctx context.Context, id string) (milliCPU, memoryBytes int64) {
-	insp, err := r.cli.ContainerInspect(ctx, id)
-	if err != nil || insp.HostConfig == nil {
+	insp, err := r.cli.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
+	if err != nil || insp.Container.HostConfig == nil {
 		return 0, 0
 	}
-	return hostConfigResources(insp.HostConfig.Resources)
+	return hostConfigResources(insp.Container.HostConfig.Resources)
 }
 
 func hostConfigResources(res container.Resources) (milliCPU, memoryBytes int64) {

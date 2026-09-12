@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	dockerclient "github.com/docker/docker/client"
+	dockerclient "github.com/moby/moby/client"
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"

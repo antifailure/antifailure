@@ -17,8 +17,8 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	dockerbuild "github.com/docker/docker/api/types/build"
-	"github.com/docker/docker/client"
+	dockerbuild "github.com/moby/moby/api/types/build"
+	"github.com/moby/moby/client"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
@@ -152,7 +152,7 @@ func wantsBuildKit(ctx context.Context, cli *client.Client, getenv func(string) 
 	}
 	ctx, cancel := context.WithTimeout(ctx, buildKitPingTimeout)
 	defer cancel()
-	ping, err := cli.Ping(ctx)
+	ping, err := cli.Ping(ctx, client.PingOptions{})
 	if err != nil {
 		// The legacy builder is the safe answer when the daemon will not say.
 		// It is slower and it is present on every daemon that has ever
@@ -256,7 +256,7 @@ func (b *DockerBuilder) Build(ctx context.Context, req Request) (Result, error) 
 	}
 
 	started := b.clock.Now()
-	opts := dockerbuild.ImageBuildOptions{
+	opts := client.ImageBuildOptions{
 		Tags:        []string{ref},
 		Dockerfile:  dockerfilePath,
 		Target:      req.Target,
@@ -364,7 +364,7 @@ func buildFailure(err error, req Request, duration string) error {
 func (b *DockerBuilder) attempt(
 	ctx context.Context,
 	req Request,
-	opts dockerbuild.ImageBuildOptions,
+	opts client.ImageBuildOptions,
 	extra map[string]string,
 	buildKit bool,
 ) (log []string, buildErr error, err error) {

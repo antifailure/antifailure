@@ -12,8 +12,7 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/docker/docker/api/types/image"
-	dockerclient "github.com/docker/docker/client"
+	dockerclient "github.com/moby/moby/client"
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
@@ -33,7 +32,7 @@ func requireBuilder(t *testing.T) *DockerBuilder {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if _, err := b.cli.Ping(ctx); err != nil {
+	if _, err := b.cli.Ping(ctx, dockerclient.PingOptions{}); err != nil {
 		_ = b.Close()
 		t.Skipf("skipped: the Docker daemon did not respond: %v", err)
 	}
@@ -51,7 +50,7 @@ func buildAndClean(t *testing.T, b *DockerBuilder, req Request) (Result, error) 
 	t.Cleanup(func() {
 		c, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
-		_, _ = b.cli.ImageRemove(c, ImageRef(req), image.RemoveOptions{Force: true, PruneChildren: true})
+		_, _ = b.cli.ImageRemove(c, ImageRef(req), dockerclient.ImageRemoveOptions{Force: true, PruneChildren: true})
 	})
 	return res, err
 }
@@ -215,7 +214,7 @@ func dockerConnectionFailure(t *testing.T) error {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = cli.Close() })
 
-	_, err = cli.Ping(context.Background())
+	_, err = cli.Ping(context.Background(), dockerclient.PingOptions{})
 	require.True(t, dockerclient.IsErrConnectionFailed(err),
 		"the fixture must exercise Docker's typed connection failure")
 	return err

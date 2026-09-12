@@ -17,16 +17,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	dockerbuild "github.com/docker/docker/api/types/build"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/client"
 	dockerspec "github.com/moby/docker-image-spec/specs-go/v1"
+	"github.com/moby/moby/api/types/image"
+	"github.com/moby/moby/api/types/jsonstream"
+	"github.com/moby/moby/client"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/require"
 
@@ -44,18 +45,18 @@ type fakeDaemon struct {
 	images     map[string]image.InspectResponse
 	inspectErr map[string]error
 	pull       func(ctx context.Context, ref string) (io.ReadCloser, error)
-	build      func(ctx context.Context, opts dockerbuild.ImageBuildOptions) (io.ReadCloser, error)
+	build      func(ctx context.Context, opts client.ImageBuildOptions) (io.ReadCloser, error)
 
 	pulled    []string
 	builds    int
-	buildOpts dockerbuild.ImageBuildOptions
+	buildOpts client.ImageBuildOptions
 }
 
 func newFakeDaemon() *fakeDaemon {
 	return &fakeDaemon{images: map[string]image.InspectResponse{}, inspectErr: map[string]error{}}
 }
 
-func (d *fakeDaemon) ImageInspect(
+func (d *fakeDaemon) imageInspect(
 	_ context.Context, ref string, _ ...client.ImageInspectOption,
 ) (image.InspectResponse, error) {
 	d.mu.Lock()
@@ -69,7 +70,7 @@ func (d *fakeDaemon) ImageInspect(
 	return image.InspectResponse{}, fmt.Errorf("No such image: %s: %w", ref, cerrdefs.ErrNotFound)
 }
 
-func (d *fakeDaemon) ImagePull(ctx context.Context, ref string, _ image.PullOptions) (io.ReadCloser, error) {
+func (d *fakeDaemon) imagePull(ctx context.Context, ref string, _ client.ImagePullOptions) (io.ReadCloser, error) {
 	d.mu.Lock()
 	d.pulled = append(d.pulled, ref)
 	pull := d.pull
@@ -80,7 +81,7 @@ func (d *fakeDaemon) ImagePull(ctx context.Context, ref string, _ image.PullOpti
 	return pull(ctx, ref)
 }
 
-func (d *fakeDaemon) ImageTag(_ context.Context, source, target string) error {
+func (d *fakeDaemon) imageTag(_ context.Context, source, target string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	img, ok := d.images[source]
@@ -92,19 +93,51 @@ func (d *fakeDaemon) ImageTag(_ context.Context, source, target string) error {
 }
 
 func (d *fakeDaemon) ImageBuild(
-	ctx context.Context, _ io.Reader, opts dockerbuild.ImageBuildOptions,
-) (dockerbuild.ImageBuildResponse, error) {
+	ctx context.Context, _ io.Reader, opts client.ImageBuildOptions,
+) (client.ImageBuildResult, error) {
 	d.mu.Lock()
 	d.builds++
 	d.buildOpts = opts
 	build := d.build
 	d.mu.Unlock()
 	if build == nil {
-		return dockerbuild.ImageBuildResponse{}, errors.New("Cannot connect to the Docker daemon")
+		return client.ImageBuildResult{}, errors.New("Cannot connect to the Docker daemon")
 	}
 	rc, err := build(ctx, opts)
-	return dockerbuild.ImageBuildResponse{Body: rc}, err
+	return client.ImageBuildResult{Body: rc}, err
 }
+
+// The moby client's shapes, over the fake's own. An inspect result wraps the
+// response, a tag takes its two names as options, and a pull hands back a
+// response that is also the stream readPullStream reads.
+func (d *fakeDaemon) ImageInspect(
+	ctx context.Context, ref string, opts ...client.ImageInspectOption,
+) (client.ImageInspectResult, error) {
+	img, err := d.imageInspect(ctx, ref, opts...)
+	return client.ImageInspectResult{InspectResponse: img}, err
+}
+
+func (d *fakeDaemon) ImagePull(ctx context.Context, ref string, opts client.ImagePullOptions) (client.ImagePullResponse, error) {
+	rc, err := d.imagePull(ctx, ref, opts)
+	if rc == nil {
+		return nil, err
+	}
+	return pullResponse{rc}, err
+}
+
+func (d *fakeDaemon) ImageTag(ctx context.Context, opts client.ImageTagOptions) (client.ImageTagResult, error) {
+	return client.ImageTagResult{}, d.imageTag(ctx, opts.Source, opts.Target)
+}
+
+// pullResponse is a pull stream as the moby client returns one. The job reads
+// the stream itself, so the two helpers the client adds are never called here.
+type pullResponse struct{ io.ReadCloser }
+
+func (pullResponse) JSONMessages(context.Context) iter.Seq2[jsonstream.Message, error] {
+	return func(func(jsonstream.Message, error) bool) {}
+}
+
+func (pullResponse) Wait(context.Context) error { return nil }
 
 func (d *fakeDaemon) put(ref string, img image.InspectResponse) {
 	d.mu.Lock()
@@ -174,7 +207,7 @@ func (d *fakeDaemon) publishes(digest string) {
 
 // compiles makes a build succeed, storing an image with the labels asked for.
 func (d *fakeDaemon) compiles() {
-	d.build = func(_ context.Context, opts dockerbuild.ImageBuildOptions) (io.ReadCloser, error) {
+	d.build = func(_ context.Context, opts client.ImageBuildOptions) (io.ReadCloser, error) {
 		img := declaring("")
 		img.Config.Labels = opts.Labels
 		for _, tag := range opts.Tags {
@@ -486,7 +519,7 @@ func TestProxyImage_ABaseImagePullThatStallsInsideTheBuildIsNamedWhenItIsGivenUp
 	// The measured 25 minutes. The build's one network operation is fetching
 	// its FROM image, and it reports that as status lines, not as stream.
 	d := newFakeDaemon()
-	d.build = func(ctx context.Context, _ dockerbuild.ImageBuildOptions) (io.ReadCloser, error) {
+	d.build = func(ctx context.Context, _ client.ImageBuildOptions) (io.ReadCloser, error) {
 		return stalling(ctx,
 			`{"status":"Pulling from library/golang","id":"1.25-alpine"}`,
 			`{"status":"Pulling fs layer","id":"a1"}`,
@@ -507,7 +540,7 @@ func TestProxyImage_AStillWorkingLineNamesWhatTheDaemonLastSaid(t *testing.T) {
 	fake := clock.NewFake(time.Date(2026, 9, 11, 0, 0, 0, 0, time.UTC))
 	release := make(chan struct{})
 	d := newFakeDaemon()
-	d.build = func(ctx context.Context, _ dockerbuild.ImageBuildOptions) (io.ReadCloser, error) {
+	d.build = func(ctx context.Context, _ client.ImageBuildOptions) (io.ReadCloser, error) {
 		pr, pw := io.Pipe()
 		go func() {
 			_, _ = io.WriteString(pw, `{"status":"Pulling fs layer","id":"a1"}`+"\n")

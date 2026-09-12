@@ -43,9 +43,8 @@ import (
 	"sync"
 	"time"
 
-	dockerbuild "github.com/docker/docker/api/types/build"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/api/types/image"
+	"github.com/moby/moby/client"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
@@ -84,10 +83,10 @@ const (
 // them can be produced on demand against a real daemon. The real client
 // satisfies this, so nothing about the production path changes.
 type proxyImageDaemon interface {
-	ImageInspect(ctx context.Context, ref string, opts ...client.ImageInspectOption) (image.InspectResponse, error)
-	ImagePull(ctx context.Context, ref string, opts image.PullOptions) (io.ReadCloser, error)
-	ImageTag(ctx context.Context, source, target string) error
-	ImageBuild(ctx context.Context, buildContext io.Reader, opts dockerbuild.ImageBuildOptions) (dockerbuild.ImageBuildResponse, error)
+	ImageInspect(ctx context.Context, ref string, opts ...client.ImageInspectOption) (client.ImageInspectResult, error)
+	ImagePull(ctx context.Context, ref string, opts client.ImagePullOptions) (client.ImagePullResponse, error)
+	ImageTag(ctx context.Context, opts client.ImageTagOptions) (client.ImageTagResult, error)
+	ImageBuild(ctx context.Context, buildContext io.Reader, opts client.ImageBuildOptions) (client.ImageBuildResult, error)
 }
 
 // proxyImageJob is one attempt to put the sidecar image on this daemon.
@@ -305,7 +304,7 @@ func (j *proxyImageJob) alreadyHave(ctx context.Context, local string) (bool, er
 				". It is answering slowly or not at all, and building an image it may already "+
 				"hold is a quarter of an hour spent on a question nobody asked")
 	}
-	if got := sourcesLabelOf(insp); got != "" && got != proxyimage.SourcesDigest() {
+	if got := sourcesLabelOf(insp.InspectResponse); got != "" && got != proxyimage.SourcesDigest() {
 		return false, aferrors.Coded(aferrors.AFRUN048, "detail",
 			"the image "+local+" on this daemon says it was built from sidecar source "+got+
 				" and this engine carries "+proxyimage.SourcesDigest()+
@@ -342,7 +341,7 @@ func (j *proxyImageJob) pull(ctx context.Context, ref, local string) error {
 	pullCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 
-	rc, err := j.daemon.ImagePull(pullCtx, ref, image.PullOptions{})
+	rc, err := j.daemon.ImagePull(pullCtx, ref, client.ImagePullOptions{})
 	if err != nil {
 		return j.streamFailure(ctx, pullCtx, budget, "fetching "+ref, err)
 	}
@@ -361,7 +360,7 @@ func (j *proxyImageJob) pull(ctx context.Context, ref, local string) error {
 		return aferrors.Wrap(err, aferrors.AFRUN048, "detail",
 			ref+" is not present after fetching it: "+err.Error())
 	}
-	if got := sourcesLabelOf(insp); got != proxyimage.SourcesDigest() {
+	if got := sourcesLabelOf(insp.InspectResponse); got != proxyimage.SourcesDigest() {
 		held := got
 		if held == "" {
 			held = "nothing"
@@ -373,7 +372,7 @@ func (j *proxyImageJob) pull(ctx context.Context, ref, local string) error {
 				"match the policy this command explains")
 	}
 	if ref != local {
-		if err := j.daemon.ImageTag(ctx, ref, local); err != nil {
+		if _, err := j.daemon.ImageTag(ctx, client.ImageTagOptions{Source: ref, Target: local}); err != nil {
 			return aferrors.Wrap(err, aferrors.AFRUN048, "detail",
 				"naming "+ref+" as "+local+": "+err.Error())
 		}
@@ -418,7 +417,7 @@ func (j *proxyImageJob) build(ctx context.Context, local string) error {
 	// accepted.
 	labels[proxyimage.SourcesLabel] = proxyimage.SourcesDigest()
 
-	resp, err := j.daemon.ImageBuild(buildCtx, proxyimage.BuildContext(), dockerbuild.ImageBuildOptions{
+	resp, err := j.daemon.ImageBuild(buildCtx, proxyimage.BuildContext(), client.ImageBuildOptions{
 		Tags:   []string{local},
 		Remove: true,
 		Labels: labels,
@@ -573,8 +572,8 @@ type notFoundProbe struct{ err error }
 
 func (p notFoundProbe) ImageInspect(
 	context.Context, string, ...client.ImageInspectOption,
-) (image.InspectResponse, error) {
-	return image.InspectResponse{}, p.err
+) (client.ImageInspectResult, error) {
+	return client.ImageInspectResult{}, p.err
 }
 
 // messageOf is what one failed attempt has to say, for composing two of them

@@ -34,7 +34,6 @@ output against this file.
 - `github.com/containerd/errdefs/pkg` v0.3.0
 - `github.com/davecgh/go-spew` v1.1.2-0.20180830191138-d8f796af33cc
 - `github.com/distribution/reference` v0.6.0
-- `github.com/docker/docker` v28.5.2+incompatible
 - `github.com/docker/go-connections` v0.8.1
 - `github.com/docker/go-units` v0.5.0
 - `github.com/dustin/go-humanize` v1.0.1
@@ -68,6 +67,8 @@ output against this file.
 - `github.com/mattn/go-isatty` v0.0.24
 - `github.com/mattn/go-runewidth` v0.0.24
 - `github.com/moby/docker-image-spec` v1.3.1
+- `github.com/moby/moby/api` v1.56.0
+- `github.com/moby/moby/client` v0.6.0
 - `github.com/modern-go/concurrent` v0.0.0-20180306012644-bacd9c7ef1dd
 - `github.com/modern-go/reflect2` v1.0.3-0.20250322232337-35a7c28c31ee
 - `github.com/muesli/ansi` v0.0.0-20230316100256-276c6243b2f6
@@ -77,7 +78,6 @@ output against this file.
 - `github.com/ncruces/go-strftime` v1.0.0
 - `github.com/opencontainers/go-digest` v1.0.0
 - `github.com/opencontainers/image-spec` v1.1.1
-- `github.com/pkg/errors` v0.9.1
 - `github.com/remyoudompheng/bigfft` v0.0.0-20230129092748-24d4a6f8daec
 - `github.com/rivo/uniseg` v0.4.7
 - `github.com/spf13/cobra` v1.10.2

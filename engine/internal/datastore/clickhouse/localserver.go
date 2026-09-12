@@ -4,16 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/network"
-	dockerclient "github.com/docker/docker/client"
-	"github.com/docker/go-connections/nat"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/network"
+	dockerclient "github.com/moby/moby/client"
 
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
@@ -130,17 +129,17 @@ func EnsureLocalServer(ctx context.Context, opts LocalServerOptions) (LocalServe
 	defer func() { _ = cli.Close() }()
 
 	started := false
-	insp, err := cli.ContainerInspect(ctx, LocalServerName)
+	insp, err := cli.ContainerInspect(ctx, LocalServerName, dockerclient.ContainerInspectOptions{})
 	switch {
 	case err == nil:
-		if insp.Config == nil || !dockerutil.IsOurs(insp.Config.Labels) {
+		if insp.Container.Config == nil || !dockerutil.IsOurs(insp.Container.Config.Labels) {
 			return LocalServer{}, fmt.Errorf(
 				"datastore.clickhouse: a container called %s exists and Antifailure did not "+
 					"create it, so this will not use it; rename it or remove it",
 				LocalServerName)
 		}
-		if insp.State == nil || !insp.State.Running {
-			if err := cli.ContainerStart(ctx, insp.ID, container.StartOptions{}); err != nil {
+		if insp.Container.State == nil || !insp.Container.State.Running {
+			if _, err := cli.ContainerStart(ctx, insp.Container.ID, dockerclient.ContainerStartOptions{}); err != nil {
 				return LocalServer{}, fmt.Errorf(
 					"datastore.clickhouse: starting the existing %s container: %w",
 					LocalServerName, err)
@@ -162,12 +161,12 @@ func EnsureLocalServer(ctx context.Context, opts LocalServerOptions) (LocalServe
 
 	// Read back rather than remembered, because a container that already
 	// existed was published on a port this process did not choose.
-	fresh, err := cli.ContainerInspect(ctx, LocalServerName)
+	fresh, err := cli.ContainerInspect(ctx, LocalServerName, dockerclient.ContainerInspectOptions{})
 	if err != nil {
 		return LocalServer{}, fmt.Errorf(
 			"datastore.clickhouse: inspecting the %s container: %w", LocalServerName, err)
 	}
-	port, err := publishedPort(fresh.NetworkSettings.Ports)
+	port, err := publishedPort(fresh.Container.NetworkSettings.Ports)
 	if err != nil {
 		return LocalServer{}, err
 	}
@@ -180,7 +179,7 @@ func EnsureLocalServer(ctx context.Context, opts LocalServerOptions) (LocalServe
 	if err := waitReady(ctx, url, opts.Ready); err != nil {
 		return LocalServer{}, err
 	}
-	return LocalServer{URL: url, ContainerRef: fresh.ID, Started: started}, nil
+	return LocalServer{URL: url, ContainerRef: fresh.Container.ID, Started: started}, nil
 }
 
 func createLocalServer(
@@ -239,9 +238,9 @@ func createLocalServer(
 // tests in the package, and a retry alone would not have helped, because the
 // next create collides with the name the failed one is still holding.
 func startLocalServerOn(ctx context.Context, cli *dockerclient.Client, port int) error {
-	httpPort := nat.Port(strconv.Itoa(localServerPort) + "/tcp")
-	resp, err := cli.ContainerCreate(ctx,
-		&container.Config{
+	httpPort := network.MustParsePort(strconv.Itoa(localServerPort) + "/tcp")
+	resp, err := cli.ContainerCreate(ctx, dockerclient.ContainerCreateOptions{
+		Config: &container.Config{
 			Image: LocalServerImage,
 			// Labelled as ours, and that is not cosmetic: dockerutil refuses
 			// to remove a container it cannot see a label on, so an
@@ -251,30 +250,32 @@ func startLocalServerOn(ctx context.Context, cli *dockerclient.Client, port int)
 				"CLICKHOUSE_PASSWORD=" + localServerPassword,
 				"CLICKHOUSE_DB=default",
 			},
-			ExposedPorts: nat.PortSet{httpPort: struct{}{}},
+			ExposedPorts: network.PortSet{httpPort: struct{}{}},
 		},
-		&container.HostConfig{
-			PortBindings: nat.PortMap{httpPort: []nat.PortBinding{{
+		HostConfig: &container.HostConfig{
+			PortBindings: network.PortMap{httpPort: []network.PortBinding{{
 				// Loopback only, which is what makes the fixed password
 				// acceptable: the server is unreachable from anywhere but
 				// this machine.
-				HostIP: "127.0.0.1", HostPort: strconv.Itoa(port),
+				HostIP: netip.MustParseAddr("127.0.0.1"), HostPort: strconv.Itoa(port),
 			}}},
 			RestartPolicy: container.RestartPolicy{Name: "unless-stopped"},
-		}, nil, nil, LocalServerName)
+		},
+		Name: LocalServerName,
+	})
 	if err != nil {
 		return fmt.Errorf(
 			"datastore.clickhouse: creating the %s container: %w", LocalServerName, err)
 	}
-	if err := cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+	if _, err := cli.ContainerStart(ctx, resp.ID, dockerclient.ContainerStartOptions{}); err != nil {
 		startErr := fmt.Errorf(
 			"datastore.clickhouse: starting the %s container: %w", LocalServerName, err)
 		// Without cancellation, because the most common reason a start fails
 		// is a caller's deadline, and that is exactly when the container must
 		// still go. Volumes with it: the image declares one for its data
 		// directory, and a server that never started wrote nothing into it.
-		rmErr := cli.ContainerRemove(context.WithoutCancel(ctx), resp.ID,
-			container.RemoveOptions{Force: true, RemoveVolumes: true})
+		_, rmErr := cli.ContainerRemove(context.WithoutCancel(ctx), resp.ID,
+			dockerclient.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
 		if rmErr != nil && !cerrdefs.IsNotFound(rmErr) {
 			return errors.Join(startErr, fmt.Errorf(
 				"datastore.clickhouse: removing the %s container that did not start, "+
@@ -297,7 +298,7 @@ func ensureImage(ctx context.Context, cli *dockerclient.Client, ref string) erro
 	if err := airgap.CheckImage(airgap.SiteImagePull, ref); err != nil {
 		return fmt.Errorf("datastore.clickhouse: %s is not present locally and cannot be pulled: %w", ref, err)
 	}
-	rc, err := cli.ImagePull(ctx, ref, image.PullOptions{})
+	rc, err := cli.ImagePull(ctx, ref, dockerclient.ImagePullOptions{})
 	if err != nil {
 		return fmt.Errorf("datastore.clickhouse: pull %s: %w", ref, err)
 	}
@@ -336,7 +337,7 @@ func waitReady(ctx context.Context, url secrets.Value, within time.Duration) err
 }
 
 // publishedPort finds the host port a container publishes.
-func publishedPort(ports nat.PortMap) (int, error) {
+func publishedPort(ports network.PortMap) (int, error) {
 	for _, bindings := range ports {
 		for _, b := range bindings {
 			if n, err := strconv.Atoi(b.HostPort); err == nil && n > 0 {
@@ -371,16 +372,16 @@ func attachToNetwork(ctx context.Context, ref, networkID, alias string) (int, er
 	}
 	defer func() { _ = cli.Close() }()
 
-	insp, err := cli.ContainerInspect(ctx, ref)
+	insp, err := cli.ContainerInspect(ctx, ref, dockerclient.ContainerInspectOptions{})
 	if err != nil {
 		return 0, fmt.Errorf("datastore.clickhouse: inspecting %s: %w", ref, err)
 	}
-	if insp.Config == nil || !dockerutil.IsOurs(insp.Config.Labels) {
+	if insp.Container.Config == nil || !dockerutil.IsOurs(insp.Container.Config.Labels) {
 		return 0, fmt.Errorf("%w: container %s", dockerutil.ErrNotOurs, dockerutil.ShortID(ref))
 	}
 	already := false
-	if insp.NetworkSettings != nil {
-		for id, ep := range insp.NetworkSettings.Networks {
+	if insp.Container.NetworkSettings != nil {
+		for id, ep := range insp.Container.NetworkSettings.Networks {
 			if id == networkID || (ep != nil && ep.NetworkID == networkID) {
 				already = true
 				break
@@ -390,8 +391,11 @@ func attachToNetwork(ctx context.Context, ref, networkID, alias string) (int, er
 	if !already {
 		// Idempotent, because Up runs again on every push and reconnecting
 		// would be an error every time after the first.
-		err = cli.NetworkConnect(ctx, networkID, ref, &network.EndpointSettings{
-			Aliases: []string{alias},
+		_, err = cli.NetworkConnect(ctx, networkID, dockerclient.NetworkConnectOptions{
+			Container: ref,
+			EndpointConfig: &network.EndpointSettings{
+				Aliases: []string{alias},
+			},
 		})
 		if err != nil && !strings.Contains(err.Error(), "already exists") {
 			return 0, fmt.Errorf("datastore.clickhouse: attaching %s to the environment "+

@@ -18,7 +18,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/docker/docker/api/types/image"
+	"github.com/moby/moby/client"
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
@@ -63,7 +63,7 @@ func TestAirGapped_TheSidecarImageIsRequiredRatherThanBuiltOnDemand(t *testing.T
 		// The tag is content addressed over a marker only this test injects, so
 		// nothing else can own it.
 		t.Logf("%s exists, which only a previous run of this test can have built; removing it", absent)
-		_, rmErr := r.cli.ImageRemove(context.Background(), absent, image.RemoveOptions{Force: true})
+		_, rmErr := r.cli.ImageRemove(context.Background(), absent, client.ImageRemoveOptions{Force: true})
 		require.NoErrorf(t, rmErr, "%s exists and could not be removed, so this test would have proved nothing", absent)
 	}
 

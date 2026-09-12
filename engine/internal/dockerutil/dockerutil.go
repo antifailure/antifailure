@@ -26,11 +26,8 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/client"
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 )
@@ -158,11 +155,11 @@ func IsOurs(labels map[string]string) bool {
 }
 
 // Filter builds a label filter for a listing call.
-func Filter(pairs ...string) filters.Args {
+func Filter(pairs ...string) client.Filters {
 	// Presence, not equality. Docker treats a bare key as an existence test,
 	// which is what makes this find a resource an older release labelled
 	// differently.
-	f := filters.NewArgs(filters.Arg("label", LabelManaged))
+	f := make(client.Filters).Add("label", LabelManaged)
 	for i := 0; i+1 < len(pairs); i += 2 {
 		f.Add("label", pairs[i]+"="+pairs[i+1])
 	}
@@ -170,7 +167,7 @@ func Filter(pairs ...string) filters.Args {
 }
 
 // EnvFilter matches everything belonging to one environment.
-func EnvFilter(envID string) filters.Args { return Filter(LabelEnv, envID) }
+func EnvFilter(envID string) client.Filters { return Filter(LabelEnv, envID) }
 
 // Client opens a connection to the daemon.
 //
@@ -232,11 +229,13 @@ func Discard(r io.ReadCloser) {
 // promptly when the deadline passes AND leaves nothing parked, which is why
 // there is no ctx.Done() case here and must not be one.
 func AwaitExit(ctx context.Context, cli *client.Client, id string) (int64, error) {
-	statusCh, errCh := cli.ContainerWait(ctx, id, container.WaitConditionNotRunning)
+	wait := cli.ContainerWait(ctx, id, client.ContainerWaitOptions{
+		Condition: container.WaitConditionNotRunning,
+	})
 	select {
-	case err := <-errCh:
+	case err := <-wait.Error:
 		return 0, err
-	case status := <-statusCh:
+	case status := <-wait.Result:
 		return status.StatusCode, nil
 	}
 }
@@ -390,17 +389,17 @@ var ErrNotOurs = errors.New("dockerutil: the resource is not managed by Antifail
 // exceptional one. Treating it as an error would make a clean teardown look
 // like a failure every second time.
 func RemoveContainer(ctx context.Context, cli *client.Client, id string) error {
-	insp, err := cli.ContainerInspect(ctx, id)
+	insp, err := cli.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
 	if err != nil {
 		if cerrdefs.IsNotFound(err) {
 			return nil
 		}
 		return err
 	}
-	if insp.Config == nil || !IsOurs(insp.Config.Labels) {
+	if insp.Container.Config == nil || !IsOurs(insp.Container.Config.Labels) {
 		return fmt.Errorf("%w: container %s", ErrNotOurs, ShortID(id))
 	}
-	err = cli.ContainerRemove(ctx, id, container.RemoveOptions{Force: true, RemoveVolumes: true})
+	_, err = cli.ContainerRemove(ctx, id, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
 	if err != nil && cerrdefs.IsNotFound(err) {
 		return nil
 	}
@@ -420,17 +419,17 @@ func RemoveContainer(ctx context.Context, cli *client.Client, id string) error {
 // A network that is not there is not an error. That is the ordinary state a
 // compensating delete finds, and the caller's intent is satisfied.
 func RemoveNetwork(ctx context.Context, cli *client.Client, id string) error {
-	insp, err := cli.NetworkInspect(ctx, id, network.InspectOptions{})
+	insp, err := cli.NetworkInspect(ctx, id, client.NetworkInspectOptions{})
 	if err != nil {
 		if cerrdefs.IsNotFound(err) {
 			return nil
 		}
 		return err
 	}
-	if !IsOurs(insp.Labels) {
+	if !IsOurs(insp.Network.Labels) {
 		return fmt.Errorf("%w: network %s", ErrNotOurs, id)
 	}
-	if err := cli.NetworkRemove(ctx, id); err != nil && !cerrdefs.IsNotFound(err) {
+	if _, err := cli.NetworkRemove(ctx, id, client.NetworkRemoveOptions{}); err != nil && !cerrdefs.IsNotFound(err) {
 		return err
 	}
 	return nil
@@ -446,17 +445,17 @@ func RemoveNetwork(ctx context.Context, cli *client.Client, id string) error {
 // compensating delete finds. It forces past the container check, never past the
 // ownership one.
 func RemoveVolume(ctx context.Context, cli *client.Client, id string) error {
-	insp, err := cli.VolumeInspect(ctx, id)
+	insp, err := cli.VolumeInspect(ctx, id, client.VolumeInspectOptions{})
 	if err != nil {
 		if cerrdefs.IsNotFound(err) {
 			return nil
 		}
 		return err
 	}
-	if !IsOurs(insp.Labels) {
+	if !IsOurs(insp.Volume.Labels) {
 		return fmt.Errorf("%w: volume %s", ErrNotOurs, id)
 	}
-	if err := cli.VolumeRemove(ctx, id, true); err != nil && !cerrdefs.IsNotFound(err) {
+	if _, err := cli.VolumeRemove(ctx, id, client.VolumeRemoveOptions{Force: true}); err != nil && !cerrdefs.IsNotFound(err) {
 		return err
 	}
 	return nil
@@ -485,7 +484,7 @@ func FirstName(names []string) string {
 // without a daemon. The whole point of the helper is which ERROR it received,
 // and a real daemon cannot be asked to produce a chosen error on demand.
 type ImageInspector interface {
-	ImageInspect(ctx context.Context, ref string, opts ...client.ImageInspectOption) (image.InspectResponse, error)
+	ImageInspect(ctx context.Context, ref string, opts ...client.ImageInspectOption) (client.ImageInspectResult, error)
 }
 
 // ImagePresent reports whether the daemon holds an image, and REFUSES TO GUESS

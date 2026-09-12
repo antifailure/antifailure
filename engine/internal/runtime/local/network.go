@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/docker/docker/api/types/network"
+	"github.com/moby/moby/client"
 
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
@@ -73,17 +73,17 @@ func (r *Runtime) ensureNetworks(ctx context.Context, envID string, journal func
 func (r *Runtime) ensureOneNetwork(
 	ctx context.Context, envID, name string, internal bool, journal func(string, string) error,
 ) (string, error) {
-	if existing, err := r.cli.NetworkInspect(ctx, name, network.InspectOptions{}); err == nil {
-		if !dockerutil.IsOurs(existing.Labels) {
+	if existing, err := r.cli.NetworkInspect(ctx, name, client.NetworkInspectOptions{}); err == nil {
+		if !dockerutil.IsOurs(existing.Network.Labels) {
 			return "", aferrors.Coded(aferrors.AFRUN040,
 				"detail", fmt.Sprintf("a network called %s exists and is not managed by Antifailure", name))
 		}
-		return existing.ID, nil
+		return existing.Network.ID, nil
 	}
 	if err := journal(kindNetwork, name); err != nil {
 		return "", err
 	}
-	res, err := r.cli.NetworkCreate(ctx, name, network.CreateOptions{
+	res, err := r.cli.NetworkCreate(ctx, name, client.NetworkCreateOptions{
 		Driver:   "bridge",
 		Internal: internal,
 		Labels:   r.managed(dockerutil.KindNetwork, envID),
@@ -96,12 +96,12 @@ func (r *Runtime) ensureOneNetwork(
 		// One branch of a function testing an invariant and the other not is
 		// how the invariant stops being one.
 		if strings.Contains(err.Error(), "already exists") {
-			if existing, insErr := r.cli.NetworkInspect(ctx, name, network.InspectOptions{}); insErr == nil {
-				if !dockerutil.IsOurs(existing.Labels) {
+			if existing, insErr := r.cli.NetworkInspect(ctx, name, client.NetworkInspectOptions{}); insErr == nil {
+				if !dockerutil.IsOurs(existing.Network.Labels) {
 					return "", aferrors.Coded(aferrors.AFRUN040,
 						"detail", fmt.Sprintf("a network called %s exists and is not managed by Antifailure", name))
 				}
-				return existing.ID, nil
+				return existing.Network.ID, nil
 			}
 		}
 		return "", aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
@@ -118,12 +118,15 @@ func (r *Runtime) ensureOneNetwork(
 // refuses to remove a network with endpoints still attached, so it has to be
 // disconnected first or teardown reports a pending network forever.
 func (r *Runtime) disconnectForeign(ctx context.Context, networkID string) {
-	insp, err := r.cli.NetworkInspect(ctx, networkID, network.InspectOptions{})
+	insp, err := r.cli.NetworkInspect(ctx, networkID, client.NetworkInspectOptions{})
 	if err != nil {
 		return
 	}
-	for id := range insp.Containers {
-		if err := r.cli.NetworkDisconnect(ctx, networkID, id, true); err != nil {
+	for id := range insp.Network.Containers {
+		if _, err := r.cli.NetworkDisconnect(ctx, networkID, client.NetworkDisconnectOptions{
+			Container: id,
+			Force:     true,
+		}); err != nil {
 			if cerrdefs.IsNotFound(err) {
 				continue
 			}

@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/antifailure/antifailure/engine/pkg/airgap"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/client"
 	"github.com/stretchr/testify/require"
 )
 

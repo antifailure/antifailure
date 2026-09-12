@@ -10,9 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/api/types/volume"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/client"
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
@@ -84,7 +82,7 @@ func requireDocker(t *testing.T) *client.Client {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
-	if _, err := cli.Ping(ctx); err != nil {
+	if _, err := cli.Ping(ctx, client.PingOptions{}); err != nil {
 		_ = cli.Close()
 		if errors.Is(err, context.DeadlineExceeded) {
 			// Not a skip. A daemon that is configured and does not answer a
@@ -159,13 +157,13 @@ func journalRecords(t *testing.T, stateDir, envID string) []journal.Record {
 
 func networkExists(t *testing.T, cli *client.Client, name string) bool {
 	t.Helper()
-	_, err := cli.NetworkInspect(t.Context(), name, network.InspectOptions{})
+	_, err := cli.NetworkInspect(t.Context(), name, client.NetworkInspectOptions{})
 	return err == nil
 }
 
 func volumeExists(t *testing.T, cli *client.Client, name string) bool {
 	t.Helper()
-	_, err := cli.VolumeInspect(t.Context(), name)
+	_, err := cli.VolumeInspect(t.Context(), name, client.VolumeInspectOptions{})
 	return err == nil
 }
 
@@ -181,13 +179,13 @@ func TestAKilledEngineIsReconciledFromTheJournal(t *testing.T) {
 	netName := "af-chaos-net-" + envID
 	volName := "af-chaos-vol-" + envID
 	t.Cleanup(func() {
-		_ = cli.NetworkRemove(context.Background(), netName)
-		_ = cli.VolumeRemove(context.Background(), volName, true)
+		_, _ = cli.NetworkRemove(context.Background(), netName, client.NetworkRemoveOptions{})
+		_, _ = cli.VolumeRemove(context.Background(), volName, client.VolumeRemoveOptions{Force: true})
 	})
 
-	_, err := cli.NetworkCreate(t.Context(), netName, network.CreateOptions{Labels: ownedByUs(envID)})
+	_, err := cli.NetworkCreate(t.Context(), netName, client.NetworkCreateOptions{Labels: ownedByUs(envID)})
 	require.NoError(t, err)
-	_, err = cli.VolumeCreate(t.Context(), volume.CreateOptions{Name: volName, Labels: ownedByUs(envID)})
+	_, err = cli.VolumeCreate(t.Context(), client.VolumeCreateOptions{Name: volName, Labels: ownedByUs(envID)})
 	require.NoError(t, err)
 	require.True(t, networkExists(t, cli, netName))
 	require.True(t, volumeExists(t, cli, volName))
@@ -247,8 +245,8 @@ func TestReconcilingTwiceIsNotAnError(t *testing.T) {
 	o, envID, stateDir := newEnvironment(t, "chaos/twice")
 
 	netName := "af-chaos-twice-" + envID
-	t.Cleanup(func() { _ = cli.NetworkRemove(context.Background(), netName) })
-	_, err := cli.NetworkCreate(t.Context(), netName, network.CreateOptions{Labels: ownedByUs(envID)})
+	t.Cleanup(func() { _, _ = cli.NetworkRemove(context.Background(), netName, client.NetworkRemoveOptions{}) })
+	_, err := cli.NetworkCreate(t.Context(), netName, client.NetworkCreateOptions{Labels: ownedByUs(envID)})
 	require.NoError(t, err)
 
 	journalAs(t, stateDir, envID,

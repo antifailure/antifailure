@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types/image"
+	"github.com/moby/moby/client"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
@@ -189,7 +189,7 @@ done
 			return
 		}
 		defer func() { _ = cli.Close() }()
-		_, _ = cli.ImageRemove(c, res.ImageRef, image.RemoveOptions{Force: true, PruneChildren: true})
+		_, _ = cli.ImageRemove(c, res.ImageRef, client.ImageRemoveOptions{Force: true, PruneChildren: true})
 	})
 	return res.ImageRef
 }

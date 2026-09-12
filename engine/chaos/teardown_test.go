@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types/network"
+	"github.com/moby/moby/client"
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
@@ -57,8 +57,8 @@ func TestATeardownAgainstAnUnreachableProviderSaysSoAndTheNextOneFinishesIt(t *t
 	envID := env.EnvID("chaostest", "chaos/partition")
 
 	netName := "af-chaos-partition-" + envID
-	t.Cleanup(func() { _ = cli.NetworkRemove(context.Background(), netName) })
-	_, err := cli.NetworkCreate(t.Context(), netName, network.CreateOptions{Labels: ownedByUs(envID)})
+	t.Cleanup(func() { _, _ = cli.NetworkRemove(context.Background(), netName, client.NetworkRemoveOptions{}) })
+	_, err := cli.NetworkCreate(t.Context(), netName, client.NetworkCreateOptions{Labels: ownedByUs(envID)})
 	require.NoError(t, err)
 
 	journalAs(t, filepath.Join(dir, env.StateDir), envID,

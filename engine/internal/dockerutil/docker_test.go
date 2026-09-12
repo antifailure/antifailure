@@ -12,11 +12,8 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/api/types/volume"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/client"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
@@ -92,7 +89,7 @@ func requireDaemon(t *testing.T) *client.Client {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if _, err := cli.Ping(ctx); err != nil {
+	if _, err := cli.Ping(ctx, client.PingOptions{}); err != nil {
 		_ = cli.Close()
 		skipped.Add(1)
 		t.Skipf("skipped: the Docker daemon did not respond: %v", err)
@@ -102,7 +99,7 @@ func requireDaemon(t *testing.T) *client.Client {
 	pullCtx, pullCancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer pullCancel()
 	if _, err := cli.ImageInspect(pullCtx, testImage); err != nil {
-		rc, pullErr := cli.ImagePull(pullCtx, testImage, image.PullOptions{})
+		rc, pullErr := cli.ImagePull(pullCtx, testImage, client.ImagePullOptions{})
 		if pullErr != nil {
 			skipped.Add(1)
 			t.Skipf("skipped: %s could not be pulled: %v", testImage, pullErr)
@@ -118,14 +115,15 @@ func create(t *testing.T, cli *client.Client, labels map[string]string) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	resp, err := cli.ContainerCreate(ctx,
-		&container.Config{Image: testImage, Cmd: []string{"true"}, Labels: labels},
-		&container.HostConfig{}, nil, nil, "")
+	resp, err := cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config:     &container.Config{Image: testImage, Cmd: []string{"true"}, Labels: labels},
+		HostConfig: &container.HostConfig{},
+	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		c, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
-		_ = cli.ContainerRemove(c, resp.ID, container.RemoveOptions{Force: true, RemoveVolumes: true})
+		_, _ = cli.ContainerRemove(c, resp.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
 	})
 	return resp.ID
 }
@@ -136,17 +134,18 @@ func createRunning(t *testing.T, cli *client.Client, cmd []string) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	resp, err := cli.ContainerCreate(ctx,
-		&container.Config{
+	resp, err := cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config: &container.Config{
 			Image: testImage, Cmd: cmd,
 			Labels: dockerutil.Managed(dockerutil.KindService, "await-exit", time.Now()),
 		},
-		&container.HostConfig{}, nil, nil, "")
+		HostConfig: &container.HostConfig{},
+	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		c, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
-		_ = cli.ContainerRemove(c, resp.ID, container.RemoveOptions{Force: true, RemoveVolumes: true})
+		_, _ = cli.ContainerRemove(c, resp.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
 	})
 	return resp.ID
 }
@@ -158,7 +157,7 @@ func TestRemoveContainer_RemovesOurOwn(t *testing.T) {
 	id := create(t, cli, dockerutil.Managed(dockerutil.KindService, "env-remove", time.Now()))
 	require.NoError(t, dockerutil.RemoveContainer(ctx, cli, id))
 
-	_, err := cli.ContainerInspect(ctx, id)
+	_, err := cli.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
 	require.True(t, cerrdefs.IsNotFound(err), "the container is gone")
 }
 
@@ -176,7 +175,7 @@ func TestRemoveContainer_RefusesAContainerThatIsNotOurs(t *testing.T) {
 	require.True(t, errors.Is(err, dockerutil.ErrNotOurs))
 	require.Contains(t, err.Error(), dockerutil.ShortID(id))
 
-	_, inspectErr := cli.ContainerInspect(ctx, id)
+	_, inspectErr := cli.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
 	require.NoError(t, inspectErr, "the container somebody else owns is untouched")
 }
 
@@ -197,13 +196,13 @@ func TestFilter_FindsOnlyWhatItNames(t *testing.T) {
 	other := create(t, cli, dockerutil.Managed(dockerutil.KindService, "env-filter-b", time.Now()))
 	theirs := create(t, cli, map[string]string{"dev.antifailure.env": "env-filter-a"})
 
-	list, err := cli.ContainerList(ctx, container.ListOptions{
+	list, err := cli.ContainerList(ctx, client.ContainerListOptions{
 		All: true, Filters: dockerutil.EnvFilter("env-filter-a"),
 	})
 	require.NoError(t, err)
 
 	var ids []string
-	for _, c := range list {
+	for _, c := range list.Items {
 		ids = append(ids, c.ID)
 	}
 	require.Contains(t, ids, mine)
@@ -247,12 +246,12 @@ func TestFilter_FindsAResourceStampedByAnOlderRelease(t *testing.T) {
 		dockerutil.LabelEnv:     "env-legacy",
 	})
 
-	list, err := cli.ContainerList(ctx, container.ListOptions{
+	list, err := cli.ContainerList(ctx, client.ContainerListOptions{
 		All: true, Filters: dockerutil.EnvFilter("env-legacy"),
 	})
 	require.NoError(t, err)
 	var ids []string
-	for _, c := range list {
+	for _, c := range list.Items {
 		ids = append(ids, c.ID)
 	}
 	require.Contains(t, ids, id)
@@ -275,12 +274,12 @@ func createNetwork(t *testing.T, cli *client.Client, labels map[string]string) s
 	t.Helper()
 	ctx := context.Background()
 	res, err := cli.NetworkCreate(ctx, "af-test-net-"+strings.ToLower(t.Name()),
-		network.CreateOptions{Labels: labels})
+		client.NetworkCreateOptions{Labels: labels})
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		c, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
-		_ = cli.NetworkRemove(c, res.ID)
+		_, _ = cli.NetworkRemove(c, res.ID, client.NetworkRemoveOptions{})
 	})
 	return res.ID
 }
@@ -288,16 +287,16 @@ func createNetwork(t *testing.T, cli *client.Client, labels map[string]string) s
 func createVolume(t *testing.T, cli *client.Client, labels map[string]string) string {
 	t.Helper()
 	ctx := context.Background()
-	v, err := cli.VolumeCreate(ctx, volume.CreateOptions{
+	v, err := cli.VolumeCreate(ctx, client.VolumeCreateOptions{
 		Name: "af-test-vol-" + strings.ToLower(t.Name()), Labels: labels,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		c, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
-		_ = cli.VolumeRemove(c, v.Name, true)
+		_, _ = cli.VolumeRemove(c, v.Volume.Name, client.VolumeRemoveOptions{Force: true})
 	})
-	return v.Name
+	return v.Volume.Name
 }
 
 func TestRemoveNetwork_RemovesOurOwn(t *testing.T) {
@@ -307,7 +306,7 @@ func TestRemoveNetwork_RemovesOurOwn(t *testing.T) {
 	id := createNetwork(t, cli, dockerutil.Managed(dockerutil.KindNetwork, "env-net", time.Now()))
 	require.NoError(t, dockerutil.RemoveNetwork(ctx, cli, id))
 
-	_, err := cli.NetworkInspect(ctx, id, network.InspectOptions{})
+	_, err := cli.NetworkInspect(ctx, id, client.NetworkInspectOptions{})
 	require.True(t, cerrdefs.IsNotFound(err), "the network is gone")
 }
 
@@ -321,7 +320,7 @@ func TestRemoveNetwork_RefusesANetworkThatIsNotOurs(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, errors.Is(err, dockerutil.ErrNotOurs))
 
-	_, inspectErr := cli.NetworkInspect(ctx, id, network.InspectOptions{})
+	_, inspectErr := cli.NetworkInspect(ctx, id, client.NetworkInspectOptions{})
 	require.NoError(t, inspectErr, "the network somebody else owns is untouched")
 }
 
@@ -332,7 +331,7 @@ func TestRemoveVolume_RemovesOurOwn(t *testing.T) {
 	name := createVolume(t, cli, dockerutil.Managed(dockerutil.KindVolume, "env-vol", time.Now()))
 	require.NoError(t, dockerutil.RemoveVolume(ctx, cli, name))
 
-	_, err := cli.VolumeInspect(ctx, name)
+	_, err := cli.VolumeInspect(ctx, name, client.VolumeInspectOptions{})
 	require.True(t, cerrdefs.IsNotFound(err), "the volume is gone")
 }
 
@@ -346,7 +345,7 @@ func TestRemoveVolume_RefusesAVolumeThatIsNotOurs(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, errors.Is(err, dockerutil.ErrNotOurs))
 
-	_, inspectErr := cli.VolumeInspect(ctx, name)
+	_, inspectErr := cli.VolumeInspect(ctx, name, client.VolumeInspectOptions{})
 	require.NoError(t, inspectErr, "the data somebody else owns is untouched")
 }
 
