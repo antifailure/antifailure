@@ -197,11 +197,48 @@ func createLocalServer(
 		}
 		from = resolved
 	}
-	port, err := dockerutil.NewPortAllocator(from).Free()
-	if err != nil {
-		return err
-	}
 
+	// A port that was free when it was probed and taken when it was bound.
+	//
+	// The allocator asks the kernel whether it can listen on a port before
+	// handing it out, which is not a lock: anything else on the machine can
+	// take the port in the gap before the daemon binds it. CI runs every engine
+	// package against one daemon, and they all allocate from the same start, so
+	// that gap was hit on main twice in twenty five runs, 0d94f648 and 67fcf2d7,
+	// each time as "Bind for 127.0.0.1:43000 failed: port is already allocated".
+	//
+	// Retried here, which the Postgres provider already did and this fixture
+	// never did. ONE allocator for every attempt, because the allocator is what
+	// remembers the port that lost: a fresh one per attempt probes the same
+	// number, the kernel says it is free again, and every retry loses the same
+	// race to the same holder.
+	ports := dockerutil.NewPortAllocator(from)
+	for attempt := 0; ; attempt++ {
+		port, err := ports.Free()
+		if err != nil {
+			return err
+		}
+		err = startLocalServerOn(ctx, cli, port)
+		if err == nil {
+			return nil
+		}
+		if !dockerutil.IsPortTaken(err) || attempt >= dockerutil.PortRetries {
+			return err
+		}
+	}
+}
+
+// startLocalServerOn makes one attempt to create and start the server
+// published on port.
+//
+// A failed attempt leaves NOTHING behind, and that is the half of the fix that
+// mattered more than the retry. The container name is fixed, and a container
+// that was created and could not start keeps the port it was created with, so
+// every later EnsureLocalServer found it, took the path that starts a stopped
+// server, and failed on the same dead port. One lost race failed all ten live
+// tests in the package, and a retry alone would not have helped, because the
+// next create collides with the name the failed one is still holding.
+func startLocalServerOn(ctx context.Context, cli *dockerclient.Client, port int) error {
 	httpPort := nat.Port(strconv.Itoa(localServerPort) + "/tcp")
 	resp, err := cli.ContainerCreate(ctx,
 		&container.Config{
@@ -230,8 +267,20 @@ func createLocalServer(
 			"datastore.clickhouse: creating the %s container: %w", LocalServerName, err)
 	}
 	if err := cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
-		return fmt.Errorf(
+		startErr := fmt.Errorf(
 			"datastore.clickhouse: starting the %s container: %w", LocalServerName, err)
+		// Without cancellation, because the most common reason a start fails
+		// is a caller's deadline, and that is exactly when the container must
+		// still go. Volumes with it: the image declares one for its data
+		// directory, and a server that never started wrote nothing into it.
+		rmErr := cli.ContainerRemove(context.WithoutCancel(ctx), resp.ID,
+			container.RemoveOptions{Force: true, RemoveVolumes: true})
+		if rmErr != nil && !cerrdefs.IsNotFound(rmErr) {
+			return errors.Join(startErr, fmt.Errorf(
+				"datastore.clickhouse: removing the %s container that did not start, "+
+					"so its name is still taken: %w", LocalServerName, rmErr))
+		}
+		return startErr
 	}
 	return nil
 }
