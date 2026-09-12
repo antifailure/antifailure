@@ -47,6 +47,13 @@ type module struct {
 	Version  string
 	Indirect bool
 	Main     bool
+	// Dir is where the module cache holds the module, which is where its
+	// licence and NOTICE files are read from. go list reports it with the rest.
+	Dir string
+
+	// Licence and Notices are filled in by attribute, never by go list.
+	Licence string    `json:"-"`
+	Notices []shipped `json:"-"`
 }
 
 // target is one GOOS and GOARCH the release publishes an archive for.
@@ -75,6 +82,10 @@ func main() {
 		fail("%v", err)
 	}
 	mods, err := linked(filepath.Join(*root, *moduleDir), *pkg, targets)
+	if err != nil {
+		fail("%v", err)
+	}
+	mods, err = attribute(mods, fileRules)
 	if err != nil {
 		fail("%v", err)
 	}
@@ -277,8 +288,13 @@ func render(targets []target, mods []module) string {
 
 	fmt.Fprintf(&b, "## Go modules (%d)\n\n", len(mods))
 	for _, m := range mods {
-		fmt.Fprintf(&b, "- `%s` %s\n", m.Path, m.Version)
+		if m.Licence == "" {
+			fmt.Fprintf(&b, "- `%s` %s\n", m.Path, m.Version)
+			continue
+		}
+		fmt.Fprintf(&b, "- `%s` %s, %s\n", m.Path, m.Version, m.Licence)
 	}
+	renderNotices(&b, mods)
 	b.WriteString("\n## Container images\n\n")
 	b.WriteString("An environment starts an emulator when a manifest asks for one, and an\n")
 	b.WriteString("emulator is somebody else's software running beside the application.\n")
@@ -354,4 +370,32 @@ func wrapAt(text string, width int) []string {
 		lines = append(lines, w)
 	}
 	return lines
+}
+
+// renderNotices reproduces the NOTICE files and notices documents the modules
+// ship, each inside a fence longer than any it contains.
+//
+// Verbatim, because the obligation is to reproduce the file and a paraphrase
+// does not. Fenced, because the text is somebody else's: its line lengths,
+// punctuation and names are not this repository's prose, and every prose gate
+// that reads this file already leaves a fenced block alone.
+func renderNotices(b *strings.Builder, mods []module) {
+	count := 0
+	for _, m := range mods {
+		count += len(m.Notices)
+	}
+	if count == 0 {
+		return
+	}
+	b.WriteString("\n### Notices the modules ship\n\n")
+	b.WriteString(wrap("Reproduced as each module ships them, because the Apache License 2.0 "+
+		"asks in section 4(d) that a NOTICE file distributed with a work be carried with "+
+		"any redistribution of it.", 74))
+	for _, m := range mods {
+		for _, n := range m.Notices {
+			fence := fenceFor(n.text)
+			fmt.Fprintf(b, "\n#### `%s` %s\n\n%stext\n%s\n%s\n", m.Path, n.file, fence,
+				strings.TrimRight(n.text, "\n"), fence)
+		}
+	}
 }
