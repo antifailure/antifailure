@@ -79,7 +79,7 @@ const PRODUCT_FAQ: FaqItem[] = [
   {
     question: "What stops a test run from emailing real customers or charging a real card?",
     answer:
-      "Every environment gets a sidecar that owns its network namespace, and nothing leaves except through it. Each host gets one of seven modes: BLOCK, ALLOW, SANDBOX with test credentials and a tripwire if a live key appears, CAPTURE into a searchable inbox, MOCK from a stateful offline pack, EMULATE from an emulator inside the environment reached with no endpoint override, or SYNTH, which asks a model to invent a response and marks the result unverified. An unlisted host fails closed.",
+      "Every environment gets a sidecar that owns its network namespace, and nothing leaves except through it. Each host gets one of seven modes: BLOCK, ALLOW, SANDBOX with test credentials and a tripwire if a live key appears, CAPTURE into a searchable inbox, MOCK from a stateful offline pack, EMULATE from an emulator inside the environment reached with no endpoint override, or SYNTH, which asks a model to invent a response and marks the result unverified. An unlisted host fails closed. EMULATE needs an emulator the build registered, and this build registers none, so a rule naming one is refused rather than ignored.",
   },
   {
     question: "Can a run complete with no network access at all?",

@@ -112,7 +112,7 @@ const PLANS: Plan[] = [
       "More repositories, volume, and peak workload",
       `Up to ${members("enterprise")} members, counting invitations not yet accepted`,
       "Organization-wide release policy",
-      "Residency for environments, placed only in the regions your policy names",
+      "Residency, so environments run only in the regions you name",
       "Single sign-on and SCIM, in the enterprise edition you run",
       "Support and service-level commitments, sold when references exist",
     ],
