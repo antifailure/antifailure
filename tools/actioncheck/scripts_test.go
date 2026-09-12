@@ -23,6 +23,7 @@ package main
 // what is tested.
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -99,8 +100,8 @@ func runActionScript(t *testing.T, script string, env map[string]string) (int, s
 	log, err := cmd.CombinedOutput()
 	code := 0
 	if err != nil {
-		exit, ok := err.(*exec.ExitError)
-		if !ok {
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) {
 			t.Fatalf("could not run the step's script: %v\n%s", err, log)
 		}
 		code = exit.ExitCode()

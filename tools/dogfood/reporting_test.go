@@ -26,6 +26,7 @@ package main
 // tested.
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -135,7 +136,7 @@ func runScript(t *testing.T, script string, env map[string]string) (int, string,
 	code := 0
 	if err != nil {
 		var exit *exec.ExitError
-		if ok := asExitError(err, &exit); !ok {
+		if !errors.As(err, &exit) {
 			t.Fatalf("could not run the step's script: %v\n%s", err, log)
 		}
 		code = exit.ExitCode()
@@ -187,14 +188,6 @@ func leftBehind(t *testing.T, dir string) string {
 		all.WriteString("\n")
 	}
 	return all.String()
-}
-
-func asExitError(err error, into **exec.ExitError) bool {
-	exit, ok := err.(*exec.ExitError)
-	if ok {
-		*into = exit
-	}
-	return ok
 }
 
 // One `key=value` line out of a step's recorded output.
