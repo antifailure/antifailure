@@ -286,6 +286,12 @@ topologySpreadConstraints:
     topologyKey: kubernetes.io/hostname
     whenUnsatisfiable: ScheduleAnyway
     labelSelector: {}
+enterprise:
+  enabled: true
+  ssoKey: keycheck
+  licenseKey: keycheck
+  org: keycheck
+  licensePublicKeys: keycheck=keycheck
 `,
 	},
 	{
@@ -323,6 +329,9 @@ networkPolicy:
 serviceAccount:
   create: false
   name: keycheck-external
+enterprise:
+  enabled: true
+  existingSecret: keycheck-enterprise
 `,
 	},
 	{
