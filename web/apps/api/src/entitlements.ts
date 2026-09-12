@@ -242,7 +242,8 @@ export const ENTITLEMENTS: Record<string, EntitlementSpec> = {
   audit_stream: {
     kind: 'boolean',
     description:
-      "Forward this organization's audit log, with its hash chain, to a SIEM or an archive.",
+      "Forward this organization's audit log, with its hash chain, to a SIEM or an archive this " +
+      'organization chooses.',
     byPlan: { free: false, team: false, enterprise: true },
     // THE ENTRY THAT WAS MISSING WHILE THE NAME EXISTED EVERYWHERE ELSE.
     //
@@ -266,7 +267,10 @@ export const ENTITLEMENTS: Record<string, EntitlementSpec> = {
       'entitlement once per organization on every pass of the poll loop rather than once at ' +
       'startup, so an organization whose entitlement is withdrawn stops being forwarded ' +
       'without a restart, and the log itself is unaffected either way: it is written whatever ' +
-      'a sink does.',
+      'a sink does. It asks again on every request that configures a destination, because a ' +
+      'hosted organization chooses its own collector and storing one for an organization that ' +
+      'is not entitled would be configuration for a stream the forwarder then declines, which ' +
+      'reads to the customer exactly like a stream that is broken.',
   },
   rbac: {
     kind: 'boolean',
