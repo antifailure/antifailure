@@ -200,8 +200,18 @@ export interface PermissionRequest {
  * That is what lets a resolver widen nothing by accident: a resolver that only
  * knows about two repositories returns undefined for everything else rather
  * than having to reproduce the whole table correctly.
+ *
+ * It may answer with a promise, and that is what made a stored role model
+ * possible at all. This type was synchronous for as long as nothing installed
+ * a resolver, which meant the only model one could consult was one already in
+ * memory, and a model in memory is a revocation that does not take effect on
+ * the replica that cached it. orgProcedure re-reads the member's role from the
+ * database on every request for exactly that reason; a custom role deserves
+ * the same rule, and a synchronous socket could not give it one.
  */
-export type PermissionResolver = (req: PermissionRequest) => boolean | undefined
+export type PermissionResolver = (
+  req: PermissionRequest,
+) => boolean | undefined | Promise<boolean | undefined>
 
 let resolver: PermissionResolver | null = null
 
@@ -226,20 +236,31 @@ export function hasPermissionResolver(): boolean {
  *
  * Deny by default, and the resolver can only be asked after the built-in table
  * has had its say, so a resolver that throws or returns nonsense degrades to
- * the community behaviour rather than to permitting everything.
+ * the community behaviour rather than to permitting everything. A rejected
+ * promise is a throw for that purpose, which is why the await is inside the try.
+ *
+ * A resolver is asked ONLY where the table said no. It can widen a role and it
+ * can never narrow one, which is the rule ee/web/rbac states for every scope
+ * ("a narrower scope grants, it never revokes") and which this function did not
+ * hold until a resolver was installed in production: it returned the
+ * resolver's false over the table's true, and the test beside the resolver that
+ * is named "a resolver cannot take away what a built-in role grants" asserted
+ * that it had. The second reason is cost. A stored model is a database read,
+ * and asking it only when the built-in answer is a refusal means an owner or an
+ * admin, who is refused almost nothing, almost never pays for one.
  */
-export function permits(req: PermissionRequest): boolean {
+export async function permits(req: PermissionRequest): Promise<boolean> {
   const builtin = roleHas(req.role, req.permission)
-  if (!resolver) return builtin
+  if (builtin || !resolver) return builtin
 
   let answer: boolean | undefined
   try {
-    answer = resolver(req)
+    answer = await resolver(req)
   } catch {
     // A resolver that fails must not open anything up. Falling back to the
     // built-in table is the conservative direction, and the failure surfaces
     // through the resolver's own reporting rather than by granting access.
     return builtin
   }
-  return answer === undefined ? builtin : answer
+  return answer === true
 }

@@ -37,3 +37,8 @@ export {
   type Change,
   type DryRun,
 } from './policyfile.ts'
+
+export { readModel, modelFor, writeModel, lockModel, assemble } from './store.ts'
+export { customRoleResolver, entitled, type ResolverOptions } from './enforce.ts'
+export { escalations, approvalsRefusal } from './authoring.ts'
+export { rbacExtension, type RbacOptions } from './routes.ts'

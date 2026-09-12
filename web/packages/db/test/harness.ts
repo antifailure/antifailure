@@ -283,6 +283,26 @@ export async function seedTenant(admin: postgres.Sql, label: string): Promise<Fi
     INSERT INTO scim_group_members (org_id, group_id, member_ref, resource_id)
     VALUES (${orgId}, ${group!.id}, ${`ext-${slug}`}, ${resource!.id})`
 
+  // Custom roles, one row in each of the five tables, so the cross-tenant suite
+  // has something of every kind to attack. The grant names the owner seeded
+  // above, because the reference is to members and a grant for somebody outside
+  // the organization cannot be stored.
+  const [customRole] = await admin<{ id: string }[]>`
+    INSERT INTO custom_roles (org_id, role_key, name, description)
+    VALUES (${orgId}, 'repo-admin', 'Repository administrator', 'Runs environments for one repository.')
+    RETURNING id`
+  await admin`
+    INSERT INTO custom_role_permissions (org_id, role_id, permission)
+    VALUES (${orgId}, ${customRole!.id}, 'environments.create')`
+  const [repositoryGroup] = await admin<{ id: string }[]>`
+    INSERT INTO repository_groups (org_id, name) VALUES (${orgId}, 'payments') RETURNING id`
+  await admin`
+    INSERT INTO repository_group_members (org_id, group_id, repository)
+    VALUES (${orgId}, ${repositoryGroup!.id}, ${`${slug}/app`})`
+  await admin`
+    INSERT INTO custom_role_grants (org_id, role_id, user_id, scope_kind, scope_name)
+    VALUES (${orgId}, ${customRole!.id}, ${userId}, 'group', 'payments')`
+
   // A provider key and its budget. The ciphertext here is not a sealed key and
   // is not meant to be: this fixture exists so the cross-tenant suite has a row
   // of each to attack, and what it proves is that Postgres refuses another

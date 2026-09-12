@@ -34,9 +34,9 @@ import (
 //	REFUSES TO LET SHIP.
 //
 // That is why State exists and why it has six values rather than a boolean.
-// Four of the fourteen features are not enforced, and they are not unenforced
-// for the same reason: two are not built at all and two are built and
-// deliberately free. The ten that ARE enforced are not enforced by one
+// Three of the fourteen features are not enforced, and they are not unenforced
+// for the same reason: two are not built at all and one is built and
+// deliberately free. The eleven that ARE enforced are not enforced by one
 // mechanism either: the enterprise engine asks feature.Enabled, the community
 // engine asks edition.Permits with the licence crossing the module boundary as
 // strings, and the control plane asks in TypeScript this package cannot see. A
@@ -364,22 +364,21 @@ var catalogue = []Entitlement{
 	},
 	{
 		Feature:        license.FeatureRBAC,
-		Summary:        "Roles, and a permission on every route.",
-		ControlPlaneAt: "web/apps/api/src/permissions.ts:PERMISSIONS",
-		State:          StateFree,
-		Because: "Free rather than unmounted, and it is the only feature where BOTH are true " +
-			"of different code. The roles and permissions in web/apps/api/src/permissions.ts " +
-			"are real, are enforced on every request by orgProcedure, and are enforced for " +
-			"every organization on every plan including free, so nothing consults the licence " +
-			"and rbac is sold and given away. Making that gated is a COMMERCIAL decision and " +
-			"not a defect to fix quietly: switching it on would refuse permission checks for " +
-			"organizations that have them today. Separately, ee/web/rbac adds approvals and a " +
-			"policy file on top, and nothing under web/apps/api/src imports it, so that half " +
-			"is unmounted in the sense the state above describes. The entry is free because " +
-			"what a customer gets today is the working ungated one. license.go's unenforced " +
-			"map records the same feature for that second half, and this row is held to it: " +
-			"a row calling rbac refused while license.go says it is gated nowhere is two " +
-			"answers to one question, which is the whole reason this file exists.",
+		Summary:        "Custom roles: a role an organization defines, granted to a member at a scope, on top of the four built-in roles.",
+		ControlPlaneAt: "ee/web/rbac/src/enforce.ts:customRoleResolver",
+		State:          StateControlPlaneGated,
+		Because: "Refused by the control plane rather than by the engine, which is why the " +
+			"engine's own count of Enabled call sites reports zero for it. The four built-in " +
+			"roles in web/apps/api/src/permissions.ts are enforced on every request for every " +
+			"plan and consult no licence, and that is unchanged: they were never what a " +
+			"licence naming rbac sold. What it sells is custom roles, stored in the tables " +
+			"migration 0044 creates, defined through the routes ee/web/rbac mounts, and applied " +
+			"by the resolver ee/web/server/src/register.ts installs, which asks the licence key " +
+			"and then the organization's entitlement before a stored grant widens anything. " +
+			"Without it the routes answer 402 or 403 and a stored grant widens nothing, while " +
+			"every built-in role keeps what it had. THIS ENTRY READ free, and license.go " +
+			"recorded rbac as gated nowhere, both true until 2026-09-11: the library was " +
+			"complete and nothing stored a model, so no request could reach it.",
 	},
 	{
 		Feature:        license.FeatureSCIM,

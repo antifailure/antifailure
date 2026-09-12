@@ -10,7 +10,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { generateKeyPairSync, randomUUID, sign } from 'node:crypto'
-import { clearExtensions, hasSignInPolicy, registeredExtensions, setSignInPolicy, FakeClock } from '@antifailure/api'
+import { clearExtensions, hasSignInPolicy, registeredExtensions, setSignInPolicy, FakeClock, setPermissionResolver, hasPermissionResolver } from '@antifailure/api'
 import {
   LicenseRefused,
   evaluate,
@@ -287,13 +287,13 @@ describe('registering the enterprise edition', () => {
       encryptionKey: Buffer.alloc(32, 7),
     })
 
-    // Three now, and the third is the audit stream's configuration routes. They
-    // are registration doing route work beside the two sign-on extensions, and
-    // they are mounted whether or not this installation can seal a credential:
-    // with no AF_PROVIDER_KEY_SECRET a save answers 503 naming the variable,
-    // because a 404 would be indistinguishable from a build that never had it.
+    // Four now: the audit stream's configuration routes and the custom role
+    // routes beside the two sign-on extensions. The audit routes are mounted
+    // whether or not this installation can seal a credential: with no
+    // AF_PROVIDER_KEY_SECRET a save answers 503 naming the variable, because a
+    // 404 would be indistinguishable from a build that never had it.
     assert.deepEqual(
-      registeredExtensions().map((e) => e.name).sort(), ['audit-stream', 'scim', 'sso'])
+      registeredExtensions().map((e) => e.name).sort(), ['audit-stream', 'rbac', 'scim', 'sso'])
     assert.equal(
       hasSignInPolicy(),
       true,
@@ -302,5 +302,42 @@ describe('registering the enterprise edition', () => {
     )
     clearExtensions()
     setSignInPolicy(null)
+    setPermissionResolver(null)
+  })
+
+  it('installs the custom role resolver beside the routes that define a model, never one', () => {
+    // The resolver that makes a stored custom role change an answer had no
+    // production caller: permits() asked a socket nothing filled, and the only
+    // call to setPermissionResolver outside the community API was in
+    // ee/web/rbac's own test. Routes without it would let an organization write
+    // a model nothing reads, which looks complete from the screen that edits it.
+    clearExtensions()
+    setPermissionResolver(null)
+    assert.equal(hasPermissionResolver(), false)
+
+    registerEnterprise({
+      pool: {} as never,
+      clock: new FakeClock(),
+      baseUrl: 'https://enterprise.test',
+      appBaseUrl: 'https://enterprise.test/',
+      secureCookies: true,
+      env: {},
+      log: () => {},
+      encryptionKey: Buffer.alloc(32, 7),
+    })
+
+    assert.ok(
+      registeredExtensions().some((e) => e.name === 'rbac'),
+      'the enterprise entry point mounted no custom role routes, so no organization can define one',
+    )
+    assert.equal(
+      hasPermissionResolver(),
+      true,
+      'the custom role routes were mounted and no resolver was installed, so a stored model ' +
+        'would change no answer anywhere',
+    )
+    clearExtensions()
+    setSignInPolicy(null)
+    setPermissionResolver(null)
   })
 })
