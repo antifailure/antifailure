@@ -51,12 +51,19 @@ case "$url" in
       wrongbody)   code=200; body='{"error":"something else entirely"}' ;;
       sso_only)    code=402; body='{"error":"not_licensed","feature":"scim","licenseState":"active"}' ;;
       scim_only)   code=200; body='{"schemas":["urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"]}' ;;
+      audit_unlicensed) code=200; body='{"schemas":["urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"]}' ;;
     esac ;;
   */sso/start)
     case "$state" in
-      licensed|wrongbody|sso_only) code=400; body='{"error":"Give an email address to find the right identity provider."}' ;;
+      licensed|wrongbody|sso_only|audit_unlicensed) code=400; body='{"error":"Give an email address to find the right identity provider."}' ;;
       community)                   code=404; body='<!doctype html><title>Antifailure</title>' ;;
       unlicensed|scim_only)        code=402; body='{"error":"not_licensed","feature":"sso","licenseState":"none"}' ;;
+    esac ;;
+  */enterprise/audit-stream)
+    case "$state" in
+      licensed|wrongbody|sso_only|scim_only) code=401; body='{"error":"Sign in first."}' ;;
+      community)                             code=404; body='<!doctype html><title>Antifailure</title>' ;;
+      unlicensed|audit_unlicensed)           code=402; body='{"error":"not_licensed","feature":"audit_stream","licenseState":"active"}' ;;
     esac ;;
   *) code=500; body='unexpected path' ;;
 esac
@@ -117,7 +124,7 @@ expect "and it says it checked nothing" says "checked nothing"
 
 run_check "$CHECK" serving https://app.example 1 0
 expect "a licensed edition serves both routes" is_zero "$CASE_RC"
-expect "and says both are mounted and licensed" says "MOUNTED AND LICENSED"
+expect "and says all three are mounted and licensed" says "MOUNTED AND LICENSED"
 
 run_check env AF_EDITION_TEST_SERVING=community "$CHECK" serving https://app.example 1 0
 expect "the community image is refused" is_nonzero "$CASE_RC"
@@ -134,6 +141,12 @@ expect "a licence naming one feature of the two is refused" is_nonzero "$CASE_RC
 # which only the other one passes, or dropping it goes unnoticed.
 run_check env AF_EDITION_TEST_SERVING=scim_only "$CHECK" serving https://app.example 1 0
 expect "a licence naming the other feature of the two is refused" is_nonzero "$CASE_RC"
+
+# The third route. A licence that permits single sign-on and provisioning and
+# not the audit stream is mounted everywhere and sold short in one place.
+run_check env AF_EDITION_TEST_SERVING=audit_unlicensed "$CHECK" serving https://app.example 1 0
+expect "a licence without the audit stream is refused" is_nonzero "$CASE_RC"
+expect "and the audit stream route is the one named" says "/enterprise/audit-stream answered 402"
 
 run_check env AF_EDITION_TEST_SERVING=wrongbody "$CHECK" serving https://app.example 1 0
 expect "a 200 that is not the document it claims is refused" is_nonzero "$CASE_RC"

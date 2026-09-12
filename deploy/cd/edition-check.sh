@@ -7,7 +7,8 @@
 #   configured  before deploy.sh: does the app's CURRENT template carry the
 #               four variables the enterprise entry point needs?
 #   serving     after the traffic shift: does the public origin actually answer
-#               a single sign-on route and a directory provisioning route?
+#               a single sign-on route, a directory provisioning route and the
+#               audit stream route?
 #
 # WHY THE FIRST ONE EXISTS. Measured against the entry point rather than read
 # off it: without AF_EE_SSO_KEY the process EXITS BEFORE IT LISTENS, whatever
@@ -118,9 +119,15 @@ serving() {
     # directory provisioning are licensed per feature, so a licence naming one
     # and not the other answers 200 here and 402 there, which is the state the
     # hosted plan must never be in and which one probe cannot see.
+    #
+    # The audit stream's route asks who is signed in only after the gate has
+    # asked whether the installation is licensed for it, so an unauthenticated
+    # 401 is the licensed answer and a 402 is the refusal, the same split as
+    # the other two.
     if probe "$base" /scim/v2/ServiceProviderConfig 200 ServiceProviderConfig &&
-       probe "$base" /sso/start 400 "email address"; then
-      say "SINGLE SIGN-ON AND DIRECTORY PROVISIONING ARE MOUNTED AND LICENSED on $base"
+       probe "$base" /sso/start 400 "email address" &&
+       probe "$base" /enterprise/audit-stream 401 "Sign in first"; then
+      say "SINGLE SIGN-ON, DIRECTORY PROVISIONING AND THE AUDIT STREAM ARE MOUNTED AND LICENSED on $base"
       return 0
     fi
     [ "$attempt" -lt "$attempts" ] && sleep "$interval"
