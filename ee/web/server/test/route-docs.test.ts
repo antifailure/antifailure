@@ -231,8 +231,8 @@ describe('the HTTP paths the documentation names, against the enterprise edition
     // The negative control. An empty route table serves nothing and a scan that
     // reads no placeholder host finds nothing to refuse, and both look exactly
     // like a clean result.
-    assert.deepEqual([...mounted].sort(), ['audit-stream', 'scim', 'sso'], 'registerEnterprise mounted something else')
-    for (const route of ['/enterprise/audit-stream', '/sso/oidc/:handle/callback', '/scim/v2/Users']) {
+    assert.deepEqual([...mounted].sort(), ['audit-stream', 'rbac', 'scim', 'sso'], 'registerEnterprise mounted something else')
+    for (const route of ['/enterprise/audit-stream', '/sso/oidc/:handle/callback', '/scim/v2/Users', '/roles/policy']) {
       assert.ok(enterprise.has(route), `the enterprise server does not register ${route}`)
       assert.ok(!community.has(route), `the community server registers ${route}, so the two tables are not two editions`)
     }
@@ -244,6 +244,7 @@ describe('the HTTP paths the documentation names, against the enterprise edition
     assert.ok(at('/enterprise/audit-stream', 'audit-stream.md'), 'the audit stream page was not read')
     assert.ok(at('/sso/oidc/<handle>/callback', 'sso.md'), 'a path after the placeholder host was not read')
     assert.ok(at('/scim/v2', 'scim.md'), 'the provisioning base URL was not read')
+    assert.ok(at('/roles/policy/dry-run', 'custom-roles.md'), 'the custom roles page was not read')
   })
 
   it('refuses a path no route matches, placeholder or not', () => {

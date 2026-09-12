@@ -283,7 +283,7 @@ export const ENTITLEMENTS: Record<string, EntitlementSpec> = {
     // and it was the finding rather than an apology: the enterprise edition
     // carried a complete library for custom roles and nothing stored a model,
     // so there was no request a check could refuse. What was missing was one
-    // persistence layer, as this entry said. It now exists: migration 0044
+    // persistence layer, as this entry said. It now exists: migration 0045
     // stores a model per organization under row level security, the enterprise
     // edition mounts routes that define one, and its entry point installs the
     // resolver permits() has always asked. The resolver asks THIS entitlement,

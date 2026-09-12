@@ -5720,6 +5720,17 @@ one grant would be every grant.
 A dry run is worth taking. The person applying a permission model is usually the
 person a wrong one would lock out.
 
+` + "`" + "`" + "`" + `sh
+curl -X POST https://<your-control-plane>/roles/policy/dry-run \
+  -H "x-antifailure-csrf: $CSRF" -H 'content-type: application/yaml' \
+  --cookie "af_session=$SESSION" \
+  --data-binary @roles.yaml
+` + "`" + "`" + "`" + `
+
+The answer lists every change the file would make and every reason it would be
+refused, in the words the apply would use. ` + "`" + `PUT` + "`" + ` to ` + "`" + `/roles/policy` + "`" + ` with the same
+body applies it.
+
 ## You cannot grant what you do not hold
 
 A file is refused if it would give anybody a permission your own built-in role
