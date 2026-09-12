@@ -1554,6 +1554,72 @@ export const auditStreamPositions = pgTable('audit_stream_positions', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
 })
 
+/* ---------------------------------------------------------------------------
+ * Custom roles (0044)
+ *
+ * The enterprise role model, one table per list in ee/web/rbac's Model. Every
+ * reference is composite on org_id, because a foreign key is checked as the
+ * table owner and ignores row level security: see the migration.
+ * ------------------------------------------------------------------------- */
+
+export const customRoles = pgTable('custom_roles', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+  roleKey: text('role_key').notNull(),
+  name: text('name').notNull(),
+  description: text('description').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('custom_roles_org_id_role_key_key').on(t.orgId, t.roleKey),
+  uniqueIndex('custom_roles_org_id_id_key').on(t.orgId, t.id),
+])
+
+export const customRolePermissions = pgTable('custom_role_permissions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+  roleId: uuid('role_id').notNull(),
+  permission: text('permission').notNull(),
+}, (t) => [
+  uniqueIndex('custom_role_permissions_role_id_permission_key').on(t.roleId, t.permission),
+  index('custom_role_permissions_org_idx').on(t.orgId),
+])
+
+export const repositoryGroups = pgTable('repository_groups', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('repository_groups_org_id_name_key').on(t.orgId, t.name),
+  uniqueIndex('repository_groups_org_id_id_key').on(t.orgId, t.id),
+])
+
+export const repositoryGroupMembers = pgTable('repository_group_members', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+  groupId: uuid('group_id').notNull(),
+  repository: text('repository').notNull(),
+}, (t) => [
+  uniqueIndex('repository_group_members_group_id_repository_key').on(t.groupId, t.repository),
+  index('repository_group_members_org_idx').on(t.orgId),
+])
+
+/** One person holding one custom role at one scope. scopeName is null exactly
+ *  when the scope is the whole organization, which a CHECK holds. */
+export const customRoleGrants = pgTable('custom_role_grants', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+  roleId: uuid('role_id').notNull(),
+  userId: uuid('user_id').notNull(),
+  scopeKind: text('scope_kind').notNull(),
+  scopeName: text('scope_name'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index('custom_role_grants_member_idx').on(t.orgId, t.userId),
+  index('custom_role_grants_role_idx').on(t.roleId),
+])
+
 export const tenantScopedTables = [
   environmentUsage, environmentUsageDaily, usageRollupState,
   members, githubInstallations, repositories, environments, goldenVersions,
@@ -1571,6 +1637,9 @@ export const tenantScopedTables = [
   githubDeliveries, pullRequests, prGenerations, teardownRequests, repositorySetups,
   oidcRepositoryBindings,
   entitlementOverrides, featureFlagTargets, adminOperations,
+
+  customRoles, customRolePermissions, repositoryGroups, repositoryGroupMembers,
+  customRoleGrants,
 ] as const
 
 /* ---------------------------------------------------------------------------

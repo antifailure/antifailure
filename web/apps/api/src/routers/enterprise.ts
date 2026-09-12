@@ -877,7 +877,7 @@ export const accountRouter = router({
       // not, and this route has to answer for a member as well. A member's
       // screen shows signing out and closing the account, and no session list,
       // which is the correct amount for the exits a member actually has.
-      const maySeeSessions = permits({
+      const maySeeSessions = await permits({
         orgId: c.actor.orgId,
         userId: c.actor.userId,
         role: c.actor.role,

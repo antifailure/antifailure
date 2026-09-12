@@ -298,7 +298,7 @@ export function orgProcedure(permission: Permission) {
       // permits, not roleHas. The built-in table decides unless a resolver has
       // been installed, and the community edition installs none, so this is the
       // same answer with a socket in it.
-      const allowed = permits({
+      const allowed = await permits({
         orgId: octx.actor.orgId,
         userId: octx.actor.userId,
         role: octx.actor.role,
