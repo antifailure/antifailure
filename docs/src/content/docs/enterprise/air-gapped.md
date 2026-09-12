@@ -92,7 +92,7 @@ recorded with the site that made it.
 | the cloud credential path | AWS, GCP, Azure or Vault, for every secret store and every managed database provider |
 | the audit stream sink | your syslog receiver, your webhook endpoint, or the object store the audit stream is dropped into |
 | the runtime conformance suite | the internet, on purpose, which is why it is here |
-| the container image pull | the registry the image reference names |
+| the container image pull | the registry the image reference names, which for the sidecar is `ghcr.io` unless `AF_PROXY_IMAGE` names your own |
 | the container image build | Docker Hub, for the sidecar's base image |
 
 Three of those are worth naming separately.
@@ -110,11 +110,28 @@ before the daemon is asked. Both callers look for the image locally first, so an
 installation that loaded its images from a tarball or an internal registry runs
 untouched. What is refused is the silent reach for Docker Hub.
 
-**The sidecar image.** Its Dockerfile begins `FROM golang:1.25-alpine`, so
-building it on demand is a pull from Docker Hub on the path of every `af up`.
-Under an air gap it is refused outright rather than pointed somewhere else:
-publish the image to your own registry and load it, and the build is never
-reached.
+**The sidecar image.** A release publishes it to `ghcr.io`, and `af up` fetches
+it from there before it would compile anything. Under an air gap that fetch is
+refused at the container image pull, naming `ghcr.io`, and the compile is then
+refused at the container image build, naming Docker Hub, where its
+`golang:1.25-alpine` base image comes from. Both refusals land in the ledger,
+in that order, and the one error you see names both.
+
+Two ways through, and neither needs the internet:
+
+- Mirror the published image into a registry your allow list names, and set
+  `AF_PROXY_IMAGE` to its reference in your registry. The engine fetches that
+  and never falls back to compiling, because falling back would reach Docker
+  Hub on a machine configured not to.
+- Load the image into the daemon under the name `af` looks for, which
+  `docker image ls antifailure/proxy` shows on any machine that has run it.
+
+Either way the image has to say it is this sidecar. Every sidecar image carries
+a `dev.antifailure.proxy-sources` label naming the digest of the source it was
+built from, and an image fetched from anywhere whose label does not match the
+source this `af` carries is refused rather than run, whatever it is called. An
+image `af` compiled carries the label too, so pushing that into your registry
+works.
 
 ## Which database you may use
 

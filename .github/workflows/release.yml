@@ -125,8 +125,227 @@ jobs:
           name: ${{ matrix.os }}-${{ matrix.arch }}
           path: dist/*.tar.gz*
 
+  # ---------------------------------------------------------------------------
+  # The egress sidecar image, published so that a customer's first af up does
+  # not compile one.
+  #
+  # THE MEASUREMENT THIS JOB EXISTS FOR. docs/plan/four-stacks/README.md is a
+  # run of `af up` against three stacks those projects publish themselves, taken
+  # on 2026-09-08. It records the same line three times: killed at 25 minutes 32
+  # seconds on "building the egress proxy". Zero of four stacks came up, zero of
+  # fifty services reached ready. The sidecar is the first thing `af up` needs
+  # and nothing had ever published it, so every first run anywhere compiled Go
+  # inside a container, with a module fetch inside that container, on somebody's
+  # first five minutes with this product.
+  #
+  # TWO ARCHITECTURES, AND THAT IS NOT OPTIONAL. The image runs on the container
+  # daemon, not on the machine, so a developer on an Apple laptop needs
+  # linux/arm64 and a Linux workstation needs linux/amd64. An amd64 only image
+  # is not a smaller version of this fix, it is the fix skipping the half of
+  # buyers most likely to be evaluating on a laptop: the pull finds no matching
+  # manifest and the engine falls back to the 25 minute build, quietly, with
+  # nothing saying why. The arm64 leg is emulated and therefore slow, which is
+  # the right place to spend the minutes: once per release here rather than once
+  # per customer there.
+  #
+  # THE TAG IS A CONTENT DIGEST AND THE ENGINE COMPUTES IT. The reference is a
+  # hash over the twenty source files tools/proxysrc packages plus the
+  # Dockerfile, so this job cannot know it and must not guess it. It asks
+  # engine/cmd/sidecarimage, which is the same function the engine calls when it
+  # looks for the image, and builds from the same tar archive the engine would
+  # have handed its own daemon. A second implementation of that hash in shell
+  # would agree until the day it did not, and on that day the release would
+  # publish an image under a name nothing ever looks for.
+  #
+  # WHY IT GATES THE RELEASE. `publish` needs this job. A release whose sidecar
+  # image is missing looks finished and puts every customer back on the build,
+  # and nobody goes looking for an artifact they were never told about. A red
+  # release can be cut again; a published one that is quietly short cannot.
+  # ---------------------------------------------------------------------------
+  sidecar:
+    name: the egress sidecar image
+    needs: gate
+    runs-on: ubuntu-latest
+    # Long enough for the emulated arm64 leg, which compiles the Go toolchain's
+    # output under QEMU. If this ever hits the limit the release fails loudly,
+    # which is the correct direction: the alternative is a release that
+    # publishes half a manifest list.
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      # QEMU for the arm64 leg and buildx for the manifest list. Both pinned to
+      # a commit like every other action here.
+      - uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: The reference the engine will ask for, and the context it would build
+        id: image
+        run: |
+          set -euo pipefail
+          cd engine
+          GOTOOLCHAIN=local go run ./cmd/sidecarimage \
+            -context "$RUNNER_TEMP/sidecar-context.tar" | tee "$GITHUB_OUTPUT"
+          ls -l "$RUNNER_TEMP/sidecar-context.tar"
+
+      # A fork must not push under this repository's name, and this constant
+      # must not quietly stop naming what the release publishes. Both are the
+      # same assertion: the owner half of the reference the ENGINE will pull
+      # from has to be the owner this workflow is running for. Without it a fork
+      # gets a 403 from a registry nobody told it about, and an edit to
+      # proxyimage.PublishedRepository publishes somewhere no engine looks.
+      - name: The published reference belongs to this repository's owner
+        env:
+          PUBLISHED: ${{ steps.image.outputs.published }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          expected="ghcr.io/${OWNER}/"
+          case "$PUBLISHED" in
+            "$expected"*) echo "$PUBLISHED is published by $OWNER" ;;
+            *)
+              echo "::error::proxyimage.PublishedRepository names $PUBLISHED, which is not under $expected."
+              echo "::error::The engine pulls that reference, so publishing anywhere else means every"
+              echo "::error::first run falls back to compiling the sidecar with nothing saying why."
+              exit 1
+              ;;
+          esac
+
+      # Built for this runner first, so the assertions below run against a real
+      # container rather than against a manifest list nothing can start. The
+      # multi architecture push reuses this leg from cache.
+      - name: Build for this runner
+        env:
+          REF: ${{ steps.image.outputs.published }}
+          LABEL: ${{ steps.image.outputs.label }}
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          docker buildx build \
+            --platform linux/amd64 \
+            --label "${LABEL}=${DIGEST}" \
+            --tag "$REF" \
+            --load \
+            - < "$RUNNER_TEMP/sidecar-context.tar"
+
+      # THE LABEL IS THE INVARIANT AND THIS IS WHERE IT IS PUT THERE.
+      #
+      # A tag is a name in a registry that whoever can push may move. The engine
+      # therefore treats the tag as how the image is FOUND and this label as how
+      # it is BELIEVED: it refuses any image it pulled whose label is not the
+      # digest of the sidecar source the binary carries, whatever the image was
+      # called. So an image published without the label is an image no engine
+      # will run, and that has to fail here rather than at a customer.
+      - name: The image says which sidecar source it was built from
+        env:
+          REF: ${{ steps.image.outputs.published }}
+          LABEL: ${{ steps.image.outputs.label }}
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          got=$(docker image inspect -f "{{index .Config.Labels \"${LABEL}\"}}" "$REF")
+          if [ "$got" != "$DIGEST" ]; then
+            echo "::error::$REF carries ${LABEL}=${got:-nothing} and the engine will look for $DIGEST."
+            echo "::error::Every engine that pulled it would refuse it and compile the sidecar instead."
+            exit 1
+          fi
+          echo "$REF declares sidecar source $got"
+
+      # And it has to be the sidecar, not merely an image. The runtime stage is
+      # scratch, so this is also the only place anything proves the binary is
+      # statically linked: a dynamically linked one cannot start at all there.
+      # With no configuration file it must exit non-zero AND name itself, and
+      # both halves are asserted, because an exit code with no message sends
+      # somebody to read source at 3am and a good message with a zero exit is a
+      # sidecar that decided to run with no policy.
+      - name: The image is the sidecar and refuses to run with no policy
+        env:
+          REF: ${{ steps.image.outputs.published }}
+        run: |
+          set -euo pipefail
+          out=$(docker run --rm "$REF" 2>&1) && rc=0 || rc=$?
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the sidecar started with no configuration file, which would mean an"
+            echo "::error::environment whose egress policy is whatever the binary defaults to."
+            exit 1
+          fi
+          case "$out" in
+            *af-proxy*) echo "the sidecar refuses with no policy: $out" ;;
+            *)
+              echo "::error::that container is not the sidecar. It said: $out"
+              exit 1
+              ;;
+          esac
+
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # No moving tag. The reference IS the content, so there is nothing for a
+      # `latest` to mean here and a floating tag would be a way to serve a
+      # sidecar that does not match its source.
+      - name: Push both architectures
+        env:
+          REF: ${{ steps.image.outputs.published }}
+          LABEL: ${{ steps.image.outputs.label }}
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --label "${LABEL}=${DIGEST}" \
+            --tag "$REF" \
+            --push \
+            - < "$RUNNER_TEMP/sidecar-context.tar"
+
+      # THE ASSERTION THAT IS NOT STRUCTURAL. Everything above this line is
+      # about bytes on the runner. This is the path the customer takes: the
+      # local copy is removed, the reference is pulled back out of the registry,
+      # and the label has to survive the round trip. A push that produced a
+      # manifest list with no linux/amd64 entry, or an authentication that
+      # succeeded and wrote nothing, is green in every step above and red here.
+      - name: Pulling it back is what a customer's first af up does
+        env:
+          REF: ${{ steps.image.outputs.published }}
+          LABEL: ${{ steps.image.outputs.label }}
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          docker image rm -f "$REF" >/dev/null
+          docker pull "$REF"
+          got=$(docker image inspect -f "{{index .Config.Labels \"${LABEL}\"}}" "$REF")
+          test "$got" = "$DIGEST" || {
+            echo "::error::the published $REF declares ${got:-nothing}, not $DIGEST"
+            exit 1
+          }
+          # Both architectures are in the manifest list the engine will meet.
+          # Read from the registry rather than from the local image, because the
+          # local one is whichever leg this runner pulled.
+          manifest=$(docker buildx imagetools inspect --raw "$REF")
+          for want in amd64 arm64; do
+            case "$manifest" in
+              *"\"architecture\":\"$want\""*) echo "linux/$want is published" ;;
+              *)
+                echo "::error::the published manifest list has no linux/$want entry, so every engine"
+                echo "::error::on that architecture falls back to compiling the sidecar."
+                exit 1
+                ;;
+            esac
+          done
+          {
+            echo "### The egress sidecar image"
+            echo ''
+            echo "Published \`$REF\`, linux/amd64 and linux/arm64, declaring sidecar source \`$DIGEST\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   publish:
-    needs: build
+    needs: [build, sidecar]
     runs-on: ubuntu-latest
     # The only job that writes anything back to the repository.
     permissions:

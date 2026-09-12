@@ -412,6 +412,8 @@ const (
 	AFRUN046 Code = "AF-RUN-046"
 	// This runtime cannot place the sizes the manifest asks for: {detail}
 	AFRUN047 Code = "AF-RUN-047"
+	// The egress sidecar image could not be obtained: {detail}
+	AFRUN048 Code = "AF-RUN-048"
 
 	// Scheduling
 	// No runtime satisfies the placement requirement {requirement}.
@@ -1858,6 +1860,15 @@ var catalog = map[Code]Entry{
 		Message:   "This runtime cannot place the sizes the manifest asks for: {detail}",
 		NextStep:  "Lower resources.cpu or resources.memory on the services named, run fewer environments on this machine, or place it somewhere with room.",
 		Docs:      "reference/manifest",
+		Retryable: true,
+		ExitCode:  ExitFailure,
+	},
+	AFRUN048: {
+		Code:      AFRUN048,
+		Area:      "RUN",
+		Message:   "The egress sidecar image could not be obtained: {detail}",
+		NextStep:  "A release publishes this image, so an official build fetches it in seconds. Set AF_PROXY_IMAGE_TIMEOUT higher if this machine is slow, or name an image you host in AF_PROXY_IMAGE so nothing is compiled here.",
+		Docs:      "guides/local-runtime",
 		Retryable: true,
 		ExitCode:  ExitFailure,
 	},

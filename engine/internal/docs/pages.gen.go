@@ -4714,7 +4714,7 @@ recorded with the site that made it.
 | the cloud credential path | AWS, GCP, Azure or Vault, for every secret store and every managed database provider |
 | the audit stream sink | your syslog receiver, your webhook endpoint, or the object store the audit stream is dropped into |
 | the runtime conformance suite | the internet, on purpose, which is why it is here |
-| the container image pull | the registry the image reference names |
+| the container image pull | the registry the image reference names, which for the sidecar is ` + "`" + `ghcr.io` + "`" + ` unless ` + "`" + `AF_PROXY_IMAGE` + "`" + ` names your own |
 | the container image build | Docker Hub, for the sidecar's base image |
 
 Three of those are worth naming separately.
@@ -4732,11 +4732,28 @@ before the daemon is asked. Both callers look for the image locally first, so an
 installation that loaded its images from a tarball or an internal registry runs
 untouched. What is refused is the silent reach for Docker Hub.
 
-**The sidecar image.** Its Dockerfile begins ` + "`" + `FROM golang:1.25-alpine` + "`" + `, so
-building it on demand is a pull from Docker Hub on the path of every ` + "`" + `af up` + "`" + `.
-Under an air gap it is refused outright rather than pointed somewhere else:
-publish the image to your own registry and load it, and the build is never
-reached.
+**The sidecar image.** A release publishes it to ` + "`" + `ghcr.io` + "`" + `, and ` + "`" + `af up` + "`" + ` fetches
+it from there before it would compile anything. Under an air gap that fetch is
+refused at the container image pull, naming ` + "`" + `ghcr.io` + "`" + `, and the compile is then
+refused at the container image build, naming Docker Hub, where its
+` + "`" + `golang:1.25-alpine` + "`" + ` base image comes from. Both refusals land in the ledger,
+in that order, and the one error you see names both.
+
+Two ways through, and neither needs the internet:
+
+- Mirror the published image into a registry your allow list names, and set
+  ` + "`" + `AF_PROXY_IMAGE` + "`" + ` to its reference in your registry. The engine fetches that
+  and never falls back to compiling, because falling back would reach Docker
+  Hub on a machine configured not to.
+- Load the image into the daemon under the name ` + "`" + `af` + "`" + ` looks for, which
+  ` + "`" + `docker image ls antifailure/proxy` + "`" + ` shows on any machine that has run it.
+
+Either way the image has to say it is this sidecar. Every sidecar image carries
+a ` + "`" + `dev.antifailure.proxy-sources` + "`" + ` label naming the digest of the source it was
+built from, and an image fetched from anywhere whose label does not match the
+source this ` + "`" + `af` + "`" + ` carries is refused rather than run, whatever it is called. An
+image ` + "`" + `af` + "`" + ` compiled carries the label too, so pushing that into your registry
+works.
 
 ## Which database you may use
 
@@ -9422,11 +9439,16 @@ those tools leave, so it happens for ` + "`" + `k3d-*` + "`" + ` and ` + "`" + `
 nothing else.
 
 For any other cluster, the images have to be somewhere the nodes can pull from.
-Publish the sidecar image and name it:
+A release publishes the sidecar image to ` + "`" + `ghcr.io/antifailure/af-proxy` + "`" + `, tagged
+with the digest of the sidecar source that release carries. Name it, or your
+own copy of it:
 
 ` + "`" + "`" + "`" + `
 export AF_PROXY_IMAGE=registry.example.com/antifailure/proxy:<tag>
 ` + "`" + "`" + "`" + `
+
+` + "`" + `docker image ls antifailure/proxy` + "`" + ` on a machine that has run ` + "`" + `af up` + "`" + ` shows
+the digest this build of ` + "`" + `af` + "`" + ` carries.
 
 ## Preview URLs
 
@@ -10038,6 +10060,47 @@ reached.
 
 ` + "`" + `af doctor` + "`" + ` checks this and everything else about the machine before you need
 it, and names the command that fixes each thing it finds.
+
+## The egress sidecar image
+
+The first thing ` + "`" + `af up` + "`" + ` needs is the egress sidecar's image, and a release
+publishes it to ` + "`" + `ghcr.io/antifailure/af-proxy` + "`" + ` for ` + "`" + `linux/amd64` + "`" + ` and
+` + "`" + `linux/arm64` + "`" + `. On a machine that has never run ` + "`" + `af` + "`" + `, the engine fetches it,
+which is one small image, and says so:
+
+` + "`" + "`" + "`" + `
+fetching the egress proxy ghcr.io/antifailure/af-proxy:<digest> (once per version)
+` + "`" + "`" + "`" + `
+
+The tag is a digest of the sidecar's own source, not a version number, so a
+build of ` + "`" + `af` + "`" + ` from a commit that changed the sidecar has a digest no release
+published. That build compiles the image instead, from the source the binary
+carries, and prints each step as it goes, including the pull of the Go base
+image the compile starts from. A line every fifteen seconds says how long the
+step has run, out of how long it may, and what the daemon last reported, so a
+stalled download and a slow compile no longer look the same.
+
+Each attempt is bounded: two minutes to fetch and ten to compile. A step that
+runs out of time stops with ` + "`" + `AF-RUN-048` + "`" + `, naming what it was doing and the last
+thing the daemon said. On a slow machine, allow more for both:
+
+` + "`" + "`" + "`" + `
+AF_PROXY_IMAGE_TIMEOUT=25m af up
+` + "`" + "`" + "`" + `
+
+To take the image from a registry you run instead, name it:
+
+` + "`" + "`" + "`" + `
+AF_PROXY_IMAGE=registry.internal:5000/antifailure/af-proxy:<digest> af up
+` + "`" + "`" + "`" + `
+
+A named image is fetched and never replaced by a compile, because naming one
+usually means this machine should not be reaching Docker Hub. Whatever it is
+called, the image has to say it is this sidecar: every sidecar image carries a
+` + "`" + `dev.antifailure.proxy-sources` + "`" + ` label naming the digest of the source it was
+built from, and one whose label does not match the source this ` + "`" + `af` + "`" + ` carries is
+refused rather than run. An image ` + "`" + `af` + "`" + ` compiled carries the label too, so
+pushing it into your own registry works.
 
 ## A service that never becomes ready
 
@@ -19617,6 +19680,18 @@ This runtime cannot place the sizes the manifest asks for: {detail}
 | Exit code | ` + "`" + `1` + "`" + ` |
 | Retryable | Yes. The engine retries automatically where it can. |
 | More | [reference/manifest](/docs/reference/manifest) |
+
+### AF-RUN-048
+
+The egress sidecar image could not be obtained: {detail}
+
+**What to do.** A release publishes this image, so an official build fetches it in seconds. Set AF_PROXY_IMAGE_TIMEOUT higher if this machine is slow, or name an image you host in AF_PROXY_IMAGE so nothing is compiled here.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `1` + "`" + ` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [guides/local-runtime](/docs/guides/local-runtime) |
 
 ## Scheduling
 

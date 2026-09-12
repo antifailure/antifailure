@@ -56,6 +56,10 @@ type Runtime struct {
 	clock    clock.Clock
 	ports    *dockerutil.PortAllocator
 	redactor *redact.Redactor
+	// getenv reads the environment, so a test can name a sidecar image or move
+	// a timeout without moving the process's. Nil reads the process
+	// environment.
+	getenv func(string) string
 	// readyTimeout bounds how long a service may take to answer.
 	readyTimeout time.Duration
 	// ttl is how long an environment this runtime creates may live.
@@ -123,7 +127,7 @@ func New(opts Options) (*Runtime, error) {
 		opts.PortFrom = from + PublishedPortOffset
 	}
 	return &Runtime{
-		cli: cli, clock: opts.Clock, redactor: opts.Redactor,
+		cli: cli, clock: opts.Clock, redactor: opts.Redactor, getenv: opts.Getenv,
 		ports:        dockerutil.NewPortAllocator(opts.PortFrom),
 		readyTimeout: opts.ReadyTimeout,
 		ttl:          opts.TTL,

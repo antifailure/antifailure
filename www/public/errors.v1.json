@@ -1422,6 +1422,17 @@
       "planned": false
     },
     {
+      "code": "AF-RUN-048",
+      "area": "RUN",
+      "areaName": "Runtime",
+      "message": "The egress sidecar image could not be obtained: {detail}",
+      "resolution": "A release publishes this image, so an official build fetches it in seconds. Set AF_PROXY_IMAGE_TIMEOUT higher if this machine is slow, or name an image you host in AF_PROXY_IMAGE so nothing is compiled here.",
+      "docs": "https://antifailure.dev/docs/guides/local-runtime",
+      "retryable": true,
+      "exitCode": 1,
+      "planned": false
+    },
+    {
       "code": "AF-SCH-001",
       "area": "SCH",
       "areaName": "Scheduling",

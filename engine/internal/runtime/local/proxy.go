@@ -14,7 +14,6 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	dockerbuild "github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
 
@@ -322,51 +321,21 @@ func (r *Runtime) proxyStillRunning(ctx context.Context, id, out string) error {
 		"code", strconv.Itoa(insp.State.ExitCode)+"\n"+out)
 }
 
-// ensureProxyImage builds the sidecar image if it is not already present.
+// ensureProxyImage puts the sidecar image on this daemon: present, then
+// fetched, then compiled.
+//
+// The work is in proxyobtain.go, which states the failure it was written for
+// and holds the ordering table. This is the call site.
 func (r *Runtime) ensureProxyImage(ctx context.Context, progress func(string)) error {
-	tag := proxyimage.Tag()
-	if _, err := r.cli.ImageInspect(ctx, tag); err == nil {
-		return nil
+	job := &proxyImageJob{
+		daemon:   r.cli,
+		clock:    r.clock,
+		redactor: r.redactor,
+		labels:   r.managed(dockerutil.KindSidecar, ""),
+		getenv:   r.getenv,
+		progress: progress,
 	}
-	if err := airgap.Refuse(airgap.SiteImageBuild,
-		"building the sidecar image "+tag+", whose base image comes from Docker Hub"); err != nil {
-		return aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
-	}
-	progress("building the egress proxy (once per version)")
-
-	resp, err := r.cli.ImageBuild(ctx, proxyimage.BuildContext(), dockerbuild.ImageBuildOptions{
-		Tags:   []string{tag},
-		Remove: true,
-		Labels: r.managed(dockerutil.KindSidecar, ""),
-	})
-	if err != nil {
-		return aferrors.Wrap(err, aferrors.AFRUN040,
-			"detail", "building the egress proxy: "+err.Error())
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	dec := json.NewDecoder(resp.Body)
-	var buildErr, tail string
-	for {
-		var msg struct {
-			Stream string `json:"stream"`
-			Error  string `json:"error"`
-		}
-		if decErr := dec.Decode(&msg); decErr != nil {
-			break
-		}
-		if s := strings.TrimSpace(msg.Stream); s != "" {
-			tail = s
-		}
-		if msg.Error != "" {
-			buildErr = msg.Error
-		}
-	}
-	if buildErr != "" {
-		return aferrors.Coded(aferrors.AFRUN040,
-			"detail", "building the egress proxy: "+r.redactor.String(buildErr+" "+tail))
-	}
-	return nil
+	return job.obtain(ctx)
 }
 
 // copyInto writes a file into a container that is not running yet.

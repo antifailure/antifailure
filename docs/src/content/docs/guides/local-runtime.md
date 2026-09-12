@@ -34,6 +34,47 @@ reached.
 `af doctor` checks this and everything else about the machine before you need
 it, and names the command that fixes each thing it finds.
 
+## The egress sidecar image
+
+The first thing `af up` needs is the egress sidecar's image, and a release
+publishes it to `ghcr.io/antifailure/af-proxy` for `linux/amd64` and
+`linux/arm64`. On a machine that has never run `af`, the engine fetches it,
+which is one small image, and says so:
+
+```
+fetching the egress proxy ghcr.io/antifailure/af-proxy:<digest> (once per version)
+```
+
+The tag is a digest of the sidecar's own source, not a version number, so a
+build of `af` from a commit that changed the sidecar has a digest no release
+published. That build compiles the image instead, from the source the binary
+carries, and prints each step as it goes, including the pull of the Go base
+image the compile starts from. A line every fifteen seconds says how long the
+step has run, out of how long it may, and what the daemon last reported, so a
+stalled download and a slow compile no longer look the same.
+
+Each attempt is bounded: two minutes to fetch and ten to compile. A step that
+runs out of time stops with `AF-RUN-048`, naming what it was doing and the last
+thing the daemon said. On a slow machine, allow more for both:
+
+```
+AF_PROXY_IMAGE_TIMEOUT=25m af up
+```
+
+To take the image from a registry you run instead, name it:
+
+```
+AF_PROXY_IMAGE=registry.internal:5000/antifailure/af-proxy:<digest> af up
+```
+
+A named image is fetched and never replaced by a compile, because naming one
+usually means this machine should not be reaching Docker Hub. Whatever it is
+called, the image has to say it is this sidecar: every sidecar image carries a
+`dev.antifailure.proxy-sources` label naming the digest of the source it was
+built from, and one whose label does not match the source this `af` carries is
+refused rather than run. An image `af` compiled carries the label too, so
+pushing it into your own registry works.
+
 ## A service that never becomes ready
 
 ```
