@@ -145,7 +145,7 @@ export function AboutPage() {
       <RelatedGrid
         items={[
           { href: "/product", title: "Product", description: "The parts of a run and the evidence they produce." },
-          { href: "/privacy", title: "Privacy", description: "Data boundaries, subprocessors, retention, and controls." },
+          { href: "/privacy", title: "Privacy", description: "Data boundaries, the processors this site uses, and your controls." },
           { href: "/contact", title: "Contact", description: "Documented routes for private and public questions." },
         ]}
       />

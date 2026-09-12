@@ -18,7 +18,14 @@ asks for before a rollout, which is also the set of things a large company is
 willing to pay for: single sign on, SCIM provisioning, custom roles and
 approvals, SIEM streaming of the engine's privileged actions, organization wide
 policy enforcement, customer owned runtime clusters, enterprise secret
-managers, billing and metering, and support tooling.
+managers, managed cloud database providers, air gapped operation, and compliance
+evidence packs.
+
+Billing and support tooling were on that list until 2026-09-11 and neither is
+here. `ee/engine/license/license.go` records billing as a name with nothing
+behind it: the billing code in this repository bills a customer for
+Antifailure, and it is MIT. Operator support access is community code in
+`web/apps/api/src/admin/customers.ts`, available on every plan on purpose.
 
 ### What "SIEM streaming with a tamper evident hash chain" means, exactly
 

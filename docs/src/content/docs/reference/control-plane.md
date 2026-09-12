@@ -545,7 +545,7 @@ so the measurement is not silently half missing; that the recorder bundle, the
 largest and most blockable request the library makes, arrives rather than failing
 while ingestion looks healthy; and that the reader's address is dropped in
 passing. It does not buy the sentence "no third party sees this", and the
-published subprocessor list says so.
+privacy page says so.
 
 ### What this process reports about itself
 

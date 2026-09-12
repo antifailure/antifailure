@@ -5,7 +5,8 @@ sidebar:
   order: 22
 ---
 
-Antifailure runs on AKS. It does not run on raw Azure Container Apps, and
+On Azure, the runtime to use is `kubernetes` on AKS. Antifailure does not run
+on raw Azure Container Apps, and
 `runtime.provider: aca` in a manifest exits with the reason rather than with a
 list of the runtimes that do exist.
 
@@ -109,9 +110,13 @@ the path. It does not mean Azure was seen enforcing it.
 
 ## What to use
 
-Use `runtime.provider: kubernetes` against AKS. It is the same containment
-argument as any other cluster, it is proved by a probe that runs before any
-application image starts, and AKS is where most organisations on Azure already
-run containers.
+Use `runtime.provider: kubernetes` against AKS. It makes the same containment
+argument there as on any other cluster: a probe tries to get out before any
+application image starts, and a cluster that does not enforce the policy is
+refused. What has not happened is a run on AKS. The Kubernetes runtime has been
+run against k3s and nowhere else, it is recorded as `written` rather than
+`proven`, and its own page says why, including the window after a pod starts
+that the probe does not close. AKS is the recommendation because it is where
+most organisations on Azure already run containers, not because it was measured.
 
 See [The Kubernetes runtime](/docs/guides/kubernetes-runtime).

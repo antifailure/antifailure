@@ -317,8 +317,8 @@ cal.com's document on cal.com's origin, not a client in this repository, and it
 is written down because a reader's browser opens the connection either way.
 
 **The marketing website at antifailure.dev does send, to PostHog Cloud US, for
-product analytics and session replay.** It is on the subprocessor list under
-PostHog, Inc. with the categories written out: page addresses and titles, the
+product analytics and session replay.** The privacy page names PostHog, Inc.
+as the processor and writes the categories out: page addresses and titles, the
 referrer, scroll depth, autocaptured clicks and form submissions, browser,
 operating system, device type, screen size, language and timezone, and a session
 recording. The raw user agent string is stripped before anything is sent, which

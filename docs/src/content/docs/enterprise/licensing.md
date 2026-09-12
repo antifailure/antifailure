@@ -140,7 +140,7 @@ is where it gets published.
 | `billing` | Subscriptions, invoices and the plan an organization is on. | Nothing changes, because the capability is not built yet. |
 | `cloud_database` | Managed cloud database providers, the ones that need an organization behind them rather than a developer's own card. | Withheld. `cloudgate/cloudgate.go:gatedDatabase.Branch` asks the license, and the feature is off when the answer is no. |
 | `cloud_runtime` | Managed cloud runtime providers, on the same rule as the databases. | Withheld. `cloudgate/cloudgate.go:gatedRuntime.Up` asks the license, and the feature is off when the answer is no. |
-| `compliance_packs` | SOC 2 and ISO 27001 evidence gathered from the control plane's own records. | Withheld. `compliance/command.go:Command` asks the license, and the feature is off when the answer is no. |
+| `compliance_packs` | SOC 2 and HIPAA evidence gathered from the control plane's own records. | Withheld. `compliance/command.go:Command` asks the license, and the feature is off when the answer is no. |
 | `enterprise_dashboard` | The console: environments, masking, egress, audit and workloads. | Nothing changes, because the capability is not built yet. |
 | `enterprise_secrets` | Declared variables resolved from Vault or a cloud secret manager. | Withheld. `secrets/source.go:Source.Available` asks the license, and the feature is off when the answer is no. |
 | `multi_runtime` | Placing an environment across several runtimes at once, by requirement and by tag. | Withheld. `engine/internal/env/env.go:Orchestrator.placement` asks the license, and the feature is off when the answer is no. |

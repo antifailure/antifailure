@@ -24,7 +24,7 @@ database:
 | [`dblab`](/docs/providers/dblab) | A Database Lab Engine you run | Flat, because clones are copy on write | A Database Lab Engine, ZFS, and its verification token |
 | [`supabase`](/docs/providers/supabase) | A Supabase branch, which is a whole separate project | Grows with the database, because a Supabase branch is created empty | A Supabase project on a paid plan and an access token |
 | [`pgurl`](/docs/providers/pgurl) | A database on any Postgres server you name | Grows with the database, because a branch is a server side file copy | A reachable Postgres and a role that may create databases |
-| [`aurora`](/docs/providers/aurora) | A clone of an Amazon Aurora PostgreSQL cluster | Flat, because a clone shares the source's storage volume | An Aurora PostgreSQL cluster, an IAM role, and the enterprise edition |
+| [`aurora`](/docs/providers/aurora) | A clone of an Amazon Aurora PostgreSQL cluster | Expected to be flat, because a clone shares the source's storage volume. Never timed on AWS | An Aurora PostgreSQL cluster, an IAM role, and the enterprise edition |
 
 `docker` is the default and needs nothing. Its branch time is flat, measured
 rather than assumed: the conformance suite branches an 8 MiB golden and a 512 MiB
@@ -55,13 +55,38 @@ and the golden has to be copied in, but what you get back is a real Supabase
 project with the Auth, Storage and Realtime services your application is
 calling, which neither of the others can offer. A branch is billed by the hour.
 
-`aurora` is the flat one for a production that already runs on Aurora
-PostgreSQL, and it is in the enterprise edition, because it needs an IAM role
-somebody in an organization has to grant. A branch is an Aurora clone, so
-branching moves no data whatever the size. What it does not give you is
-seconds: a clone has no instances, a preview environment needs one, and
-provisioning a writer takes minutes. That number is flat in the size too, and
-the provider page says so before you buy rather than after.
+`aurora` is the one for a production that already runs on Aurora PostgreSQL,
+and it is in the enterprise edition, because it needs an IAM role somebody in
+an organization has to grant. A branch is an Aurora clone. What has been
+measured is the provider's half of that: the requests a branch makes are
+identical at a one gigabyte volume and at a one terabyte one, and the provider
+reads and writes no database content while making them. That is what flat
+branch time needs from the code. What it needs from AWS is a clone that is
+fast whatever the size, and a writer instance for the preview environment,
+because a clone has none. Neither has been timed. Nobody who wrote this
+provider has an Aurora account, and its benchmark prints every wall clock cell
+as unmeasured rather than guessing one, so the table's "flat" is an
+expectation, and the [provider page](/docs/providers/aurora) says the same.
+
+### What is proved, and what is not
+
+The table mixes providers that have answered their real service with one that
+has not, so here is the split, in the terms the
+[golden stores](/docs/providers/stores) page uses:
+
+- **`docker` and `pgurl` are proved on every pull request**, by the shared
+  conformance suite against a real Docker daemon and a real Postgres server.
+  For `pgurl` the real server is the whole of the provider's service, so there
+  is nothing a fake would be standing in for.
+- **`neon`, `supabase` and `dblab` are proved against the real service, by
+  hand.** Each needs an account or a Database Lab Engine that CI does not have,
+  so the runs that passed were made by a person rather than by a pull request.
+- **`aurora` is proved against a fake, and not against AWS.** The same suite
+  runs every line of the provider on every pull request, with a fake RDS
+  control plane in front of a real Postgres, so the claims about bytes are
+  checked against bytes. What it cannot show is that AWS accepts those
+  requests, or how long a clone and its writer take, because no test in this
+  repository may need a cloud account.
 
 A provider named in the manifest and neither built into this binary nor
 registered with it is refused at startup rather than substituted. Falling back
