@@ -1,6 +1,8 @@
 package emulator_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -201,4 +203,110 @@ func mustAWS(t *testing.T) *emulator.Emulator {
 	e, ok := emulator.Named(emulator.AWSName)
 	require.True(t, ok)
 	return e
+}
+
+// The guide is where a person reads what the emulator answers for before they
+// depend on it, and a table that drifts from the code is worse than no table:
+// it is a wrong answer somebody trusts. So the guide's surface table is
+// checked against the declaration rather than maintained beside it.
+func TestAWS_TheGuideRecordsTheSurfaceTheCodeAnswersFor(t *testing.T) {
+	t.Parallel()
+	guide := readGuide(t)
+	e := mustAWS(t)
+
+	for _, s := range e.Services {
+		require.Contains(t, guide, s.Name,
+			"%s is answered by the emulator and the guide does not name it", s.Name)
+		for _, h := range s.Hosts {
+			require.Contains(t, guide, "`"+h+"`",
+				"%s is routed to the emulator and the guide does not name it", h)
+		}
+		require.Contains(t, guide, s.Proves,
+			"the guide does not carry what proves %s", s.Name)
+	}
+	for _, s := range e.Outside {
+		require.Contains(t, guide, strings.SplitN(s.Name, ",", 2)[0],
+			"%s is refused and the guide does not say so", s.Name)
+	}
+	require.Contains(t, guide, e.Container().Image,
+		"the guide names an image other than the one the engine starts")
+}
+
+func readGuide(t *testing.T) string {
+	t.Helper()
+	// From engine/pkg/emulator to the repository root.
+	path := filepath.Join("..", "..", "..",
+		"docs", "src", "content", "docs", "guides", "aws.md")
+	body, err := os.ReadFile(path)
+	require.NoError(t, err, "the AWS guide is where the surface is published")
+	return string(body)
+}
+
+// The engine resolves an emulate rule through the registry and through nothing
+// else, so an emulator this repository ships has to arrive the same way one
+// written outside it does. A declaration nobody registers is a provider named
+// and not built.
+func TestRegisterBuiltin_PutsTheAWSEmulatorWhereTheEngineLooksForIt(t *testing.T) {
+	t.Parallel()
+	r := extension.NewRegistry()
+	emulator.RegisterBuiltin(r)
+
+	found, ok := r.EmulatorNamed("aws")
+	require.True(t, ok, "an egress rule naming aws would be refused by this build")
+	require.Contains(t, found.Container().Image, "@sha256:")
+	require.NoError(t, r.Validate(map[string][]string{}))
+}
+
+// An organization that registered its own licensed image under the name aws
+// made a deliberate choice, and a built in registration must not undo it or
+// sit beside it. Two emulators under one name is what the registry refuses.
+func TestRegisterBuiltin_LeavesAnOutsideRegistrationOfTheSameNameAlone(t *testing.T) {
+	t.Parallel()
+	r := extension.NewRegistry()
+	theirs := &outsideEmulator{}
+	r.AddEmulator(theirs)
+	emulator.RegisterBuiltin(r)
+
+	// Exactly one aws, rather than the whole list of names. This build also
+	// ships the Azure emulators, and an assertion that spelled out every
+	// builtin would fail the next time one is added, for a reason that has
+	// nothing to do with what this test is about.
+	names := r.EmulatorNames()
+	aws := 0
+	for _, n := range names {
+		if n == "aws" {
+			aws++
+		}
+	}
+	require.Equal(t, 1, aws,
+		"the built in registration was added beside theirs, and the registry refuses that")
+
+	// The premise, so that this cannot pass by RegisterBuiltin having
+	// registered nothing at all: every other builtin did arrive.
+	for _, e := range emulator.Builtin() {
+		if e.Name() == "aws" {
+			continue
+		}
+		require.Contains(t, names, e.Name(),
+			"RegisterBuiltin skipped %s as well, so the aws skip proves nothing", e.Name())
+	}
+	found, ok := r.EmulatorNamed("aws")
+	require.True(t, ok)
+	require.Equal(t, "example.invalid/localstack@sha256:"+strings.Repeat("a", 64),
+		found.Container().Image, "the built in image displaced the one they chose")
+	require.NoError(t, r.Validate(map[string][]string{}))
+}
+
+// outsideEmulator is what an organization with a LocalStack licence registers:
+// the same name, their own image.
+type outsideEmulator struct{}
+
+func (outsideEmulator) Name() string    { return "aws" }
+func (outsideEmulator) Hosts() []string { return []string{"s3.amazonaws.com"} }
+func (outsideEmulator) Container() extension.EmulatorContainer {
+	return extension.EmulatorContainer{
+		Image:      "example.invalid/localstack@sha256:" + strings.Repeat("a", 64),
+		Port:       4566,
+		Maintainer: extension.MaintainerCommercial,
+	}
 }

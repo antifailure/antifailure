@@ -141,6 +141,8 @@ runner/artifacts/
 /docsembed
 /dogfood
 /editioncheck
+/emulatorcheck
+/emuroute
 /errcheck
 /errgen
 /eventcheck

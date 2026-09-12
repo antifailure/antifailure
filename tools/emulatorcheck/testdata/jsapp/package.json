@@ -1,0 +1,11 @@
+{
+  "name": "af-emulatorcheck-jsapp",
+  "private": true,
+  "type": "module",
+  "description": "The vendor's own JavaScript SDK, driven at the emulator with no endpoint override.",
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.958.0",
+    "@aws-sdk/client-sqs": "3.958.0",
+    "@aws-sdk/client-sts": "3.958.0"
+  }
+}
