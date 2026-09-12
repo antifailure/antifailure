@@ -25,10 +25,8 @@
 //   - The SOURCE is an Aurora PostgreSQL cluster, named by database.project.
 //     It is never written to and never read over a connection; it is cloned.
 //   - A GOLDEN is a clone of the source, with the masking rules applied and
-//     the verification scanner run against it, whose writer instance is then
-//     DELETED. A published golden costs storage and no compute, and it is
-//     still clonable, because an Aurora cluster's volume exists whether or not
-//     an instance is attached to it.
+//     the verification scanner run against it. The writer remains attached
+//     until live AWS evidence establishes that removing it preserves cloning.
 //   - A BRANCH is a clone of a golden, plus one writer instance.
 //
 // Nothing here is renamed or deleted on the strength of its name. Every
@@ -62,6 +60,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the pgx driver
@@ -152,7 +152,7 @@ const (
 	// cannot silently move which region it is valid in.
 	EndpointVariable = "AF_AURORA_RDS_ENDPOINT"
 	// TLSModeVariable is the sslmode of the connection strings this provider
-	// hands out. It defaults to require and there is no path that sets it to
+	// hands out. It defaults to verify-full and there is no path that sets it to
 	// disable on its own.
 	TLSModeVariable = "AF_AURORA_SSLMODE"
 )
@@ -209,8 +209,8 @@ type Options struct {
 	ReadyTimeout time.Duration
 	// BranchLatency overrides the declared ExpectedBranchLatency.
 	BranchLatency time.Duration
-	// SkipEngineCheck is set only by tests that have no source cluster to
-	// describe. It is deliberately not reachable from a manifest: the engine
+	// SkipEngineCheck skips only engine validation. Source account and region
+	// identity are always validated. It is not reachable from a manifest: the engine
 	// check is what stops this provider being pointed at RDS for PostgreSQL,
 	// where a clone is impossible and the honest answer is a different
 	// provider.
@@ -219,17 +219,23 @@ type Options struct {
 
 // Provider is the Aurora PostgreSQL database provider.
 type Provider struct {
-	api           *client
-	source        string
-	branchKey     secret.Value
-	variable      string
-	instanceClass string
-	tlsMode       string
-	maxBranches   int
-	branchLatency time.Duration
-	now           func() time.Time
-	poll          time.Duration
-	readyTimeout  time.Duration
+	scope, arnPrefix, partition string
+	loginCatalog                func(context.Context, *sql.DB) ([]string, error)
+	closed                      atomic.Bool
+	trustMu                     sync.Mutex
+	trustDir, trustPath         string
+	trustOverride               string
+	api                         *client
+	source                      string
+	branchKey                   secret.Value
+	variable                    string
+	instanceClass               string
+	tlsMode                     string
+	maxBranches                 int
+	branchLatency               time.Duration
+	now                         func() time.Time
+	poll                        time.Duration
+	readyTimeout                time.Duration
 	// major is the source cluster's Postgres major version, read from the
 	// cluster rather than taken from the manifest. A clone is the same
 	// Postgres the source is, so the manifest cannot choose.
@@ -286,13 +292,14 @@ func New(ctx context.Context, opts Options) (*Provider, error) {
 		branchKey:     opts.BranchKey,
 		variable:      variable,
 		instanceClass: or(opts.InstanceClass, defaultInstanceClass),
-		tlsMode:       or(opts.TLSMode, "require"),
+		tlsMode:       or(opts.TLSMode, "verify-full"),
 		maxBranches:   opts.MaxBranches,
 		branchLatency: opts.BranchLatency,
 		now:           opts.Now,
 		poll:          opts.PollInterval,
 		readyTimeout:  opts.ReadyTimeout,
 		major:         0,
+		loginCatalog:  customerLogins,
 	}
 	if p.now == nil {
 		p.now = time.Now
@@ -310,10 +317,6 @@ func New(ctx context.Context, opts Options) (*Provider, error) {
 		return nil, fmt.Errorf("a negative branch limit is not meaningful; use zero for unlimited")
 	}
 
-	if opts.SkipEngineCheck {
-		p.major = 17
-		return p, nil
-	}
 	source, found, err := p.api.describeCluster(ctx, opts.SourceCluster)
 	if err != nil {
 		return nil, err
@@ -324,7 +327,7 @@ func New(ctx context.Context, opts Options) (*Provider, error) {
 				"identifier, not an instance identifier and not an endpoint hostname",
 			opts.SourceCluster, opts.Region)
 	}
-	if source.Engine != engineAuroraPostgres {
+	if !opts.SkipEngineCheck && source.Engine != engineAuroraPostgres {
 		// Refused rather than substituted, which is the rule this provider is
 		// most likely to be asked to break. A snapshot restore would work here
 		// and would be a byte for byte copy: flat cost quietly becoming linear
@@ -336,6 +339,9 @@ func New(ctx context.Context, opts Options) (*Provider, error) {
 				"copies every byte and is a different provider with a different number, "+
 				"so this one refuses rather than becoming that one silently",
 			opts.SourceCluster, source.Engine, engineAuroraPostgres)
+	}
+	if err := p.bindSource(source); err != nil {
+		return nil, err
 	}
 	p.major = majorOf(source.EngineVersion)
 	return p, nil
@@ -456,7 +462,13 @@ func containsInt(xs []int, n int) bool {
 // spec.Load is likewise never called. Caps.Subsetting is false, so the engine
 // does not set it, and there is nothing it could do: the clone is complete
 // before this provider can run a line of SQL.
-func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) (provider.GoldenVersion, error) {
+func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) (result provider.GoldenVersion, retErr error) {
+	if spec.Mask == nil || spec.Verify == nil {
+		return result, fmt.Errorf("aurora: masking and verification callbacks are required")
+	}
+	if p.closed.Load() {
+		return provider.GoldenVersion{}, fmt.Errorf("aurora: provider is closed")
+	}
 	// What a killed refresh left behind, before this one adds to it. A
 	// candidate is a full clone of production with an instance attached, so
 	// one abandoned by a process that died between the clone and the publish
@@ -467,7 +479,7 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 
 	created := p.now().UTC()
 	version := provider.NewGoldenVersionID(created, spec.RulesHash)
-	cluster := goldenPrefix + shortHash(version)
+	cluster := goldenPrefix + shortHash(p.scope+"\n"+version)
 
 	tags := map[string]string{
 		tagMarker:     Name,
@@ -478,8 +490,19 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 		tagCreated:    created.Format(time.RFC3339Nano),
 	}
 
-	if _, err := p.api.cloneCluster(ctx, p.source, cluster, tags); err != nil {
-		return provider.GoldenVersion{}, p.refreshError(err)
+	accepted, cloneErr := p.clone(ctx, p.source, cluster, tags)
+	if cloneErr != nil {
+		if accepted {
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+			defer cancel()
+			if err := p.destroyCluster(cleanup, cluster); err == nil {
+				return provider.GoldenVersion{}, p.refreshError(cloneErr)
+			}
+		}
+		if !uncertainCreation(cloneErr) {
+			return provider.GoldenVersion{}, p.refreshError(cloneErr)
+		}
+		return provider.GoldenVersion{ID: version, ProviderRef: cluster}, p.refreshError(cloneErr)
 	}
 
 	// Everything from here can fail, and a candidate left behind is a cluster
@@ -494,7 +517,10 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 		}
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 		defer cancel()
-		_ = p.destroyCluster(cleanup, cluster)
+		if err := p.destroyCluster(cleanup, cluster); err != nil {
+			result = provider.GoldenVersion{ID: version, ProviderRef: cluster}
+			retErr = fmt.Errorf("%w; candidate cleanup failed: %v", retErr, err)
+		}
 	}()
 
 	live, err := p.provision(ctx, cluster)
@@ -523,7 +549,13 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 		}
 	}
 
-	published := map[string]string{tagKind: kindGolden}
+	if attestation == "" {
+		return provider.GoldenVersion{}, fmt.Errorf("aurora: verification returned no attestation")
+	}
+	if err := p.disableInheritedLogins(ctx, connection); err != nil {
+		return provider.GoldenVersion{}, err
+	}
+	published := map[string]string{tagKind: kindGolden, tagPrepared: p.receipt(live)}
 	chunks, err := chunkAttestation(attestation)
 	if err != nil {
 		return provider.GoldenVersion{}, err
@@ -531,8 +563,15 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 	for k, v := range chunks {
 		published[k] = v
 	}
-	if err := p.api.setTags(ctx, arnOf(p.api.region, cluster), published); err != nil {
+	if err := p.api.setTags(ctx, live.ARN, published); err != nil {
 		return provider.GoldenVersion{}, err
+	}
+	actual, found, err := p.api.describeCluster(ctx, cluster)
+	if err != nil {
+		return provider.GoldenVersion{}, err
+	}
+	if !found || !p.prepared(actual) || actual.tags()[tagKind] != kindGolden || joinAttestation(actual.tags()) != attestation {
+		return provider.GoldenVersion{}, fmt.Errorf("aurora: golden publication receipt was not recorded")
 	}
 
 	// THE GOLDEN KEEPS ITS WRITER INSTANCE, and that is a decision rather than
@@ -601,11 +640,23 @@ func (p *Provider) provision(ctx context.Context, cluster string) (dbCluster, er
 	// Rotated before anything connects and before anything is published. A
 	// clone inherits the source's master password, so the window in which this
 	// cluster is openable with production's credential is the window between
-	// the clone and this line, and nothing in it has an endpoint yet.
+	// the clone and this line. The writer can have an endpoint during this
+	// interval; preparation revokes inherited logins and sessions before return.
 	if err := p.api.setMasterPassword(ctx, cluster, p.passwordFor(cluster)); err != nil {
 		return dbCluster{}, err
 	}
-	return p.waitCluster(ctx, cluster)
+	live, err := p.waitCluster(ctx, cluster)
+	if err != nil {
+		return dbCluster{}, err
+	}
+	connection, err := p.connString(live)
+	if err != nil {
+		return dbCluster{}, err
+	}
+	if err := p.disableInheritedLogins(ctx, connection); err != nil {
+		return dbCluster{}, err
+	}
+	return live, nil
 }
 
 // ListGoldens returns published versions, newest first.
@@ -622,7 +673,10 @@ func (p *Provider) ListGoldens(ctx context.Context) ([]provider.GoldenVersion, e
 	var out []provider.GoldenVersion
 	for _, c := range clusters {
 		tags := c.tags()
-		if tags[tagMarker] != Name || tags[tagKind] != kindGolden {
+		if !p.owned(c) || tags[tagKind] != kindGolden {
+			continue
+		}
+		if !p.prepared(c) {
 			continue
 		}
 		attestation := joinAttestation(tags)
@@ -656,7 +710,7 @@ func (p *Provider) DestroyGolden(ctx context.Context, version string) error {
 	referencing := 0
 	for _, c := range clusters {
 		tags := c.tags()
-		if tags[tagMarker] != Name || tags[tagVersion] != version {
+		if !p.owned(c) || tags[tagVersion] != version {
 			continue
 		}
 		switch tags[tagKind] {
@@ -689,34 +743,44 @@ func (p *Provider) DestroyGolden(ctx context.Context, version string) error {
 // Branch clones a golden for one environment.
 //
 // The clone is the flat part. Everything else in this function is one API call
-// or a wait for an instance, and none of it reads or writes a row of the
-// database, which is what makes the work here independent of how large the
-// database is. benchmark_test.go measures exactly that and says what it could
+// or a wait for an instance. Security SQL reads role and session metadata,
+// never customer tables, so its work is independent of customer data size. benchmark_test.go measures exactly that and says what it could
 // not measure.
 func (p *Provider) Branch(ctx context.Context, version string, envID string) (provider.Branch, error) {
+	if p.closed.Load() {
+		return provider.Branch{}, fmt.Errorf("aurora: provider is closed")
+	}
+	release, err := p.admit(ctx)
+	if err != nil {
+		return provider.Branch{}, err
+	}
+	defer release()
 	clusters, err := p.api.describeClusters(ctx, "")
 	if err != nil {
 		return provider.Branch{}, err
 	}
 
-	name := branchPrefix + shortHash(envID)
+	name := p.branchName(envID)
 	golden := ""
 	goldenVerified := false
 	branches := 0
 	for _, c := range clusters {
 		tags := c.tags()
-		if tags[tagMarker] != Name {
+		if !p.owned(c) {
 			continue
 		}
 		switch tags[tagKind] {
 		case kindGolden:
 			if tags[tagVersion] == version {
 				golden = c.Identifier
-				goldenVerified = joinAttestation(tags) != ""
+				goldenVerified = joinAttestation(tags) != "" && p.prepared(c)
 			}
 		case kindBranch:
 			branches++
-			if c.Identifier == name && tags[tagEnv] == envID {
+			if c.Identifier == name {
+				if tags[tagEnv] != envID || tags[tagVersion] != version || !p.prepared(c) {
+					return provider.Branch{EnvID: envID, From: version, ProviderRef: name}, fmt.Errorf("aurora: existing branch identity or preparation receipt does not match")
+				}
 				// Idempotent by environment. The engine retries after a
 				// timeout, and a retry that made a second cluster would be an
 				// orphan nothing names and nothing pays attention to.
@@ -754,21 +818,28 @@ func (p *Provider) Branch(ctx context.Context, version string, envID string) (pr
 		tagEnv:     envID,
 		tagCreated: created.Format(time.RFC3339Nano),
 	}
-	if _, err := p.api.cloneCluster(ctx, golden, name, tags); err != nil {
+	if _, err := p.clone(ctx, golden, name, tags); err != nil {
 		if isCode(err, faultQuotaExceeded) {
 			return provider.Branch{}, coded(codeBranchLimit, fmt.Sprintf(
 				"AWS refused the clone because this account is at its Aurora quota, "+
 					"which is a lower ceiling than the declared limit of %d", p.branchLimit()))
 		}
-		return provider.Branch{}, err
+		if !uncertainCreation(err) {
+			return provider.Branch{}, err
+		}
+		return provider.Branch{EnvID: envID, From: version, ProviderRef: name + "#" + tags[tagAttempt], CreatedAt: created}, err
 	}
-	if _, err := p.provision(ctx, name); err != nil {
+	live, err := p.provision(ctx, name)
+	if err != nil {
 		// The cluster exists and is named in the error's own resource, and the
 		// inventory reports it, so teardown and the leak detector can both
 		// find it. It is not removed here: a half provisioned branch is
 		// evidence while somebody is diagnosing why an instance would not come
 		// up.
-		return provider.Branch{}, err
+		return provider.Branch{EnvID: envID, From: version, ProviderRef: name, CreatedAt: created}, err
+	}
+	if err := p.markPrepared(ctx, live); err != nil {
+		return provider.Branch{EnvID: envID, From: version, ProviderRef: name, CreatedAt: created}, err
 	}
 	return provider.Branch{
 		EnvID: envID, From: version, ProviderRef: name, CreatedAt: created,
@@ -789,11 +860,28 @@ func (p *Provider) Reset(context.Context, provider.Branch) error {
 // Destroy removes a branch. Removing one already gone succeeds.
 func (p *Provider) Destroy(ctx context.Context, b provider.Branch) error {
 	name := b.ProviderRef
+	attempt := ""
+	if parts := strings.SplitN(name, "#", 2); len(parts) == 2 {
+		name, attempt = parts[0], parts[1]
+	}
 	if name == "" && b.EnvID != "" {
-		name = branchPrefix + shortHash(b.EnvID)
+		name = p.branchName(b.EnvID)
 	}
 	if name == "" {
 		return nil
+	}
+	if attempt != "" || b.EnvID != "" || b.From != "" {
+		c, found, err := p.api.describeCluster(ctx, name)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return nil
+		}
+		tags := c.tags()
+		if (attempt != "" && tags[tagAttempt] != attempt) || (b.EnvID != "" && tags[tagEnv] != b.EnvID) || (b.From != "" && tags[tagVersion] != b.From) {
+			return fmt.Errorf("%w: branch cleanup identity mismatch", ErrNotOurs)
+		}
 	}
 	return p.destroyCluster(ctx, name)
 }
@@ -815,7 +903,7 @@ func (p *Provider) sweepCandidates(ctx context.Context) {
 	cutoff := p.now().Add(-candidateAge)
 	for _, c := range clusters {
 		tags := c.tags()
-		if tags[tagMarker] != Name || tags[tagKind] != kindCandidate {
+		if !p.owned(c) || tags[tagKind] != kindCandidate {
 			continue
 		}
 		created := firstTime(parseTagTime(tags[tagCreated]), c.Created.Time)
@@ -847,7 +935,7 @@ func (p *Provider) destroyCluster(ctx context.Context, name string) error {
 	if !found {
 		return nil
 	}
-	if cluster.tags()[tagMarker] != Name {
+	if !p.owned(cluster) {
 		// Coded rather than a bare sentence, because this is the refusal that
 		// stops a misconfigured project operating on somebody else's
 		// infrastructure, and a caller has to be able to tell it apart from an
@@ -873,9 +961,15 @@ func (p *Provider) retryClusterDelete(ctx context.Context, name string) error {
 	for {
 		err := p.api.deleteCluster(ctx, name)
 		if err == nil {
-			return nil
-		}
-		if !isCode(err, faultInvalidState) {
+			_, found, lookupErr := p.api.describeCluster(ctx, name)
+			if lookupErr != nil {
+				return lookupErr
+			}
+			if !found {
+				return nil
+			}
+			err = fmt.Errorf("aurora: deleted cluster still exists")
+		} else if !isCode(err, faultInvalidState) {
 			return err
 		}
 		if p.now().After(deadline) {
@@ -901,17 +995,33 @@ func (p *Provider) ConnString(ctx context.Context, b provider.Branch, mode provi
 		// asking gets an error instead of a pool that is not one.
 		return secret.Value{}, provider.ErrUnsupported
 	}
-	cluster, found, err := p.api.describeCluster(ctx, b.ProviderRef)
+	name := b.ProviderRef
+	if name == "" && b.EnvID != "" {
+		name = p.branchName(b.EnvID)
+	}
+	if name == "" {
+		return secret.Value{}, fmt.Errorf("aurora: branch identity is required")
+	}
+	cluster, found, err := p.api.describeCluster(ctx, name)
 	if err != nil {
 		return secret.Value{}, err
 	}
 	if !found {
 		return secret.Value{}, fmt.Errorf("no branch cluster named %s exists", b.ProviderRef)
 	}
+	if !p.prepared(cluster) || (b.EnvID != "" && cluster.tags()[tagEnv] != b.EnvID) || (b.From != "" && cluster.tags()[tagVersion] != b.From) {
+		return secret.Value{}, fmt.Errorf("aurora: branch identity or preparation receipt does not match")
+	}
 	return p.connString(cluster)
 }
 
 func (p *Provider) connString(c dbCluster) (secret.Value, error) {
+	if p.closed.Load() {
+		return secret.Value{}, fmt.Errorf("aurora: provider is closed")
+	}
+	if c.IAMEnabled {
+		return secret.Value{}, fmt.Errorf("aurora: IAM database authentication was not disabled")
+	}
 	if c.Endpoint == "" {
 		return secret.Value{}, fmt.Errorf(
 			"the cluster %s reports no endpoint, which is what a cluster with no writer "+
@@ -929,10 +1039,34 @@ func (p *Provider) connString(c dbCluster) (secret.Value, error) {
 		Host:   net.JoinHostPort(c.Endpoint, strconv.Itoa(port)),
 		Path:   "/" + database,
 	}
+	// Plaintext is for the loopback fixture and nothing else. Azure and Cloud
+	// SQL refuse it for a remote server, and a copy of production is no less
+	// sensitive on AWS.
+	if p.tlsMode == "disable" && !loopbackHost(c.Endpoint) {
+		return secret.Value{}, fmt.Errorf("aurora: sslmode disable is limited to a loopback endpoint; use verify-full")
+	}
 	q := url.Values{}
 	q.Set("sslmode", p.tlsMode)
+	if p.tlsMode != "disable" {
+		if p.tlsMode != "verify-full" {
+			return secret.Value{}, fmt.Errorf("aurora: sslmode must be verify-full")
+		}
+		path, err := p.trustFile()
+		if err != nil {
+			return secret.Value{}, err
+		}
+		q.Set("sslrootcert", path)
+	}
 	u.RawQuery = q.Encode()
 	return secret.New(u.String()), nil
+}
+
+func loopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // Inventory lists every cluster this provider holds.
@@ -944,7 +1078,7 @@ func (p *Provider) Inventory(ctx context.Context) ([]provider.Resource, error) {
 	out := make([]provider.Resource, 0, len(clusters))
 	for _, c := range clusters {
 		tags := c.tags()
-		if tags[tagMarker] != Name {
+		if !p.owned(c) {
 			continue
 		}
 		kind := tags[tagKind]
@@ -984,7 +1118,7 @@ func (p *Provider) Health(ctx context.Context, b provider.Branch) (provider.Heal
 			Latency:   p.now().Sub(started),
 		}, nil
 	}
-	if cluster.Status != "available" || cluster.Endpoint == "" {
+	if !p.prepared(cluster) || cluster.Endpoint == "" {
 		return provider.Health{
 			Reachable: false,
 			Detail:    "the cluster " + b.ProviderRef + " reports status " + cluster.Status,
@@ -1009,13 +1143,8 @@ func (p *Provider) Health(ctx context.Context, b provider.Branch) (provider.Heal
 	return provider.Health{Reachable: true, Detail: "available", Latency: p.now().Sub(started)}, nil
 }
 
-// Close releases nothing, because this provider holds nothing.
-//
-// No pool and no long lived connection: everything here is one HTTP call or
-// one short lived SQL connection that is closed where it is opened. The method
-// exists because the interface has it, and it is honest about holding nothing
-// rather than pretending to tidy.
-func (p *Provider) Close() error { return nil }
+// Close removes only the private CA directory this provider created.
+func (p *Provider) Close() error { return p.closeTrust() }
 
 // ---------------------------------------------------------------------------
 // Waiting, connecting, and the small pure helpers
@@ -1122,22 +1251,11 @@ func (p *Provider) passwordFor(cluster string) string {
 // not a collision anybody will meet.
 func shortHash(s string) string {
 	sum := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(sum[:])[:12]
+	return hex.EncodeToString(sum[:])[:32]
 }
 
 // writerOf is the instance identifier for a cluster's writer.
 func writerOf(cluster string) string { return cluster + "-w" }
-
-// arnOf builds the ARN AddTagsToResource takes.
-//
-// Without the account number, which AddTagsToResource does not require when
-// the resource is addressed in the caller's own account and region: RDS
-// accepts an ARN whose account field is empty for the caller's own resources.
-// Deriving the account would mean a second service, sts, a second set of
-// permissions, and a call that can fail for reasons unrelated to the tag.
-func arnOf(region, cluster string) string {
-	return "arn:aws:rds:" + region + "::cluster:" + cluster
-}
 
 func parseTagTime(raw string) time.Time {
 	if raw == "" {

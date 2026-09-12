@@ -246,6 +246,15 @@ func (g *gatedDatabase) Inventory(ctx context.Context) ([]provider.Resource, err
 	return g.inner.Inventory(ctx)
 }
 
+// Trust is connection metadata, available while inspecting or removing an
+// existing branch just as ConnString is after an entitlement expires.
+func (g *gatedDatabase) TrustBundle(ctx context.Context, b provider.Branch) (string, error) {
+	if source, ok := g.inner.(provider.DatabaseTrust); ok {
+		return source.TrustBundle(ctx, b)
+	}
+	return "", nil
+}
+
 func (g *gatedDatabase) Health(ctx context.Context, b provider.Branch) (provider.Health, error) {
 	return g.inner.Health(ctx, b)
 }

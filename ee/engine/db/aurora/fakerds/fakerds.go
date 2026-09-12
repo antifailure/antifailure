@@ -608,6 +608,8 @@ func (s *Server) advance(c *cluster) {
 
 func (s *Server) render(c *cluster) clusterXML {
 	out := clusterXML{
+		Subnet: "fixture-subnet", SecurityGroups: []securityGroupXML{{ID: "sg-fixture"}},
+		ARN:        "arn:aws:rds:" + s.region + ":123456789012:cluster:" + c.id,
 		Identifier: c.id, Status: c.status, Engine: c.engine,
 		EngineVersion: c.engineVersion, MasterUsername: c.master,
 		DatabaseName: c.database, Port: s.port,
@@ -830,8 +832,8 @@ func (s *Server) modifyCluster(w http.ResponseWriter, form url.Values) {
 		// no superuser behind on a server other suites share.
 		statements := []string{
 			`DROP ROLE IF EXISTS ` + quoteIdent(role),
-			`CREATE ROLE ` + quoteIdent(role) + ` LOGIN INHERIT PASSWORD ` +
-				quoteLiteral(password) + ` IN ROLE ` + quoteIdent(s.pgUser),
+			`CREATE ROLE ` + quoteIdent(role) + ` LOGIN CREATEROLE INHERIT PASSWORD ` +
+				quoteLiteral(password) + ` IN ROLE pg_signal_backend, ` + quoteIdent(s.pgUser),
 		}
 		for _, statement := range statements {
 			if _, err := s.admin.Exec(statement); err != nil {
@@ -1033,19 +1035,22 @@ type emptyResponse struct {
 }
 
 type clusterXML struct {
-	Identifier        string      `xml:"DBClusterIdentifier"`
-	Status            string      `xml:"Status"`
-	Engine            string      `xml:"Engine"`
-	EngineVersion     string      `xml:"EngineVersion"`
-	MasterUsername    string      `xml:"MasterUsername"`
-	DatabaseName      string      `xml:"DatabaseName"`
-	Endpoint          string      `xml:"Endpoint,omitempty"`
-	ReaderEndpoint    string      `xml:"ReaderEndpoint,omitempty"`
-	Port              int         `xml:"Port"`
-	AllocatedStorage  int64       `xml:"AllocatedStorage"`
-	ClusterCreateTime string      `xml:"ClusterCreateTime"`
-	Members           []memberXML `xml:"DBClusterMembers>DBClusterMember"`
-	Tags              []tagXML    `xml:"TagList>Tag"`
+	Subnet            string             `xml:"DBSubnetGroup"`
+	SecurityGroups    []securityGroupXML `xml:"VpcSecurityGroups>VpcSecurityGroupMembership"`
+	ARN               string             `xml:"DBClusterArn"`
+	Identifier        string             `xml:"DBClusterIdentifier"`
+	Status            string             `xml:"Status"`
+	Engine            string             `xml:"Engine"`
+	EngineVersion     string             `xml:"EngineVersion"`
+	MasterUsername    string             `xml:"MasterUsername"`
+	DatabaseName      string             `xml:"DatabaseName"`
+	Endpoint          string             `xml:"Endpoint,omitempty"`
+	ReaderEndpoint    string             `xml:"ReaderEndpoint,omitempty"`
+	Port              int                `xml:"Port"`
+	AllocatedStorage  int64              `xml:"AllocatedStorage"`
+	ClusterCreateTime string             `xml:"ClusterCreateTime"`
+	Members           []memberXML        `xml:"DBClusterMembers>DBClusterMember"`
+	Tags              []tagXML           `xml:"TagList>Tag"`
 }
 
 type memberXML struct {
@@ -1098,4 +1103,27 @@ func quoteIdent(name string) string {
 
 func quoteLiteral(value string) string {
 	return `'` + strings.ReplaceAll(value, `'`, `''`) + `'`
+}
+
+// SetTags alters control-plane metadata for boundary tests.
+func (s *Server) SetTags(identifier string, tags map[string]string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if c := s.clusters[identifier]; c != nil {
+		for k, v := range tags {
+			c.tags[k] = v
+		}
+	}
+}
+
+// SetEndpoint makes the database connection traverse the real TLS fixture.
+func (s *Server) SetEndpoint(host string, port int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.host = host
+	s.port = port
+}
+
+type securityGroupXML struct {
+	ID string `xml:"VpcSecurityGroupId"`
 }
