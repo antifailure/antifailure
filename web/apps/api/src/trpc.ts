@@ -15,7 +15,7 @@ import type { Db, Pool, Tenant, AdminPool } from '@antifailure/db'
 import type { AdminActor } from './admin/trpc.ts'
 import { appendAudit, type AuditInput } from '@antifailure/db'
 import type { Permission, Role } from './permissions.ts'
-import { permits } from './permissions.ts'
+import { hasPermissionResolver, permits } from './permissions.ts'
 import type { Clock } from './clock.ts'
 import type { GitHubClient } from './auth/github.ts'
 import type { Billing } from './billing/index.ts'
@@ -293,8 +293,30 @@ const requireActor = t.middleware(({ ctx, next }) => {
  */
 export function orgProcedure(permission: Permission) {
   return publicProcedure.meta({ permission }).use(requireActor).use(
-    t.middleware(async ({ ctx, next, input }) => {
+    t.middleware(async ({ ctx, next, getRawInput }) => {
       const octx = ctx as OrgContext
+      // The scope, from the RAW input, and only when a resolver is installed.
+      //
+      // `input` here is always undefined and nothing could notice. A middleware
+      // sees the PARSED input only when an input parser was declared before it,
+      // and this middleware is built into orgProcedure while every route adds
+      // its `.input()` afterwards. So repositoryOf(input) answered null for
+      // every request ever made, the scope never reached a resolver, and the
+      // only resolver that existed was in a test that called permits directly.
+      //
+      // Raw rather than parsed is correct here and not a shortcut. The parser
+      // has not run at the guard, by design: the guard must refuse before a
+      // route's own validation reports the shape of something the caller may
+      // not touch. The value is read only to NARROW a grant, a non-string is
+      // read as absent, and it is the same string the procedure then acts on,
+      // because every route that carries a repository declares it as a plain
+      // string with no transform.
+      //
+      // Asked only when a resolver is installed, so the community edition makes
+      // exactly the calls it made before: no resolver, no scope, no body read.
+      const scope = hasPermissionResolver()
+        ? await scopeOf(getRawInput)
+        : { repository: null, envId: null }
       // permits, not roleHas. The built-in table decides unless a resolver has
       // been installed, and the community edition installs none, so this is the
       // same answer with a socket in it.
@@ -303,8 +325,8 @@ export function orgProcedure(permission: Permission) {
         userId: octx.actor.userId,
         role: octx.actor.role,
         permission,
-        repository: repositoryOf(input),
-        envId: envOf(input),
+        repository: scope.repository,
+        envId: scope.envId,
       })
       if (!allowed) {
         throw new TRPCError({
@@ -392,6 +414,25 @@ export type Feature = (typeof CATALOG)['adoption.feature_used']['payload']['feat
 // a second thing to keep in step. A route that concerns no repository passes
 // null, and a resolver scoped to repositories then has no opinion about it,
 // which is the right answer rather than a refusal.
+/**
+ * The scope of a request, or no scope when it cannot be read.
+ *
+ * A body that does not parse is not an authorization decision: the route's own
+ * parser will refuse it in a moment and say why. Answering "no scope" leaves the
+ * built-in role to decide, which is the direction that grants less.
+ */
+async function scopeOf(
+  getRawInput: () => Promise<unknown>,
+): Promise<{ repository: string | null; envId: string | null }> {
+  let raw: unknown
+  try {
+    raw = await getRawInput()
+  } catch {
+    return { repository: null, envId: null }
+  }
+  return { repository: repositoryOf(raw), envId: envOf(raw) }
+}
+
 function repositoryOf(input: unknown): string | null {
   const i = input as { repository?: unknown } | null
   return typeof i?.repository === 'string' ? i.repository : null

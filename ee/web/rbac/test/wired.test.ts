@@ -456,7 +456,7 @@ describe('custom roles, end to end', { skip: hasDatabase ? false : 'no Postgres 
     const refused = await put(
       owner,
       policy([deployer], [onRepository(viewer.userId, org.repository)], [], [
-        { kind: 'masking', approvals: 1, requires: 'masking.approve' as Permission, reason: 'Two sets of eyes.' },
+        { kind: 'masking.rules', approvals: 1, requires: 'masking.approve' as Permission, reason: 'Two sets of eyes.' },
       ] as unknown as PolicyFile['approvals']),
     )
     assert.equal(refused.status, 409, JSON.stringify(refused.body))

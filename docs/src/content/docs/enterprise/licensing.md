@@ -115,7 +115,7 @@ The features a license can name are `air_gapped`, `audit_stream`, `billing`, `cl
 <!-- entitlement-names:end -->
 
 <!-- entitlement-count:start -->
-Of the 14 features a license can carry, **10 are refused when the license does not name them**, 8 by the engine and 3 by the control plane, with some checked by both. The rest are listed here anyway, with what actually happens without each one, because a feature that is sold and never checked is worth knowing about and the number is only useful if it can come back unflattering.
+Of the 14 features a license can carry, **11 are refused when the license does not name them**, 8 by the engine and 4 by the control plane, with some checked by both. The rest are listed here anyway, with what actually happens without each one, because a feature that is sold and never checked is worth knowing about and the number is only useful if it can come back unflattering.
 <!-- entitlement-count:end -->
 
 The table is generated from `ee/engine/feature/catalogue.go`, which is the one
@@ -145,7 +145,7 @@ is where it gets published.
 | `enterprise_secrets` | Declared variables resolved from Vault or a cloud secret manager. | Withheld. `secrets/source.go:Source.Available` asks the license, and the feature is off when the answer is no. |
 | `multi_runtime` | Placing an environment across several runtimes at once, by requirement and by tag. | Withheld. `engine/internal/env/env.go:Orchestrator.placement` asks the license, and the feature is off when the answer is no. |
 | `policy_enforcement` | Organization policy that refuses an environment the manifest would have allowed. | Withheld. `policyenforce/policyenforce.go:Hook.Check` asks the license, and the feature is off when the answer is no. |
-| `rbac` | Roles, and a permission on every route. | Nothing changes. It is implemented and deliberately available to everyone. |
+| `rbac` | Custom roles: a role an organization defines, granted to a member at a scope, on top of the four built-in roles. | Withheld by the control plane. `ee/web/rbac/src/enforce.ts:customRoleResolver` asks the license, and an unlicensed installation is answered 402 naming the feature rather than 404. |
 | `scim` | Directory provisioning, so joiners and leavers arrive from the identity provider. | Withheld by the control plane. `ee/web/scim/src/routes.ts:guard` asks the license, and an unlicensed installation is answered 402 naming the feature rather than 404. |
 | `sso` | Single sign on against the organization's own identity provider. | Withheld by the control plane. `ee/web/sso/src/store.ts:connectionByHandle` asks the license, and an unlicensed installation is answered 402 naming the feature rather than 404. |
 | `support_access` | A supported way for the vendor to see what a customer sees. | Nothing changes. It is implemented and deliberately available to everyone. |
