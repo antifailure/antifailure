@@ -577,11 +577,6 @@ LocalStack, Azurite and the vendors' own emulators carry years of fidelity work
 that a replacement written here would not have, so Antifailure writes none of
 them and routes to them instead.
 
-A build supplies the emulators, and this build registers none, so the rules
-below are refused with the list of what is registered rather than started. The
-[emulators page](/docs/providers/emulators) says why the list is a build's to
-fill.
-
 ` + "`" + "`" + "`" + `yaml
     - host: "s3.*.amazonaws.com"
       mode: emulate

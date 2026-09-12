@@ -43,7 +43,8 @@ Smaller corrections:
   run against k3s.
 - The terms page, the privacy link and two documentation pages still pointed at
   the deleted service levels and subprocessor pages.
-- The egress example named an emulator, `localstack`, that nothing registers.
+- The egress example named `localstack`, which is not a name the engine
+  registers. The AWS surface registers as `aws`, answered by LocalStack's image.
 - The Twins page said there is no automatic time to live, and every environment
   is created with one.
 - `CONTRIBUTING.md` said TypeScript is formatted by Biome, which is not
