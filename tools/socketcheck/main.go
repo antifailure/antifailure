@@ -35,13 +35,24 @@
 // outlive the gap it describes and the list cannot become a set of exemptions
 // nobody rereads.
 //
+// THE THIRD QUESTION is the one the second cannot ask. Consulted means the
+// engine reads a registry, and it says nothing about whether any binary a
+// customer runs ever puts anything in it. The emulator socket was consulted,
+// this gate reported it plugged in, and its registry was empty in every
+// shipped build, because the one function that fills it had no caller. So
+// every socket is also either REGISTERED by a shipped binary, or listed in
+// notRegistered with the reason, and that list fails in both directions too.
+// registered.go holds the question, how it decides what a shipped binary can
+// reach, and what that decision cannot see.
+//
 // WHAT IT DOES NOT CHECK. It reads the syntax tree rather than type checking,
 // so a type reaching a socket signature through an alias declared elsewhere is
 // invisible to it, exactly as it is to surfacecheck. It looks for a call to
 // the registry's own reader method by name, so a consultation that reached the
 // registry some other way would not count. Erring strict is the right way
 // round: the failure this exists to catch is a socket that looks plugged in
-// and is not.
+// and is not. The registration direction's own limits are in registered.go,
+// and the report prints which binaries it read and which it did not.
 package main
 
 import (
@@ -91,8 +102,9 @@ func main() {
 // removed here, and the two happening within hours of each other is why this
 // resolution deserves reading twice: a rebase that kept either entry would
 // have reinstated a gap that no longer exists and reported a socket as
-// unplugged while the engine consulted it. Nine of nine sockets are consulted
-// now. An entry added back has to name a socket the engine really does ignore,
+// unplugged while the engine consulted it. Every socket is consulted now, and
+// the count lives in the report rather than here, where it went stale once
+// already. An entry added back has to name a socket the engine really does ignore,
 // because the gate fails in both directions.
 var notConsulted = map[string]string{}
 
@@ -121,23 +133,41 @@ type Socket struct {
 	// Foreign lists types in this socket's signatures that an implementation
 	// outside this module cannot name.
 	Foreign []string
+	// RegisteredBy are the shipped binaries that reach a call to Add.
+	RegisteredBy []string
+	// RegisteredAt is the first such call, as file:line.
+	RegisteredAt string
+	// NotRegisteredBecause is the reason notRegistered gives, when it lists
+	// this socket.
+	NotRegisteredBecause string
 }
 
 // Report is what the check found.
 type Report struct {
 	Sockets  []Socket
 	Problems []string
+	// Binaries are the main packages read as shipped, and Platforms the
+	// release builds their files were evaluated for.
+	Binaries  []string
+	Platforms []string
+	// NotRead are the main packages that were not read, each with the reason,
+	// because a report that names only what it checked reads as if it
+	// checked everything.
+	NotRead []string
 }
 
 func (r Report) String() string {
 	var b strings.Builder
-	implementable, consulted := 0, 0
+	implementable, consulted, registered := 0, 0, 0
 	for _, s := range r.Sockets {
 		if len(s.Foreign) == 0 {
 			implementable++
 		}
 		if s.ConsultedAt != "" {
 			consulted++
+		}
+		if len(s.RegisteredBy) > 0 {
+			registered++
 		}
 	}
 	fmt.Fprintf(&b, "%d of %d sockets are implementable from outside the engine module\n",
@@ -150,6 +180,25 @@ func (r Report) String() string {
 		}
 		fmt.Fprintf(&b, "  %-20s %s\n", s.Name, where)
 	}
+	fmt.Fprintf(&b, "%d of %d sockets are registered by a binary a customer runs\n",
+		registered, len(r.Sockets))
+	for _, s := range r.Sockets {
+		where := "NOT REGISTERED"
+		switch {
+		case len(s.RegisteredBy) > 0:
+			where = strings.Join(s.RegisteredBy, " and ") + ", at " + s.RegisteredAt
+		case strings.TrimSpace(s.NotRegisteredBecause) != "":
+			where = "none, and listed in socketcheck with the reason"
+		}
+		fmt.Fprintf(&b, "  %-20s %s\n", s.Name, where)
+	}
+	if len(r.Binaries) > 0 {
+		fmt.Fprintf(&b, "binaries read: %s, as built for %s\n",
+			strings.Join(r.Binaries, ", "), strings.Join(r.Platforms, ", "))
+	}
+	for _, n := range r.NotRead {
+		fmt.Fprintf(&b, "  not read, because no customer runs it: %s\n", n)
+	}
 	for _, p := range r.Problems {
 		fmt.Fprintln(&b, "socketcheck: "+p)
 	}
@@ -157,12 +206,17 @@ func (r Report) String() string {
 }
 
 // Check reads the extension package and the engine that consults it.
-func Check(root string) (Report, error) { return check(root, notConsulted) }
+func Check(root string) (Report, error) {
+	return check(root, lists{
+		notConsulted: notConsulted, notRegistered: notRegistered,
+		shipped: shipped, notShipped: notShipped,
+	})
+}
 
-// check takes the list of known gaps as an argument rather than reading the
-// package variable, so that a test can supply its own without editing global
-// state that another test running beside it is reading.
-func check(root string, unconsulted map[string]string) (Report, error) {
+// check takes the lists as an argument rather than reading the package
+// variables, so that a test can supply its own without editing global state
+// that another test running beside it is reading.
+func check(root string, l lists) (Report, error) {
 	var report Report
 	dir := filepath.Join(root, "engine", "pkg", "extension")
 	// The files are listed and parsed one at a time rather than through
@@ -296,7 +350,7 @@ func check(root string, unconsulted map[string]string) (Report, error) {
 				break
 			}
 		}
-		reason, listed := unconsulted[s.Name]
+		reason, listed := l.notConsulted[s.Name]
 		switch {
 		case s.ConsultedAt == "" && !listed:
 			report.Problems = append(report.Problems, fmt.Sprintf(
@@ -315,6 +369,14 @@ func check(root string, unconsulted map[string]string) (Report, error) {
 					"outside this module, so the socket cannot be implemented from outside",
 				s.Name, foreign))
 		}
+	}
+	sockets := map[string]*Socket{}
+	for i := range report.Sockets {
+		sockets[report.Sockets[i].Name] = &report.Sockets[i]
+	}
+	report.Problems = append(report.Problems, exemptionProblems("notConsulted", l.notConsulted, sockets)...)
+	if err := checkRegistered(root, &report, calls, l); err != nil {
+		return report, err
 	}
 	return report, nil
 }
