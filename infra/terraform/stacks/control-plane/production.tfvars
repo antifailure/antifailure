@@ -482,3 +482,23 @@ stripe_price_team = "price_1UBSGCIfNGpUWtp7OVO2YbsY"
 # operator_sets_plan is likewise unset and cannot be set now. Granting a plan by
 # hand on a plane that sells the same plan is refused at plan time, and the
 # process exits at start-up on the combination.
+
+# ---------------------------------------------------------------------------
+# The enterprise edition.
+# ---------------------------------------------------------------------------
+
+# ON, and IT NEEDS TWO THINGS IN afcpprod-kv-centralus BEFORE THE RELEASE THAT
+# CARRIES IT. cd.yml deploys the enterprise image, whose entry point exits
+# before it listens without AF_EE_SSO_KEY. This switch makes the module generate
+# that key into the vault, and configguard refuses a configuration apply that
+# creates a vault secret, so the key is created by one targeted hand apply. The
+# licence is a vault secret Terraform never sees, placed by a person. The
+# production guide, under Turning on the enterprise edition, has both steps in
+# order, and cd.yml refuses the deploy with production untouched if either is
+# missing.
+enterprise_edition = true
+license_org        = "antifailure"
+
+# The same signing key as staging: one key, hosted-2026-09, issues both
+# installations' licences. A public key, not a secret.
+license_public_keys = "hosted-2026-09=FoNrZRWV4hQhMKtPYwCHHvvtpjmOyYb5MEg6C4LBkoA"

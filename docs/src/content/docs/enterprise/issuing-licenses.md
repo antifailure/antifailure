@@ -247,6 +247,40 @@ What is available:
 Choosing between these is a decision, not a procedure. Making it once and
 writing it down is worth more than any of the three.
 
+## The hosted control plane's signing key
+
+The hosted control plane is the vendor's own installation, and it licenses
+itself with one signing key, `license-signing-key-hosted-2026-09`, key id
+`hosted-2026-09`. Its public half is `license_public_keys` in both
+`staging.tfvars` and `production.tfvars`, and it signs both environments'
+licences. [Turning on the enterprise edition](/docs/self-hosting/production#turning-on-the-enterprise-edition)
+has the command that uses it.
+
+**It is kept in `afcp-kv-centralus`, the staging control plane's own vault, and
+that is a measured limit rather than the arrangement this page recommends.**
+The advice above is that a signing key lives somewhere no pipeline can reach.
+This one was placed where it was because it was the fastest place with the
+right access model already in it, and the decision was taken knowingly. What
+that costs, read from the vault's role assignments on 2026-09-12 rather than
+from the Terraform that is supposed to describe them:
+
+| Principal | Role on the vault | What it means for this key |
+| --- | --- | --- |
+| `afcp-id`, the managed identity | Key Vault Secrets User | The staging app, its bootstrap job and its maintenance job can read it. Nothing in the control plane does, but anybody who runs code as that identity can. |
+| the operator who runs Terraform | Key Vault Secrets Officer | Expected: this is the person who issues the licence. |
+| `af-infra-ci`, the GitHub Actions identity | Key Vault Secrets Officer | Its federated credentials include `pull_request` and `ref:refs/heads/main` as well as both environments, so a workflow run on a pull request from a branch of this repository can read the key. `ci.tf` records that grant as made by hand on 2026-08-28. Pull requests from forks receive no identity token and cannot. |
+
+So the key is exactly as safe as the staging app identity and this repository's
+workflows, and the consequence of either being compromised is that somebody can
+mint a licence both hosted environments accept. It grants nothing on any
+customer's self hosted installation, which trusts only the keys its own
+operator supplies.
+
+Moving it means a vault that holds nothing else and grants a data role to one
+person, then the same procedure with a new key id: keygen, add the new public
+half beside the old one in both tfvars files, reissue both licences, and remove
+`hosted-2026-09` only after both environments have started on the new ones.
+
 ## What goes wrong, and what the customer sees
 
 | They see | Cause |

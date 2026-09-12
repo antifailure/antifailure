@@ -323,6 +323,15 @@ jobs:
         # script against fake Azure and health endpoints and proves all three.
         run: ./deploy/cd/deploy_test.sh
 
+      - name: The deploy refuses an environment that cannot run this edition
+        # cd.yml deploys the enterprise image, whose entry point exits before it
+        # listens without AF_EE_SSO_KEY. This runs the check that stands either
+        # side of that deploy against a fake Azure and a fake origin: the
+        # template missing each of the four variables one at a time, and the two
+        # answers that read as success, a 404 from the community image and a 402
+        # from a licence that does not permit the feature.
+        run: ./deploy/cd/edition-check_test.sh
+
       - name: The configuration apply applies configuration and nothing else
         # Before every deploy, cd.yml applies the container app's env and
         # secret references from the environment's tfvars. This runs that

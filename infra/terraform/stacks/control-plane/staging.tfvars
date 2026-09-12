@@ -167,3 +167,24 @@ alerting_enabled = false
 # production's 2000, because staging is allowed to be slow and is not allowed
 # to page anybody for it.
 response_time_threshold_ms = 4000
+
+# ---------------------------------------------------------------------------
+# The enterprise edition.
+# ---------------------------------------------------------------------------
+
+# ON, because cd.yml deploys ghcr.io/antifailure/control-plane-enterprise and
+# its entry point exits before it listens without the sealing key this switch
+# generates. Staging is the rehearsal of production, so it runs the edition
+# production sells rather than the one self-hosters download.
+#
+# The organization the hosted licence is issued to. It is compared against the
+# licence and against nothing else: every customer organization on this plane
+# is gated by its own plan, and this names the installation.
+enterprise_edition = true
+license_org        = "antifailure"
+
+# The public half of license-signing-key-hosted-2026-09, which sits in
+# afcp-kv-centralus. Derived from the vault's copy by re-deriving the key from
+# its seed and checking it equals the stored public half, rather than copied
+# from a keygen printout nobody kept. A public key, not a secret.
+license_public_keys = "hosted-2026-09=FoNrZRWV4hQhMKtPYwCHHvvtpjmOyYb5MEg6C4LBkoA"

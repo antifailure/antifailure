@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -265,4 +266,146 @@ func TestTheVerificationPagesPinsAreAllStrict(t *testing.T) {
 	if n == 0 {
 		t.Fatal("no pins for the verification page, so this proved nothing")
 	}
+}
+
+// A tag that exists is not an image that exists, and this is the pair that was
+// not checked.
+//
+// The case is the real one. control-plane-enterprise:v1.3.5 has never been
+// published: v1.3.5 predates the enterprise Dockerfile by a day, so the tree
+// that tag names could not build it. Every check this file had passed that pin,
+// because the TAG is real, and the maintenance container app job reads the
+// repository and the tag with no ignore_changes.
+func TestAnImageIsNotBuiltAtATagThatPredatesItsDockerfile(t *testing.T) {
+	dir := taggedRepository(t,
+		[]string{"deploy/docker/control-plane.Dockerfile"}, "v1.0.0",
+		[]string{"deploy/docker/control-plane-enterprise.Dockerfile"})
+
+	built, dockerfile, err := imageBuiltAtTag(dir, "ghcr.io/antifailure/control-plane-enterprise", "v1.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if built {
+		t.Errorf("%s reads as built at v1.0.0, and it did not exist in that tree", dockerfile)
+	}
+	if dockerfile != "deploy/docker/control-plane-enterprise.Dockerfile" {
+		t.Errorf("dockerfile = %q, want it derived from the repository's last segment", dockerfile)
+	}
+}
+
+// The positive control. Without it the test above passes just as well against a
+// function that always answers no, which would refuse every release.
+func TestAnImageIsBuiltAtATagWhoseTreeCarriesItsDockerfile(t *testing.T) {
+	dir := taggedRepository(t,
+		[]string{"deploy/docker/control-plane.Dockerfile"}, "v1.0.0",
+		[]string{"deploy/docker/control-plane-enterprise.Dockerfile"})
+
+	built, _, err := imageBuiltAtTag(dir, "ghcr.io/antifailure/control-plane", "v1.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !built {
+		t.Error("the community Dockerfile was in the tagged tree and reads as absent")
+	}
+}
+
+// The complaint, in the shape main prints, so the pin and the file reach it.
+func TestTheRefusalNamesThePinTheRepositoryAndTheDockerfile(t *testing.T) {
+	dir := taggedRepository(t,
+		[]string{"deploy/docker/control-plane.Dockerfile"}, "v1.0.0",
+		[]string{"deploy/docker/control-plane-enterprise.Dockerfile"})
+	write(t, dir, "variables.tf", `variable "image_repository" {
+  default = "ghcr.io/antifailure/control-plane-enterprise"
+}
+variable "image_tag" {
+  default = "v1.0.0"
+}
+`)
+	p := pin{
+		file:       "variables.tf",
+		what:       "a test pin",
+		pattern:    regexp.MustCompile(`(?s)variable\s+"image_tag"\s*\{.*?default\s*=\s*"([^"]+)"`),
+		kind:       live,
+		repository: regexp.MustCompile(`(?s)variable\s+"image_repository"\s*\{.*?default\s*=\s*"([^"]+)"`),
+	}
+	problem := imagePinProblem(dir, p, "v1.0.0")
+	for _, want := range []string{
+		"variables.tf",
+		"ghcr.io/antifailure/control-plane-enterprise:v1.0.0",
+		"deploy/docker/control-plane-enterprise.Dockerfile",
+		"maintenance container app job",
+	} {
+		if !strings.Contains(problem, want) {
+			t.Errorf("the refusal does not mention %q: %s", want, problem)
+		}
+	}
+}
+
+// A pin with no repository beside it is not an image pin and must not be turned
+// into one: the verification page's four version literals name no image, and a
+// check that demanded a Dockerfile for them would refuse every release.
+func TestAPinWithNoRepositoryIsNotAnImagePin(t *testing.T) {
+	if problem := imagePinProblem(".", pin{file: "does-not-exist", kind: current}, "v1.0.0"); problem != "" {
+		t.Errorf("a pin with no repository pattern was checked as an image: %s", problem)
+	}
+}
+
+// Both image pins in this repository really do read a repository beside their
+// tag. A pattern that quietly matched nothing would make the check above pass
+// over every pin, which is the failure this file already guards for the tag.
+func TestTheImagePinsInThisRepositoryReadTheirRepository(t *testing.T) {
+	found := 0
+	for _, p := range pins {
+		if p.repository == nil {
+			continue
+		}
+		found++
+		value, err := read("../..", pin{file: p.file, what: "the image repository", pattern: p.repository})
+		if err != nil {
+			t.Errorf("%v", err)
+			continue
+		}
+		if !strings.HasPrefix(value, "ghcr.io/") {
+			t.Errorf("%s: image repository read as %q", p.file, value)
+		}
+	}
+	if found != 2 {
+		t.Errorf("%d pins carry a repository, want the stack's and the module's", found)
+	}
+}
+
+// A repository, a tag on a tree that carries the first list, then the second
+// list added afterwards so it is absent at that tag.
+func taggedRepository(t *testing.T, atTag []string, tag string, afterTag []string) string {
+	t.Helper()
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.test",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.test")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Skipf("git is not usable here: %v: %s", err, out)
+		}
+	}
+	add := func(paths []string) {
+		t.Helper()
+		for _, p := range paths {
+			if err := os.MkdirAll(filepath.Join(dir, filepath.Dir(p)), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			write(t, dir, p, "FROM scratch\n")
+		}
+	}
+	run("init", "-q")
+	add(atTag)
+	run("add", "-A")
+	run("commit", "-qm", "the tagged tree")
+	run("tag", tag)
+	add(afterTag)
+	run("add", "-A")
+	run("commit", "-qm", "after the tag")
+	return dir
 }

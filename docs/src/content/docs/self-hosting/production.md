@@ -690,3 +690,187 @@ Then ask the product for the thing the plan was withholding. Create an
 environment that the free plan's limit of three refused before the purchase. That
 is the only check that cannot be satisfied by a payment path that is connected to
 nothing.
+
+## Turning on the enterprise edition
+
+The hosted control plane runs `ghcr.io/antifailure/control-plane-enterprise`,
+the image whose entry point mounts single sign-on and directory provisioning and
+starts the audit stream forwarder. `cd.yml` builds and deploys that image to
+staging on every merge and to production on every tag. The community image is
+still built and published for self-hosted installations, and nothing here
+changes it.
+
+That image **will not start on an app that has not been given its edition.**
+Measured against the entry point rather than read off it: without
+`AF_EE_SSO_KEY` the process exits before it listens, whatever the licence says,
+and a licence with no `AF_ORG` or no trusted key stops it at start-up with exit
+status 2. So this is a one-time procedure per environment, and it runs before
+the first release that deploys the enterprise image there. Like billing, it is
+not a numbered step of first setup. Run the sections in the order written.
+
+**Three settings in the tfvars file, and two secrets in the vault.**
+
+| Setting | Where it lives | Who creates it |
+| --- | --- | --- |
+| `enterprise_edition = true` | the environment's tfvars | a person, in a pull request |
+| `license_org`, `license_public_keys` | the environment's tfvars | a person, in a pull request; both are public |
+| `ee-sso-key` | the environment's vault | Terraform, in one targeted hand apply |
+| `license-key` | the environment's vault | a person, from `tools/licensegen` |
+
+**The order is forced by two gates, not chosen.** `tools/configguard` refuses a
+configuration apply that creates anything other than an environment or secret
+reference change, and `ee-sso-key` is a vault secret Terraform creates, so the
+apply `cd.yml` runs cannot create it and refuses the whole release instead. And
+`deploy/cd/edition-check.sh configured` runs before every deploy and refuses one
+whose app template is missing any of the four variables, leaving the app
+serving what it served. Both refusals leave production untouched, and both
+spend a release approval to tell you something this page already says.
+
+Staging was switched on this way when the enterprise image first shipped. The
+commands below are production's, with `afcpprod-kv-centralus`, `afcpprod-app`
+and `af-cp-prod-centralus`.
+
+### First, issue the licence and put it in the vault
+
+The hosted licence is signed by `license-signing-key-hosted-2026-09`, the one
+signing key both hosted environments trust. Its public half is
+`license_public_keys` in both tfvars files. Read where the key lives, and who
+can read it, in [issuing a license](/docs/enterprise/issuing-licenses#the-hosted-control-planes-signing-key)
+before you use it.
+
+The private key goes from the vault into the environment of one command and the
+licence goes from that command into a file only you can read, then into the
+vault. Neither is ever printed.
+
+```sh
+umask 077
+dir="$(mktemp -d)"
+cat > "$dir/request.json" <<'JSON'
+{
+  "org": "antifailure",
+  "plan": "enterprise",
+  "features": ["audit_stream", "rbac", "scim", "sso", "support_access"],
+  "seats": 0,
+  "months": 12
+}
+JSON
+
+AF_LICENSE_SIGNING_KEY="$(az keyvault secret show --vault-name afcp-kv-centralus \
+    --name license-signing-key-hosted-2026-09 --query value -o tsv)" \
+  go run ./tools/licensegen issue -request "$dir/request.json" \
+    -key-id hosted-2026-09 -id hosted-production-2026-09 \
+  | tr -d '\n' > "$dir/licence"
+
+az keyvault secret set --vault-name afcpprod-kv-centralus --name license-key \
+  --file "$dir/licence" --output none
+rm -P "$dir/licence" 2> /dev/null || rm -f "$dir/licence"
+rm -rf "$dir"
+```
+
+**Read the receipt on standard error before going on.** Its second line names a
+public key. It must be exactly the value after `hosted-2026-09=` in
+`production.tfvars`, or every start refuses the licence as signed by a key this
+installation does not trust. The receipt also warns that `rbac` is gated nowhere
+by the licence, so withdrawing the licence would not withdraw it. That is
+expected here: on the hosted plane role based access is an entitlement of each
+organization's plan, and the licence names it so the installation's licence
+describes the whole enterprise plan.
+
+`org` is `antifailure` because that is `license_org`, and the two are compared
+at start-up. It names the installation, not a customer: each customer
+organization on the plane is still gated by its own plan. `seats` is zero,
+which is unlimited, because the hosted plane counts seats per organization by
+plan and a licence limit here would cap every customer at once. Twelve months
+means the licence expires a year from the moment it is signed and then runs on
+its fourteen day grace; `af license status` and the start-up line both say how
+many days remain, and a renewal is this section again with a new `-id`.
+
+Confirm it is there, as a name and a length, never a value:
+
+```sh
+az keyvault secret show --vault-name afcpprod-kv-centralus --name license-key \
+  --query value -o tsv | tr -d '\n' | wc -c
+```
+
+Staging's, issued with exactly these commands on 2026-09-12, is 432 characters.
+A length far from that is a failed signing or a stray byte written into the
+vault, and the next start will refuse it.
+
+### Then generate the sealing key, with one targeted apply
+
+`ee-sso-key` is owned by Terraform for the reason `provider-key-secret` is: no
+person ever holds it, and nothing regenerates it, because a new key cannot open
+anything the old one sealed. With `enterprise_edition = true` merged into
+`production.tfvars`, from a checkout of that commit:
+
+```sh
+cd infra/terraform/stacks/control-plane
+terraform init -reconfigure -backend-config=backend.production.hcl
+export TF_VAR_subscription_id="$(az account show --query id -o tsv)"
+export TF_VAR_github_client_id=seeded-once-not-read-here
+export TF_VAR_github_client_secret=seeded-once-not-read-here
+terraform plan -var-file=production.tfvars -out=edition.tfplan \
+  -target='module.control_plane.azurerm_key_vault_secret.owned["ee-sso-key"]'
+terraform apply edition.tfplan
+```
+
+The two GitHub values are placeholders on purpose: the seeded secrets ignore
+their value after the first apply, and this target does not reach them.
+
+**Read the plan before applying it.** It must say exactly `2 to add, 0 to
+change, 0 to destroy`: `random_bytes.ee_sso_key[0]` and
+`azurerm_key_vault_secret.owned["ee-sso-key"]`. Anything else is a change to a
+resource this procedure has no business moving, and the answer is to stop, not
+to apply.
+
+Then both names, never values:
+
+```sh
+az keyvault secret list --vault-name afcpprod-kv-centralus \
+  --query "[?name=='ee-sso-key' || name=='license-key'].name" -o tsv
+```
+
+Two names, or stop here.
+
+### Then release
+
+Push the tag. The production job's configuration apply now plans an
+environment and secret reference change and nothing else, so `configguard`
+accepts it and names the four variables it added. `edition-check.sh
+configured` finds all four in the template, `deploy.sh` moves the image and the
+traffic, and `edition-check.sh serving` asks the public origin for
+`/scim/v2/ServiceProviderConfig`, which must answer 200, and `/sso/start`, which
+must answer 400 asking for an email address. A 404 from either is the community
+image. A 402 is the enterprise image with a licence that does not permit that
+feature, and the body names the licence state.
+
+### Then move the image defaults, in a commit after the tag
+
+The container app's image belongs to `deploy.sh`, but the maintenance job reads
+`image_repository` and `image_tag` from `infra/terraform/stacks/control-plane/variables.tf`
+with no `ignore_changes`, so the next hand apply puts that image back on it.
+Once the tag exists, change the repository to
+`ghcr.io/antifailure/control-plane-enterprise` and the tag to the release in one
+commit. Not before, and not inside the tag's own commit: `tools/tagsync` refuses
+an `image_tag` bump in the tagged commit, and refuses a repository whose
+Dockerfile did not exist in the tree that tag names, because the registry has no
+such image and the maintenance job would pull a manifest that is not there.
+
+### Then prove it, on the running control plane
+
+The deploy job has already asked for both routes. Ask again yourself, and read
+what the process said it decided, because a route that answers is not the same
+claim as a licence that says what you issued:
+
+```sh
+curl -sS -o /dev/null -w '%{http_code}\n' https://app.antifailure.dev/scim/v2/ServiceProviderConfig
+curl -sS https://app.antifailure.dev/sso/start
+az containerapp logs show -n afcpprod-app -g af-cp-prod-centralus --tail 200 \
+  | grep -E 'license|licence|mounted|audit stream'
+```
+
+200, then the email address sentence, then a start-up line naming the licence as
+active for `antifailure` with its features and expiry, the two extensions
+mounted, and the audit stream line. With no `AF_AUDIT_STREAM_SINK` set, that
+line says the audit log is written and not forwarded, which is correct for a
+plane where each organization chooses its own destination.

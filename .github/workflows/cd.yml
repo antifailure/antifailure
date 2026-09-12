@@ -34,6 +34,24 @@
 # keeps serving the last green build, which is a working system, and the fix is
 # to fix main.
 #
+# WHICH EDITION THIS DEPLOYS, AND WHY IT IS NOT THE COMMUNITY ONE.
+#
+# The hosted control plane sells single sign-on, directory provisioning and
+# audit streaming on its enterprise plan, and for the whole life of this
+# workflow it deployed ghcr.io/antifailure/control-plane, whose entry point
+# mounts none of them. Three features that exist, are tested, and are paid for
+# ran nowhere: every provider callback and every SCIM request answered 404, and
+# nothing anywhere said so, because a community control plane and an enterprise
+# one with nothing mounted produce the same logs and the same /readyz.
+#
+# So this builds and deploys the enterprise image, and two checks stand either
+# side of the deploy rather than one. The configuration has to be in the app's
+# template BEFORE the image moves, because the enterprise entry point exits
+# before it listens without AF_EE_SSO_KEY, measured against the image itself
+# across every state its licence can be in. And the public origin has to
+# actually answer one route of each feature AFTER the shift, because ready on
+# the expected commit is a claim the community image satisfies perfectly.
+#
 # WHY OIDC. There is no Azure credential in this repository. The job exchanges a
 # GitHub-signed token for an Azure one, scoped by the federated credential to
 # `repo:antifailure/antifailure:environment:staging` (and :production), so a
@@ -75,7 +93,11 @@ permissions:
   contents: read
 
 env:
-  IMAGE: ghcr.io/${{ github.repository_owner }}/control-plane
+  # The enterprise image, which is the edition the hosted plan sells. The
+  # community image is still built and published by control-plane-image.yml, on
+  # every pull request and every tag, because self-hosting/control-plane.md
+  # tells operators to run it and the two are one matrix so they cannot drift.
+  IMAGE: ghcr.io/${{ github.repository_owner }}/control-plane-enterprise
   RESOURCE_GROUP: af-cp-centralus
   APP: afcp-app
   BOOTSTRAP_JOB: afcp-bootstrap
@@ -208,7 +230,7 @@ jobs:
           set -euo pipefail
           tag="cd-${GITHUB_SHA::12}"
           docker build \
-            -f deploy/docker/control-plane.Dockerfile \
+            -f deploy/docker/control-plane-enterprise.Dockerfile \
             -t "${IMAGE}:${tag}" \
             --build-arg AF_VERSION="${GITHUB_REF_NAME}" \
             --build-arg AF_COMMIT="${GITHUB_SHA}" \
@@ -234,6 +256,35 @@ jobs:
             *AF_MIGRATION_DATABASE_URL*) echo "bootstrap refuses and names the variable" ;;
             *) echo "FAIL: bootstrap said: $out"; exit 1 ;;
           esac
+
+      # THE IMAGE IS THE EDITION IT CLAIMS TO BE.
+      #
+      # One line above decides which edition the hosted control plane runs, and
+      # reverting it would be invisible from everywhere else: the community
+      # image passes every other check in this job, is ready on the right
+      # commit, and answers 404 on every route the enterprise plan sells. So the
+      # artifact is asked what it starts and whether the enterprise tree
+      # actually reached it. The layout matters as much as the entry point,
+      # because the enterprise workspace reaches the community one through
+      # relative symlinks npm wrote, and a dangling symlink is not a build
+      # error: it is a process that dies on its first import.
+      - name: The image is the enterprise edition
+        run: |
+          set -euo pipefail
+          img="${IMAGE}:cd-${GITHUB_SHA::12}"
+          cmd="$(docker inspect --format '{{json .Config.Cmd}}' "$img")"
+          if [ "$cmd" != '["node","/app/ee/web/server/src/main.ts"]' ]; then
+            echo "FAIL: this image starts ${cmd}, which is not the enterprise entry point."
+            echo "FAIL: a deploy of it would mount no single sign-on and no provisioning."
+            exit 1
+          fi
+          docker run --rm --entrypoint sh "$img" -c '
+            set -e
+            test -f /app/ee/web/server/src/main.ts
+            test -f /app/ee/web/node_modules/@antifailure/api/src/boot.ts
+            test -f /app/ee/LICENSE.md
+          '
+          echo "the entry point, the cross workspace link and the enterprise license are in the image"
 
   # ---------------------------------------------------------------------------
   # Staging. Automatic, on every merge to main.
@@ -319,6 +370,18 @@ jobs:
           AF_TFSTATE_ACCOUNT: ${{ secrets.AZURE_TFSTATE_ACCOUNT }}
         run: deploy/cd/apply-config.sh staging
 
+      # THE EDITION IS CONFIGURED, BEFORE THE IMAGE MOVES.
+      #
+      # deploy.sh creates its revision with `az containerapp update --image`,
+      # which inherits the template the apply above just wrote. The enterprise
+      # entry point exits before it listens without AF_EE_SSO_KEY, whatever the
+      # licence says, so an environment whose tfvars have not been switched over
+      # or whose vault has not been given the two secrets is refused here, with
+      # the app untouched, instead of five minutes later as a candidate revision
+      # that never reaches Running and a message about the platform.
+      - name: The enterprise edition is configured
+        run: deploy/cd/edition-check.sh configured "${RESOURCE_GROUP}" "${APP}"
+
       # The digest goes through the environment rather than being interpolated
       # into the script text. It comes from `docker inspect` and is therefore
       # trustworthy today, but a template expansion inside `run:` is a shell
@@ -331,6 +394,15 @@ jobs:
           deploy/cd/deploy.sh \
             "${RESOURCE_GROUP}" "${APP}" "${BOOTSTRAP_JOB}" "${MAINTENANCE_JOB}" \
             "${IMAGE_DIGEST}" "${GITHUB_SHA}" "${STAGING_URL}"
+
+      # READY IS NOT THE SAME CLAIM AS LICENSED AND MOUNTED, and the deploy is
+      # not finished until the second one is made. health-gate.sh has already
+      # proved the origin is ready on this commit; the community image would
+      # satisfy that and answer 404 on everything the enterprise plan sells.
+      # This asks for one route of each feature. It never rolls back: the
+      # application is healthy, and what is wrong is the edition or the licence.
+      - name: The deployed edition serves what the plan sells
+        run: deploy/cd/edition-check.sh serving "${STAGING_URL}"
 
       - name: What is serving
         if: always()
@@ -469,6 +541,14 @@ jobs:
           AF_TFSTATE_ACCOUNT: ${{ secrets.AZURE_TFSTATE_ACCOUNT }}
         run: deploy/cd/apply-config.sh production
 
+      # The same refusal as staging, and production is where it earns its place:
+      # the sealing key, the licence and the three tfvars lines are a one-time
+      # hand step per environment, and a release that reached this job with them
+      # missing would otherwise spend its approval on a revision that cannot
+      # start. Production keeps serving whatever it was serving.
+      - name: The enterprise edition is configured
+        run: deploy/cd/edition-check.sh configured "${PRODUCTION_RESOURCE_GROUP}" "${PRODUCTION_APP}"
+
       # The same digest staging tested, which is the entire reason build outputs
       # one. A tag can be moved between the two deploys and a digest cannot.
       - name: Deploy
@@ -479,6 +559,9 @@ jobs:
             "${PRODUCTION_RESOURCE_GROUP}" "${PRODUCTION_APP}" \
             "${PRODUCTION_BOOTSTRAP_JOB}" "${PRODUCTION_MAINTENANCE_JOB}" \
             "${IMAGE_DIGEST}" "${GITHUB_SHA}" "${PRODUCTION_URL}"
+
+      - name: The deployed edition serves what the plan sells
+        run: deploy/cd/edition-check.sh serving "${PRODUCTION_URL}"
 
       - name: What is serving
         if: always()
