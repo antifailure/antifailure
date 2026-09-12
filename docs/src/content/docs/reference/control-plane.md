@@ -87,6 +87,15 @@ serves the console and the API, as the hosted control plane does, and the
 process stops at start-up when neither is set. `AF_LICENSE_REVOKED` takes a
 comma separated list of licence identifiers this installation refuses as
 revoked; nothing publishes such a list, so it is set by hand when one is needed.
+The enterprise edition also reads `AF_PROVIDER_KEY_SECRET`, the key in the
+table above, and seals each organization's audit stream collector credential
+under it rather than under a key of its own, because it already reaches every
+deployment that stores provider keys. Unset, the audit stream routes still
+answer, saving a destination is refused with 503 naming the variable, the
+start-up log says no organization can choose its own destination, and an
+installation sink set in the environment is unaffected. A value that is not 32
+bytes of base64 stops the process at start-up with exit status 2.
+
 The audit stream's variables are on
 [the audit stream page](/docs/enterprise/audit-stream).
 
