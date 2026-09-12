@@ -707,7 +707,14 @@ func emulatorCloud(image string) (cloud, product string) {
 	switch {
 	case strings.Contains(base, "localstack"):
 		return "aws", "LocalStack"
-	case strings.Contains(base, "moto"):
+	// moto is matched on the repository name exactly rather than by substring.
+	// The other names here are distinctive enough that no unrelated image
+	// contains them, but moto is four letters that sit inside ordinary words,
+	// so acme/promotools was read as an AWS emulator and drafted AWS egress
+	// rules for an application that never calls AWS. moto publishes under two
+	// repository names: motoserver/moto on Docker Hub, and
+	// ghcr.io/getmoto/motoserver.
+	case base == "moto", base == "motoserver":
 		return "aws", "moto"
 	case strings.Contains(base, "elasticmq"):
 		return "aws", "ElasticMQ"

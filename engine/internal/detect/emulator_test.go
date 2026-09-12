@@ -1,6 +1,7 @@
 package detect_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -249,5 +250,108 @@ func TestEmulator_ASDKForAServiceTheCatalogClaimsIsNotAGap(t *testing.T) {
 	for _, f := range detect.OfKind(res.Findings, detect.KindNote) {
 		require.NotContains(t, f.Subject, "cloud-service.",
 			"%s has a rule, so reporting it as a gap is noise", f.Subject)
+	}
+}
+
+func TestEmulator_TheListFormOfEnvironmentIsReadToo(t *testing.T) {
+	t.Parallel()
+	// Compose accepts environment as a mapping and as a list, parseCompose has
+	// a separate branch for each, and only the mapping branch was exercised.
+	// An emulator whose SERVICES arrives in list form would have produced an
+	// empty roster and no rules, which reads exactly like an emulator that
+	// named nothing.
+	res := run(t, "shopfront", map[string]string{
+		"package.json": `{"name":"shopfront","scripts":{"start":"next start"},
+			"dependencies":{"next":"15.0.0"}}`,
+		"docker-compose.yml": `services:
+  web:
+    build: .
+    ports:
+      - "3000:3000"
+  localstack:
+    image: localstack/localstack:3.4
+    environment:
+      - SERVICES=s3,sqs
+      - DEBUG=1
+`,
+		"Dockerfile": "FROM node:20\nCMD [\"node\", \"server.js\"]\n",
+	})
+	em := emulatorFor(t, res, "localstack")
+	require.Equal(t, []string{"s3", "sqs"}, em.Services,
+		"the list form of environment must be read the same as the mapping form")
+	ruleFor(t, res.Draft, "sqs.*.amazonaws.com")
+}
+
+// motoRepo runs one image under a compose service called aws, naming S3 and
+// SQS. The service name is deliberately neutral, so the image is the only
+// thing that can make it an emulator, and SERVICES is set, so an image wrongly
+// read as moto has a roster to turn into AWS rules and the harm is visible.
+func motoRepo(image string) map[string]string {
+	return map[string]string{
+		"package.json": `{"name":"shopfront","scripts":{"start":"next start"},
+			"dependencies":{"next":"15.0.0"}}`,
+		"docker-compose.yml": `services:
+  web:
+    build: .
+    ports:
+      - "3000:3000"
+  aws:
+    image: ` + image + `
+    environment:
+      SERVICES: s3,sqs
+`,
+		"Dockerfile": "FROM node:20\nCMD [\"node\", \"server.js\"]\n",
+	}
+}
+
+func TestEmulator_AnImageWhoseNameMerelyContainsMotoIsNotAnEmulator(t *testing.T) {
+	t.Parallel()
+	// moto was matched by substring. It is four letters and sits inside
+	// ordinary words, so each of these was read as an AWS emulator, and its
+	// SERVICES became AWS egress rules for an application that never calls
+	// AWS: a wider firewall than the application needs, proposed by the tool
+	// whose job is to narrow it.
+	for _, image := range []string{
+		"acme/promotools:2.1",
+		"motorola/firmware-sim:1.0",
+		"acme/moto-dashboard:3",
+		"acme/motoserverless:1",
+		// A registry host containing moto is not the repository name.
+		"moto.registry.example.com/acme/app:1.4",
+		"registry.moto.dev:5000/team/api@sha256:" + strings.Repeat("ab", 32),
+	} {
+		t.Run(image, func(t *testing.T) {
+			t.Parallel()
+			res := run(t, "shopfront", motoRepo(image))
+			require.Empty(t, res.Emulators, "%s is not moto", image)
+			for _, r := range res.Draft.Egress.Rules {
+				require.NotContains(t, r.Host, "amazonaws.com",
+					"%s is not an AWS emulator, so it cannot produce an AWS rule", image)
+			}
+		})
+	}
+}
+
+func TestEmulator_MotoIsRecognisedUnderEveryNameItPublishes(t *testing.T) {
+	t.Parallel()
+	// The two repository names moto publishes under, with a tag, with a
+	// digest and behind a registry mirror, which is how a pinned compose file
+	// actually spells them.
+	for _, image := range []string{
+		"motoserver/moto",
+		"motoserver/moto:5.0.9",
+		"motoserver/moto@sha256:" + strings.Repeat("cd", 32),
+		"registry.example.com:5000/mirror/motoserver/moto:5.0.9",
+		"ghcr.io/getmoto/motoserver:latest",
+	} {
+		t.Run(image, func(t *testing.T) {
+			t.Parallel()
+			res := run(t, "shopfront", motoRepo(image))
+			em := emulatorFor(t, res, "aws")
+			require.Equal(t, "aws", em.Cloud, "%s answers for AWS", image)
+			require.Equal(t, "moto", em.Product)
+			require.Equal(t, []string{"s3", "sqs"}, em.Services)
+			ruleFor(t, res.Draft, "sqs.*.amazonaws.com")
+		})
 	}
 }
