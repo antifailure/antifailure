@@ -71,7 +71,7 @@ function guardUnder(secureCookies: boolean) {
 
   describe(
     `an operator mutation over HTTP needs the cross-site token: ${label}`,
-    { skip: hasDatabase ? false : 'no database' },
+    { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABASE_URL' },
     () => {
       let h: ApiHarness
       let cookie: string

@@ -211,7 +211,7 @@ describe('experiments have no table, so this lane serves no experiment route', (
 //   for and the one that no column in the database states directly.
 // ---------------------------------------------------------------------------
 
-describe('the product routes answer from real rows', { skip: hasDatabase ? false : 'no database' }, () => {
+describe('the product routes answer from real rows', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: ApiHarness
   let org: Org
   let operatorId: string

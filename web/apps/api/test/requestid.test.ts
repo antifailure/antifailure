@@ -47,7 +47,7 @@ function lineFor(lines: unknown[][], id: string): { head: string; fields: Record
   return { head: String(found[0]), fields: found[1] as Record<string, unknown> }
 }
 
-describe('a tRPC error carries the request id', { skip: hasDatabase ? false : 'no database' }, () => {
+describe('a tRPC error carries the request id', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: ApiHarness
   let org: Org
 
@@ -125,7 +125,7 @@ describe('a tRPC error carries the request id', { skip: hasDatabase ? false : 'n
   })
 })
 
-describe('a cross-site refusal is written down and quotable', { skip: hasDatabase ? false : 'no database' }, () => {
+describe('a cross-site refusal is written down and quotable', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: ApiHarness
   let org: Org
   let member: SignedIn

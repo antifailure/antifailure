@@ -37,7 +37,7 @@ import { available, startApi, seedOrg, adminUrl, type ApiHarness, type Org } fro
 
 const hasDb = await available()
 
-describe('the administration routes', { skip: hasDb ? false : 'no database' }, () => {
+describe('the administration routes', { skip: hasDb ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: ApiHarness
   let acme: Org
   let umbrella: Org

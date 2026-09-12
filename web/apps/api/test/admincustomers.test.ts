@@ -71,7 +71,7 @@ describe("the Customers lane's routes are all in the served tree", () => {
   })
 })
 
-describe('support notes and impersonation', { skip: hasDb ? false : 'no database' }, () => {
+describe('support notes and impersonation', { skip: hasDb ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: ApiHarness
   let acme: Org
   let other: Org

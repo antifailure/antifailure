@@ -235,7 +235,7 @@ describe('single sign-on', { skip: hasDatabase ? false : 'no Postgres at AF_TEST
   })
 })
 
-describe('group claims and roles', { skip: hasDatabase ? false : 'no database' }, () => {
+describe('group claims and roles', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: Harness
   let org: Org
 
@@ -283,7 +283,7 @@ describe('group claims and roles', { skip: hasDatabase ? false : 'no database' }
   })
 })
 
-describe('the seat limit', { skip: hasDatabase ? false : 'no database' }, () => {
+describe('the seat limit', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: Harness
   let org: Org
 
@@ -371,7 +371,7 @@ describe('the seat limit', { skip: hasDatabase ? false : 'no database' }, () => 
   })
 })
 
-describe('enforcement and break-glass', { skip: hasDatabase ? false : 'no database' }, () => {
+describe('enforcement and break-glass', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: Harness
   let org: Org
   let codes: string[]

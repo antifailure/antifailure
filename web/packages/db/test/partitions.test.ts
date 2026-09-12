@@ -26,7 +26,7 @@ import { available, seedTenant, setup, type Fixture, type Harness } from './harn
 
 const has = await available()
 
-describe('partition planning', { skip: has ? false : 'no database' }, () => {
+describe('partition planning', { skip: has ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   const now = new Date('2026-05-17T12:00:00Z')
 
   function month(iso: string, name?: string): PartitionState {
@@ -111,7 +111,7 @@ describe('partition planning', { skip: has ? false : 'no database' }, () => {
   })
 })
 
-describe('partition management', { skip: has ? false : 'no database' }, () => {
+describe('partition management', { skip: has ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: Harness
   let org: Fixture
 
@@ -259,7 +259,7 @@ describe('partition management', { skip: has ? false : 'no database' }, () => {
   })
 })
 
-describe('reading a partition out', { skip: has ? false : 'no database' }, () => {
+describe('reading a partition out', { skip: has ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: Harness
   let org: Fixture
   const month = new Date('2035-04-01T00:00:00Z')

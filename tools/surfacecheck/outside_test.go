@@ -23,6 +23,16 @@
 // and this compiles. If it ever stops compiling the promise has broken again,
 // and a build failure here is a better way to learn that than a stranger's bug
 // report.
+//
+// WHAT A DEAD CODE PASS SAYS ABOUT THIS FILE, written down because the answer
+// looks alarming and is correct. golang.org/x/tools/cmd/deadcode over the tools
+// module reports EIGHTEEN unreachable functions and every one of them is a
+// method below, on outsideDatabase or outsideRuntime. That is the whole of the
+// module's report: there is no other dead code in tools. These are compile time
+// conformance stubs, so the EXISTENCE of the method is the assertion rather
+// than anything a caller runs, and a pass that ranks functions by whether
+// something calls them cannot express that. Do not delete them to quiet the
+// tool, and do not read the count as eighteen gaps.
 package main
 
 import (

@@ -104,7 +104,7 @@ async function seedOperator(
 
 describe(
   'the operator sign-in routes',
-  { skip: hasDb ? false : 'no database' },
+  { skip: hasDb ? false : 'no Postgres at AF_TEST_DATABASE_URL' },
   () => {
     let h: ApiHarness
     const password = 'a-provisioned-password-nobody-shipped'
@@ -220,7 +220,7 @@ describe(
 
 describe(
   'the operator cookie under Secure, where the __Host- prefix applies',
-  { skip: hasDb ? false : 'no database' },
+  { skip: hasDb ? false : 'no Postgres at AF_TEST_DATABASE_URL' },
   () => {
     let h: ApiHarness
     const password = 'a-provisioned-password-nobody-shipped'

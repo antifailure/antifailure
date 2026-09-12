@@ -106,7 +106,7 @@ describe('the operator permission catalog', () => {
   })
 })
 
-describe('operator sign-in', { skip: hasDb ? false : 'no database' }, () => {
+describe('operator sign-in', { skip: hasDb ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: ApiHarness
   let operatorId: string
   let email: string

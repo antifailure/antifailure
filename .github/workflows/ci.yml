@@ -425,6 +425,18 @@ jobs:
         # identifier that names a real cloud tenant.
         run: ./tools/docs/forbidden.sh
 
+      - name: Nothing in the tree says the work is not finished
+        # The scan above reads six Markdown paths, roughly 300 of the 2875
+        # tracked files, so until this step existed a note to the author in any
+        # Go file, SQL migration, Terraform stack, workflow, the justfile, or
+        # the api's and runner's TypeScript passed every gate in this
+        # repository. This reads the git index, so an untracked scratch file
+        # cannot change its verdict, and it fails rather than skips on a
+        # tracked file no text tool can read. It also refuses the form no grep
+        # can see: a test that skips without saying why, which reports a skip,
+        # keeps the suite green and reads as a pass in the summary.
+        run: go run ./tools/defercheck .
+
       - name: The error catalog and the code agree
         # The reference page promises that a code with no entry fails the build
         # and an entry nothing returns fails it too. It promised that for a

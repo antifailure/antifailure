@@ -527,7 +527,7 @@ errors:
   - code: AF-RUN-001
     area: RUN
     message: "The command '{command}' is not available in this version."
-    next_step: "See the roadmap for when it lands; 'af version' reports the version you are running."
+    next_step: "Run 'af --help' for the commands this binary carries and 'af version' for which build it is. 'af update' replaces it in place with the newest release, which may carry more."
     docs: reference/cli
     retryable: false
     exit_code: 2

@@ -36,7 +36,7 @@ async function fakeBuild(): Promise<string> {
 
 const ok = await available()
 
-describe('serving the console build', { skip: ok ? false : 'no database' }, () => {
+describe('serving the console build', { skip: ok ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: ApiHarness
   let dir: string
 
@@ -180,7 +180,7 @@ describe('serving the console build', { skip: ok ? false : 'no database' }, () =
   })
 })
 
-describe('running without a console build', { skip: ok ? false : 'no database' }, () => {
+describe('running without a console build', { skip: ok ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: ApiHarness
   before(async () => {
     h = await startApi()
@@ -200,7 +200,7 @@ describe('running without a console build', { skip: ok ? false : 'no database' }
   })
 })
 
-describe('provider keys from a browser', { skip: ok ? false : 'no database' }, () => {
+describe('provider keys from a browser', { skip: ok ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: ApiHarness
   let org: Org
   const sealing = Buffer.alloc(32, 7)
@@ -361,7 +361,7 @@ describe('provider keys from a browser', { skip: ok ? false : 'no database' }, (
   })
 })
 
-describe('a control plane with no sealing secret', { skip: ok ? false : 'no database' }, () => {
+describe('a control plane with no sealing secret', { skip: ok ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: ApiHarness
   let org: Org
   before(async () => {

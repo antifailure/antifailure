@@ -51,7 +51,7 @@ describe('every operator route declares a permission', () => {
   })
 })
 
-describe('the operator routes', { skip: hasDb ? false : 'no database' }, () => {
+describe('the operator routes', { skip: hasDb ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: ApiHarness
   let alice: Org
   let bob: Org

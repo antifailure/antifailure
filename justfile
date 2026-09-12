@@ -96,6 +96,7 @@ gate: _reports
     run "the mode lists are the real one" just modecheck
     run "every contact route resolves"   just contactcheck
     run "no forbidden tokens in docs"    just forbidden
+    run "no work deferred to later"      just defercheck
     run "spelling"                       just spell
     run "prose style"                    just vale
     run "every link resolves"            just links
@@ -1265,6 +1266,15 @@ readability:
 # somebody's private network, and identifiers that name a real cloud tenant.
 forbidden:
     ./tools/docs/forbidden.sh
+
+# The same question over the WHOLE tracked tree, which the scan above does not
+# read. That one covers six Markdown paths, roughly 300 of the 2875 tracked
+# files, so a note to the author in any Go file, migration, Terraform stack,
+# workflow, or the api's TypeScript passed every gate here. This also refuses
+# the form a grep cannot see: a test that skips without saying why, which
+# reports a skip, keeps the suite green, and reads as a pass in the summary.
+defercheck:
+    go run ./tools/defercheck .
 
 # Every repository path our documents point at exists.
 claimcheck:
