@@ -640,8 +640,26 @@ func renderInitSummary(env *Env, res *detect.Result, assumed map[string]string, 
 			ruleRows = append(ruleRows, []string{r.Host, string(r.Mode), r.Note})
 		}
 		env.Out.Table([]Column{Col("HOST"), Col("MODE"), Flex("WHY")}, ruleRows)
-		env.Out.Note(StyleDim,
-			"Everything not listed is blocked. Nothing reaches the internet by accident.")
+		// "Nothing reaches the internet by accident" was printed under every
+		// table, including one whose own catalogue entry is *.supabase.co in
+		// allow, which reaches every Supabase customer's project and not only
+		// this one. The sentence is kept where it is true and replaced by the
+		// rule's own caution where it is not.
+		var cautions []string
+		for _, r := range res.Draft.Egress.Rules {
+			if c := manifest.EgressCaution(r.Host, r.Mode); c != "" {
+				cautions = append(cautions, c)
+			}
+		}
+		if len(cautions) == 0 {
+			env.Out.Note(StyleDim,
+				"Everything not listed is blocked. Nothing reaches the internet by accident.")
+		} else {
+			env.Out.Note(StyleDim, "Everything not listed is blocked.")
+			for _, c := range cautions {
+				env.Out.Note(StyleWarn, c)
+			}
+		}
 	}
 
 	if len(res.Datastores) > 0 {

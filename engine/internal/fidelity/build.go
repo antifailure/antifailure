@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/antifailure/antifailure/engine/internal/manifest"
 	"github.com/antifailure/antifailure/engine/internal/traffic"
 	"github.com/antifailure/antifailure/engine/internal/volume"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
@@ -546,9 +547,18 @@ func hostComponent(h Host) Component {
 	switch h.Mode {
 	case schema.ModeAllow:
 		c.State, c.Detail = Reproduced, "reached for real"
+		// Still reproduced, because whichever host arrives is reached for
+		// real. What a reader was not told is how many hosts that is, and
+		// *.zapier.com read here exactly as api.stripe.com did.
+		if covers := manifest.EgressReach(h.Name); covers != "" {
+			c.Detail += ", by a rule that names no host and covers " + covers
+		}
 	case schema.ModeSandbox:
 		c.State = Substituted
 		c.Detail = "the provider's own sandbox, with test credentials substituted at the sidecar"
+		if covers := manifest.EgressReach(h.Name); covers != "" {
+			c.Detail += ", by a rule that names no host and covers " + covers
+		}
 	case schema.ModeCapture:
 		if strings.HasPrefix(h.Name, "*") {
 			// A rule covering a domain rather than naming a host cannot be

@@ -363,6 +363,12 @@ func TestThirdPartyModes(t *testing.T) {
 			fidelity.Reproduced, "for real"},
 		{"sandbox is the provider's own sandbox", fidelity.Host{Name: "h", Mode: schema.ModeSandbox},
 			fidelity.Substituted, "sandbox"},
+		// Still reproduced and still substituted, and now saying how many hosts
+		// that is. *.zapier.com read here exactly as an exact host did.
+		{"a wildcard allow says how far it reaches", fidelity.Host{Name: "*.zapier.com", Mode: schema.ModeAllow},
+			fidelity.Reproduced, "every name under zapier.com"},
+		{"a wildcard sandbox says how far it reaches", fidelity.Host{Name: "*.auth0.com", Mode: schema.ModeSandbox},
+			fidelity.Substituted, "every name under auth0.com"},
 		{"capture answers with the success shape", fidelity.Host{Name: "h", Mode: schema.ModeCapture},
 			fidelity.Substituted, "inbox"},
 		{"a stateful pack keeps what was created",

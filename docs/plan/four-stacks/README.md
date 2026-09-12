@@ -469,11 +469,12 @@ Owed by: the runtime lane and whoever owns releases. This is the finding that
 turned a rehearsal into a refusal, so it is the one to fix first if the row is
 re-run.
 
-### F13. A domain wildcard with `mode: allow` is accepted, and would post to a real endpoint
+### F13. A domain wildcard with `mode: allow` was accepted, and explained as a clean ALLOW
 
-`host: "*"` is refused outside block mode, at
-`engine/internal/manifest/validate.go:752`. `host: "*.zapier.com"` with
-`mode: allow` is not refused, and `af net explain` renders it as a clean ALLOW
+Re-verified on 2026-09-11 against main at 67fcf2d7, by running it, and it
+held. `host: "*"` was refused outside block by the egress validator in
+`engine/internal/manifest/validate.go`. `host: "*.zapier.com"` with
+`mode: allow` was accepted, and `af net explain` rendered it as a clean ALLOW
 with no other rule matching and no caution:
 
 ```
@@ -482,14 +483,24 @@ POST https://hooks.zapier.com/hooks/catch/1234/abcd
   ALLOW
 
   The rule for *.zapier.com decided allow because the host ends in .zapier.com.
+
+  No other rule matches this request.
 ```
 
 For a delivery path that posts to a customer's CRM through a Zapier catch hook,
-that is a rehearsal firing somebody's real automation at real contacts. It is
-the opposite of the failure this row was told to look for and it is worse than
-it.
+that is a rehearsal firing somebody's real automation at real contacts.
 
-Owed by: L0.3 with L6.1.
+The matcher was never wrong. The rule does reach every name under
+`zapier.com`, at any depth, and not the apex. What was missing was anything
+saying so, and three neighbours of the same shape were worse: `*.com` and
+`hooks.*.com` were accepted in allow and reached names anybody registered, and
+`egress.default: sandbox` was accepted while a sandbox request with no
+credential leaves untouched, which made it the refused `default: allow` under a
+safer word.
+
+Closed on the branch `w-wildcard-egress-caution`. The breadth is stated
+wherever a rule is explained, a star standing where the owner's name goes is
+refused outside block, and a sandbox default is refused.
 
 ### F14. `af net explain` cannot tell the two capture rules apart, and the sidecar can
 

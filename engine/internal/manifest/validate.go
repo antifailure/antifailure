@@ -960,6 +960,21 @@ func (v *validator) egress(m *schema.Manifest) {
 				"Set the default to block and write an emulate rule for each host an emulator answers for.")
 	}
 
+	// Sandbox is the other mode a default cannot express, and for a worse
+	// reason than emulate's. The credential is named on a rule, a default
+	// names none, and the sidecar substitutes nothing when it has nothing to
+	// substitute: the request leaves exactly as the application wrote it,
+	// credential included, for whatever host it named. So a sandbox default is
+	// the allow default refused above, under a word that sounds safe, and it
+	// was accepted.
+	if e.Default == schema.ModeSandbox {
+		v.add("egress.default",
+			"The default egress mode is sandbox, and a default names no credential.",
+			"With no credential to substitute, a sandbox request leaves as the application wrote it, so a sandbox default "+
+				"reaches the whole internet exactly as allow would. Set the default to block and write a sandbox rule, "+
+				"with its credential, for each provider that has a sandbox.")
+	}
+
 	seen := map[string]int{}
 	for i := range e.Rules {
 		r := &e.Rules[i]
@@ -974,6 +989,26 @@ func (v *validator) egress(m *schema.Manifest) {
 			v.add(base+".host",
 				fmt.Sprintf("A rule matching every host is set to %s.", r.Mode),
 				"Only block may match everything. Name the hosts you want to reach.")
+		}
+		// The same reach one label down. *.com, *.co.uk and hooks.*.com each
+		// hold still only a suffix nobody owns, so the star is standing where
+		// the owner's name goes and the rule reaches names registered by
+		// anybody. That is the rule above arrived at by a different spelling,
+		// and it walked straight past it. A leading wildcard over one owner's
+		// domain is a different decision and is accepted, with its breadth
+		// stated wherever it is explained: see reach.go.
+		if r.Host != "*" && r.Mode != schema.ModeBlock && validHostPattern(r.Host) {
+			if got, domain := reachOf(r.Host); got == reachAnybody {
+				under := "under " + domain
+				if domain == "" {
+					under = "under every top level domain"
+				}
+				v.add(base+".host",
+					fmt.Sprintf("The host %q puts a star where the owner's name goes, so this %s rule reaches names %s registered by anybody at all.",
+						r.Host, r.Mode, under),
+					"Only block may reach that far, for the reason only block may match everything. "+
+						"Name the owner's domain, such as *.example.com, so the rule covers one owner's hosts.")
+			}
 		}
 		key := r.Host + "|" + strings.Join(r.Paths, ",") + "|" + strings.Join(r.Methods, ",")
 		if prev, dup := seen[key]; dup {
