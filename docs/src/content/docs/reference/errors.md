@@ -1412,7 +1412,7 @@ The candidate behaves differently from the baseline: {detail}
 
 The command '{command}' is not available in this version.
 
-**What to do.** See the roadmap for when it lands; 'af version' reports the version you are running.
+**What to do.** Run 'af --help' for the commands this binary carries and 'af version' for which build it is. 'af update' replaces it in place with the newest release, which may carry more.
 
 | | |
 | --- | --- |
