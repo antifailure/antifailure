@@ -495,9 +495,14 @@ workflows:
       # the checkout mutation REACHED THE HANDLER. Billing is configured in
       # this environment, so the mutation gets past the precondition, tries to
       # create a Stripe customer, and fails at api.stripe.com, which the egress
-      # policy does not allow. The control plane turns that into an internal
-      # error, and this is the fixed sentence its tRPC layer shows for one. It
-      # can only appear once the request is past the transport gate.
+      # policy does not allow. The Stripe client reports a connection that got
+      # no answer as a StripeError, and the checkout route turns that into this
+      # gateway refusal, which tells the buyer nothing was charged. It can only
+      # appear once the request is past the transport gate.
+      #
+      # It used to be the fixed internal error sentence, because the dropped
+      # connection reached the route as a bare TypeError. The first dogfood run
+      # after that changed failed here, which is this expectation doing its job.
       #
       # THE 403 PATH CANNOT PRODUCE IT. When the operator CSRF check wrongly
       # runs on this customer mutation, the gate refuses the request before the
@@ -513,7 +518,7 @@ workflows:
       # Quoted, so it is required character for character rather than by its
       # scattered words, and so its absence is a FAILURE rather than an
       # unverified result that would exit zero.
-      - '"Something went wrong on the control plane. Nothing was changed, and the reason is in its logs."'
+      - '"Stripe would not create a customer for this organization. Nothing was charged and nothing was changed."'
     tags: [billing, rbac, csrf]
 
   # The same failure in the other direction, which the founder hit next. An

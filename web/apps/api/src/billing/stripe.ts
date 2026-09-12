@@ -104,6 +104,33 @@ export interface StripeCheckoutSession {
   customerId: string | null
 }
 
+/**
+ * A checkout session read back, rather than one just created.
+ *
+ * A separate type from StripeCheckoutSession because the two answer different
+ * questions and only one of them can be trusted to have an address. A session
+ * that has been paid, or that has expired, carries no url at all, and the
+ * status is the field a caller has to branch on before it does anything with
+ * the rest. Stripe documents exactly three: open, complete and expired.
+ *
+ * `attemptId` is this control plane's own marker, carried in the session's
+ * metadata, and it is what makes a checkout recoverable. A response lost on the
+ * way back leaves a payable page at Stripe that nothing here has recorded, and
+ * the only way to tell that page apart from a stranger's is a name we put on it
+ * ourselves. See billing/checkout.ts.
+ */
+export interface StripeCheckoutState {
+  id: string
+  url: string | null
+  status: 'open' | 'complete' | 'expired'
+  customerId: string
+  /** The subscription a completed session created, when it created one. */
+  subscriptionId: string | null
+  /** The purchase attempt this session was opened for, or null for a session
+   *  opened before this control plane recorded attempts. */
+  attemptId: string | null
+}
+
 export interface StripeInvoice {
   id: string
   customerId: string
@@ -203,13 +230,58 @@ export interface StripeClient {
     successUrl: string
     cancelUrl: string
     /**
-     * Required, like every other write that can end in a charge. Stripe
-     * returns the first session for a repeated key, so two requests inside
-     * the caller's window open one hosted page rather than two. The caller
-     * decides the window; see checkoutIdempotencyKey in routers/subscriptions.
+     * The purchase attempt this session is for, and the only thing this method
+     * takes about idempotency.
+     *
+     * It is deliberately NOT a free text key. The attempt is both the
+     * idempotency key Stripe is sent and the marker written into the session's
+     * metadata, and a caller able to pass those separately is a caller able to
+     * pass two that disagree: a retry would then reach Stripe as a second
+     * request, and the page it opened could not be found again by the metadata
+     * either. One value, used for both, so they cannot drift.
+     *
+     * The attempt lives in billing_checkout_attempts, one row per organization,
+     * so it survives a browser retry, a second billing owner and a restart.
+     * See billing/checkout.ts.
      */
-    idempotencyKey: string
+    attemptId: string
   }): Promise<StripeCheckoutSession>
+
+  /**
+   * One checkout session read back, or null when Stripe says it has never heard
+   * of it.
+   *
+   * Null is a real answer and it is the safe direction: a session Stripe does
+   * not hold cannot be paid, so it cannot be the second charge. Anything else
+   * that goes wrong throws, because a read that authorises opening another
+   * payable page must not be able to fail quietly.
+   */
+  getCheckoutSession(id: string): Promise<StripeCheckoutState | null>
+
+  /**
+   * Every checkout session for this customer that can still be paid.
+   *
+   * This is the one call that can see a payable page nothing here recorded: one
+   * opened by a version of this control plane that kept no attempt row, or one
+   * whose creation response was lost. Both are pages a customer could still put
+   * a card into, so they have to be enumerable rather than inferred.
+   *
+   * Throws rather than returning a short list. An empty answer is read as "there
+   * is nothing else payable" and acted on by opening a new page, so a list that
+   * could silently omit a session would be the double charge it exists to
+   * prevent.
+   */
+  listOpenCheckoutSessions(customerId: string): Promise<StripeCheckoutState[]>
+
+  /**
+   * Makes one open session unpayable.
+   *
+   * Stripe expires only a session in the `open` status and refuses anything
+   * else, which is the behaviour this depends on: the refusal is how we learn
+   * that the page we were about to retire was paid while we were looking at it.
+   * See https://docs.stripe.com/api/checkout/sessions/expire
+   */
+  expireCheckoutSession(id: string): Promise<StripeCheckoutState>
 
   /** The hosted page somebody changes a plan, a card, or a cancellation on. */
   createPortalSession(input: { customerId: string; returnUrl: string }): Promise<{ url: string }>
@@ -238,6 +310,19 @@ export interface StripeClient {
   /** Every subscription Stripe holds for one customer. This is the recovery
    *  path when the creation webhook never arrived and no local row exists yet. */
   listSubscriptions(customerId: string, limit: number): Promise<StripeSubscription[]>
+
+  /**
+   * Every subscription this customer holds, or a throw.
+   *
+   * The strict sibling of listSubscriptions, for the one caller whose answer
+   * authorizes a charge: the checkout guard. listSubscriptions reads one page,
+   * answers [] for a 404 and skips a row it cannot read, which is right for a
+   * screen and is a double charge here, because each of those reads as "this
+   * customer has no subscription". So this follows every page, and a 404, a
+   * page that fails, a malformed page or an unreadable row of this customer's
+   * throws instead.
+   */
+  listSubscriptionsForPurchase(customerId: string): Promise<StripeSubscription[]>
 
   /** Cancels at the end of the paid period. */
   cancelSubscription(id: string): Promise<StripeSubscription>
@@ -360,11 +445,12 @@ export class RealStripeClient implements StripeClient {
     // two customers that both look real in the dashboard. Stripe returns the
     // first customer for a repeated key, so the retry converges instead.
     //
-    // The checkout session's key is different in kind: it carries a time
-    // bucket, because Stripe returns the SAME session for a repeated key and an
-    // organization that cancelled and came back a week later must not be sent
-    // to the page it walked away from. The customer's key carries none,
-    // because there is exactly one customer per organization forever.
+    // The checkout session's key is different in kind: it names a purchase
+    // ATTEMPT rather than the organization, because Stripe returns the same
+    // session for a repeated key and an organization that cancelled and came
+    // back a week later must not be sent to the page it walked away from. The
+    // customer's key carries no such qualifier, because there is exactly one
+    // customer per organization forever.
     return customerOf(await this.post('/v1/customers', body, `af-customer-${input.orgId}`))
   }
 
@@ -374,7 +460,7 @@ export class RealStripeClient implements StripeClient {
     orgId: string
     successUrl: string
     cancelUrl: string
-    idempotencyKey: string
+    attemptId: string
   }): Promise<StripeCheckoutSession> {
     const body = new URLSearchParams({
       mode: 'subscription',
@@ -393,8 +479,98 @@ export class RealStripeClient implements StripeClient {
       client_reference_id: input.orgId,
       'metadata[org_id]': input.orgId,
       'subscription_data[metadata][org_id]': input.orgId,
+      // The attempt, on the session itself, and it is not decoration. A
+      // creation whose response is lost leaves a payable page here and nothing
+      // recorded there, and this is the only field that tells that page apart
+      // from one belonging to a different purchase. listOpenCheckoutSessions
+      // reads it back.
+      'metadata[checkout_attempt]': input.attemptId,
     })
-    return checkoutOf(await this.post('/v1/checkout/sessions', body, input.idempotencyKey))
+    return checkoutOf(
+      await this.post('/v1/checkout/sessions', body, checkoutKey(input.attemptId)),
+    )
+  }
+
+  async getCheckoutSession(id: string): Promise<StripeCheckoutState | null> {
+    const found = await this.get(`/v1/checkout/sessions/${encodeURIComponent(id)}`)
+    if (found === null) return null
+    const state = checkoutStateOf(found)
+    // A session read back under another identifier is not the page that was
+    // asked about, so nothing may be decided from it.
+    if (state.id !== id) {
+      throw new StripeError(
+        `Stripe answered a request for checkout session ${id} with ${state.id}. No new purchase was started.`,
+      )
+    }
+    return state
+  }
+
+  async listOpenCheckoutSessions(customerId: string): Promise<StripeCheckoutState[]> {
+    const out: StripeCheckoutState[] = []
+    let cursor: string | null = null
+    // Bounded, because an unbounded loop against a third party is an outage
+    // waiting for a provider bug. A customer holds at most one open session in
+    // any state this control plane creates, so five pages of a hundred is four
+    // hundred and ninety nine more than the case that exists, and the refusal
+    // below is what happens rather than a quiet short list.
+    for (let page = 0; page < 5; page += 1) {
+      const query = new URLSearchParams({
+        customer: customerId,
+        // Stripe filters; the decoder checks again. A proxy or a simulator that
+        // ignored the filter would otherwise have this expiring a session that
+        // was already paid.
+        status: 'open',
+        limit: '100',
+      })
+      if (cursor) query.set('starting_after', cursor)
+      const body = await this.get(`/v1/checkout/sessions?${query.toString()}`)
+      // A collection that answers 404 is not "this customer has nothing". It is
+      // an answer this code will not translate into permission to open another
+      // payable page.
+      if (body === null || !Array.isArray(body.data) || typeof body.has_more !== 'boolean') {
+        throw new StripeError(
+          'Stripe did not answer with this customer\'s checkout sessions, so it is not known ' +
+            'whether one is already open. No new purchase was started.',
+        )
+      }
+      for (const item of body.data) {
+        if (item === null || typeof item !== 'object') {
+          throw new StripeError(
+            'Stripe returned a checkout session that cannot be read. No new purchase was started.',
+          )
+        }
+        // NOT skipped on failure, unlike listSubscriptions and listInvoices.
+        // Those render a screen, where one bad row must not empty the page.
+        // This decides whether another payable page may exist, so an element
+        // that cannot be read has to stop the operation instead.
+        //
+        // Another customer's session is passed over BEFORE the strict read. It
+        // cannot be this customer's second charge, so its shape must not be
+        // able to refuse this customer's purchase. Stripe filters on the
+        // customer already; a simulator that ignores the filter, as the
+        // engine's pack does, answers with every session it holds.
+        if (idOf((item as Record<string, unknown>).customer) !== customerId) continue
+        const session = checkoutStateOf(item as Record<string, unknown>)
+        if (session.customerId === customerId && session.status === 'open') out.push(session)
+      }
+      if (!body.has_more) return out
+      const last = body.data.at(-1) as { id?: unknown } | undefined
+      const next = text(last?.id)
+      if (!next || next === cursor) {
+        throw new StripeError('Stripe\'s checkout session pagination did not advance.')
+      }
+      cursor = next
+    }
+    throw new StripeError(
+      'This customer holds more open checkout sessions than this control plane will page ' +
+        'through. No new purchase was started.',
+    )
+  }
+
+  async expireCheckoutSession(id: string): Promise<StripeCheckoutState> {
+    return checkoutStateOf(
+      await this.post(`/v1/checkout/sessions/${encodeURIComponent(id)}/expire`, new URLSearchParams()),
+    )
   }
 
   async createPortalSession(input: {
@@ -451,6 +627,45 @@ export class RealStripeClient implements StripeClient {
       }
     }
     return out
+  }
+
+  async listSubscriptionsForPurchase(customerId: string): Promise<StripeSubscription[]> {
+    const out: StripeSubscription[] = []
+    let cursor: string | null = null
+    // Bounded for the reason listOpenCheckoutSessions is, and the bound is a
+    // refusal rather than a short list.
+    for (let page = 0; page < 5; page += 1) {
+      const query = new URLSearchParams({ customer: customerId, status: 'all', limit: '100' })
+      if (cursor) query.set('starting_after', cursor)
+      const body = await this.get(`/v1/subscriptions?${query.toString()}`)
+      if (body === null || !Array.isArray(body.data) || typeof body.has_more !== 'boolean') {
+        throw new StripeError(
+          'Stripe did not answer with this customer\'s subscriptions, so it is not known whether ' +
+            'one is already live. No new purchase was started.',
+        )
+      }
+      for (const item of body.data) {
+        if (item === null || typeof item !== 'object') {
+          throw new StripeError('Stripe returned a subscription that cannot be read. No new purchase was started.')
+        }
+        // Another customer's row cannot be this customer's live subscription, so
+        // its shape must not be able to refuse this purchase.
+        if (idOf((item as Record<string, unknown>).customer) !== customerId) continue
+        // NOT caught, unlike listSubscriptions: a row of this customer's that
+        // cannot be read may be the live subscription.
+        out.push(subscriptionOf(item as Record<string, unknown>))
+      }
+      if (!body.has_more) return out
+      const next = text((body.data.at(-1) as { id?: unknown } | undefined)?.id)
+      if (!next || next === cursor) {
+        throw new StripeError('Stripe\'s subscription pagination did not advance. No new purchase was started.')
+      }
+      cursor = next
+    }
+    throw new StripeError(
+      'This customer holds more subscriptions than this control plane will page through. No new ' +
+        'purchase was started.',
+    )
   }
 
   async cancelSubscription(id: string): Promise<StripeSubscription> {
@@ -618,12 +833,44 @@ export class RealStripeClient implements StripeClient {
     return this.config.fetch ?? globalThis.fetch
   }
 
+  /**
+   * The request itself, with a connection that failed turned into a StripeError
+   * that says so.
+   *
+   * Nothing used to produce the ambiguous case this class documents. A refusal
+   * Stripe MADE arrived as a StripeError with `answered` true, and a connection
+   * that dropped arrived as whatever fetch threw, which is a TypeError with no
+   * provider vocabulary in it at all. Every caller here branches on StripeError,
+   * so the dropped connection took the path meant for a programming mistake: the
+   * checkout route answered a buyer "something went wrong on the control plane"
+   * at the exact moment they most needed to be told that nothing was charged and
+   * that pressing again resumes the same purchase rather than starting a second.
+   *
+   * `answered` stays FALSE here, which is the whole point of the flag: no answer
+   * came back, so the request may have been executed and its response lost, and
+   * only a retry carrying the SAME idempotency key is safe. The underlying
+   * message is kept in the text because an operator reading a log needs to know
+   * whether this was a timeout, a refused connection or a hung socket.
+   */
+  private async reach(path: string, url: URL, init: RequestInit): Promise<Response> {
+    try {
+      return await this.call()(url, init)
+    } catch (err) {
+      if (err instanceof StripeError) throw err
+      throw new StripeError(
+        `Stripe did not answer ${path}: ${err instanceof Error ? err.message : String(err)}`,
+        null,
+        false,
+      )
+    }
+  }
+
   private async post(
     path: string,
     body: URLSearchParams,
     idempotencyKey?: string,
   ): Promise<Record<string, unknown>> {
-    const res = await this.call()(new URL(path, this.base()), {
+    const res = await this.reach(path, new URL(path, this.base()), {
       method: 'POST',
       headers: {
         authorization: `Bearer ${this.config.secretKey}`,
@@ -642,7 +889,7 @@ export class RealStripeClient implements StripeClient {
 
   /** Null for a 404, which several callers treat as an answer. */
   private async get(path: string): Promise<Record<string, unknown> | null> {
-    const res = await this.call()(new URL(path, this.base()), {
+    const res = await this.reach(path, new URL(path, this.base()), {
       headers: {
         authorization: `Bearer ${this.config.secretKey}`,
         'stripe-version': STRIPE_API_VERSION,
@@ -776,6 +1023,56 @@ function checkoutOf(body: Record<string, unknown>): StripeCheckoutSession {
     throw new StripeError('Stripe returned a checkout session with no address to send anybody to.')
   }
   return { id, url, status: text(body.status) ?? 'open', customerId: idOf(body.customer) }
+}
+
+/** The idempotency key one purchase attempt reaches Stripe under. Exported for
+ *  the test that asserts what is actually sent, and derived in one place so the
+ *  key and the metadata on the session can never name different attempts. */
+export function checkoutKey(attemptId: string): string {
+  return `af-checkout-${attemptId}`
+}
+
+/**
+ * A session read back, strictly.
+ *
+ * Strict where the rest of this file is tolerant, and the asymmetry is the
+ * point: every other decoder here feeds a screen, where refusing a response
+ * means an outage over a field nobody reads. This one decides whether a second
+ * payable page may be opened for somebody's card, so a status this code does not
+ * recognise, a missing customer or an `open` session with no address is a
+ * refusal rather than a guess. Guessing in the tolerant direction here means
+ * treating a real, payable page as though it were not there.
+ */
+function checkoutStateOf(body: Record<string, unknown>): StripeCheckoutState {
+  const id = text(body.id)
+  const customerId = idOf(body.customer)
+  const status = text(body.status)
+  const url = text(body.url)
+  if (
+    !id ||
+    !customerId ||
+    status === null ||
+    !['open', 'complete', 'expired'].includes(status) ||
+    (status === 'open' && !url)
+  ) {
+    throw new StripeError(
+      `Stripe returned a checkout session whose state cannot be verified (${id ?? 'no id'}, ` +
+        `${status ?? 'no status'}). No new purchase was started.`,
+    )
+  }
+  const metadata = body.metadata
+  const attemptId =
+    metadata !== null && typeof metadata === 'object'
+      ? text((metadata as Record<string, unknown>).checkout_attempt)
+      : null
+  return {
+    id,
+    url,
+    status: status as StripeCheckoutState['status'],
+    customerId,
+    subscriptionId: idOf(body.subscription),
+    attemptId,
+  }
 }
 
 export function subscriptionOf(body: Record<string, unknown>): StripeSubscription {

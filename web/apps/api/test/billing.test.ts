@@ -45,7 +45,6 @@ import {
 } from '../src/billing/webhook.ts'
 import { PLANS, planForPrice, planForStatus, stripeConfigFrom } from '../src/billing/plans.ts'
 import { RealStripeClient, invoiceOf, subscriptionOf } from '../src/billing/stripe.ts'
-import { checkoutIdempotencyKey } from '../src/routers/subscriptions.ts'
 import {
   available, startApi, seedOrg, signInAs, callProcedure, errorCode, dropOrg,
   stripeAgainstMockPack, type ApiHarness, type Org, type SignedIn,
@@ -863,7 +862,7 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
     const created = await billing.client.createCheckoutSession({
       customerId, priceId: 'price_team_afmock', orgId: o.orgId,
       successUrl: 'https://app.test/ok', cancelUrl: 'https://app.test/no',
-      idempotencyKey: `af-test-${o.orgId}`,
+      attemptId: randomUUID(),
     })
     assert.ok(created.url.endsWith(created.id), 'the checkout url does not name its own session')
 
@@ -1123,7 +1122,7 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
     const { org: o } = await freshOrg('idem')
     const session = await signInAs(h, o, 'owner')
 
-    const seen: { path: string; key: string | null }[] = []
+    const seen: { method: string; path: string; key: string | null }[] = []
     const watched = await stripeAgainstMockPack()
     const underneath = watched.config.fetch!
     const spy = await startApi({
@@ -1134,38 +1133,57 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
           fetch: async (input, init) => {
             const url = new URL(input instanceof Request ? input.url : String(input))
             const headers = new Headers(init?.headers)
-            seen.push({ path: url.pathname, key: headers.get('idempotency-key') })
+            seen.push({
+              method: (init?.method ?? 'GET').toUpperCase(),
+              path: url.pathname,
+              key: headers.get('idempotency-key'),
+            })
             return underneath(input, init)
           },
         }),
       },
     })
     const spyOrg = await seedOrg(spy.admin, 'idemspy')
-    const spySession = await signInAs(spy, spyOrg, 'owner')
+    // In finally, so a red assertion below reports and lets the file end. Before
+    // this, a failing key assertion skipped both lines, and this second server
+    // and its pool held the process open after every test had finished, which
+    // is a hang in CI rather than a failure anybody can read.
+    try {
+      const spySession = await signInAs(spy, spyOrg, 'owner')
 
-    const { status } = await callProcedure(spy, spySession, 'subscriptions.checkout', 'mutation', {
-      plan: 'team',
-      successUrl: 'https://app.test/ok', cancelUrl: 'https://app.test/no',
-    })
-    assert.equal(status, 200)
+      const { status } = await callProcedure(spy, spySession, 'subscriptions.checkout', 'mutation', {
+        plan: 'team',
+        successUrl: 'https://app.test/ok', cancelUrl: 'https://app.test/no',
+      })
+      assert.equal(status, 200)
 
-    const customerCall = seen.find((c) => c.path === '/v1/customers')
-    assert.ok(customerCall, 'no customer was created')
-    assert.equal(customerCall.key, `af-customer-${spyOrg.orgId}`)
+      const customerCall = seen.find((c) => c.path === '/v1/customers')
+      assert.ok(customerCall, 'no customer was created')
+      assert.equal(customerCall.key, `af-customer-${spyOrg.orgId}`)
 
-    // And on the checkout session, keyed on the organization, the plan and a
-    // thirty second bucket. This asserted the key was ABSENT, on the reasoning
-    // that Stripe returns the same session for a repeated key and a cancelled
-    // organization coming back would be sent to a stale page forever. The
-    // bucket is what makes both true: two requests inside the same half
-    // minute, which is a double click or two owners on one call, open one
-    // hosted page, and a return an hour later gets a fresh one.
-    const sessionCall = seen.find((c) => c.path === '/v1/checkout/sessions')
-    assert.ok(sessionCall, 'no checkout session was opened')
-    assert.equal(sessionCall.key, checkoutIdempotencyKey(spyOrg.orgId, 'team', spy.clock.now()))
+      // And on the checkout session, naming the purchase ATTEMPT.
+      //
+      // This asserted a key built from the organization, the plan and a thirty
+      // second clock bucket, and before that it asserted the key was absent
+      // altogether. Both were attempts to answer "which requests are the same
+      // request" with arithmetic on the clock, and a minute between two billing
+      // owners was enough to make the answer wrong and the customer pay twice.
+      // The attempt row is the answer now, so the key is whatever that row says
+      // and the assertion reads it from the database rather than recomputing it.
+      // The POST, by method. The checkout now LISTS this customer's open sessions
+      // at the same path before it creates one, and a read carries no key, so
+      // matching on the path alone reads the listing and reports a missing key.
+      const sessionCall = seen.find((c) => c.method === 'POST' && c.path === '/v1/checkout/sessions')
+      assert.ok(sessionCall, 'no checkout session was opened')
+      const [attempt] = await spy.admin<{ attempt_id: string }[]>`
+        SELECT attempt_id FROM billing_checkout_attempts WHERE org_id = ${spyOrg.orgId}`
+      assert.ok(attempt, 'the checkout recorded no purchase attempt for this organization')
+      assert.equal(sessionCall.key, `af-checkout-${attempt.attempt_id}`)
 
-    await dropOrg(spy.admin, spyOrg.orgId)
-    await spy.close()
+    } finally {
+      await dropOrg(spy.admin, spyOrg.orgId)
+      await spy.close()
+    }
     await dropOrg(h.admin, o.orgId)
     void session
   })
@@ -1836,6 +1854,10 @@ describe('checkout asks Stripe before it opens a session', {
     return (body as { error?: { message?: string } }).error?.message ?? ''
   }
 
+  function sessionOf(body: unknown): string | null {
+    return (body as { result?: { data?: { sessionId?: string } } }).result?.data?.sessionId ?? null
+  }
+
   it('an active subscription Stripe holds and this database does not: refused, named, and written down', async () => {
     const { org, customerId, owner } = await returningBuyer('guard-active', (customerId) => [
       subscriptionObject({ id: 'sub_guard_active', customer: customerId, status: 'active' }),
@@ -1953,24 +1975,35 @@ describe('checkout asks Stripe before it opens a session', {
     assert.equal(sessionsOpenedSince(mark), 0, 'a session was opened while Stripe could not be asked')
   })
 
-  it('two checkouts inside one half minute carry the same idempotency key, and the next half minute a new one', async () => {
+  it('a second press half a minute later reopens the same page rather than a second payable one', async () => {
+    // The defect this file pinned the WRONG WAY for two revisions. It used to
+    // assert that a press in the next thirty second bucket reached Stripe with
+    // a different key, which is exactly the behaviour that gave two billing
+    // owners a payable page each. What has to be true is about pages rather
+    // than keys: however many times Subscribe is pressed and however far apart,
+    // this organization has one page that can take a card.
     const { org, owner } = await returningBuyer('guard-key', (customerId) => [])
     const mark = posted.length
     const first = await callProcedure(h, owner, 'subscriptions.checkout', 'mutation', buy)
-    const second = await callProcedure(h, owner, 'subscriptions.checkout', 'mutation', buy)
-    assert.equal(first.status, 200)
-    assert.equal(second.status, 200)
-    const keys = posted.slice(mark).filter((p) => p.path === '/v1/checkout/sessions').map((p) => p.key)
-    assert.equal(keys.length, 2)
-    assert.equal(keys[0], checkoutIdempotencyKey(org.orgId, 'team', h.clock.now()))
-    assert.equal(keys[0], keys[1], 'a double click inside the bucket reached Stripe as two different requests')
-    assert.ok(keys[0]!.startsWith(`af-checkout-${org.orgId}-team-`), `the key is not scoped to the organization: ${keys[0]}`)
+    assert.equal(first.status, 200, JSON.stringify(first.body))
 
-    h.clock.advance(30 * 1000)
-    const later = await callProcedure(h, owner, 'subscriptions.checkout', 'mutation', buy)
-    assert.equal(later.status, 200)
-    const next = posted.at(-1)!
-    assert.equal(next.path, '/v1/checkout/sessions')
-    assert.notEqual(next.key, keys[0], 'a return in the next bucket was pinned to the old session')
+    h.clock.advance(60 * 1000)
+    const second = await callProcedure(h, owner, 'subscriptions.checkout', 'mutation', buy)
+    assert.equal(second.status, 200, JSON.stringify(second.body))
+
+    const opened = posted.slice(mark).filter((p) => p.path === '/v1/checkout/sessions')
+    assert.equal(
+      opened.length,
+      1,
+      `${opened.length} checkout sessions were created a minute apart, so two pages are payable`,
+    )
+    const [attempt] = await h.admin<{ attempt_id: string }[]>`
+      SELECT attempt_id FROM billing_checkout_attempts WHERE org_id = ${org.orgId}`
+    assert.equal(opened[0]!.key, `af-checkout-${attempt!.attempt_id}`)
+    assert.equal(
+      sessionOf(second.body),
+      sessionOf(first.body),
+      'the second press was sent to a different checkout page',
+    )
   })
 })

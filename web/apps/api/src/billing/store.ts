@@ -208,6 +208,11 @@ export async function reconcile(
     customer: await db.execute<{ stripe_customer_id: string }>(sql`
       SELECT stripe_customer_id FROM billing_customers WHERE org_id = ${orgId}::uuid`),
   }))
+  const attempt = await pool.withTenant({ orgId }, (db) =>
+    db.execute<{ attempt_id: string; stripe_session_id: string | null }>(sql`
+      SELECT attempt_id, stripe_session_id FROM billing_checkout_attempts
+      WHERE org_id = ${orgId}::uuid`),
+  )
   const customerId = read.customer[0]?.stripe_customer_id
   if (!customerId) {
     return { checked: 0, changed: 0, notes: ['this organization has no Stripe customer'] }
@@ -233,9 +238,37 @@ export async function reconcile(
       })),
   ])
 
+  // The checkout attempt, asked about OUTSIDE the transaction. A recorded page
+  // Stripe answers 404 for makes checkout refuse (billing/checkout.ts), and
+  // this is the button that refusal names. The customer read above already
+  // proved this account holds the customer, so a 404 for the page is a page
+  // this account cannot take a payment on.
+  const recorded = attempt[0]
+  const forgotten = recorded?.stripe_session_id
+    ? await client
+        .getCheckoutSession(recorded.stripe_session_id)
+        .then((session) => session === null)
+        .catch(() => false)
+    : false
+
   return pool.withTenant({ orgId }, async (db) => {
     const notes: string[] = []
     let changed = 0
+    if (forgotten && recorded && !subscriptions.error) {
+      // Compare and set on the attempt this read saw, so a checkout that moved
+      // on in the meantime is not undone. A fresh attempt with no session is
+      // what the next press claims, sweeps and opens.
+      const retired = await db.execute(sql`
+        UPDATE billing_checkout_attempts
+        SET attempt_id = gen_random_uuid(), stripe_session_id = NULL, updated_at = ${clock.now().toISOString()}
+        WHERE org_id = ${orgId}::uuid AND attempt_id = ${recorded.attempt_id}::uuid
+          AND stripe_session_id = ${recorded.stripe_session_id}
+        RETURNING attempt_id`)
+      if (retired.length > 0) {
+        changed += 1
+        notes.push('a checkout Stripe has no record of was cleared, so the next Subscribe opens a new one')
+      }
+    }
     if (subscriptions.error) {
       notes.push(`subscriptions could not be read from Stripe (${subscriptions.error})`)
     }

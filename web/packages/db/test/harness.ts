@@ -313,6 +313,14 @@ export async function seedTenant(admin: postgres.Sql, label: string): Promise<Fi
   await admin`
     INSERT INTO billing_customers (org_id, stripe_customer_id, email)
     VALUES (${orgId}, ${customerId}, ${`billing@${slug}.test`})`
+  // A purchase attempt per tenant, so the generic read and write loops in
+  // tenancy.test.ts cover the table that decides whether a second payable
+  // checkout may be opened, rather than passing over it as an empty table.
+  await admin`
+    INSERT INTO billing_checkout_attempts
+      (org_id, stripe_customer_id, price_id, success_url, cancel_url, stripe_session_id)
+    VALUES (${orgId}, ${customerId}, 'price_team_seed', ${`https://${slug}.test/plan?checkout=success`},
+            ${`https://${slug}.test/plan`}, ${`cs_seed_${slug}`})`
   await admin`
     INSERT INTO payment_methods (
       org_id, stripe_payment_method_id, stripe_customer_id, brand, last4,

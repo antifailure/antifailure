@@ -61,6 +61,9 @@ tenant isolation and entitlement enforcement suites remain required.
 
 This repair does not claim to prevent a second Stripe checkout session. That
 requires a separate durable reservation and provider idempotency lifecycle.
+That reservation is `billing_checkout_attempts`, added by migration 0045, and its
+lifecycle is `web/apps/api/src/billing/checkout.ts`, with every checkout ordering
+proven in `web/apps/api/test/checkout-lifecycle.test.ts`.
 It makes no live charges and does not change Stripe account settings.
 
 Provider references:

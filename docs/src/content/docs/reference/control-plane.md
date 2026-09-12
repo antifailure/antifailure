@@ -239,6 +239,12 @@ Stripe for every subscription belonging to that customer and repairs the same
 state when a webhook never arrives, including the case where no local
 subscription row exists yet.
 
+It also clears a checkout that cannot be paid. If Subscribe is refused because
+Stripe has no record of the checkout this organization already opened,
+**Refresh from Stripe** asks Stripe for that checkout. When Stripe still has no
+record of it, the stale checkout is cleared and the next Subscribe opens a new
+one. Nothing is charged by either step.
+
 ## What role somebody gets
 
 The role comes from GitHub, read at sign-in with an installation token: an
