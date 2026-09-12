@@ -40,6 +40,48 @@ The first source that has the value wins. The order is the point: a temporary
 override beats a file, and a file beats a stored default, which is what makes
 "try it with a different key" a one line thing.
 
+## One name, two services
+
+Two services can need different values for one variable name. Supabase's
+`storage` and `supavisor` both read `DATABASE_URL` and each needs a different
+connection string. Both are credentials, so neither can be a literal in the
+manifest, and a lookup by name alone could only ever hand both services the
+same one.
+
+`scope: service` says the value is this service's own:
+
+```yaml
+services:
+  - name: storage
+    env:
+      - name: DATABASE_URL
+        scope: service
+  - name: supavisor
+    env:
+      - name: DATABASE_URL
+        scope: service
+```
+
+The value is then looked up under the service's name in capitals, two
+underscores, then the variable, so those two are stored as
+`STORAGE__DATABASE_URL` and `SUPAVISOR__DATABASE_URL`. Every source can hold a
+name of that shape, including the enterprise secret stores, and the order above
+is unchanged: the shell is still asked first, then `.env`, then the local store,
+then the keyring.
+
+A scoped variable is looked up under the scoped name only, and does not fall
+back to the bare one, because a single bare value is what cannot be right for
+both services. `af explain` names the service beside each value it is one
+service's own, and a value nothing supplies is reported under the scoped name,
+so the message says the name to set rather than the name the service reads.
+
+A sandbox credential cannot be scoped. The proxy holds one value per credential
+for the whole environment and substitutes it into every request to that provider
+whichever service sent it, so there is no value it could use for two, and
+choosing one would hand a service another service's key. Two services reading
+one sandbox credential from different places is refused with AF-SEC-007, which
+names the variable and the services.
+
 ## Nothing found
 
 ```
