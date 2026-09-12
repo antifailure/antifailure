@@ -1,3 +1,4 @@
+// Not MIT. Covered by the Antifailure Enterprise License; see ee/LICENSE.md.
 package aurora
 
 import (
