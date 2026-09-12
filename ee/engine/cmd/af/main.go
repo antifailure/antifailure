@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/antifailure/antifailure/ee/engine/compliance"
+	"github.com/antifailure/antifailure/ee/engine/db/rds"
 	"github.com/antifailure/antifailure/ee/engine/feature"
 	"github.com/antifailure/antifailure/ee/engine/license"
 	"github.com/antifailure/antifailure/ee/engine/policyenforce"
@@ -95,6 +96,18 @@ func main() {
 			fmt.Fprintf(os.Stderr, "af: secret source: %s\n", line)
 		}
 	}
+
+	// The database providers this edition adds, plugged into the same registry.
+	// A manifest naming one reaches it through the default arm of the engine's
+	// own provider switch, which consults the registry after every built-in
+	// provider and never before them, so a registration adds a provider and can
+	// never take one over.
+	//
+	// This line is the whole difference between a provider that exists and a
+	// provider that runs, which is the gap this file's header was written
+	// about: ee/engine/db/rds is written, tested against a fake RDS control
+	// plane over a real Postgres, and reachable by nothing at all without it.
+	rds.Register(extension.Default)
 
 	// The organization policy, plugged into the same registry and refused at
 	// startup for the same reason. This registration is the whole of what the

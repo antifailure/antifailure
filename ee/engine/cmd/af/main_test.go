@@ -169,3 +169,78 @@ func TestAnUnreadablePolicyStopsTheBinary(t *testing.T) {
 	require.Equal(t, 3, exit.ExitCode())
 	require.Contains(t, stderr.String(), "AF_ORG_POLICY_FILE")
 }
+
+// The database providers this edition adds, proved by the observable
+// difference rather than by the presence of a line.
+//
+// A provider written and not registered is dead code that looks like a
+// feature, and it is the exact gap main.go's own header was written about. The
+// proof cannot be a unit test of the provider package, because the provider
+// package would pass whether or not anything constructed it; and it cannot be
+// a grep for the registration, because a grep proves a line exists and not
+// that anything reaches it.
+//
+// So this runs the binary a customer runs against a manifest naming the
+// provider, and reads which of two refusals comes back. Both are refusals and
+// that is the point: they are different sentences, produced at different
+// places, and only one of them is reachable when the registration is there.
+//
+//   - unregistered: the engine's own switch falls through to a registry that
+//     has nothing under that name, and AF-MAN-002 says the build does not have
+//     it, listing the five it does.
+//   - registered: the registry hands back the provider, its Open runs, and it
+//     refuses for its own reason, which is that the region resolved to
+//     nothing.
+//
+// Deleting the registration line turns the second into the first, which is
+// what makes this a check rather than a description.
+func TestTheBinaryRegistersTheEnterpriseDatabaseProviders(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		provider string
+		// reached is a phrase only the provider's own refusal can produce.
+		reached string
+	}{
+		{"rds", "AWS_REGION"},
+	} {
+		t.Run(tc.provider, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			manifest := "version: 1\n" +
+				"name: registration-check\n" +
+				"services:\n" +
+				"  - name: api\n" +
+				"    kind: web\n" +
+				"    path: .\n" +
+				"    port: 3000\n" +
+				"    health_path: /health\n" +
+				"database:\n" +
+				"  provider: " + tc.provider + "\n" +
+				"  project: acme-production\n"
+			require.NoError(t, os.WriteFile(filepath.Join(root, "antifailure.yaml"),
+				[]byte(manifest), 0o644))
+
+			cmd := exec.Command(enterpriseBinary(t), "-C", root, "golden", "list")
+			// A clean environment for the one variable the provider reads
+			// through the engine's chain, so that a machine which happens to
+			// export AWS_REGION does not turn this test green for the wrong
+			// reason.
+			cmd.Env = append(os.Environ(), "GOWORK=off", "AWS_REGION=", "AWS_DEFAULT_REGION=")
+			var out strings.Builder
+			cmd.Stdout = &out
+			cmd.Stderr = &out
+			_ = cmd.Run()
+			text := out.String()
+
+			require.NotContains(t, text, "which this build does not have",
+				"the manifest named %q and the engine fell through to a registry that has "+
+					"nothing under that name. The provider is written and nothing "+
+					"constructs it, which is a shippable gap that looks like a "+
+					"feature.\n%s", tc.provider, text)
+			require.Contains(t, text, tc.reached,
+				"the provider was reached and refused for some other reason than its "+
+					"own, so this test is no longer reading what it thinks it is.\n%s", text)
+		})
+	}
+}

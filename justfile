@@ -558,6 +558,13 @@ benchmark:
     # AF_TEST_CLICKHOUSE_URL, it starts the machine's managed server.
     AF_BENCHMARK=1 go test ./internal/datastore/clickhouse -run TestBenchmarkEventsInTheTwin \
       -v -count=1 -timeout 60m
+    # The RDS provider, which is the same question again and answers half of it
+    # with a refusal. A snapshot restore's wall clock is AWS provisioning an
+    # instance and hydrating a volume, neither of which happens here, so the
+    # report prints UNMEASURED for the numbers the table wants and measures the
+    # control plane work instead. It is in the enterprise module, which is not
+    # in the workspace, so it runs from its own directory.
+    (cd ../ee/engine && AF_BENCHMARK=1 go test ./db/rds -run TestBenchmark -v -count=1 -timeout 60m)
     # What one documentation answer costs an agent, against what the whole
     # documentation set would cost it. It is the one benchmark here that needs
     # no database, no daemon and no network: the corpus is compiled into the
