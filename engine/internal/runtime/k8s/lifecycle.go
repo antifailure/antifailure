@@ -35,13 +35,11 @@ func emulatorList(specs []provider.EmulatorSpec) string {
 // Up creates the environment and returns once every service that declares
 // readiness has answered.
 //
-// The order is the containment argument, so it is worth reading as one. The
-// namespace and its policies come first, because a pod that started before the
-// policy that contains it has already had a window in which it could reach
-// anything. The escape probe comes next, before a single service image runs,
-// because a cluster whose CNI ignores NetworkPolicy accepts every object here
-// and enforces none of them, and there is no later moment at which that would
-// be discovered. Only then does the sidecar start, and only then the services.
+// The namespace and policies come first, then the trusted sidecar and the
+// trusted namespace preflight. Each customer pod additionally runs its own
+// trusted init gate, because policy has to be installed for that pod before
+// any customer process starts. A preflight in another pod cannot establish
+// that ordering for a new replica.
 func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, error) {
 	if spec.EnvID == "" {
 		return provider.Env{}, aferrors.Coded(aferrors.AFRUN040, "detail", "the environment has no id")
@@ -129,36 +127,11 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 	}
 	env.ProxyReady = true
 
-	// AFTER the sidecar and before any service image, and the order is the
-	// whole value of the check.
-	//
-	// It ran before the sidecar until a run caught it out. The rule that lets
-	// a service out at all is `af-service-egress-to-proxy`, whose peer list is
-	// a pod selector for the sidecar, and with no sidecar in the namespace
-	// that selector matches nothing. So the probe was governed by default-deny
-	// alone: it proved that a pod with NO egress allowance cannot escape,
-	// which is a question nobody was asking, while the rule a service actually
-	// runs under was never exercised.
-	//
-	// That is not hypothetical. On k3s the conformance suite caught a service
-	// reaching 1.1.1.1 on UDP 53 and getting the real public answer back,
-	// minutes after this probe had passed on the same cluster. Moving the
-	// probe here is what stopped it.
-	//
-	// What that proves and what it does not: the escape needed the rule to be
-	// present, and it went away once the probe ran with the rule present and
-	// looped until nothing got out. So the window is around the rule becoming
-	// real for a namespace that has just acquired a sidecar, and this probe
-	// now absorbs it before any service exists. Whether the CNI is briefly
-	// permissive or permanently loose about the destination on that port is
-	// NOT established here, and the difference does not change what to do:
-	// the probe has to run under the rule set a service runs under, and it has
-	// to keep asking until the answer stops changing.
-	//
-	// The sidecar having started first costs nothing that matters. It is one
-	// pod of ours, it is torn down with the namespace, and the promise this
-	// check exists to keep is that no SERVICE image runs on a cluster that
-	// does not contain it.
+	// The preflight needs the real sidecar as its positive network control.
+	// Running it earlier once measured default-deny alone, before the policy
+	// that permits the sidecar had a destination. A real UDP escape exposed
+	// that false assurance. The preflight now uses the service rule set, and
+	// every subsequent customer pod has its own gate for CNI startup there.
 	if !r.skipContainmentCheck {
 		if err := r.verifyContainment(ctx, spec, namespace, resolver, progress); err != nil {
 			return env, err
@@ -495,6 +468,11 @@ func (r *Runtime) startService(
 		}, want, timeout, s.Name); err != nil {
 			return running, err
 		}
+		if running.URL != "" {
+			if err := r.probeIngress(ctx, running.URL, s.HealthPath, timeout); err != nil {
+				return running, aferrors.Coded(aferrors.AFRUN004, "service", s.Name, "timeout", timeout.Round(time.Second).String(), "health", err.Error())
+			}
+		}
 		running.Ready = true
 		running.State = "running"
 		return running, nil
@@ -536,34 +514,107 @@ func (r *Runtime) startService(
 func (r *Runtime) waitForInstances(
 	ctx context.Context, namespace string, s provider.ServiceSpec, want int, timeout time.Duration,
 ) error {
-	deadline := time.Now().Add(timeout)
+	return r.waitForWorkerInstances(ctx, namespace, s, want, timeout, 0)
+}
+
+// waitForWorkerInstances counts observed application states, never scheduled
+// objects. A normal init must have completed successfully first. A short
+// observation period for a single worker retains early-crash detection after
+// the application starts, rather than spending that period on a pending pod.
+func (r *Runtime) waitForWorkerInstances(
+	ctx context.Context, namespace string, s provider.ServiceSpec, want int,
+	timeout, observe time.Duration,
+) error {
+	if want < 1 {
+		want = 1
+	}
+	if timeout <= 0 {
+		timeout = DefaultReadyTimeout
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	var readySince time.Time
+	var previous string
+	started := 0
+	last := "no pod was scheduled"
+	timeoutError := func() error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return aferrors.Coded(aferrors.AFRUN004, "service", s.Name,
+			"timeout", timeout.Round(time.Second).String(),
+			"health", fmt.Sprintf("%d of %d instances started: %s", started, want, last))
+	}
 	for {
-		pods, err := r.cli.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+		if waitCtx.Err() != nil {
+			return timeoutError()
+		}
+		pods, err := r.cli.CoreV1().Pods(namespace).List(waitCtx, metav1.ListOptions{
 			LabelSelector: LabelService + "=" + s.Name,
 		})
 		if err != nil {
+			if waitCtx.Err() != nil {
+				return timeoutError()
+			}
 			return aferrors.Wrap(err, aferrors.AFRUN002, "endpoint", r.rest.Host)
 		}
+		started, last = 0, "no pod was scheduled"
+		completed := 0
+		var identities []string
 		for _, pod := range pods.Items {
 			if code, ok := exitCodeOf(pod); ok && code != 0 {
 				return aferrors.Coded(aferrors.AFRUN005,
 					"service", s.Name, "code", strconv.Itoa(code))
 			}
+			if running, done := applicationStarted(pod); running || done {
+				started++
+				if done {
+					completed++
+				}
+				identities = append(identities, pod.Name+"/"+string(pod.UID))
+			} else {
+				last = podTrouble(pod)
+			}
 		}
-		if len(pods.Items) >= want {
-			return nil
+		sort.Strings(identities)
+		identity := strings.Join(identities, ",")
+		if waitCtx.Err() != nil {
+			return timeoutError()
 		}
-		if time.Now().After(deadline) {
-			return aferrors.Coded(aferrors.AFRUN004,
-				"service", s.Name, "timeout", timeout.Round(time.Second).String(),
-				"health", fmt.Sprintf("%d of %d instances were scheduled", len(pods.Items), want))
+		if started >= want {
+			if readySince.IsZero() || previous != identity {
+				readySince = time.Now()
+			}
+			if completed >= want || time.Since(readySince) >= observe {
+				return nil
+			}
+			last = "observing the started application for an immediate exit"
+		} else {
+			readySince = time.Time{}
 		}
+		previous = identity
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(time.Second):
+		case <-waitCtx.Done():
+			return timeoutError()
+		case <-time.After(250 * time.Millisecond):
 		}
 	}
+}
+
+func applicationStarted(pod corev1.Pod) (running, completed bool) {
+	if pod.DeletionTimestamp != nil || (pod.Status.Phase != corev1.PodRunning && pod.Status.Phase != corev1.PodSucceeded) {
+		return false, false
+	}
+	if ready, _ := initContainersReady(pod); !ready {
+		return false, false
+	}
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.Name != "app" {
+			continue
+		}
+		return cs.State.Running != nil, cs.State.Terminated != nil && cs.State.Terminated.ExitCode == 0
+	}
+	return false, false
 }
 
 // runMigration runs the migration Job to completion and fails if it did not
@@ -635,27 +686,11 @@ func (r *Runtime) jobExitCode(ctx context.Context, namespace, job string) int {
 // confirmStarted reports a service that has already exited rather than
 // counting it as running.
 func (r *Runtime) confirmStarted(ctx context.Context, namespace string, s provider.ServiceSpec) error {
-	// One look after a moment, not a wait. A worker that is going to fail
-	// immediately has done so by now, and a worker that is going to run for a
-	// week looks the same either way.
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(2 * time.Second):
+	timeout := s.HealthTimeout
+	if timeout <= 0 {
+		timeout = r.readyWait
 	}
-	pods, err := r.cli.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: LabelService + "=" + s.Name,
-	})
-	if err != nil {
-		return nil
-	}
-	for _, pod := range pods.Items {
-		if code, ok := exitCodeOf(pod); ok && code != 0 {
-			return aferrors.Coded(aferrors.AFRUN005,
-				"service", s.Name, "code", strconv.Itoa(code))
-		}
-	}
-	return nil
+	return r.waitForWorkerInstances(ctx, namespace, s, 1, timeout, 2*time.Second)
 }
 
 // waitForPods blocks until at least want pods matching the selector are ready.
@@ -729,6 +764,9 @@ func selectorString(selector map[string]string) string {
 }
 
 func podReady(pod corev1.Pod) bool {
+	if ready, _ := initContainersReady(pod); !ready || pod.DeletionTimestamp != nil {
+		return false
+	}
 	if pod.Status.Phase != corev1.PodRunning {
 		return false
 	}
@@ -747,6 +785,9 @@ func podReady(pod corev1.Pod) bool {
 // pod that cannot be scheduled, and both look identical from outside as a wait
 // that never finishes.
 func podTrouble(pod corev1.Pod) string {
+	if ready, detail := initContainersReady(pod); !ready {
+		return detail
+	}
 	for _, cs := range pod.Status.ContainerStatuses {
 		if cs.State.Waiting != nil && cs.State.Waiting.Reason != "" {
 			return fmt.Sprintf("%s: %s", cs.State.Waiting.Reason, cs.State.Waiting.Message)
@@ -758,6 +799,48 @@ func podTrouble(pod corev1.Pod) string {
 		}
 	}
 	return string(pod.Status.Phase)
+}
+
+// A restartable init sidecar stays running instead of terminating. Its Started
+// signal means its startup probe passed; a declared readiness probe also has
+// to pass. Ordinary init containers, including the network gate, must exit 0.
+func initContainersReady(pod corev1.Pod) (bool, string) {
+	for _, init := range pod.Spec.InitContainers {
+		var status *corev1.ContainerStatus
+		for i := range pod.Status.InitContainerStatuses {
+			if pod.Status.InitContainerStatuses[i].Name == init.Name {
+				status = &pod.Status.InitContainerStatuses[i]
+				break
+			}
+		}
+		if status == nil {
+			return false, "init " + init.Name + " has not started"
+		}
+		if init.RestartPolicy != nil && *init.RestartPolicy == corev1.ContainerRestartPolicyAlways {
+			// Kubernetes stops restartable sidecars after successful job
+			// completion; their shutdown exit code does not fail the job.
+			if pod.Status.Phase == corev1.PodSucceeded && status.State.Terminated != nil {
+				continue
+			}
+			if status.State.Running != nil && status.Started != nil && *status.Started && (init.ReadinessProbe == nil || status.Ready) {
+				continue
+			}
+		} else if status.State.Terminated != nil && status.State.Terminated.ExitCode == 0 {
+			continue
+		}
+		failed := status.State.Terminated
+		if failed == nil {
+			failed = status.LastTerminationState.Terminated
+		}
+		if failed != nil && failed.ExitCode != 0 {
+			return false, fmt.Sprintf("init %s exited %d: %s %s", init.Name, failed.ExitCode, failed.Reason, strings.TrimSpace(failed.Message))
+		}
+		if waiting := status.State.Waiting; waiting != nil {
+			return false, fmt.Sprintf("init %s: %s %s", init.Name, waiting.Reason, waiting.Message)
+		}
+		return false, "init " + init.Name + " has not completed startup"
+	}
+	return true, ""
 }
 
 // exitCodeOf reports the code a pod's application container exited with.

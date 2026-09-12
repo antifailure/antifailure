@@ -679,7 +679,12 @@ func uncalledByGate(recipes []recipe, reachable map[string]bool) []string {
 	// untrue in the direction that matters. It is a gate; it runs in a workflow;
 	// it is out of `gate` for the reason recorded in exemptFromGate.
 	exemptRecipes := map[string]bool{
-		"vuln": true,
+		// A dedicated-cluster proof, run by k8s-conformance.yml. A workstation
+		// gate cannot safely create a cluster while other local work runs.
+		// The result validator refuses missing or skipped behaviors; its tests
+		// run before the isolated workflow attempts the real suite.
+		"k8s-conformance": true,
+		"vuln":            true,
 		// The npm half of the same scan, out of `gate` for the same reason and
 		// running in the same workflow.
 		"npmaudit": true,

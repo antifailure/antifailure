@@ -30,6 +30,11 @@ says `http://worker:8080` means it. One Deployment and Service for the egress
 sidecar. A Secret holding the sidecar's configuration. Five NetworkPolicies. An
 Ingress per web service, when a domain is set.
 
+Every customer-code pod also has a trusted startup gate, including migrations
+and stance jobs. It uses the engine's own image, not a shell or networking tool
+from the application image. Application code cannot start until that pod has
+connected to its sidecar and repeatedly observed the escape routes denied.
+
 A service that declares `migrate` gets a Job that has to finish first. It is
 never retried, because one clear failure reads better than six minutes of a Job
 that is neither running nor finished, and because a half applied migration is
@@ -124,6 +129,13 @@ With `domain` set, each web service gets an Ingress at
 controller in. Without a domain, no Ingress is created and the runtime reports
 that it has no ingress, so `af up` prints no URL rather than one that resolves
 to nothing.
+
+Pod readiness alone does not mean the ingress controller has updated its
+backend list. The runtime also waits for the published health URL to stop
+returning missing-route or gateway-unavailable responses. If the root path
+deliberately returns 404 or 503, configure a `health_path` that reports
+readiness. Redirects are not followed, so the probe does not sign in or visit
+an external authentication service.
 
 ## Readiness, and one real difference
 
@@ -244,50 +256,36 @@ that could declare its way out of them would be a supported way to ship one
 that lets environments reach the internet, and a knob that skips them is the
 same hole with a friendlier name.
 
-It has not passed, and the number this page used to quote should not be
-repeated. Two runs against real k3s reported 31 of 32 and then 29 of 32, and
-both were measuring a suite that could pass without containment ever having
-been in force: blocked and not-yet-governed are the same observation from
-inside a pod, and every containment behaviour but one asserts that something
-was blocked. The suite has since been shown to give a clean sweep to a runtime
-whose pods never came under policy at all.
+Historical counts do not establish the current runtime's guarantees. Earlier
+runs exposed a startup window: NetworkPolicy was programmed after a new pod
+started, and its first UDP lookup escaped. A namespace-level probe could not
+close that window for pods created later.
 
-What a run did catch, before that was understood, is the thing this runtime
-still does not handle: a pod is not contained for a short window after it
-starts, because a NetworkPolicy is programmed for each new pod some time after
-the API server accepts the object. A service reached 1.1.1.1 on UDP 53 and got
-the real public address back. One packet out and one back fits inside that
-window; a lookup, a handshake and an HTTP exchange do not, which is why the
-other escapes never saw it.
+The startup gate now runs in each pod before customer code. The separate
+`TestImmediateStartupCannotBypassContainment` checks the application's first
+network command, with an uncontrolled positive check proving that the UDP
+receiver answers. A complete proof requires both this test and every current
+shared conformance behaviour, without skips. The isolated workflow retains
+the individual test events, rather than turning a successful process exit into
+a conformance claim.
 
-The fix is a gate in the pod itself, an initContainer that will not complete
-until an escape attempt fails, so that no service process starts before its
-own pod is governed. It is not built. Until it is, and until a full run passes
-with the suite's own readiness gate in place, this runtime is `written` rather
-than `proven` and there is no number to quote.
+Response-based probes do not prove the absence of every one-way packet. Use a
+CNI that implements NetworkPolicy; the gates test observable paths and refuse
+an incomplete answer rather than certify arbitrary CNI implementations.
 
 The skip is worth understanding before you rely on it. A behaviour a runtime
 cannot support is skipped by name, so the output tells you which guarantee this
 runtime did not make on that run. Nothing about containment can be skipped that
 way.
 
-To reproduce it, this is the cluster the passing run used: k3s v1.35.5 under
-k3d v5.9.0, with no ingress controller, which is why the ingress behaviour is
-the one that skips. The disable is written out rather than left to k3d's
-default so that the cluster is the same one whatever your k3d does.
+Run the isolated Kubernetes conformance workflow, or use the disposable
+cluster command on a machine dedicated to this test:
 
 ```
-k3d cluster create af-conformance --k3s-arg "--disable=traefik@server:0"
-AF_KUBE_CONTEXT=k3d-af-conformance \
-  go test ./engine/internal/runtime/k8s/ -run TestConformance -timeout 60m
-k3d cluster delete af-conformance
+just k8s-conformance
 ```
 
-The test skips unless `AF_KUBE_CONTEXT` names a cluster. It creates namespaces,
-deletes namespaces, and runs pods that try to reach the internet, so it is never
-run against a cluster by accident.
-
-Give it the hour. The run that passed took 27m50s on a loaded machine, and most
-of that is waiting for real pods to schedule rather than anything this runtime
-computes. The default `go test` timeout of ten minutes will kill it partway and
-leave namespaces behind.
+The command pins the cluster image, enables ingress on loopback, runs the full
+roster plus immediate-startup proof, and deletes its cluster. Existing clusters
+are refused. The ordinary ten-minute Go timeout is too short for this run;
+the command supplies its own bounded timeout and checks every recorded verdict.

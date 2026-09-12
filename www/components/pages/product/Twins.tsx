@@ -137,10 +137,10 @@ export function TwinsPage() {
             title="<strong>Isolation is a spec, not a hope.</strong> An unresolved secret fails closed and stops the run."
           />
           <p className="mt-6 max-w-[640px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-            These seven are in force today on the Docker runtime, which passes all thirty-two runtime
-            conformance behaviours against a real daemon. The Kubernetes runtime is written and not yet
-            proven to the same standard, and no cloud runtime exists. Convenience must not silently
-            override containment.
+            The shared suite defines thirty-seven runtime conformance behaviours. These seven isolation
+            properties are implemented by the Docker runtime. Kubernetes and cloud runtimes are written;
+            their live verification has separate limits documented in the provider guides. Convenience
+            must not silently override containment.
           </p>
         </Split>
       </PageSection>

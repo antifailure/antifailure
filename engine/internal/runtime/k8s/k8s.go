@@ -106,6 +106,14 @@ type Runtime struct {
 	// each deployment would be four more places to forget it and no more
 	// coverage.
 	ttl time.Duration
+	// ingressProbe replaces the published URL probe, and it exists because
+	// waitForIngress passing its own tests says nothing about whether
+	// anything calls it. A probe with no call site is a function that goes
+	// green in CI while `af up` keeps printing a URL that serves the ingress
+	// controller's error page, which is the defect it was written for. Only
+	// the test that watches the call site sets it; there is no option,
+	// environment variable or manifest key that reaches it.
+	ingressProbe func(context.Context, string, string, time.Duration) error
 	// skipContainmentCheck is never set by anything a user can reach.
 	//
 	// It exists for exactly one test, the one that proves the containment

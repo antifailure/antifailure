@@ -52,6 +52,7 @@ func TestConformance(t *testing.T) {
 	conformance.RunRuntime(t, func(t *testing.T) provider.Runtime {
 		r, err := k8s.New(k8s.Options{
 			Context: kubeContext,
+			Domain:  os.Getenv("AF_KUBE_DOMAIN"),
 			// Resolved on demand, exactly as the engine does it, rather than
 			// built once at the top of the run. Built once is what this did
 			// first, and on a shared machine the image was pruned by another

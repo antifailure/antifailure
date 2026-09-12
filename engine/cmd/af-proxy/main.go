@@ -86,7 +86,16 @@ type Config struct {
 
 func main() {
 	configPath := flag.String("config", "/etc/antifailure/proxy.json", "path to the sidecar configuration")
+	networkGate := flag.Bool("network-gate", false, "wait for this pod's network containment before starting customer code")
+	gateControl := flag.String("gate-control", "", "actual sidecar IP and port for the network readiness control")
 	flag.Parse()
+	if *networkGate {
+		if err := networkGateMode(*gateControl); err != nil {
+			log.Fatalf("AF-CONTAINMENT refused: %v", err)
+		}
+		fmt.Println("AF-CONTAINMENT contained")
+		return
+	}
 
 	cfg, err := loadConfig(*configPath)
 	if err != nil {

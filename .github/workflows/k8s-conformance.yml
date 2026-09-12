@@ -1,0 +1,72 @@
+name: Kubernetes conformance proof
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/k8s-conformance.yml'
+      - 'engine/internal/runtime/k8s/**'
+      - 'engine/conformance/runtime.go'
+      # The startup gate is the only thing standing between a new pod and the
+      # window before its NetworkPolicy is programmed, and it is built from the
+      # engine's own proxy image rather than from the runtime package.
+      - 'engine/cmd/af-proxy/**'
+      - 'engine/internal/proxyimage/**'
+      # The verdict reader and the recipe decide what a successful process exit
+      # is allowed to claim, so a change to either changes the proof itself.
+      - 'tools/runtimeproof.py'
+      - 'tools/test_runtimeproof.py'
+      - 'justfile'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: k8s-proof-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 115
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+      - name: Install the pinned cluster tools
+        # Pinning says WHICH bytes, never whether they arrived. A run on
+        # 2026-09-12 fetched and verified just and k3d, then died on
+        # `curl: (35) Recv failure: Connection reset by peer` fetching kubectl,
+        # and reported red having run no behaviour at all. The retries answer
+        # the fetch; the checksum below each one still refuses anything but
+        # the pinned bytes, so a retry can only ever deliver the same file.
+        run: |
+          set -euo pipefail
+          fetch() { curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 20 "$1" -o "$2"; }
+          fetch https://github.com/casey/just/releases/download/1.58.0/just-1.58.0-x86_64-unknown-linux-musl.tar.gz /tmp/just.tar.gz
+          echo '4a5cc2f53e6f0f8c59092a6cc38291eb729d46a7dd95d3ae582008881b84931d  /tmp/just.tar.gz' | sha256sum -c
+          mkdir /tmp/just-bin
+          tar -xzf /tmp/just.tar.gz -C /tmp/just-bin just
+          sudo install /tmp/just-bin/just /usr/local/bin/just
+          fetch https://github.com/k3d-io/k3d/releases/download/v5.9.0/k3d-linux-amd64 /tmp/k3d
+          echo '06d8f25bc3a971c4eb29e0ff08429b180402db0f4dec838c9eac427e296800a0  /tmp/k3d' | sha256sum -c
+          sudo install /tmp/k3d /usr/local/bin/k3d
+          fetch https://dl.k8s.io/release/v1.35.5/bin/linux/amd64/kubectl /tmp/kubectl
+          echo '90f75ea6ecc9ea5633262e1c0b83a40560003b30fc94a04cb099404fcef0c224  /tmp/kubectl' | sha256sum -c
+          sudo install /tmp/kubectl /usr/local/bin/kubectl
+          k3d version
+          kubectl version --client
+      - name: Prove the result reader can refuse an incomplete run
+        run: python3 -m unittest discover -s tools -p test_runtimeproof.py
+      - name: Run every runtime behavior on a disposable cluster
+        run: just k8s-conformance
+      - name: Keep the actual verdicts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kubernetes-conformance-${{ github.sha }}
+          path: .gate-reports/k8s-runtime.jsonl
+          include-hidden-files: true
+          if-no-files-found: error
