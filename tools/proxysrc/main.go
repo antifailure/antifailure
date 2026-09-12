@@ -38,6 +38,7 @@ var sources = []string{
 	"internal/policy/policy.go",
 	"cmd/af-proxy/main.go",
 	"cmd/af-proxy/network_gate.go",
+	"cmd/af-proxy/forward.go",
 	"cmd/af-proxy/destination.go",
 	"cmd/af-proxy/dns.go",
 	"cmd/af-proxy/transparent.go",
