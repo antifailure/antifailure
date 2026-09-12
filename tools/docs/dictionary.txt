@@ -7,7 +7,6 @@ antifailure
 autocapture
 autocaptured
 autovacuum
-azurepg
 Backblaze
 blockable
 branchable
@@ -17,7 +16,6 @@ buildpacks
 burstable
 BYPASSRLS
 bytea
-cloudsql
 cobra
 CREATEDB
 cspell

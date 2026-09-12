@@ -89,14 +89,22 @@ has not, so here is the split, in the terms the
   checked against bytes. What it cannot show is that AWS accepts those
   requests, or how long a clone and its writer take, because no test in this
   repository may need a cloud account.
+- **`cloudsql` and `azurepg` are proved against fakes, and not against Google
+  or Azure.** The same arrangement as `aurora`: every line of each provider
+  runs on every pull request, against a fake Cloud SQL Admin API and a fake
+  Azure Resource Manager, each with a real Postgres behind it. Neither has met
+  the real service, and no connection has met a certificate Google or Microsoft
+  issued.
 
-`cloudsql` is the flat one for a production on Google Cloud, and it is in the
+`cloudsql` is the one for a production on Google Cloud, and it is in the
 enterprise edition for the same reason `aurora` is. A branch is a Cloud SQL
-FAST clone, created from an Instant Snapshot, so it moves no data whatever the
-size. The thing to know before choosing it is that Cloud SQL also has a slower
-clone whose duration scales with the database, it picks between the two from
-the shape of the request rather than from anything you ask for, and it tells you
-nothing about which you got. The provider is built so it cannot ask for the slow
+FAST clone, created from an Instant Snapshot, which Google documents as moving
+no data whatever the size. That is Google's claim rather than a measurement:
+nobody who wrote this provider has run a clone on Google Cloud, so the table's
+"flat" is an expectation. The thing to know before choosing it is that Cloud
+SQL also has a slower clone whose duration scales with the database, it picks
+between the two from the shape of the request rather than from anything you ask
+for, and it tells you nothing about which you got. The provider is built so it cannot ask for the slow
 one, and its page explains the three conditions that would have selected it.
 
 `azurepg` is the one for a production on Azure, and it is the only provider here
@@ -104,7 +112,9 @@ that does NOT claim flat branch time. A branch is a point in time restore, whose
 snapshot half is flat in the size of the data and whose log replay half is not,
 so the honest number is one that grows. Microsoft gives the overall recovery as
 a few minutes up to a few hours. Its page says why claiming otherwise would be
-quoting the fast half of that.
+quoting the fast half of that. No restore this provider requested has been
+timed on Azure either, so the growth is Microsoft's description rather than a
+number anybody here measured.
 
 A provider named in the manifest and neither built into this binary nor
 registered with it is refused at startup rather than substituted. Falling back
