@@ -205,11 +205,29 @@ config:
 # cannot be stored at all: saving one is refused rather than written in the
 # clear. It must not live in the same place as the database, or a database dump
 # carries both halves, which is the argument for existingSecret here.
+#
+# `secret` is the sealing key for version v1, which is what every row written
+# before a rotation says. Rotating it is adding, never replacing: put the new key
+# in `secrets` as `v2=<32 bytes of base64>`, deploy, set `version: v2`, deploy
+# again, run `af-control-plane-backup reseal`, and only then remove `secret`.
+# Replacing `secret` in place makes every stored key stop opening. The runbook is
+# docs/self-hosting/rotating-secrets.
+#
+# With existingSecret, both keys are read from it and both are optional there:
+# a secret that has finished a rotation no longer holds the v1 key, and that is
+# the state a rotation is meant to end in.
 providerKeys:
   secret: ""
+  # More sealing keys, `v2=<base64>,v3=<base64>`. Merged with `secret`.
+  secrets: ""
+  # Which version new keys are sealed under. Not a secret. Required by the
+  # process once more than one key is configured, and refused rather than
+  # guessed if it is missing then.
+  version: ""
   existingSecret: ""
   secretKeys:
     secret: AF_PROVIDER_KEY_SECRET
+    secrets: AF_PROVIDER_KEY_SECRETS
 
 # The enterprise edition, for an installation running
 # ghcr.io/antifailure/control-plane-enterprise as image.repository.

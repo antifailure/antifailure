@@ -524,6 +524,47 @@ jobs:
           ok     "${base[@]}" --set config.hostedRequiredPlan=enterprise --set stripe.secretKey=sk \
                  --set stripe.webhookSecret=wh --set stripe.priceTeam=price
 
+      # The sealing key set, in the three shapes a rotation passes through. A
+      # rotation ADDS a key, so an installation that has finished one holds the
+      # plural value and no v1 key, and a chart that only knew the single key
+      # could neither start that installation nor carry it through the rotation.
+      # Each assertion reads the rendered object, because a missing env entry
+      # renders valid YAML that simply does not mention the variable.
+      - name: The sealing keys render through a whole rotation
+        run: |
+          set -euo pipefail
+          render() {
+            helm template t deploy/helm/antifailure-control-plane \
+              --set database.url=x --set database.migrationUrl=y \
+              --set github.clientId=i --set github.clientSecret=s \
+              --set github.redirectUri=https://x/cb "$@"
+          }
+          # Extended patterns, so a name can be anchored at the end of its line:
+          # AF_PROVIDER_KEY_SECRET is a prefix of AF_PROVIDER_KEY_SECRETS, and a
+          # fixed string match for the one finds the other.
+          need() { if ! grep -qE "$1" <<<"$2"; then echo "FAIL: $3"; exit 1; fi; echo "ok: $3"; }
+          never() { if grep -qE "$1" <<<"$2"; then echo "FAIL: $3"; exit 1; fi; echo "ok: $3"; }
+
+          before=$(render --set providerKeys.secret=AAAA)
+          need  'AF_PROVIDER_KEY_SECRET: "AAAA"' "$before" "one key renders into the chart's Secret as before"
+          never 'AF_PROVIDER_KEY_SECRETS' "$before" "nothing plural appears until a rotation adds it"
+
+          during=$(render --set providerKeys.secret=AAAA --set providerKeys.secrets=v2=BBBB --set providerKeys.version=v2)
+          need  'AF_PROVIDER_KEY_SECRETS: "v2=BBBB"' "$during" "the added key is in the chart's Secret beside the first"
+          need  'name: AF_PROVIDER_KEY_SECRETS' "$during" "the Deployment reads the added key"
+          need  'value: "v2"' "$during" "the Deployment is told which version seals"
+
+          after=$(render --set providerKeys.secrets=v2=BBBB --set providerKeys.version=v2)
+          need  'AF_PROVIDER_KEY_SECRETS: "v2=BBBB"' "$after" "with v1 removed the chart's Secret still renders"
+          never 'name: AF_PROVIDER_KEY_SECRET$' "$after" "with v1 removed nothing references a v1 key"
+
+          existing=$(render --set providerKeys.existingSecret=mine -s templates/deployment.yaml)
+          count=$(grep -A6 -E 'name: AF_PROVIDER_KEY_SECRETS?$' <<<"$existing" | grep -c 'optional: true' || true)
+          if [ "$count" -ne 2 ]; then
+            echo "FAIL: under existingSecret both sealing key references must be optional, found $count"; exit 1
+          fi
+          echo "ok: under existingSecret both sealing key references are optional"
+
       # Who may sign in, in all three of its states, because the difference
       # between them is the whole feature and two of the three are silent.
       #

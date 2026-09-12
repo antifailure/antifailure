@@ -426,6 +426,89 @@ The connection string is read from the environment rather than taken as an
 argument, because an argument is visible in `ps` to every user on the machine and
 lands in shell history. `--url` exists for a terminal where that does not matter.
 
+**On the Helm chart** the same rotation is three values under `providerKeys`, and
+each one maps to a step above. Step 2 is adding `providerKeys.secrets` as
+`v2=<the new key>` beside the existing `providerKeys.secret`, then `helm upgrade`.
+Step 3 is `providerKeys.version: v2` and another upgrade. Step 6 is removing
+`providerKeys.secret` once step 5 is clean. With `providerKeys.existingSecret`,
+put `AF_PROVIDER_KEY_SECRETS` into that Secret instead; both sealing key
+references are optional there, so the Secret may drop `AF_PROVIDER_KEY_SECRET`
+at step 6 without the pods refusing to start.
+
+Step 4 is a Job you run once, not a value. The chart deliberately does not
+give the serving pods the migration connection, which is the credential this
+tool uses, so the Job reads it from the chart's database Secret the way the
+maintenance CronJob does. For a release named `cp` with the chart creating its
+own Secrets:
+
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cp-reseal
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: reseal
+          # The image the release is running: kubectl get deploy
+          # cp-antifailure-control-plane -o jsonpath='{..image}'
+          image: ghcr.io/antifailure/control-plane:<version>
+          command: ["node", "apps/api/src/backup-cli.ts", "reseal"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: AF_RESEAL_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cp-antifailure-control-plane-database
+                  key: AF_MIGRATION_DATABASE_URL
+            - name: AF_PROVIDER_KEY_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: cp-antifailure-control-plane-provider-keys
+                  key: AF_PROVIDER_KEY_SECRET
+                  optional: true
+            - name: AF_PROVIDER_KEY_SECRETS
+              valueFrom:
+                secretKeyRef:
+                  name: cp-antifailure-control-plane-provider-keys
+                  key: AF_PROVIDER_KEY_SECRETS
+                  optional: true
+            - name: AF_PROVIDER_KEY_VERSION
+              value: v2
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+```
+
+```sh
+kubectl apply -f reseal-job.yaml
+kubectl wait --for=condition=complete --timeout=30m job/cp-reseal
+kubectl logs job/cp-reseal
+```
+
+With `database.existingSecret` or `providerKeys.existingSecret`, use those
+Secret names instead. For step 5, delete the Job and apply it again with
+`command: ["node", "apps/api/src/backup-cli.ts", "reseal", "--check"]`. The
+chart's NetworkPolicy only restricts traffic into the control plane's own pods,
+so it does not stand between this Job and Postgres.
+
 **An installation that does not want the feature** can run with no sealing secret
 at all. The app says so in its start-up log and in the console, and refuses a
 save rather than accepting one it cannot seal.
