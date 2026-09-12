@@ -3,6 +3,7 @@ package insights
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"sort"
@@ -12,6 +13,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
@@ -275,16 +277,26 @@ func lastLines(ctx context.Context, cli *client.Client, id string) string {
 		return ""
 	}
 	defer dockerutil.Discard(logs)
-	buf := make([]byte, 8192)
-	n, _ := logs.Read(buf)
-	// Docker multiplexes stdout and stderr with an eight byte header per
-	// frame. Stripping the non printing bytes is enough to make it readable
-	// without demultiplexing properly, which this does not need to do.
+	return demuxLogs(logs)
+}
+
+// maxToolOutput bounds how much of a failing tool's output reaches a report.
+const maxToolOutput = 64 << 10
+
+// demuxLogs turns a container's multiplexed log stream into the text the tool
+// printed.
+//
+// Docker frames every write with eight bytes: the stream, three zeros, and the
+// payload's length as a big endian number. This used to keep whatever bytes
+// printed and drop the rest, on the reasoning that a header does not print. A
+// length is a number rather than a character, and any length from 32 to 126
+// prints: a 49 byte line reached the report as "1rehearsal sees", the header's
+// last byte glued to the tool's first word, in the one message whose whole
+// value is being the tool's own words. It also read once, so a message longer
+// than the first chunk Docker happened to send was cut short. Both streams go
+// to one buffer, so their lines keep the order the tool wrote them in.
+func demuxLogs(r io.Reader) string {
 	var b strings.Builder
-	for _, c := range string(buf[:n]) {
-		if c == '\n' || c == '\t' || (c >= 32 && c < 127) || c > 159 {
-			b.WriteRune(c)
-		}
-	}
+	_, _ = stdcopy.StdCopy(&b, &b, io.LimitReader(r, maxToolOutput))
 	return strings.TrimSpace(b.String())
 }
