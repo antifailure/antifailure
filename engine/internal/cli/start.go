@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	dockerdb "github.com/antifailure/antifailure/engine/internal/db/docker"
+	"github.com/antifailure/antifailure/engine/internal/db/managed"
 	pgurldb "github.com/antifailure/antifailure/engine/internal/db/pgurl"
 	"github.com/antifailure/antifailure/engine/internal/env"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
@@ -586,16 +587,60 @@ func pgurlState(ctx context.Context, e *Env, m *schema.Manifest) stage {
 			"creates a database per golden and a database per environment on it.", name)
 		s.command = "af secret set " + name
 	default:
-		s.state = StageDone
 		// The host and port, never the URL. The value is a connection string
 		// with a password in it and this line is printed.
-		s.detail = fmt.Sprintf("pgurl, on %s, from %s", pgurldb.HostPortOf(value), name)
+		host := pgurldb.HostPortOf(value)
+		s.state = StageDone
+		s.detail = fmt.Sprintf("pgurl, on %s, from %s", host, name)
+
+		// The vendor, when the host says which one it is.
+		//
+		// Two different sentences, and the split is between a vendor whose own
+		// documentation says the host server cannot work there and every other
+		// answer.
+		//
+		// What this rung adds over the provider's own refusal is not the
+		// ordering, and saying so is worth a line because the obvious claim to
+		// make here is the wrong one. pgurl.New probes the role at
+		// construction and refuses with AF-DB-037 before RefreshGolden reads
+		// anything, so the dump is already safe. What this rung adds is that
+		// it answers WITHOUT CONNECTING: af start runs nothing and writes
+		// nothing, so it can say "that host is a Tiger Cloud service and a
+		// service holds one database" to somebody who has not set the rest of
+		// their configuration up yet, which is exactly who is reading it.
+		//
+		// Blocked on a documented no, and merely NAMED otherwise. A verdict
+		// read from a vendor's page can go stale, so the ones this repository
+		// could not verify get the vendor's name in the line and nothing else:
+		// a rung that blocked on a guess would refuse a setup that works, and
+		// the whole point of the three valued verdict behind this is that
+		// unverified is not a quiet no.
+		if v, ok := managed.Recognize(host); ok {
+			s.detail = fmt.Sprintf("pgurl, on %s, which is %s, from %s", host, v.Display, name)
+			if v.HostServer.Answer == managed.No {
+				s.state = StageBlocked
+				s.prose = fmt.Sprintf("%s cannot be the server that holds the goldens and "+
+					"the branches: %s. Keep it as database.source_url_env, which needs read "+
+					"access only, and set %s to a Postgres you administer. Read on %s from %s.",
+					v.Display, v.HostServer.Reason, name,
+					v.HostServer.Citation.Retrieved, v.HostServer.Citation.URL)
+				s.command = "af secret set " + name
+			}
+		}
 	}
 	return s
 }
 
 // pgurlHost is the host and port the goldens go to, for a line about something
 // else. Never the URL: it carries a password and this is printed.
+//
+// The vendor clause is HERE as well as in pgurlState, and the duplication is
+// the point rather than an oversight. pgurlState's own line is only ever
+// printed when the manifest names no source, because the rung returns the
+// SOURCE line for every manifest that does, with this function's answer
+// appended to it. So a vendor clause written only in pgurlState is a clause
+// nobody with a configured source ever sees, which is most people, and this
+// lane's own test found it that way rather than a reader finding it later.
 func pgurlHost(ctx context.Context, e *Env, m *schema.Manifest) string {
 	name := pgurlVariable(m)
 	value, _, found, err := modelChain(e).Lookup(ctx, name)
@@ -605,6 +650,9 @@ func pgurlHost(ctx context.Context, e *Env, m *schema.Manifest) string {
 	host := pgurldb.HostPortOf(value)
 	if host == "" {
 		return "the server named by " + name
+	}
+	if v, ok := managed.Recognize(host); ok {
+		return host + ", which is " + v.Display
 	}
 	return host
 }

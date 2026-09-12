@@ -54,6 +54,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the pgx driver
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
+	"github.com/antifailure/antifailure/engine/internal/db/managed"
 	"github.com/antifailure/antifailure/engine/internal/db/pgcopy"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
@@ -211,11 +212,53 @@ func New(ctx context.Context, opts Options) (*Provider, error) {
 		// without CREATEDB cannot do any part of its job, and saying so before
 		// anything reads production is the difference between a sentence and a
 		// wasted dump.
-		return nil, aferrors.Coded(aferrors.AFDB035,
-			"role", role, "host", hostport, "variable", variable)
+		return nil, refuseCreateDB(role, hostport, variable)
 	}
 	p.major = versionNum / 10000
 	return p, nil
+}
+
+// recognize names the vendor a host belongs to. It is a variable so that a test
+// can drive New against a local Postgres and still reach the vendor branch: no
+// local server answers to a vendor's hostname, and without this the only proof
+// that New reaches AF-DB-037 would be a test of refuseCreateDB on its own, which
+// stays green if New stops calling it.
+var recognize = managed.Recognize
+
+// refuseCreateDB is the refusal for a host server whose role may not create
+// databases, and it is two refusals because the remedy is not the same one.
+//
+// AF-DB-035 says "Run: ALTER ROLE {role} CREATEDB", which is the right answer
+// on a server you administer and is IMPOSSIBLE on most of the managed Postgres
+// this engine gets pointed at. Heroku Postgres provisions one database per add
+// on and hands out no superuser, so there is no role that could run that
+// statement; a Tiger Cloud service holds exactly one database and says so in
+// its own troubleshooting page. Printing an instruction the reader cannot carry
+// out is worse than printing nothing, because it costs them the time to try it
+// before they conclude the tool is wrong about their vendor.
+//
+// The second refusal is only reached for a vendor whose OWN documentation says
+// the grant is unavailable, and it quotes where that was read. A vendor this
+// repository has not checked, or has checked and found silent, gets the general
+// message: an unverified guess dressed as a vendor specific answer would be the
+// same defect in the other direction.
+//
+// What it does NOT do is refuse before trying. The role probe above is
+// empirical and this function only decides how to describe a refusal the server
+// itself just made, so a vendor that starts granting CREATEDB tomorrow is
+// simply never refused and never reads either message.
+func refuseCreateDB(role, hostport, variable string) error {
+	if v, ok := recognize(hostport); ok && v.HostServer.Answer == managed.No {
+		return aferrors.Coded(aferrors.AFDB037,
+			"role", role,
+			"host", hostport,
+			"variable", variable,
+			"vendor", v.Display,
+			"reason", v.HostServer.Reason,
+			"citation", v.HostServer.Citation.URL+", read on "+v.HostServer.Citation.Retrieved)
+	}
+	return aferrors.Coded(aferrors.AFDB035,
+		"role", role, "host", hostport, "variable", variable)
 }
 
 // DefaultVariable is the variable this provider reads when the manifest names

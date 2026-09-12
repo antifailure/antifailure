@@ -102,10 +102,16 @@ The role in `PGURL_ADMIN_URL` needs `CREATEDB`. That is checked when the
 provider starts, not when the first `CREATE DATABASE` runs, so the refusal
 arrives before a refresh has read production rather than after.
 
+Some managed Postgres products give you no role that could grant it. On those
+the vendor stays as `database.source_url_env` and `PGURL_ADMIN_URL` points at a
+Postgres you administer. [Managed Postgres vendors](/docs/providers/managed-postgres)
+says which products those are and where each answer was read.
+
 | Refusal | When |
 | --- | --- |
 | AF-DB-034 | The server named by the variable could not be reached. |
 | AF-DB-035 | Its role may not create databases. |
+| AF-DB-037 | Its role may not create databases, and the vendor that runs it documents that the grant is not available. |
 | AF-DB-036 | A database with the name it needs exists and this provider did not create it. |
 | AF-DB-024 | The variable does not hold a `postgres://` URL. |
 | AF-DB-003 | The manifest asks for a Postgres major the server does not run. |
