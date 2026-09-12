@@ -18,6 +18,7 @@ import (
 	"github.com/antifailure/antifailure/ee/engine/db/aurora"
 	"github.com/antifailure/antifailure/ee/engine/db/azurepg"
 	"github.com/antifailure/antifailure/ee/engine/db/cloudsql"
+	"github.com/antifailure/antifailure/ee/engine/db/rds"
 	"github.com/antifailure/antifailure/engine/pkg/extension"
 )
 
@@ -33,8 +34,14 @@ import (
 // cloudsql declares CopyOnWrite because a Cloud SQL fast clone is created from
 // an Instant Snapshot, and azurepg declares it FALSE, because a point in time
 // restore creates an independent server and replays logs after the snapshot.
+//
+// rds is plain Amazon RDS for PostgreSQL, where most Postgres on AWS runs. It
+// has no clone, so a branch is a snapshot restore that copies every byte, and
+// it declares CopyOnWrite FALSE and refuses an Aurora cluster rather than
+// becoming the slow way to do what aurora does.
 func Register(r *extension.Registry) {
 	aurora.Register(r)
 	cloudsql.Register(r)
 	azurepg.Register(r)
+	rds.Register(r)
 }

@@ -86,6 +86,7 @@ recorded with the site that made it.
 | the Database Lab API | your DBLab server |
 | the Aurora control API | AWS, to create and branch an Aurora cluster |
 | the Xata control API | `api.xata.tech` |
+| the RDS control API | AWS, to snapshot and restore an RDS for PostgreSQL instance |
 | the Cloud SQL control API | Google Cloud, to clone and branch a Cloud SQL instance |
 | the Azure PostgreSQL control API | Azure, to restore and branch a flexible server |
 | the ClickHouse HTTP interface | your ClickHouse server |

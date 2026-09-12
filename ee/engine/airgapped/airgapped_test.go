@@ -375,7 +375,7 @@ func TestTheHookRefusesADatabaseProviderWhoseControlPlaneIsSomebodyElses(t *test
 	require.Subsetf(t, builtin, []string{"docker", "neon", "supabase", "dblab", "pgurl"},
 		"the schema constants read as %v, which is missing providers the engine is known to "+
 			"build, so the enumeration is broken and this test would check less than it says", builtin)
-	require.Subsetf(t, registered, []string{"aurora", "cloudsql", "azurepg"},
+	require.Subsetf(t, registered, []string{"aurora", "cloudsql", "azurepg", "rds"},
 		"managed.Register registered %v, which is missing providers this edition is known to "+
 			"ship, so the enumeration is broken and this test would check less than it says", registered)
 

@@ -86,6 +86,7 @@ const (
 	SiteDBLab           Site = "the Database Lab API"
 	SiteAurora          Site = "the Aurora control API"
 	SiteXata            Site = "the Xata control API"
+	SiteRDS             Site = "the RDS control API"
 	SiteCloudSQL        Site = "the Cloud SQL control API"
 	SiteAzurePostgres   Site = "the Azure PostgreSQL control API"
 	SiteClickHouse      Site = "the ClickHouse HTTP interface"

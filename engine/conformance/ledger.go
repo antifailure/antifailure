@@ -162,6 +162,22 @@ var CopyOnWriteLedger = map[string]LedgerEntry{
 			"fake's byte counter to move, so the reason is a test rather than a comment.",
 		Evidence: "ee/engine/db/azurepg/conformance_test.go",
 	},
+	"rds": {
+		Declared: false,
+		Verdict:  Unproven,
+		Because: "the instrument cannot decide this provider, and not for want of a " +
+			"credential alone. Its conformance test drives a fake RDS control plane over one " +
+			"local Postgres, where a restore is CREATE DATABASE ... TEMPLATE, which copies " +
+			"every byte, so a declaration of false would PASS the stopwatch on the " +
+			"simulator's own copy whatever RDS would have done. That is the copying harness " +
+			"case in the direction that flatters, and a pass bought that way is worse than " +
+			"no verdict. No AWS account was available, so no run has timed a real " +
+			"RestoreDBInstanceFromDBSnapshot. The declaration false is AWS's documented " +
+			"mechanism, a new volume hydrated from the snapshot, rather than a measurement. " +
+			"ee/engine/db/rds/verdict_test.go reads the fake's own byte counter across one " +
+			"branch and requires it to move, and requires the run to assert no real service.",
+		Evidence: "ee/engine/db/rds/conformance_test.go",
+	},
 	"supabase": {
 		Declared: false,
 		Verdict:  Unproven,

@@ -269,3 +269,61 @@ func TestAnAirGapAllowListWithATypoStopsTheBinary(t *testing.T) {
 		"an allow list entry that can never match must not be accepted in silence")
 	require.Equal(t, 3, exit.ExitCode())
 }
+
+// A manifest naming an enterprise database provider reaches that provider in
+// the binary a customer runs.
+//
+// A provider written, tested against its fake, and never registered in main is
+// the shippable gap this file's header describes, and every unit test in its
+// package passes while the binary answers "which this build does not have". So
+// this runs the binary with a manifest selecting the provider and requires the
+// refusal only that provider's own Open can produce, which here is its missing
+// region. Open is deliberately not behind the licence gate, which is why an
+// unlicensed binary reaches it.
+func TestTheBinaryRegistersTheEnterpriseDatabaseProviders(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		provider string
+		// reached is a phrase only the provider's own refusal can produce.
+		reached string
+	}{
+		{"rds", "database.provider is rds and AWS_REGION resolved to nothing"},
+	} {
+		t.Run(tc.provider, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			manifest := "version: 1\n" +
+				"name: registration-check\n" +
+				"services:\n" +
+				"  - name: api\n" +
+				"    kind: web\n" +
+				"    path: .\n" +
+				"    port: 3000\n" +
+				"    health_path: /health\n" +
+				"database:\n" +
+				"  provider: " + tc.provider + "\n" +
+				"  project: acme-production\n"
+			require.NoError(t, os.WriteFile(filepath.Join(root, "antifailure.yaml"),
+				[]byte(manifest), 0o644))
+
+			cmd := exec.Command(enterpriseBinary(t), "-C", root, "golden", "list")
+			// Cleared, so that a machine which happens to export a region does
+			// not turn this green for a reason other than the registration.
+			cmd.Env = append(os.Environ(), "GOWORK=off", "AWS_REGION=", "AWS_DEFAULT_REGION=")
+			var out strings.Builder
+			cmd.Stdout = &out
+			cmd.Stderr = &out
+			_ = cmd.Run()
+			text := out.String()
+
+			require.NotContains(t, text, "which this build does not have",
+				"the manifest named %q and the engine fell through to a registry with nothing "+
+					"under that name, so the provider is written and nothing constructs it.\n%s",
+				tc.provider, text)
+			require.Contains(t, text, tc.reached,
+				"the provider was not reached, or refused for a reason other than its own, so "+
+					"this test is no longer reading what it thinks it is.\n%s", text)
+		})
+	}
+}
