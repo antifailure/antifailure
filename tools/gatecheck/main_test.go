@@ -2011,11 +2011,12 @@ func TestEveryContainerImageIsPinnedToADigest(t *testing.T) {
 				filepath.ToSlash(file), f.line, f.why, f.ref)
 		}
 	}
-	// Two today: the egress sidecar's and the ingress forwarder's. Fewer means
-	// the recogniser stopped recognising, which reads exactly like a clean tree.
-	if dockerfiles < 2 {
-		t.Fatalf("only %d Dockerfiles were found in Go source, and the sidecar and the ingress "+
-			"forwarder alone are two; the recogniser has probably stopped matching", dockerfiles)
+	// One today: the egress sidecar's. The ingress forwarder carried a second
+	// until it became the sidecar binary in forward mode. None means the
+	// recogniser stopped recognising, which reads exactly like a clean tree.
+	if dockerfiles < 1 {
+		t.Fatal("no Dockerfile was found in Go source, and the sidecar's alone is one; " +
+			"the recogniser has probably stopped matching")
 	}
 	t.Logf("%d workflow, justfile and shell files and %d Dockerfiles carried in Go source checked",
 		checked, dockerfiles)

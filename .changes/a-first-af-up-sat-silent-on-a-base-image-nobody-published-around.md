@@ -24,3 +24,9 @@ its source and its Dockerfile text, and while that text named a moving tag, two
 machines could hold two different sidecar binaries under one name. Every
 sidecar image now also declares the source it was built from, and one that
 declares anything else is refused rather than run, whatever it is called.
+
+Publishing a port no longer builds a second image. The ingress forwarder was
+built from Alpine with `socat` added, so the first `af up` of any web service
+also pulled a base image and downloaded a package, with the same silence and
+the same missing bound. The forwarder is now the sidecar image itself, started
+in forward mode, so it needs nothing the sidecar did not already bring.

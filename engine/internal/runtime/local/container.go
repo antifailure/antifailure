@@ -19,6 +19,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	"github.com/antifailure/antifailure/engine/internal/envcert"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/internal/proxyimage"
 	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 )
@@ -54,10 +55,10 @@ func containerName(envID, service string, ordinal int) string {
 // one to reproduce inside the runtime.
 //
 // The ingress is ONE forwarder for the service, not one per instance. It
-// forwards to the service's name, which every instance answers to, and socat
-// resolves that name per connection, so requests spread across the instances
-// the way a load balancer would. That is what makes a sticky session
-// assumption visible: the second request lands somewhere else.
+// forwards to the service's name, which every instance answers to, and it
+// dials that name per connection, so requests spread across the instances the
+// way a load balancer would. That is what makes a sticky session assumption
+// visible: the second request lands somewhere else.
 //
 // Readiness waits for EVERY instance. Reporting a service ready when one of
 // three has answered is the same lie as reporting three when one is running,
@@ -449,8 +450,9 @@ func (r *Runtime) startIngress(
 //
 // The order is load bearing: the container is created on the edge network with
 // the port binding, then attached to the inner network, and only then started.
-// Started first, the forwarder cannot resolve the service's name yet and exits
-// immediately, which looks exactly like a service that never came up.
+// Started first, the forwarder would accept a connection it has no route to the
+// service to deliver, and the client would read a closed connection that looks
+// exactly like a service that never came up.
 //
 // A failed attempt leaves nothing behind, because the name is deterministic and
 // the next attempt's create would collide with the container this one made.
@@ -471,11 +473,12 @@ func (r *Runtime) createIngress(
 
 	resp, err := r.cli.ContainerCreate(ctx,
 		&container.Config{
-			Image:  ingressImage,
-			Labels: labels,
-			Cmd: []string{"socat",
-				fmt.Sprintf("TCP-LISTEN:%d,fork,reuseaddr", s.Port),
-				fmt.Sprintf("TCP:%s:%d", s.Name, s.Port)},
+			// The sidecar's own image, which startProxy obtained before any
+			// service was created, so publishing a port fetches and builds
+			// nothing of its own.
+			Image:        proxyimage.Tag(),
+			Labels:       labels,
+			Cmd:          ingressCommand(s),
 			ExposedPorts: nat.PortSet{port: struct{}{}},
 		},
 		&container.HostConfig{
@@ -512,6 +515,19 @@ func (r *Runtime) createIngress(
 			"detail", fmt.Sprintf("starting the forwarder for %s: %v", s.Name, err))
 	}
 	return nil
+}
+
+// ingressCommand is the forwarder's command line: the sidecar binary in forward
+// mode, accepting on the service's port and relaying to the service's name.
+//
+// The flag names are the sidecar's, and a test reads them out of the source
+// this binary carries, so renaming one there fails that test rather than every
+// published port at the next af up.
+func ingressCommand(s provider.ServiceSpec) []string {
+	return []string{
+		"-forward-listen", ":" + strconv.Itoa(s.Port),
+		"-forward-to", net.JoinHostPort(s.Name, strconv.Itoa(s.Port)),
+	}
 }
 
 // publishedPort reads the host port out of a port map.

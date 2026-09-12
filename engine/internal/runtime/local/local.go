@@ -246,11 +246,6 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 		return env, err
 	}
 	env.ProxyReady = true
-	if needsIngress(order) {
-		if err := r.ensureIngressImage(ctx); err != nil {
-			return env, err
-		}
-	}
 	// Reserved before anything starts, because a service has to be told its
 	// own public address before it runs, and the ingress that publishes it is
 	// created after the service it forwards to.
@@ -392,16 +387,6 @@ func sortByManifestOrder(running []provider.RunningService, declared []provider.
 		// in the order they were found is better than inventing one.
 		return false
 	})
-}
-
-// needsIngress reports whether any service has to be reachable from the host.
-func needsIngress(services []provider.ServiceSpec) bool {
-	for _, s := range services {
-		if s.Kind == "web" && s.Port > 0 {
-			return true
-		}
-	}
-	return false
 }
 
 // AttachDatabase connects a branch container to the environment network and

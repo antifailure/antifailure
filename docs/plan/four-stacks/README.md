@@ -480,23 +480,25 @@ the stream as it arrives, and the base image is pinned by digest, because a
 moving tag under a content addressed name let two machines hold two different
 sidecars under one identity.
 
-There is a second cold dependency behind the same door, and it is worse in one
-respect. `ensureIngressImage` builds `antifailure/ingress:socat-2` from
-`FROM alpine:3.20` and `RUN apk add --no-cache socat`, so it needs both a
-registry pull and a package fetch. It is skipped when no service publishes a
-port, which is the only reason the experiment below could run.
+There was a second cold dependency behind the same door, and it was worse in
+one respect. `ensureIngressImage` built `antifailure/ingress` from
+`FROM alpine:3.20` and `RUN apk add --no-cache socat`, so publishing a port
+needed a registry pull and a package fetch, with the same unbounded silent build
+and the same inspect that read every daemon error as absence. It was skipped
+when no service publishes a port, which is the only reason the experiment below
+could run.
 
-**Partly closed on 2026-09-11.** Its base image is pinned by digest and its tag
-moved to `socat-2`, because that file's own rule is that the tag holds only
-while the content does. Three things about it are NOT closed and none is this
-lane's: the `apk add` still reaches a package mirror on a first build, the
-build has no bound and no progress of its own, and its "is the image present"
-question reads every daemon error as absence, which is the same two valued read
-the sidecar's had. Whoever fixes those owes it the AF-RUN-048 treatment.
+**Closed on 2026-09-12, by removing the image rather than repairing it.** The
+sidecar binary gained a forward mode, `-forward-listen` and `-forward-to`, in the
+standard library alone: accept, dial the service per connection, copy both ways,
+and pass a half close through. The forwarder container runs the sidecar image in
+that mode. That image is obtained before any service starts, through the
+bounded, reported, two valued path above, so publishing a port now fetches and
+builds nothing of its own and no first `af up` reaches a package mirror. The
+socat image, its Dockerfile and its build are deleted.
 
-Owed by: the runtime lane and whoever owns releases. This is the finding that
-turned a rehearsal into a refusal, so it is the one to fix first if the row is
-re-run.
+This is the finding that turned a rehearsal into a refusal, and the fix is in
+the same pull request as the sidecar's.
 
 ### F13. A domain wildcard with `mode: allow` is accepted, and would post to a real endpoint
 

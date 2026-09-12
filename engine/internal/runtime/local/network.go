@@ -1,22 +1,15 @@
 package local
 
 import (
-	"archive/tar"
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"strings"
-	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	dockerbuild "github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/api/types/network"
 
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
-	"github.com/antifailure/antifailure/engine/pkg/airgap"
 )
 
 // An environment gets two networks, and the reason is the whole containment
@@ -43,26 +36,6 @@ const (
 
 func innerNetworkName(envID string) string { return innerNetworkPrefix + envID }
 func edgeNetworkName(envID string) string  { return edgeNetworkPrefix + envID }
-
-// ingressImage is the forwarder image.
-//
-// Built here rather than pulled, from a base already in use, so that bringing
-// an environment up does not depend on a third party image nobody in this
-// repository has read. The tag is fixed because the content is fixed; a change
-// to the Dockerfile below must change it.
-const (
-	// socat-2 rather than socat-1, because the rule above is this file's own:
-	// the tag is fixed only while the content is, and pinning the base image
-	// below changed the content. Left at socat-1, every machine that has run
-	// af up keeps the forwarder it built from whatever alpine:3.20 meant that
-	// day and never builds the pinned one, which is the same two images under
-	// one name that the pin exists to prevent.
-	ingressImage = "antifailure/ingress:socat-2"
-	// Pinned by digest for the reason the sidecar's base is, and found by the
-	// same gate: this literal is a Dockerfile a Go string carries, which the
-	// digest gate could not read until it was widened to read exactly this.
-	ingressDockerfile = "FROM alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc\nRUN apk add --no-cache socat\n"
-)
 
 // networks holds an environment's two network identifiers.
 type networks struct {
@@ -134,67 +107,6 @@ func (r *Runtime) ensureOneNetwork(
 		return "", aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
 	}
 	return res.ID, nil
-}
-
-// ensureIngressImage builds the forwarder image if it is not already present.
-//
-// The context is assembled in memory rather than on disk, because writing a
-// two line Dockerfile into a temporary directory to hand it back to the daemon
-// is a filesystem round trip for nothing, and one more thing to clean up.
-func (r *Runtime) ensureIngressImage(ctx context.Context) error {
-	if _, err := r.cli.ImageInspect(ctx, ingressImage); err == nil {
-		return nil
-	}
-	if err := airgap.Refuse(airgap.SiteImageBuild,
-		"building the ingress forwarder image "+ingressImage+", whose base image is pulled"); err != nil {
-		return aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
-	}
-	var buf bytes.Buffer
-	tw := tar.NewWriter(&buf)
-	if err := tw.WriteHeader(&tar.Header{
-		Name: "Dockerfile", Mode: 0o644, Size: int64(len(ingressDockerfile)),
-		ModTime: time.Unix(946684800, 0).UTC(), Format: tar.FormatPAX, Typeflag: tar.TypeReg,
-	}); err != nil {
-		return aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
-	}
-	if _, err := io.WriteString(tw, ingressDockerfile); err != nil {
-		return aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
-	}
-	if err := tw.Close(); err != nil {
-		return aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
-	}
-
-	resp, err := r.cli.ImageBuild(ctx, bytes.NewReader(buf.Bytes()), dockerbuild.ImageBuildOptions{
-		Tags:   []string{ingressImage},
-		Remove: true,
-		Labels: r.managed(dockerutil.KindSidecar, ""),
-	})
-	if err != nil {
-		return aferrors.Wrap(err, aferrors.AFRUN040,
-			"detail", "building the ingress forwarder: "+err.Error())
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	// The stream has to be drained for the daemon to consider the build
-	// finished, and the error only appears inside it.
-	dec := json.NewDecoder(resp.Body)
-	var buildErr string
-	for {
-		var msg struct {
-			Error string `json:"error"`
-		}
-		if decErr := dec.Decode(&msg); decErr != nil {
-			break
-		}
-		if msg.Error != "" {
-			buildErr = msg.Error
-		}
-	}
-	if buildErr != "" {
-		return aferrors.Coded(aferrors.AFRUN040,
-			"detail", "building the ingress forwarder: "+r.redactor.String(buildErr))
-	}
-	return nil
 }
 
 // disconnectForeign detaches anything still on a network that this teardown is

@@ -82,39 +82,3 @@ func TestAirGapped_TheSidecarImageIsRequiredRatherThanBuiltOnDemand(t *testing.T
 	require.Len(t, airgap.Refusals(), 1)
 	require.Equal(t, airgap.SiteImageBuild, airgap.Refusals()[0].Site)
 }
-
-func TestAirGapped_TheIngressForwarderImageIsRequiredToo(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipped: -short")
-	}
-	r, err := New(Options{Clock: clock.New()})
-	if err != nil {
-		t.Skipf("skipped: no Docker daemon is reachable: %v", err)
-	}
-	t.Cleanup(func() { _ = r.Close() })
-
-	// Unlike the sidecar this tag is a constant, so the early return cannot be
-	// dodged and the live half of this is only reachable on a machine that has
-	// never built it. When it is present the assertion is that the refusal
-	// exists on the path rather than that it fired, and the test says so
-	// rather than reporting a pass it did not earn.
-	// The same two valued read, and the same fix. Here the consequence of
-	// guessing is a SKIP, which is the quieter of the two failures: a daemon
-	// that could not answer would report this test as not applicable rather
-	// than as not run, and a skip reads like a pass in every summary view.
-	present, err := dockerutil.ImagePresent(context.Background(), r.cli, ingressImage)
-	require.NoError(t, err,
-		"the daemon could not say whether %s exists, so this test was NOT run rather "+
-			"than skipped for a known reason", ingressImage)
-	if present {
-		t.Skipf("skipped: %s is already on this daemon, so the build is not reached", ingressImage)
-	}
-
-	airgap.Reset()
-	t.Cleanup(airgap.Reset)
-	airgap.Seal("this test is measuring the refusal")
-
-	err = r.ensureIngressImage(context.Background())
-	require.ErrorIs(t, err, airgap.ErrSealed)
-	require.Len(t, airgap.Refusals(), 1)
-}

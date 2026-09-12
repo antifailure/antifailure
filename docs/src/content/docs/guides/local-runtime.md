@@ -75,6 +75,11 @@ built from, and one whose label does not match the source this `af` carries is
 refused rather than run. An image `af` compiled carries the label too, so
 pushing it into your own registry works.
 
+A service that publishes a port is reached through a small forwarder on your
+loopback, and the forwarder is this same sidecar image started in forward mode.
+So publishing a port fetches and builds nothing beyond the sidecar itself: no
+second image, no base image, and no package download.
+
 ## A service that never becomes ready
 
 ```
