@@ -56,7 +56,12 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
   // separate test proves nothing fell out of it.
   const isolatedByUser = new Map<string, string>([
     ['sessions', 'belongs to a user, not an organization; covered by its own test below'],
-    ['audit_stream_positions', 'forwarder bookkeeping; tenant access is refused and tested explicitly'],
+    [
+      'audit_stream_positions',
+      'forwarder bookkeeping. A tenant reads its own row and no other, and writes none, which ' +
+        'the generic loops cannot express because a tenant cannot insert here; tested explicitly ' +
+        'in ee/web/audit and below. See migrations/0043 and 0044.',
+    ],
   ])
 
   // relkind r and p. A partitioned table's parent is p, not r, so a filter on
@@ -443,6 +448,92 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
     )
 
     await h.admin`DELETE FROM audit_entries WHERE action = 'audit.stream.isolation'`
+  })
+
+  /**
+   * One organization's audit destination, from every position that can reach it.
+   *
+   * Migration 0044 puts a customer's sealed collector credential and chosen URL
+   * on a table with two readers: the tenant, under the ordinary policy, and the
+   * forwarder, under a declaration that names no tenant. Postgres ORs permissive
+   * policies, so the forwarder's SELECT policy widens this table for whoever its
+   * predicate is true for, and the whole isolation claim rests on that predicate
+   * being false for every request that arrived from outside.
+   *
+   * So bob, holding his own tenant, is asserted to reach alice's row in no
+   * direction, and the forwarder is asserted to read it and to be unable to
+   * change it. The two positive controls are what stop the denials being a
+   * table nobody can reach.
+   */
+  it("an organization's audit destination is its own, and the forwarder reads it and cannot change it", async () => {
+    // The harness seeds one destination per tenant, which is also what puts this
+    // table through the generic loops above. Read rather than written here, so
+    // this case and those loops are about the same row.
+    const [fixture] = await h.admin<{ url: string }[]>`
+      SELECT url FROM audit_stream_destinations WHERE org_id = ${alice.orgId}`
+    assert.ok(fixture, 'the harness seeded no destination for alice, so every denial below is about an empty table')
+    const url = fixture.url
+
+    const asBob = <T>(fn: (db: Parameters<Parameters<typeof h.pool.withTenant>[1]>[0]) => Promise<T>) =>
+      h.pool.withTenant({ orgId: bob.orgId, userId: bob.userId }, fn)
+
+    const seen = await asBob((db) => db.execute(sql`
+      SELECT ciphertext FROM audit_stream_destinations WHERE org_id = ${alice.orgId}`))
+    assert.equal(seen.length, 0, "bob read alice's sealed collector credential")
+
+    const repointed = await asBob((db) => db.execute(sql`
+      UPDATE audit_stream_destinations SET url = 'https://bob.collector.example/ingest'
+      WHERE org_id = ${alice.orgId} RETURNING org_id`))
+    assert.equal(repointed.length, 0, "bob repointed alice's audit stream at his own collector")
+
+    const deleted = await asBob((db) => db.execute(sql`
+      DELETE FROM audit_stream_destinations WHERE org_id = ${alice.orgId} RETURNING org_id`))
+    assert.equal(deleted.length, 0, "bob removed alice's audit destination")
+
+    const planted = await asBob(async (db) => {
+      await db.execute(sql`
+        INSERT INTO audit_stream_destinations (org_id, kind, url, ciphertext, nonce, fingerprint, last4)
+        VALUES (${alice.orgId}, 'webhook', 'https://bob.collector.example/y', ${Buffer.alloc(40, 1)},
+                ${Buffer.alloc(12, 1)}, 'f', 'abcd')
+        ON CONFLICT (org_id) DO NOTHING`)
+    }).then(() => null, (e: unknown) => pgError(e))
+    assert.equal(planted?.code, '42501', 'bob wrote a destination row for alice')
+
+    // Alice, on her own tenant, the positive control for the tenant policy.
+    const own = await h.pool.withTenant({ orgId: alice.orgId, userId: alice.userId }, (db) =>
+      db.execute(sql`SELECT url FROM audit_stream_destinations`))
+    assert.deepEqual(own.map((r) => (r as { url: string }).url), [url])
+
+    // The forwarder reads, the positive control for its policy.
+    const forwarded = await h.pool.withAuditForwarder((db) => db.execute(sql`
+      SELECT url FROM audit_stream_destinations WHERE org_id = ${alice.orgId}`))
+    assert.equal(forwarded.length, 1, 'the forwarder cannot read the destination it must deliver to')
+
+    // And cannot write, in any verb.
+    const forwarderMoved = await h.pool.withAuditForwarder((db) => db.execute(sql`
+      UPDATE audit_stream_destinations SET url = 'https://elsewhere.collector.example/'
+      WHERE org_id = ${alice.orgId} RETURNING org_id`))
+    assert.equal(forwarderMoved.length, 0, 'the forwarder rewrote a customer destination')
+    const forwarderDeleted = await h.pool.withAuditForwarder((db) => db.execute(sql`
+      DELETE FROM audit_stream_destinations WHERE org_id = ${alice.orgId} RETURNING org_id`))
+    assert.equal(forwarderDeleted.length, 0, 'the forwarder removed a customer destination')
+    const forwarderPlanted = await h.pool
+      .withAuditForwarder(async (db) => {
+        await db.execute(sql`
+          INSERT INTO audit_stream_destinations (org_id, kind, url, ciphertext, nonce, fingerprint, last4)
+          VALUES (${bob.orgId}, 'webhook', 'https://x.collector.example/', ${Buffer.alloc(40, 2)},
+                  ${Buffer.alloc(12, 2)}, 'f', 'abcd')`)
+      })
+      .then(() => null, (e: unknown) => pgError(e))
+    assert.equal(forwarderPlanted?.code, '42501', 'the forwarder created a destination')
+
+    const [left] = await h.admin<{ url: string }[]>`
+      SELECT url FROM audit_stream_destinations WHERE org_id = ${alice.orgId}`
+    assert.equal(left?.url, url, 'one of the refusals above changed the row after all')
+    const [planted2] = await h.admin<{ n: string }[]>`
+      SELECT count(*) AS n FROM audit_stream_destinations
+      WHERE url IN ('https://bob.collector.example/y', 'https://x.collector.example/')`
+    assert.equal(Number(planted2!.n), 0, 'one of the refused inserts wrote a row after all')
   })
 
   it('the application role cannot read or write an operator\'s notes', async () => {
