@@ -59,8 +59,7 @@ func databaseUpstream(upstream string) (string, string, error) {
 	}
 	if _, err := netip.ParseAddr(host); err != nil {
 		for _, c := range host {
-			if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-				(c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.') {
+			if !hostnameRune(c) {
 				return "", "", fmt.Errorf("the database upstream contains an invalid hostname")
 			}
 		}
@@ -70,6 +69,14 @@ func databaseUpstream(upstream string) (string, string, error) {
 		return "", "", fmt.Errorf("the database upstream needs a numeric port from 1 through 65535")
 	}
 	return host, strconv.Itoa(n), nil
+}
+
+// hostnameRune admits the characters a DNS name may carry, and an underscore,
+// which some cloud endpoints use. Anything else could smuggle a path, a user or
+// a second address into what the relay dials.
+func hostnameRune(c rune) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
+		c == '-' || c == '_' || c == '.'
 }
 
 var databaseServiceAddresses = map[netip.Addr]bool{

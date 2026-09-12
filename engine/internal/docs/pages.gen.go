@@ -12485,6 +12485,15 @@ preview and nothing else. And the source cluster's own password is never read
 and never needed. Any high entropy string will do, and changing it changes
 every branch's password.
 
+Rotating the master password is not the whole of it. A clone carries every
+other login the source had, and a password change ends no session that has
+already authenticated. So before a golden is masked, and again before it is
+published, the provider disables every other login role in the clone's own
+catalog, clears its password, and ends its sessions along with any other session
+of the administrator. ` + "`" + `rdsadmin` + "`" + ` and ` + "`" + `rdsrepladmin` + "`" + `, which AWS reserves, are
+left alone. A login the administrator cannot disable stops publication rather
+than surviving into it.
+
 The AWS credentials themselves come from the environment, an ECS or EKS Pod
 Identity credential endpoint, or an EC2 instance role, in that order, and
 version 2 of the instance metadata service only. A profile in ` + "`" + `~/.aws` + "`" + ` and a
@@ -12495,6 +12504,23 @@ The IAM actions needed are ` + "`" + `rds:RestoreDBClusterToPointInTime` + "`" +
 cluster, and ` + "`" + `rds:CreateDBInstance` + "`" + `, ` + "`" + `rds:ModifyDBCluster` + "`" + `,
 ` + "`" + `rds:AddTagsToResource` + "`" + `, ` + "`" + `rds:DescribeDBClusters` + "`" + `, ` + "`" + `rds:DescribeDBInstances` + "`" + `,
 ` + "`" + `rds:DeleteDBInstance` + "`" + ` and ` + "`" + `rds:DeleteDBCluster` + "`" + ` on the clones.
+
+## Connections verify the server
+
+` + "`" + `AF_AURORA_SSLMODE` + "`" + ` defaults to ` + "`" + `verify-full` + "`" + `, which checks the certificate and
+the hostname, and nothing weaker is accepted for a remote endpoint. The provider
+carries AWS's published RDS root bundles for the commercial and GovCloud
+partitions, pinned by digest in its tests, and uses the one for the source's
+partition. The engine installs the same public bundle inside service and
+migration containers, separately from the proxy's HTTP inspection authority, so
+that authority cannot vouch for a database. ` + "`" + `disable` + "`" + ` is accepted only when the
+cluster's endpoint is loopback, which is the test fixture and nothing else.
+
+A clone is created in the source cluster's DB subnet group and security groups,
+read from the source rather than configured, with IAM database authentication
+off, and its writer is not publicly accessible. Every resource is scoped to the
+source cluster's ARN, so a second source in the same account is never listed,
+adopted or deleted by this one.
 
 ## What this provider will not do
 
@@ -12545,6 +12571,11 @@ and is isolated from the golden and from other branches, and that nothing
 leaks across a whole run. It also proves the requests are signed correctly for
 the region and service they are sent to, because the fake recomputes the
 signature and refuses one that does not match.
+
+The verification path runs a real PostgreSQL SSLRequest and TLS handshake
+through the same driver the provider uses, against a certificate authority the
+test generates. It refuses a wrong hostname and a wrong signer. No connection has
+met a certificate issued by RDS.
 
 It does not prove that AWS accepts those requests, and it cannot produce a wall
 clock for a real clone. The benchmark says ` + "`" + `UNMEASURED` + "`" + ` in those cells rather
@@ -12647,7 +12678,13 @@ qualified domain name is accepted too and the server name is taken from it.
 | ` + "`" + `AF_AZUREPG_ALLOW_CIDR` + "`" + ` | The range the created firewall rule admits. Required for public sources |
 | ` + "`" + `AF_AZUREPG_DATABASE` + "`" + ` | The application database. Required when several application databases exist |
 | ` + "`" + `AF_AZUREPG_LOCATION` + "`" + ` | The region. A restore lands in its source's region |
-| ` + "`" + `AF_AZUREPG_TLS_MODE` + "`" + ` | The ` + "`" + `sslmode` + "`" + ` of the connection strings. Defaults to ` + "`" + `require` + "`" + ` |
+| ` + "`" + `AF_AZUREPG_TLS_MODE` + "`" + ` | The ` + "`" + `sslmode` + "`" + ` of the connection strings. Defaults to ` + "`" + `verify-full` + "`" + `, which checks the server certificate and hostname |
+
+Remote connections require ` + "`" + `verify-full` + "`" + `. The provider supplies Microsoft's
+published Azure root certificates through an explicit certificate file, so
+clients that do not use the operating system trust store still verify the
+server. The engine installs that public bundle inside service containers.
+Weaker modes are restricted to loopback API fixtures.
 
 ` + "`" + `AF_AZUREPG_ALLOW_CIDR` + "`" + ` has no default on purpose. A default of ` + "`" + `0.0.0.0/0` + "`" + `
 would make every branch work immediately and would open a copy of production to
@@ -12769,13 +12806,25 @@ the source instance over a connection.
 | ` + "`" + `AF_CLOUDSQL_BRANCH_KEY` + "`" + ` | The key every clone's password is derived from |
 | ` + "`" + `AF_CLOUDSQL_STOP_GOLDENS` + "`" + ` | ` + "`" + `1` + "`" + ` to stop a published golden's compute. Read the section below first |
 | ` + "`" + `AF_CLOUDSQL_TIER` + "`" + ` | Overrides the machine tier. Empty keeps the source's, which is what keeps a clone fast |
-| ` + "`" + `AF_CLOUDSQL_TLS_MODE` + "`" + ` | The ` + "`" + `sslmode` + "`" + ` of the connection strings. Defaults to ` + "`" + `require` + "`" + ` |
+| ` + "`" + `AF_CLOUDSQL_TLS_MODE` + "`" + ` | ` + "`" + `verify-ca` + "`" + ` or ` + "`" + `verify-full` + "`" + `. Empty chooses from the instance's CA mode. ` + "`" + `require` + "`" + ` and ` + "`" + `disable` + "`" + ` are refused |
 
 The branch key is **not** the source instance's password. A distinct password is
 derived from it for every clone, so a preview environment never holds
 production's database credential. That matters more here than it sounds: Google
 documents that a clone carries the source's users and passwords, so without the
 derived password every branch would be reachable with production's.
+
+Every connection string verifies the server, because encryption without
+verification lets anything on the path present a certificate. An instance on
+Google's per instance CA gets ` + "`" + `verify-ca` + "`" + ` against that instance's own CA,
+fetched through the authenticated Admin API. An instance on a shared or
+customer CA gets ` + "`" + `verify-full` + "`" + `, which also checks the hostname. An instance
+whose CA mode the provider does not recognise is refused rather than guessed.
+` + "`" + `require` + "`" + ` checks nothing and is refused, and so is ` + "`" + `disable` + "`" + `, which the
+provider permits only behind a loopback proxy that a manifest cannot configure.
+The engine installs the same public CA material
+inside service and migration containers, separately from the proxy's HTTP
+inspection authority, so that authority cannot vouch for a database.
 
 Admin API calls use a service account supplied through
 ` + "`" + `GOOGLE_APPLICATION_CREDENTIALS` + "`" + `, or the attached Google identity through the
@@ -12784,17 +12833,18 @@ SQL permissions needed to clone, configure and delete instances. An empty or
 failed token is refused before the request reaches the API. These control
 plane credentials are separate from the branch key and database password.
 
-## Goldens cost compute here, and Aurora's trick does not exist
+## Goldens cost compute here, and there is no shape that would make them free
 
-The Aurora provider publishes a golden by deleting its writer instance and
-keeping the volume, because an Aurora cluster's storage exists whether or not an
-instance is attached and is still cloneable. A published Aurora golden costs
-storage and no compute.
+An Aurora cluster's volume exists whether or not an instance is attached, so a
+published Aurora golden could in principle drop its compute and stay cloneable.
+The Aurora provider does not do that. Nobody who wrote it has an Aurora account,
+so the saving is unmeasured and its golden keeps its writer instance, which
+[the Aurora page](/docs/providers/aurora) states in full.
 
-**Cloud SQL has no such thing.** An instance is compute and storage together and
-there is no cloneable object underneath it. The closest shape available is an
-instance whose activation policy is ` + "`" + `NEVER` + "`" + `, which stops the compute and keeps
-the disk.
+**Cloud SQL does not have that shape at all.** An instance is compute and
+storage together and there is no cloneable object underneath it. The closest
+shape available is an instance whose activation policy is ` + "`" + `NEVER` + "`" + `, which stops
+the compute and keeps the disk.
 
 Whether Cloud SQL will fast clone an instance that is stopped is **not
 established**. Google's clone documentation does not address a stopped source in

@@ -2403,7 +2403,7 @@ func (o *Orchestrator) branchFrom(
 			commitErr := s.journal.Commit(journalCtx, rec.ID, branch.ProviderRef)
 			cancel()
 			if commitErr != nil {
-				return "", zero, secrets.Value{}, secrets.Value{}, fmt.Errorf("branch failed (%v) and its partial resource could not be journalled: %w", err, commitErr)
+				return "", zero, secrets.Value{}, secrets.Value{}, fmt.Errorf("branch failed (%w) and its partial resource could not be journalled: %w", err, commitErr)
 			}
 		}
 		return "", zero, secrets.Value{}, secrets.Value{}, err
