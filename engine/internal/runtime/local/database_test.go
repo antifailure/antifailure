@@ -221,6 +221,13 @@ exec tail -f /dev/null`
 					Migrate: "su -p postgres -s /bin/sh -c " + relayShell(migration),
 					Env: map[string]secrets.Value{
 						"PGPASSWORD": secrets.New(relayFixturePassword), "PGCONNECT_TIMEOUT": secrets.New("4"),
+						// su -p keeps the image's HOME of /root, which the postgres
+						// user cannot traverse, and libpq refuses a default client
+						// certificate path it cannot stat. A path that plainly does
+						// not exist is skipped, so the probe authenticates by password
+						// exactly as an application would.
+						"PGSSLCERT":     secrets.New("/tmp/af-relay-no-client.crt"),
+						"PGSSLKEY":      secrets.New("/tmp/af-relay-no-client.key"),
 						"AF_FAKE_QUERY": secrets.New(query), "AF_FAKE_FORGED_URL": secrets.New(forgedURL),
 						"AF_FAKE_ALIAS_URL":  secrets.New(relayURL("another.af-remote.invalid", 45000, "af_relay_app", "verify-ca")),
 						"AF_FAKE_DIRECT_URL": secrets.New(relayURL(upstream, 5432, "af_relay_app", "verify-ca")),
