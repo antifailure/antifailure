@@ -4844,6 +4844,14 @@ with the hash chain in it, from wherever you run that. Neither replaces the
 other and neither replaces the log itself, which is written regardless: a sink
 that is unreachable loses forwarding and never loses the entry.
 
+The control plane's stream has two ways to choose a destination, and which one
+applies to you depends on who runs the control plane. An operator names one
+destination for the whole installation in the environment, which is the section
+below. An organization on a hosted control plane names its own, through an API,
+which is the section after it. An organization that has named one is delivered
+there and nowhere else, and the installation destination covers every
+organization that has not.
+
 Until this page said so, only the first half existed. The control plane's audit
 log carried a tamper evident chain and reached no destination at all, so single
 organization sign on, directory provisioning and administrative actions were
@@ -5109,6 +5117,105 @@ An object store sink exists in the code and cannot be turned on from the
 environment, because it needs a request signer this half of the product does not
 carry. Naming one is refused rather than accepted and then silently writing
 nowhere.
+
+### Choosing your own destination, per organization
+
+On a hosted control plane the installation's environment is the operator's, not
+yours, so the destination is an API instead. One destination per organization:
+a second would make "where did sequence 41 go" a question with two answers, and
+the honest way to reach two collectors is one collector that fans out after
+receiving.
+
+` + "`" + "`" + "`" + `sh
+curl -X PUT https://app.antifailure.dev/enterprise/audit-stream \
+  -H "x-antifailure-csrf: $CSRF" -H 'content-type: application/json' \
+  --cookie "af_session=$SESSION" \
+  -d '{"kind":"webhook","url":"https://siem.example/ingest","credential":"..."}'
+` + "`" + "`" + "`" + `
+
+` + "`" + `GET` + "`" + ` returns the destination and what the stream has done for you. ` + "`" + `PUT` + "`" + `
+stores or replaces it. ` + "`" + `PATCH` + "`" + ` with ` + "`" + `{"enabled": false}` + "`" + ` stops delivery without
+discarding the endpoint and the credential. ` + "`" + `DELETE` + "`" + ` removes it. ` + "`" + `kind` + "`" + ` takes
+` + "`" + `splunk` + "`" + `, ` + "`" + `event_hubs` + "`" + ` or ` + "`" + `webhook` + "`" + `, and Splunk additionally accepts
+` + "`" + `indexName` + "`" + ` and ` + "`" + `sourcetype` + "`" + ` so entries land where your existing searches
+already look.
+
+Only an owner or an admin may change it. Any member may read it, because the
+answer carries the endpoint, the last four characters of the credential and a
+fingerprint of it, and never the credential itself.
+
+**The credential is required on every save, including a change of endpoint.**
+That is deliberate. If the endpoint could be moved while the stored credential
+was kept, somebody who had taken over an administrator's session could point the
+stream at a host they control and receive your collector token in the
+authorization header of the next delivery. Changing where a credential is sent
+requires having it.
+
+**Your credential is stored sealed.** It is encrypted with AES-256-GCM under a
+key held in the deployment's key vault and never in the database, bound to your
+organization and to the kind of destination it was sealed for, so a copy of the
+row is useless anywhere else. A database backup on its own decrypts nothing. The
+only thing that ever holds the plaintext is the code putting it in a request
+header to your collector.
+
+**Delivery starts when you save, not at the beginning of your history.** The
+organization's current audit sequence is recorded with the destination, and
+entries above it are what get delivered, so configuring a collector does not
+replay months of entries into it as a surprise. The configuration change is
+itself an audit entry, written after that sequence is read, so the first thing
+your collector receives is the record of its own creation. That is how you can
+tell a working destination from a wrong one without a test button.
+
+Switching a destination off stops delivery on the next pass and does not fall
+back to the installation destination: an organization that turned its stream off
+did not ask for its entries to go somewhere else instead. Switching it on starts
+from the moment of the switch, for the same reason a first save does.
+
+**Batch manifests are signed under a key derived from your own credential**,
+rather than under the operator's ` + "`" + `AF_AUDIT_STREAM_KEY` + "`" + `, which you do not hold. A
+signature its reader cannot check is decoration. The key is the HMAC-SHA256 of
+the label ` + "`" + `antifailure audit manifest v1` + "`" + ` keyed by the credential you gave,
+rendered as lowercase hexadecimal, so a receiver can derive it and verify every
+batch without asking this control plane anything.
+
+` + "`" + `GET` + "`" + ` also reports what the stream has actually done: the sequence delivered so
+far, when it last tried, when it last succeeded, how many passes have failed in
+a row, and the collector's own words about the last failure. A credential your
+security team rotates or revokes shows up there as the status your collector
+answered with.
+
+### What a destination may be, and what no URL check can see
+
+A destination you supply is an untrusted address from the control plane's point
+of view, so it is held to a stricter rule than the installation destination in
+the section above.
+
+- HTTPS always. There is no loopback exception, unlike the operator's
+  destination, which removes every plaintext service inside the deployment
+  including the control plane's own port.
+- No credentials in the URL, because every proxy log on the way keeps them.
+- No literal address that is not a public one: loopback, the private ranges,
+  link local including the address cloud metadata services answer on, unique
+  local, multicast, the unspecified address, and the IPv4 addresses that arrive
+  wearing an IPv6 coat.
+- No single label hostname and nothing under ` + "`" + `.local` + "`" + `, because those resolve
+  inside a container network and nowhere else.
+
+The rule is applied when you save and again when a batch is delivered, so a row
+written by any other path is refused too.
+
+**What it cannot see, stated rather than implied:** a public hostname whose DNS
+resolves into a private network. No check on a URL can, and neither can a check
+made when the row is saved, because resolution can change between the save and
+the delivery. The control that would close it is egress policy on the control
+plane's own network, which this deployment does not have today.
+
+**Rotating the deployment's sealing secret is a one way door.** There is no re
+sealing tool, and a stored credential that will not decrypt looks exactly like
+one that was altered. If an operator replaces that secret, every organization's
+collector credential stops opening and the stream holds its entries and reports
+the reason; saving the credential again repairs it. This is the limitation
+already recorded for a stored provider key, which the same mechanism carries.
 
 ### Delivery, and what happens when your collector is down
 
