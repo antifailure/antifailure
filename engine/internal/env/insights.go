@@ -343,11 +343,24 @@ func (o *Orchestrator) applierFor(
 		return nil, "", err
 	}
 
+	// The service's own tool runs the migrations, so it needs what the service
+	// is given. serviceEnv alone holds only the manifest's literals, which left
+	// every secret the service declared as an empty string: a Rails app with no
+	// SECRET_KEY_BASE refuses to boot, so the rehearsal failed on configuration
+	// before it reached a single migration. Resolved per service, so a value
+	// scoped to another service is not handed to this one.
+	resolved, err := o.resolveSecrets(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	env := serviceEnv(svc)
+	resolveInto(svc.Name, env, resolved)
+
 	applier := &insights.ContainerApplier{
 		Image:    image,
 		Command:  svc.Migrate,
 		URLVar:   databaseURLVar(o.opts.Manifest),
-		Env:      serviceEnv(svc),
+		Env:      env,
 		EnvID:    o.envID,
 		Progress: o.progress,
 	}

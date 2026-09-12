@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -68,6 +69,44 @@ type Attachable interface {
 // Name identifies the applier.
 func (*ContainerApplier) Name() string { return "container" }
 
+// Environment is what the migration container is started with: the service's
+// own variables, and the branch's connection string under the variable the
+// application reads it from.
+//
+// One map, and the branch written into it last, so there is exactly one entry
+// per name and the branch is the one that survives. This was a list with the
+// branch first and the service's variables appended after it, and Docker keeps
+// the LAST of two entries with one name. A service declaring DATABASE_URL as a
+// secret therefore replaced the branch's address with its own: blank while
+// secrets were not resolved for the rehearsal, which failed the migration with
+// no database to connect to, and the resolved secret once they were, which
+// would have run a pull request's migrations against whatever database that
+// secret names instead of against a throwaway copy. The branch is the only
+// database a rehearsal may touch, so the precedence is decided here rather
+// than by the order Docker happens to read its arguments in.
+func (a *ContainerApplier) Environment(url secrets.Value) []string {
+	variable := a.URLVar
+	if variable == "" {
+		variable = "DATABASE_URL"
+	}
+	vars := make(map[string]string, len(a.Env)+1)
+	for k, v := range a.Env {
+		vars[k] = v.Reveal()
+	}
+	vars[variable] = url.Reveal()
+
+	keys := make([]string, 0, len(vars))
+	for k := range vars {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, k+"="+vars[k])
+	}
+	return out
+}
+
 // databaseAlias is the name the migration reaches the branch by.
 //
 // A fixed alias rather than the container's own name, because the connection
@@ -129,14 +168,7 @@ func (a *ContainerApplier) Apply(
 		reachable = rewritten
 	}
 
-	variable := a.URLVar
-	if variable == "" {
-		variable = "DATABASE_URL"
-	}
-	env := []string{variable + "=" + reachable.Reveal()}
-	for k, v := range a.Env {
-		env = append(env, k+"="+v.Reveal())
-	}
+	env := a.Environment(reachable)
 
 	name := "af-rehearse-" + a.EnvID
 	// A container left by an interrupted run holds the name, and adopting one

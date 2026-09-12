@@ -2544,10 +2544,20 @@ func orDefault(s, fallback string) string {
 // resolver had kept, with nothing anywhere saying one of them was wrong.
 func applyResolved(services []provider.ServiceSpec, resolved *secrets.Resolved) {
 	for i := range services {
-		for name := range services[i].Env {
-			if value, ok := resolved.Lookup(services[i].Name, name); ok {
-				services[i].Env[name] = value
-			}
+		resolveInto(services[i].Name, services[i].Env, resolved)
+	}
+}
+
+// resolveInto replaces each variable one service declared with what the
+// resolver found for that service.
+//
+// Shared by af up, the previous version's spec and the migration rehearsal,
+// because the rehearsal building its environment on its own is how it came to
+// run with every secret the service declared set to an empty string.
+func resolveInto(service string, env map[string]secrets.Value, resolved *secrets.Resolved) {
+	for name := range env {
+		if value, ok := resolved.Lookup(service, name); ok {
+			env[name] = value
 		}
 	}
 }
