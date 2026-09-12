@@ -160,7 +160,7 @@ errors:
     exit_code: 3
   - code: AF-SEC-007
     area: SEC
-    message: "The sandbox credential {name} would need a different value for each of {services}, and the egress proxy holds one value per credential for the whole environment."
+    message: "The sandbox credential {name} is declared by {services} with a scope or from more than one place, so it would need more than one value, and the egress proxy holds one value per credential for the whole environment."
     next_step: "Give every service that declares {name} the same source and no scope. The proxy substitutes the credential into every request to that provider whichever service sent it, so a value that belongs to one service cannot be kept to that service."
     docs: guides/secrets
     retryable: false

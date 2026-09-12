@@ -439,9 +439,10 @@ const (
 	// The credential stored in {location} is not in this tool's format:
 	// {detail}
 	AFSEC006 Code = "AF-SEC-006"
-	// The sandbox credential {name} would need a different value for each
-	// of {services}, and the egress proxy holds one value per credential
-	// for the whole environment.
+	// The sandbox credential {name} is declared by {services} with a scope
+	// or from more than one place, so it would need more than one value,
+	// and the egress proxy holds one value per credential for the whole
+	// environment.
 	AFSEC007 Code = "AF-SEC-007"
 	// The environment certificate could not be created: {detail}
 	AFSEC010 Code = "AF-SEC-010"
@@ -1949,7 +1950,7 @@ var catalog = map[Code]Entry{
 	AFSEC007: {
 		Code:      AFSEC007,
 		Area:      "SEC",
-		Message:   "The sandbox credential {name} would need a different value for each of {services}, and the egress proxy holds one value per credential for the whole environment.",
+		Message:   "The sandbox credential {name} is declared by {services} with a scope or from more than one place, so it would need more than one value, and the egress proxy holds one value per credential for the whole environment.",
 		NextStep:  "Give every service that declares {name} the same source and no scope. The proxy substitutes the credential into every request to that provider whichever service sent it, so a value that belongs to one service cannot be kept to that service.",
 		Docs:      "guides/secrets",
 		Retryable: false,
