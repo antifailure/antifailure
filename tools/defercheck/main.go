@@ -295,19 +295,25 @@ func run(root, exemptionsPath string, out io.Writer) error {
 		}
 		return found[i].line < found[j].line
 	})
+	// Write errors are ignored explicitly and once, for the reason prosecheck
+	// gives: the verdict of this tool is its exit code, not its report, so a
+	// broken pipe changes what a person can read and not whether the build
+	// should fail.
+	report := func(format string, args ...any) { _, _ = fmt.Fprintf(out, format, args...) }
+
 	// Every finding is named with its file, its line and the claim it broke,
 	// on the report rather than in the error, because the error is one line and
 	// a reader needs all of them. This is also what the tool's own tests read:
 	// a gate whose findings only exist as a count cannot be proved to have
 	// found the right thing.
 	for _, f := range found {
-		fmt.Fprintf(out, "%s:%d: %s\n    %s\n", f.file, f.line, f.why, f.text)
+		report("%s:%d: %s\n    %s\n", f.file, f.line, f.why, f.text)
 	}
 	if len(stale) > 0 {
 		// An exemption that excuses nothing is a claim about the tree that
 		// stopped being true, and left alone it becomes a licence nobody
 		// granted over whatever takes that line next.
-		fmt.Fprintf(out, "%d %s in the exemptions matches nothing and can be deleted:\n  %s\n",
+		report("%d %s in the exemptions matches nothing and can be deleted:\n  %s\n",
 			len(stale), plural(len(stale), "row", "rows"), strings.Join(stale, "\n  "))
 	}
 	if len(found)+len(stale) > 0 {
@@ -318,10 +324,10 @@ func run(root, exemptionsPath string, out io.Writer) error {
 	// The report names what was not checked rather than only what was. A
 	// count on its own reads as coverage, and the whole point of this line is
 	// that the reader can see the gap.
-	fmt.Fprintf(out, "defercheck: %d files scanned, 0 deferrals\n", scanned)
+	report("defercheck: %d files scanned, 0 deferrals\n", scanned)
 	if len(opaque) > 0 {
 		sort.Strings(opaque)
-		fmt.Fprintf(out, "defercheck: %d tracked %s not checked, each an image, a font or another binary: %s\n",
+		report("defercheck: %d tracked %s not checked, each an image, a font or another binary: %s\n",
 			len(opaque), plural(len(opaque), "file is", "files are"), strings.Join(opaque, ", "))
 	}
 	return nil
@@ -386,7 +392,7 @@ func tracked(root string) ([]string, error) {
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("git ls-files in %s: %v: %s", root, err, strings.TrimSpace(stderr.String()))
+		return nil, fmt.Errorf("git ls-files in %s: %w: %s", root, err, strings.TrimSpace(stderr.String()))
 	}
 	var files []string
 	for _, p := range strings.Split(string(out), "\x00") {
@@ -407,7 +413,7 @@ func readExemptions(path string) ([]*exemption, error) {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("reading %s: %v", path, err)
+		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}
 	var out []*exemption
 	for i, line := range strings.Split(string(body), "\n") {
