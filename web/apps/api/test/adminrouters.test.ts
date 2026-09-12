@@ -40,7 +40,7 @@ import { adminUrl, available, dropOrg, seedOrg, startApi, stripeAgainstMockPack,
  *  the shape that does not have that trap. */
 const hasDatabase = await available()
 
-describe('the operator money routes', { skip: hasDatabase ? false : 'no database' }, () => {
+describe('the operator money routes', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: ApiHarness
   let org: Org
   let operatorId: string

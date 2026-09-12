@@ -41,7 +41,7 @@ describe('the retention read from the environment', () => {
   })
 })
 
-describe('a maintenance pass', { skip: has ? false : 'no database' }, () => {
+describe('a maintenance pass', { skip: has ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: ApiHarness
 
   before(async () => {

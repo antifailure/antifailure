@@ -21,7 +21,7 @@ import {
 
 const hasDatabase = await available()
 
-describe('an internal failure', { skip: hasDatabase ? false : 'no database' }, () => {
+describe('an internal failure', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: ApiHarness
   let org: Org
 
