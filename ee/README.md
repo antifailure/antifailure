@@ -203,6 +203,23 @@ reason: somebody who set the variable has said every privileged action must
 reach their SIEM, and starting anyway forwards nothing and says nothing, which
 is indistinguishable from a quiet week.
 
+**An organization on a hosted control plane chooses its own destination**, and
+the variables above are the INSTALLATION's rather than any customer's. A
+destination belongs to an organization in `audit_stream_destinations`, holding
+the endpoint and the credential sealed under `AF_PROVIDER_KEY_SECRET`, which is
+the mechanism a customer's provider key already uses and which never puts the
+value in Postgres. An owner or an admin sets it through
+`/enterprise/audit-stream`; the forwarder resolves a destination per
+organization on every pass, after asking the entitlement, so an organization
+whose entitlement was withdrawn never has its credential opened. An organization
+with no destination of its own is covered by the installation's, and one with a
+destination is not. Batches to an organization's own destination are signed
+under a key derived from that organization's credential, because a manifest
+signed under the operator's key is one the customer cannot verify. A customer
+supplied endpoint is untrusted input and is held to a stricter rule than the
+operator's: HTTPS with no loopback exception, no URL credentials, and no literal
+address that is not public. See `docs/enterprise/audit-stream.md`.
+
 The object store sink in `ee/web/audit/src/sinks.ts` **cannot be configured from
 the environment**, because it takes a `put` callback and this side of the
 product carries no S3 or Blob signer to supply one. It is reachable by an

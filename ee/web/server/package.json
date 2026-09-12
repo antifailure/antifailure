@@ -12,7 +12,7 @@
   },
   "scripts": {
     "start": "node src/main.ts",
-    "test": "node --test --test-concurrency=1 test/license.test.ts && node --test --test-concurrency=1 test/entrypoint.test.ts && node --test --test-concurrency=1 test/vectors.test.ts && node --test --test-concurrency=1 test/audit-stream.test.ts",
+    "test": "node --test --test-concurrency=1 test/license.test.ts && node --test --test-concurrency=1 test/entrypoint.test.ts && node --test --test-concurrency=1 test/vectors.test.ts && node --test --test-concurrency=1 test/audit-stream.test.ts && node --test --test-concurrency=1 test/audit-destinations.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {

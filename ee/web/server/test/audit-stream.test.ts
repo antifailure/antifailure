@@ -180,7 +180,7 @@ describe(
       try {
         assert.match(
           running.output(),
-          /audit stream: forwarding the control plane's audit log to webhook/,
+          /audit stream: forwarding to webhook for every organization without its own destination/,
           `the process did not say it had started a forwarder. It said:\n${running.output()}`,
         )
 
@@ -388,7 +388,7 @@ describe(
         // and one that does not produced identical logs.
         assert.match(
           running.output(),
-          /no AF_AUDIT_STREAM_SINK is set, so the control plane's audit log is written and not forwarded/,
+          /no AF_AUDIT_STREAM_SINK is set and no organization can choose a destination, so the control plane's audit log is written and not forwarded/,
           `the silent state was silent. It said:\n${running.output()}`,
         )
       } finally {

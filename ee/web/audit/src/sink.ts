@@ -282,3 +282,28 @@ function sortKeys(value: Record<string, unknown>): Record<string, unknown> {
   for (const key of Object.keys(value).sort()) out[key] = value[key]
   return out
 }
+
+/**
+ * The key a batch delivered to an organization's own destination is signed under.
+ *
+ * WHY NOT THE INSTALLATION KEY. AF_AUDIT_STREAM_KEY is the operator's, and a
+ * hosted customer does not hold it, so a manifest signed under it is one the
+ * only party who needs to check it cannot check. A signature its reader cannot
+ * verify is the decoration configure.ts refuses to produce.
+ *
+ * So the key is derived from the credential the organization gave for the
+ * destination: HMAC-SHA256 of a fixed label, keyed by that credential, as
+ * lowercase hex. The organization holds the credential, so it can derive the
+ * same key and run `verify` on every batch without asking this control plane
+ * anything. Derived rather than the credential itself, so a manifest key that
+ * leaks from a receiver's verification code is not a working collector token.
+ *
+ * Exported for a receiver, the way `verifyWebhook` is.
+ */
+export function manifestKeyFor(credential: string): string {
+  return createHmac('sha256', credential).update(MANIFEST_KEY_LABEL).digest('hex')
+}
+
+/** The label the manifest key is derived over. Versioned, so a change to the
+ *  derivation is a new label rather than silently different signatures. */
+export const MANIFEST_KEY_LABEL = 'antifailure audit manifest v1'

@@ -240,15 +240,35 @@ describe(
       }
     })
 
-    it('positions: a tenant cannot read or advance delivery state and the forwarder can', async () => {
+    it('positions: a tenant reads its own delivery state and no other, and cannot advance it', async () => {
+      // WIDENED ON PURPOSE BY 0044, and this test is what bounds the widening.
+      // 0043 gave a tenant no read of this table at all. An organization that
+      // chose its own collector has to be able to see whether it is working, so
+      // it now reads ITS OWN row. It must still read nobody else's and move
+      // nothing: advancing a position skips entries, and rewinding one replays
+      // an organization's history into its collector.
       const org = await tenant()
+      const other = await tenant()
       const seq = await h.write(org.orgId, 'position.boundary')
+      await h.write(other.orgId, 'position.boundary')
       await forwarderFor(new RecordingSink(), new TestClock(), entitled).pass()
-      const hidden = await h.pool.withTenant({ orgId: org.orgId }, (db) =>
-        db.execute(sql`SELECT * FROM audit_stream_positions WHERE org_id = ${org.orgId}`))
-      assert.equal(hidden.length, 0)
-      await h.pool.withTenant({ orgId: org.orgId }, (db) =>
-        db.execute(sql`UPDATE audit_stream_positions SET delivered_seq = 0 WHERE org_id = ${org.orgId}`))
+
+      const seen = await h.pool.withTenant({ orgId: org.orgId }, (db) =>
+        db.execute<{ org_id: string; delivered_seq: string }>(sql`
+          SELECT org_id, delivered_seq FROM audit_stream_positions`))
+      assert.deepEqual(
+        seen.map((r) => r.org_id), [org.orgId],
+        'a tenant read delivery state that is not its own, so the SELECT policy 0044 added names ' +
+          'no tenant and widened the table for every ordinary request',
+      )
+      assert.equal(Number(seen[0]!.delivered_seq), seq)
+
+      const moved = await h.pool.withTenant({ orgId: org.orgId }, (db) =>
+        db.execute(sql`
+          UPDATE audit_stream_positions SET delivered_seq = 0 WHERE org_id = ${org.orgId}
+          RETURNING org_id`))
+      assert.equal(moved.length, 0, 'a tenant rewound its own delivery position')
+
       const visible = await h.pool.withAuditForwarder((db) =>
         db.execute<{ delivered_seq: string }>(sql`
           SELECT delivered_seq FROM audit_stream_positions WHERE org_id = ${org.orgId}`))
