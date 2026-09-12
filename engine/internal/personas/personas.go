@@ -327,6 +327,23 @@ func Provision(
 ) (*Result, error) {
 	out := &Result{Adapter: a.Name()}
 	for _, p := range list {
+		// A persona that never signs in has nothing to create, so the adapter
+		// is not asked to create it. It used to be: every persona reached the
+		// adapter, and a seed command, which is written for the accounts that
+		// sign in, was handed a persona with no address and no role. This
+		// repository's own personas.mjs refuses exactly that and exits non
+		// zero, so declaring a signed out visitor stopped provisioning, and
+		// af test and af ci with it, before a single workflow ran. It is still
+		// an account in the result, with no credential, so the runner is told
+		// about it the same way it is told about every other persona.
+		if !needsAccount(p) {
+			out.Accounts = append(out.Accounts, &Account{
+				Name: p.Name, Email: p.Email, Phone: p.Phone, Role: p.Role,
+				Login: schema.LoginNone, Adapter: a.Name(),
+			})
+			continue
+		}
+
 		want := d.For(p)
 
 		// Checked here rather than at the sign in, which is the whole point of

@@ -1,0 +1,43 @@
+scenario: a-reader-arrives-signed-out
+description: >-
+  A launch reader opens the console signed out, the page asks the control plane
+  whether there is a session, and the reader reloads once when it feels slow.
+# Spread the arrivals over two seconds. Readers following a link arrive over
+# a minute, not on one tick, and a thundering herd at time zero measures the
+# connection pool rather than the sign-in screen.
+ramp_ms: 2000
+steps:
+  # The shell, which is the sign-in screen to anybody without a cookie.
+  - request: GET /
+    think_ms: 300
+    jitter_ms: 300
+  # The first thing the console asks once it has loaded: is anybody signed in,
+  # and which ways in are offered. This is what decides whether the reader
+  # sees a form or a spinner.
+  - request: GET /auth/session
+    think_ms: 1500
+    jitter_ms: 1000
+  # The impatient reload: the same two requests again, overlapping, three
+  # hundred milliseconds apart, the way a browser sends them when somebody
+  # presses reload before the first answer has painted.
+  - parallel:
+      - request: GET /
+        after_ms: 0
+      - request: GET /auth/session
+        after_ms: 300
+  # Readiness, which is what the launch checklist curls while this happens.
+  - request: GET /readyz
+assertions:
+  - name: every_request_was_answered
+    every_request_succeeded: true
+  - name: the_session_read_never_fell_over
+    step: GET /auth/session
+    status_in: [200]
+  # Two seconds is not a benchmark, it is the point past which a sign-in
+  # screen reads as broken. Absolute on purpose and generous on purpose: the
+  # mix carries no p95 baseline under source none, and a number that fails on
+  # a busy shared runner while the application is fine is a check people
+  # learn to ignore.
+  - name: the_sign_in_screen_answered_within_two_seconds
+    step: GET /
+    p95_below_ms: 2000

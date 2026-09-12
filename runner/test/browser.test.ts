@@ -1,10 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
+import { createServer as createNetServer } from 'node:net';
 import { mkdtempSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Session } from '../src/browser.ts';
 import { run } from '../src/execute.ts';
 import { explore, type Goal } from '../src/explore.ts';
 import { exitCodeFor } from '../src/verdict.ts';
@@ -449,6 +451,85 @@ test('the snapshot reads rendered text, never markup', async () => {
   for (const forbidden of ['innerHTML', 'outerHTML', '.content()', 'documentElement.outerHTML']) {
     assert.ok(!source.includes(forbidden),
       `browser.ts reads ${forbidden}, so the page's markup can reach the model`);
+  }
+});
+
+test('the snapshot never offers a control nobody could press', { timeout: 120_000 }, async () => {
+  // The console's mobile menu button, which a desktop layout hides with
+  // display: none. It was offered to the planner at desktop width, pressing it
+  // could never work, and the click timed out and ended two of this
+  // repository's own explorations as blocked with nothing explored.
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end(`<html><head><title>Members</title></head><body>
+      <header style="display: none">
+        <button type="button" aria-label="Open the menu">&#9776;</button>
+      </header>
+      <h1>Members</h1>
+      <a href="/invitations">Invitations</a>
+    </body></html>`);
+  });
+  const baseURL = await new Promise<string>((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address();
+      resolve(`http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`);
+    });
+  });
+  const session = await Session.open({ artifacts: mkdtempSync(join(tmpdir(), 'af-hidden-')) });
+  try {
+    await session.page().goto(`${baseURL}/`);
+    const seen = await session.snapshot();
+    // Both halves, so a snapshot that offered nothing at all cannot pass.
+    assert.ok(seen.controls.includes('Invitations'), `the visible link is missing from ${seen.controls.join(', ')}`);
+    assert.ok(!seen.controls.includes('Open the menu'),
+      `a control hidden with display: none was offered: ${seen.controls.join(', ')}`);
+  } finally {
+    await session.close('hidden-control').catch(() => undefined);
+    server.close();
+  }
+});
+
+test('a press that starts a navigation which never finishes does not end the run', { timeout: 120_000 }, async () => {
+  // Continue with GitHub, inside an environment that never lets github.com
+  // answer. The click landed, Playwright then waited for the navigation it
+  // started, the navigation never committed, and the ten second timeout threw
+  // out of the press and ended a whole exploration as blocked with nothing
+  // explored. Modelled by a host that accepts the connection and never replies.
+  const silent = createNetServer((socket) => { socket.on('error', () => undefined); });
+  const silentPort = await new Promise<number>((resolve) => {
+    silent.listen(0, '127.0.0.1', () => {
+      const addr = silent.address();
+      resolve(typeof addr === 'object' && addr ? addr.port : 0);
+    });
+  });
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end(`<html><head><title>Sign in</title></head><body>
+      <h1>Sign in</h1>
+      <a href="http://127.0.0.1:${silentPort}/login/oauth/authorize">Continue with GitHub</a>
+      <a href="/email">Send a sign-in link</a>
+    </body></html>`);
+  });
+  const baseURL = await new Promise<string>((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address();
+      resolve(`http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`);
+    });
+  });
+  const session = await Session.open({ artifacts: mkdtempSync(join(tmpdir(), 'af-nowhere-')) });
+  try {
+    const page = session.page();
+    await page.goto(`${baseURL}/`);
+    await page.click(/^Continue with GitHub$/);
+    // The press returned, and the page it left is still one the agent can
+    // read and act on, which is what lets an exploration record it and move on.
+    const seen = await session.snapshot();
+    assert.ok(seen.controls.includes('Send a sign-in link'),
+      `after the press the page offered: ${seen.controls.join(', ')}`);
+  } finally {
+    await session.close('nowhere').catch(() => undefined);
+    server.close();
+    silent.close();
   }
 });
 
