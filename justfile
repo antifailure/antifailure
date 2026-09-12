@@ -1392,6 +1392,15 @@ wirecheck:
 # Both directions fail: a socket that is not consulted and not listed in the
 # tool is reported, and so is one that is listed and has since been wired up,
 # so the list cannot outlive the gaps it describes.
+#
+# And a third question, because consulted is not filled. The engine asked the
+# emulator registry for an emulator and no binary a customer runs had ever put
+# one in it: emulator.RegisterBuiltin had no caller, so eleven hundred lines of
+# AWS, Azure and GCP emulators were refused by name while this gate reported
+# every socket plugged in. So every socket is also registered by a shipped
+# binary, found by walking what that binary's main can reach, or listed in the
+# tool as deliberately empty with the reason, and that list fails both ways
+# too.
 socketcheck:
     go run ./tools/socketcheck .
 

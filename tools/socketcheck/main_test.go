@@ -98,17 +98,75 @@ func write(t *testing.T, root, rel, body string) {
 	}
 }
 
+// The tree every case starts from also carries a binary that ships, because
+// every socket is now asked whether one registers anything, and a fixture
+// with no binary would report every socket as empty whatever the case was
+// about.
+const (
+	goodModule = "module github.com/antifailure/antifailure/engine\n\ngo 1.26.0\n"
+
+	goodRelease = `jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - { os: darwin, arch: arm64 }
+          - { os: linux,  arch: amd64 }
+`
+
+	goodMain = `package main
+
+import "github.com/antifailure/antifailure/engine/internal/cli"
+
+func main() { cli.Run(nil) }
+`
+
+	goodCLI = `package cli
+
+import "github.com/antifailure/antifailure/engine/pkg/extension"
+
+func Run(r *extension.Registry) {
+	register(r)
+}
+
+func register(r *extension.Registry) {
+	r.AddPolicy(nil)
+	r.AddDatabaseProvider(nil)
+}
+`
+)
+
 func tree(t *testing.T, extension, engine string) string {
 	t.Helper()
 	root := t.TempDir()
+	write(t, root, "engine/go.mod", goodModule)
+	write(t, root, ".github/workflows/release.yml", goodRelease)
 	write(t, root, "engine/pkg/extension/extension.go", extension)
+	write(t, root, "engine/pkg/provider/provider.go", "package provider\n\ntype Database interface{}\n")
+	write(t, root, "engine/internal/secrets/secrets.go", "package secrets\n\ntype Value string\n")
 	write(t, root, "engine/internal/env/env.go", engine)
+	write(t, root, "engine/cmd/af/main.go", goodMain)
+	write(t, root, "engine/internal/cli/cli.go", goodCLI)
 	return root
+}
+
+// fixture is the lists a case runs against: the one fixture binary ships, and
+// nothing is exempt unless the case says so.
+func fixture(unconsulted map[string]string) lists {
+	return lists{
+		notConsulted: unconsulted,
+		shipped:      map[string]string{"engine/cmd/af": "the fixture's one binary"},
+	}
 }
 
 func problems(t *testing.T, root string, unconsulted map[string]string) string {
 	t.Helper()
-	report, err := check(root, unconsulted)
+	return problemsWith(t, root, fixture(unconsulted))
+}
+
+func problemsWith(t *testing.T, root string, l lists) string {
+	t.Helper()
+	report, err := check(root, l)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,11 +345,11 @@ func TestTheAnswerDoesNotDependOnHowTheRootIsSpelled(t *testing.T) {
 	// how it was invoked is worse than no gate.
 	root := tree(t, selfCallingExtension, goodEngine)
 
-	direct, err := check(root, nil)
+	direct, err := check(root, fixture(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	indirect, err := check(filepath.Join(root, "..", filepath.Base(root)), nil)
+	indirect, err := check(filepath.Join(root, "..", filepath.Base(root)), fixture(nil))
 	if err != nil {
 		t.Fatal(err)
 	}

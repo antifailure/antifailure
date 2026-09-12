@@ -450,7 +450,7 @@ jobs:
         # failed on the first line of the first real provider anybody wrote.
         run: go run ./tools/surfacecheck .
 
-      - name: Every extension point is implementable and consulted
+      - name: Every extension point is implementable, consulted and filled
         # The same question as the step above, asked about the other surface,
         # and it ran nowhere until now. `just gate` has called `socketcheck`
         # since it was written and no workflow ever did, so the property was
@@ -464,6 +464,13 @@ jobs:
         # socket nobody can implement. extension.AuditSink has an interface, a
         # registry, an Add and a forwarding method that nothing in the engine
         # has ever called.
+        #
+        # And consulted is not filled. The engine asked the emulator registry
+        # for an emulator, so this step passed, and no shipped binary had ever
+        # registered one, because emulator.RegisterBuiltin had no caller. The
+        # step now also walks what each shipped binary's main can reach and
+        # fails a socket nothing shipped fills, unless the tool lists it as
+        # empty on purpose with the reason.
         run: go run ./tools/socketcheck .
 
       - name: Every manifest field is read or refused
