@@ -33,7 +33,7 @@ import {
   readCookie,
   resolveSession,
 } from '../auth/session.ts'
-import { PROVIDERS, type Provider } from '../providers/seal.ts'
+import { PROVIDERS, type Keyring, type Provider } from '../providers/seal.ts'
 import {
   listBudgets,
   listKeys,
@@ -54,7 +54,7 @@ export interface ConsoleOptions {
   /** The secret that seals provider keys, or null when none is configured.
    *  Null does not hide the page: it shows why a key cannot be stored, which
    *  is more useful than a form that fails on submit. */
-  sealingKey?: Buffer | null
+  keyring?: Keyring | null
   /** The exported console. A build that is absent is reported, never faked. */
   build: ConsoleBuild
   /** Where the analytics event goes when a key is stored from these pages. */
@@ -168,7 +168,7 @@ export function mountConsole(app: Hono<ApiEnv>, options: ConsoleOptions): void {
     return c.json({
       // Whether a key CAN be stored at all, reported rather than discovered on
       // a failed write.
-      sealing: Boolean(options.sealingKey),
+      sealing: Boolean(options.keyring),
       mayManage: MAY_MANAGE_KEYS.has(viewer.role ?? ''),
       role: viewer.role,
       keys: keys.map((k) => ({
@@ -195,7 +195,7 @@ export function mountConsole(app: Hono<ApiEnv>, options: ConsoleOptions): void {
     if (!provider) {
       return c.json({ error: `Unknown provider. Known: ${PROVIDERS.join(', ')}.` }, 400)
     }
-    if (!options.sealingKey) {
+    if (!options.keyring) {
       // Refused rather than stored in the clear. An installation with no
       // sealing secret has nowhere safe to put this.
       return c.json(
@@ -217,7 +217,7 @@ export function mountConsole(app: Hono<ApiEnv>, options: ConsoleOptions): void {
     if (!key.trim()) return c.json({ error: 'No key was given.' }, 400)
 
     try {
-      const result = await saveKey(pool, clock, options.sealingKey, {
+      const result = await saveKey(pool, clock, options.keyring, {
         analytics: options.analytics,
         orgId: viewer.organization!,
         provider,

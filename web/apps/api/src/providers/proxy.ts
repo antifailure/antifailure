@@ -29,7 +29,7 @@ import type { Pool } from '@antifailure/db'
 import type { Clock } from '../clock.ts'
 import { borrowKey, recordSpend, ProviderKeyError } from './store.ts'
 import { costOf, usageFrom, PricingError, type Price } from './pricing.ts'
-import type { Provider } from './seal.ts'
+import type { Keyring, Provider } from './seal.ts'
 import type { PostHogSink } from '../analytics/posthog-sink.ts'
 
 export class ProxyError extends Error {
@@ -57,7 +57,7 @@ const PROVIDERS: Record<Provider, { base: string; path: string; auth: (key: stri
 export interface ProxyOptions {
   pool: Pool
   clock: Clock
-  sealingKey: Buffer
+  keyring: Keyring
   prices: Record<string, Price>
   /** Overridden in tests. */
   fetchImpl?: typeof fetch
@@ -133,7 +133,7 @@ export async function forward(
 
   // Budget first, and the decrypt happens inside. A run with no allowance never
   // causes the key to exist in this process's memory.
-  const borrowed = await borrowKey(options.pool, options.clock, options.sealingKey, {
+  const borrowed = await borrowKey(options.pool, options.clock, options.keyring, {
     orgId,
     provider,
   })

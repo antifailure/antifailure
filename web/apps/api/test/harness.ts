@@ -3,6 +3,7 @@
 import { randomUUID } from 'node:crypto'
 import postgres from 'postgres'
 import { createAdminPool, createPool, migrate, type AdminPool, type Pool } from '@antifailure/db'
+import type { Keyring } from '../src/providers/seal.ts'
 import { createServer } from '../src/server.ts'
 import { FakeClock } from '../src/clock.ts'
 import type { Clock } from '../src/clock.ts'
@@ -127,7 +128,7 @@ export interface StartApiOptions {
   /** The secret that seals provider keys. Undefined means none is configured,
    *  which is a state the server has to serve rather than crash in, and there
    *  are tests for that. */
-  sealingKey?: Buffer | null
+  keyring?: Keyring | null
   /** The GitHub App's webhook secret. Undefined means no App, and the webhook
    *  endpoint refuses every delivery rather than accepting unsigned ones. */
   githubWebhookSecret?: string | null
@@ -285,7 +286,7 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
     signInAllowlist: options.signInAllowlist ?? null,
     selfServeSignup: options.selfServeSignup ?? false,
     leadNotifier: options.leadNotifier ?? null,
-    sealingKey: options.sealingKey ?? null,
+    keyring: options.keyring ?? null,
     postHogSink: options.postHogSink ?? null,
     githubWebhookSecret: options.githubWebhookSecret ?? null,
     ...(options.modelPrices ? { modelPrices: options.modelPrices } : {}),

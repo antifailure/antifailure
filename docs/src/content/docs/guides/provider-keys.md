@@ -248,5 +248,17 @@ Generate one with:
 openssl rand -base64 32
 ```
 
+That secret can be replaced. The control plane holds a set of sealing keys rather
+than one, each row records which key sealed it, and
+`af-control-plane-backup reseal` moves every stored credential from an old key to
+a new one while the application keeps serving. The procedure is
+[rotating secrets](/docs/self-hosting/rotating-secrets), and its last step removes
+the old key, which is what proves the rotation finished rather than appearing to.
+
+Until 2026-09-12 this was a one way door: replacing the secret made every stored
+key stop opening, permanently and silently, because a value that will not decrypt
+looks exactly like one somebody altered. It now reports the missing key version by
+name instead, which is a configuration an operator can fix in a minute.
+
 Keep it outside the database. It is the whole point: somebody with a copy of the
 database and no copy of this secret has nothing.

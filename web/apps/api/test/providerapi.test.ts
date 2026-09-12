@@ -36,6 +36,7 @@ import {
 import type { Role } from '../src/permissions.ts'
 import { CSRF_HEADER } from '../src/auth/session.ts'
 import { DEVICE_POLL_INTERVAL_SECONDS } from '../src/auth/device.ts'
+import { Keyring } from '../src/providers/seal.ts'
 
 // Assembled rather than written out, by the same rule as providerkeys.test.ts:
 // tools/scanrepo refuses a repository carrying anything its detector reads as a
@@ -51,10 +52,10 @@ describe('provider keys from a terminal', {
 }, () => {
   let api: ApiHarness
   let org: Org
-  const sealingKey = randomBytes(32)
+  const keyring = Keyring.of(randomBytes(32))
 
   before(async () => {
-    api = await startApi({ sealingKey })
+    api = await startApi({ keyring })
     org = await seedOrg(api.admin, 'byok-cli')
   })
   after(async () => {

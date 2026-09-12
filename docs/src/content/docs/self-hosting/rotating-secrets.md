@@ -18,10 +18,17 @@ None of these runbooks has been performed against the live deployment. Each is
 derived from the Terraform and the application code, and every step names the
 file it comes from so you can check the derivation rather than trust it.
 
-Two of them carry a warning that is not a matter of rehearsal. Rotating
-`provider-key-secret` destroys data and cannot be undone. Rotating
+One of them carries a warning that is not a matter of rehearsal. Rotating
 `github-app-webhook-secret` has a window during which GitHub deliveries are
-refused. Both are described below rather than left to be discovered.
+refused, and it is described below rather than left to be discovered.
+
+`provider-key-secret` used to carry a worse one: rotating it destroyed every
+stored provider key, permanently and silently. It no longer does. That runbook is
+the longest on this page because it is the only one where the application holds
+two values at once on purpose, and its steps are proven by
+`web/apps/api/test/reseal.test.ts` against a real Postgres rather than derived
+from the code. The proof is the last step: the old key is removed and everything
+still opens.
 
 ## What is in the vault
 
@@ -32,7 +39,8 @@ put your new value back.
 | --- | --- | --- |
 | `database-url` | Terraform generates it | the app, and the bootstrap job |
 | `migration-database-url` | Terraform generates it | the bootstrap and maintenance jobs |
-| `provider-key-secret` | Terraform generates it | the app |
+| `provider-key-secret` | Terraform generates it | the app, and the reseal job |
+| `provider-key-secrets` | you, entirely | the app, and the reseal job |
 | `github-client-id` | seeded once, then you | the app |
 | `github-client-secret` | seeded once, then you | the app |
 | `github-redirect-uri` | seeded once, then you | the app |
@@ -53,6 +61,12 @@ the placeholder back and break sign-in.
 **Yours.** GitHub mints an App private key and shows it once, so Terraform can
 neither create it nor recreate it. The module reads both App secrets with a data
 source. Nothing here will overwrite them.
+
+`provider-key-secrets` is the one secret on this page that does not exist until
+you create it. It holds the sealing keys a rotation adds, and Terraform only
+addresses it: the module builds its versionless id from the vault address and the
+name, so nothing that plans this stack ever reads its value. Its runbook below
+creates it.
 
 `github-redirect-uri` is in the vault with the others and is not a secret. It is
 a public callback address. It is listed for completeness, and rotating it is a
@@ -207,36 +221,206 @@ same reason as `database-url`.
 
 ## `provider-key-secret`
 
-**Do not rotate this one.** It is a one way door and there is no way back.
+**This can now be rotated, and before 2026-09-12 it could not.** The steps below
+add a second key, move every stored credential onto it, and then take the first
+one away. Read all of them before starting: the order is the whole procedure.
 
 **What it is.** Thirty two bytes that seal every customer's stored provider key
 under AES-256-GCM. `web/apps/api/src/providers/seal.ts` holds the shape. The
 sealing key never reaches Postgres, so a database dump on its own decrypts
 nothing.
 
-**What breaks if you rotate it.** Every stored provider key, permanently. A
-sealed value that will not open looks exactly like a tampered one, so the
-failure is silent in the worst way: the rows are still there and none of them
-work.
+**What used to break, and why it was silent.** Replacing the value in place made
+every stored key stop opening, permanently. Rows recorded which key version
+sealed them and nothing read that column, so the application tried every row
+against the one key it held and reported the same failure for all of them: a value
+that will not decrypt is indistinguishable from a value somebody altered. An
+operator saw authentication failures across every organization and no sentence
+saying why.
 
-There is no re-sealing tool. The rows record a `keyVersion` and the comment
-beside it says the version exists so a rotation can find the rows that still
-need re-sealing. Nothing reads that column for that purpose. The rotation it
-anticipates has not been built, and this page says so rather than implying the
-column is a plan.
+**What happens now instead.** The application holds a SET of sealing keys
+addressed by version, so the old key and the new one are open at the same time.
+A row names its version, is opened with the key that version names, and a row
+whose version is not held produces its own error naming the missing version. That
+error is the difference between a silent outage and a message, and it is the one
+thing to look for in the logs if any step below goes wrong.
 
-**What to do instead.** If the sealing key is compromised, the keys it sealed
-are compromised too, and re-sealing them would be protecting values that already
-need replacing. Tell each affected organization to revoke their provider key at
-the provider and store a new one. Storing a key is a normal operation for an
-owner or admin, from the console or from a terminal, and it is described in
-[provider keys](/docs/guides/provider-keys).
+**What breaks while you rotate.** Nothing, if the steps are run in this order.
+There is no window in which a stored key cannot be opened, because no key is
+removed until every row has been moved off it and that has been verified.
 
-An installation that does not want the feature can run with the secret unset.
-The app then says so in its start-up log and in the console, and refuses a save
-rather than accepting one it cannot seal.
+**One thing to decide first.** If the sealing key is rotating because it was
+COMPROMISED, re-sealing is the wrong operation: the keys it sealed are compromised
+with it, and re-sealing protects values that already need replacing. In that case
+tell each affected organization to revoke their provider key at the provider and
+store a new one, which is a normal operation for an owner or admin and is
+described in [provider keys](/docs/guides/provider-keys). Rotate the sealing
+secret afterwards, with these steps, so the new keys are sealed under a key
+nobody has seen.
 
----
+### Steps
+
+1. Generate the new key and write it to a vault secret of its own. Never into
+   `provider-key-secret`, which Terraform owns and would put back.
+
+   ```sh
+   umask 077
+   printf 'v2=%s' "$(openssl rand -base64 32)" > /tmp/afseal
+   az keyvault secret set --vault-name afcp-kv-centralus \
+     --name provider-key-secrets --file /tmp/afseal --output none
+   shred -u /tmp/afseal
+   ```
+
+   The value is `v2=<32 bytes of base64>`. The version label is yours; `v2` is
+   the obvious one after `v1`, which is what every existing row says. Several
+   keys are comma separated, which is what a third rotation looks like.
+
+   The old key is NOT in this value, and that is deliberate. The application
+   merges `AF_PROVIDER_KEY_SECRET`, which is version `v1`, with
+   `AF_PROVIDER_KEY_SECRETS`, so `v1` stays exactly where Terraform generated it
+   and you never read a live sealing key out of the vault to compose a combined
+   string.
+
+2. Point the deployment at it, holding both keys and still sealing under the old
+   one. In the environment's tfvars:
+
+   ```hcl
+   provider_key_secrets_name = "provider-key-secrets"
+   ```
+
+   Leave `provider_key_version` unset for now. This is a secret reference change
+   on the container app, so merging it deploys it: `deploy/cd/apply-config.sh`
+   plans the tfvars targeted at the container app and applies it before
+   `deploy.sh`. The `azurerm_container_app_job.reseal` resource in the same
+   change is NOT inside that target, so it needs one hand apply, which is the
+   `terraform apply` in
+   [the control plane runbook](/docs/self-hosting/control-plane).
+
+   **Confirm the revision actually holds both keys before going further.** The
+   start-up log names the versions, which is the only way to check this without
+   decrypting somebody's credential:
+
+   ```sh
+   az containerapp logs show -n afcp-app -g af-cp-centralus --tail 200 \
+     | grep 'sealing key'
+   ```
+
+   It must say `2 sealing keys (v1, v2)`. One key means the secret reference did
+   not arrive and step 4 would report every row as unopenable.
+
+3. Seal new keys under the new version. In the same tfvars:
+
+   ```hcl
+   provider_key_version = "v2"
+   ```
+
+   Merging this deploys it the same way. From here, a customer who saves a key
+   gets it sealed under `v2` and every existing row still opens under `v1`.
+
+   This is a separate deploy from step 2 on purpose. Both revisions serve for a
+   few seconds during a traffic shift, and a key sealed under `v2` by the new
+   revision cannot be opened by a revision that has not got `v2` yet. Making the
+   set available first and switching which one seals second removes that window
+   rather than relying on it being short.
+
+4. Move every stored credential onto the new key. This is the job that did not
+   exist:
+
+   ```sh
+   az containerapp job start -n afcp-reseal -g af-cp-centralus
+   az containerapp job execution list -n afcp-reseal -g af-cp-centralus \
+     --query "[0].{name:name,status:properties.status}" -o tsv
+   ```
+
+   It opens each row with the key its own version names and writes it back under
+   `v2`, one row per transaction, a batch at a time rather than the table at
+   once. It is idempotent and resumable, so starting it again after an
+   interruption continues from where it stopped, and starting it twice is safe.
+   It re-seals revoked rows too, which is what makes step 5 unambiguous.
+
+   Read its log. It prints a count per version and it prints no key material:
+
+   ```sh
+   az containerapp job execution show -n afcp-reseal -g af-cp-centralus \
+     --job-execution-name <name> --query properties.status
+   ```
+
+   Exit 3 means some rows could not be opened, and the log says which of two
+   things that is. Rows under a version nothing holds means the environment is
+   missing a key, which is step 2 not having taken. Rows that will not
+   authenticate under a version that IS held means those rows are damaged or were
+   moved between organizations, and they are a separate investigation. Nothing
+   has been lost either way: a row the job cannot open is left exactly as it was.
+
+5. **Verify before removing anything.** This is the step that separates a
+   completed rotation from one that appears complete, and it asks a different
+   question from step 4: not "what is left to do" but "does what has been done
+   actually work".
+
+   ```sh
+   az containerapp job start -n afcp-reseal -g af-cp-centralus \
+     --command "node apps/api/src/backup-cli.ts reseal --check"
+   ```
+
+   It opens EVERY row whatever version it is at and writes nothing. It must
+   report zero rows that could not be opened and zero rows not yet at `v2`.
+   Without this check, "nothing left to re-seal" and "every row is at the new
+   version and none of them open" look identical.
+
+6. Remove the old key, which is the last proof that step 4 finished. In the
+   tfvars:
+
+   ```hcl
+   provider_key_secret_enabled = false
+   ```
+
+   The feature does not go with it: `AF_PROVIDER_KEY_SECRETS` still carries `v2`,
+   and `AF_PROVIDER_KEY_VERSION` still names it. What goes is `v1`, which nothing
+   should now need.
+
+   This destroys `random_bytes.provider_key_secret` and the vault secret it
+   wrote, so do not run it on a report you have not read. Key Vault soft delete
+   keeps the destroyed secret for the vault's retention period, so a mistake here
+   is recoverable within it, and outside it is not.
+
+7. Run step 5 once more, against the revision that no longer holds `v1`. It must
+   say the same thing. If it now reports rows under version `v1`, put
+   `provider_key_secret_enabled` back to `true`, deploy, and go back to step 4:
+   nothing is lost while the old key still exists in the vault.
+
+**How to verify, end to end.** A customer request that spends the key is the only
+complete proof, because it exercises the same `borrowKey` path the rotation
+changed. Anything that calls `/byok/anthropic/v1/messages` will do. Short of
+that, the console's Provider keys page still showing the same fingerprint and
+last four for every organization is a good check that this moved the ciphertext
+and not the value inside it: the fingerprint is of the plaintext, so re-sealing
+cannot change it and a changed one would mean something opened the wrong row.
+
+**Afterwards.** Every subsequent rotation is the same procedure with the version
+numbers moved on: put `v3=<new>` alongside `v2` in `provider-key-secrets`, set
+`provider_key_version = "v3"`, re-seal, check, and drop `v2` from the secret's
+value. `provider_key_secret_enabled` stays false from the first rotation onward;
+it is only ever the `v1` Terraform generated.
+
+**On a self-hosted installation** with no Key Vault, the same three variables are
+set however that deployment sets environment variables, and the tool is the same
+one:
+
+```sh
+AF_PROVIDER_KEY_SECRET=<the old key> \
+AF_PROVIDER_KEY_SECRETS=v2=<the new key> \
+AF_PROVIDER_KEY_VERSION=v2 \
+AF_RESEAL_DATABASE_URL=postgres://owner:...@db:5432/antifailure \
+  node apps/api/src/backup-cli.ts reseal
+```
+
+The connection string is read from the environment rather than taken as an
+argument, because an argument is visible in `ps` to every user on the machine and
+lands in shell history. `--url` exists for a terminal where that does not matter.
+
+**An installation that does not want the feature** can run with no sealing secret
+at all. The app says so in its start-up log and in the console, and refuses a
+save rather than accepting one it cannot seal.
 
 ## `github-client-id`, `github-client-secret`
 
