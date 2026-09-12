@@ -62,9 +62,11 @@ var notAPath = map[string]string{
 	"docs/neon-provider":     "the second example branch name in that same sentence",
 	"pgregory.net/rapid":     "a Go module path, resolved from the module cache and not a directory here",
 
-	"github.com/docker/docker": "a Go module path, named in SECURITY.md's account of the open Moby advisories, and resolved from the module cache rather than being a directory here",
-	"github.com/moby/moby":     "the same module under its other name, named in the same paragraph because the version check has to cover both spellings",
-	"github.com/moby/moby/v2":  "where Moby published the fixes, named so the reason they cannot be taken is checkable",
+	"github.com/docker/docker":    "a Go module path, named in SECURITY.md's account of the Moby advisories the engine left behind, and resolved from the module cache rather than being a directory here",
+	"github.com/moby/moby":        "the same module under its other name, named in the same paragraph because the version check has to cover both spellings",
+	"github.com/moby/moby/v2":     "where Moby published the fixes, named so the reason they could not be taken on the old path is checkable",
+	"github.com/moby/moby/client": "the API client module the engine moved to, named so a reader can check it is not a module any of the advisories covers",
+	"github.com/moby/moby/api":    "the API types module it moved to alongside the client, named for the same reason",
 
 	".gate-reports/": "created by `just gate` when it runs and gitignored, so it is a place output goes rather than something the repository contains",
 
@@ -896,7 +898,7 @@ var siteClaims = []siteClaim{
 	{
 		name:      "the build runs inside the sandbox",
 		forbidden: regexp.MustCompile(`builds and runs your services inside a sandbox`),
-		premise:   [2]string{"engine/internal/build/docker.go", "dockerbuild.ImageBuildOptions{"},
+		premise:   [2]string{"engine/internal/build/docker.go", "client.ImageBuildOptions{"},
 		reason: "ImageBuildOptions sets no NetworkMode and the buildpack path runs " +
 			"`npm ci` and `pip install`, so a build necessarily has a route out. The " +
 			"containment is real and applies to the running services. This string " +

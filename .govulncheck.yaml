@@ -10,45 +10,21 @@
 # Adding an entry is a security decision. The bar is "this vulnerability cannot
 # be reached through the way we use this dependency, and here is why", not
 # "upgrading is inconvenient". If the fix exists, take the fix.
+#
+# The file is empty, and that is the stronger state rather than the weaker one.
+#
+# It held GO-2026-4883 and GO-2026-4887, both against github.com/docker/docker,
+# both arguing that the vulnerable code runs inside the Docker daemon and that an
+# API client cannot reach it. Both were accurate. The first said to revisit once
+# the client packages moved to a Moby module path of their own and to drop the
+# entry then, and they have: the engine imports github.com/moby/moby/client and
+# github.com/moby/moby/api, which neither advisory names. tools/vulncheck then
+# reported both entries as matching nothing, and the third rule above fails an
+# entry like that, so removing them was required rather than merely permitted.
+#
+# Read that as the module graph changing, not the daemon. Both advisories are
+# bugs in dockerd, which whoever runs it installs and upgrades, and the exposure
+# a daemon's operator still carries is written up per advisory in
+# docs/security/pentest-readiness.md.
 
-allow:
-  - id: GO-2026-4883
-    module: github.com/docker/docker
-    expires: 2026-11-26
-    reason: >
-      An off-by-one in Moby's plugin privilege validation. The vulnerable code
-      runs inside the Docker daemon, in the path that decides whether a plugin
-      may take a privilege it asked for. We are an API client: the engine dials
-      a daemon the developer already runs and already trusts, and it never
-      installs a plugin. govulncheck reports this as reachable because the
-      advisory carries no symbol information for the github.com/docker/docker
-      module path, so every symbol in the module matches, and the traces it
-      prints bear that out: client.init, client.ContainerStart,
-      client.NetworkList. All of them are the API client, none of them are the
-      daemon.
-      There is no fix to take. Moby published the fix on a renamed module path,
-      github.com/moby/moby/v2 2.0.0-beta.8, and the github.com/docker/docker
-      path this advisory also names has no fixed version at all. Migrating the
-      module path is a real change with its own risk and it buys nothing here,
-      because the daemon we talk to is not built from our module graph. Its
-      version is whatever the developer installed, and keeping that current is
-      their Docker upgrade, not ours.
-      Revisit when the client packages move to github.com/moby/moby/v2 for
-      reasons of their own, and drop this entry then.
-
-  - id: GO-2026-4887
-    module: github.com/docker/docker
-    expires: 2026-11-26
-    reason: >
-      An authorization plugin bypass in Moby when a request body is oversized.
-      The same reasoning as GO-2026-4883 applies and for the same structural
-      reason. AuthZ plugin middleware is daemon-side: it is the component that
-      inspects an incoming API request before the daemon acts on it. We are the
-      party sending requests, not the party authorizing them, and the engine
-      configures no authorization plugin. The traces govulncheck prints are
-      again client-side only, client.init and client.WithAPIVersionNegotiation,
-      which is module-granularity matching rather than evidence of a reachable
-      path. The fix exists only on github.com/moby/moby/v2.
-      A developer whose daemon runs an AuthZ plugin should upgrade Docker. That
-      is worth saying out loud, and it is not something an upgrade in this
-      repository can do for them.
+allow: []

@@ -128,42 +128,53 @@ cannot hurt us and when that judgement expires. An expired entry fails the
 build, and so does an entry that no longer matches a real finding. The file is
 short and it is meant to be read.
 
-**What govulncheck does not answer, and where that shows.** It asks whether a
+**What govulncheck does not answer, and where that showed.** It asks whether a
 vulnerable symbol is reachable from our code. GitHub's Dependabot asks whether a
-vulnerable version is in the module graph at all. Those are different questions
-and today they give different answers: the daily scan is green and there are
-eight open Dependabot alerts.
+vulnerable version is in the module graph at all. Those are different questions,
+and here they gave different answers: the daily scan was green while eight
+Dependabot alerts were open.
 
-All eight are one dependency, `github.com/docker/docker`, counted twice because
-both `engine/go.mod` and `ee/engine/go.mod` require it. They are four Moby
-advisories and **none of them has a fix to take**: checked against
+All eight were one dependency, `github.com/docker/docker`, counted twice because
+both `engine/go.mod` and `ee/engine/go.mod` required it. They were four Moby
+advisories and **none had a fix to take on that path**: checked against
 proxy.golang.org rather than remembered, no version of `github.com/docker/docker`
 or `github.com/moby/moby` above v28.5.2 exists, three of the four cover
 everything up to and including 28.5.2, and the fourth names a version that
 exists only as a Docker Engine release. `github.com/moby/moby/v2`, where the
 fixes landed, is a beta.
 
-All four are daemon-side bugs and we are an API client, and for three of them
-that is checkable rather than a claim to take on trust. Their Go advisory
-entries carry symbols, and every symbol is a method on the daemon's own `Daemon`
-type: `openContainerFS`, `createIfNotExists`, `containerExtractToDir`. Those
-live in Moby's daemon package, which this engine does not import. It takes the
-Docker client and five API type packages from that module and nothing else, so
-the vulnerable code is not linked into the binary at all. That is why the scan
-is green, and green is the right answer.
+**Neither manifest requires that module any more.** Moby split its API client
+and its API types into modules of their own, `github.com/moby/moby/client` and
+`github.com/moby/moby/api`, both ordinary releases rather than the v2 betas, and
+no advisory names either. The engine moved to them, and
+`github.com/docker/docker` left `go.mod` and `go.sum` in both modules, which is
+the thing those eight alerts matched. `.govulncheck.yaml` is empty as a result:
+its two entries named the old path, `tools/vulncheck` reported both as matching
+nothing, and an entry that matches nothing fails the build.
 
-The fourth, the plugin privilege off-by-one, carries no symbol information, so
-every symbol in the module matches it. That is why it is the one govulncheck
-flags, and why it has an entry in `.govulncheck.yaml` arguing from how we use
-Docker rather than from a call graph.
+**That changed the module graph and not the daemon.** All four are bugs in
+`dockerd`, which whoever runs it installs and upgrades, and its version was
+never decided by our module graph. Keep Docker Engine current; nothing in this
+repository can do that for you. For three of the four this was always checkable
+rather than a claim to take on trust: their Go advisory entries carry symbols,
+every symbol is a method on the daemon's own `Daemon` type, `openContainerFS`,
+`createIfNotExists` and `containerExtractToDir`, and Moby's daemon package has
+never been linked into this engine, before the move or after it.
+
+The move has one consequence a user can see. The new client negotiates no lower
+than Docker API 1.40, which is Docker Engine 19.03, where the old one fell back
+as far as 1.24. `af doctor` reads the daemon's API version and fails its Docker
+check below that floor, naming the version it found, so a daemon that old is
+told so before anything is created rather than partway through an environment.
 
 The call sites, and the one residual exposure worth naming, are written out in
-`docs/security/pentest-readiness.md`.
+`docs/security/pentest-readiness.md`. Read that page rather than the alert
+count: the residual is real and the module move did not touch it.
 
 The honest gap is not the reasoning, it is that nothing in this repository
-watches the module-version surface. `just vuln` can be green while that page has
-eight entries on it, and the only reason anybody looked was that a push printed
-the count.
+watches the module-version surface. `just vuln` could be green while that page
+had eight entries on it, the only reason anybody looked was that a push printed
+the count, and that is still true today.
 
 **Known vulnerabilities, npm.** `tools/npmaudit` runs `npm audit` over every
 lockfile in the repository, in the same workflow and on the same schedule, and
