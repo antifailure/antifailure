@@ -23,7 +23,7 @@ export function MarketplacesPage() {
         kicker="Timing is the bug"
         title="Services, queues, and workers are a dimension staging drops."
         items={[
-          { title: "Queues in the twin", body: "Simulated streams so dual-writes and retries are visible." },
+          { title: "Queues in the twin", body: "The broker runs in the twin, with its topics and consumer groups created in its own image and no production messages copied." },
           { title: "Webhook containment", body: "Production partner webhooks are blocked and written to the attempted-effect ledger." },
           { title: "Retry personas", body: "Impatient users and API clients become deterministic scenarios." },
         ]}
