@@ -51,8 +51,17 @@ func edgeNetworkName(envID string) string  { return edgeNetworkPrefix + envID }
 // repository has read. The tag is fixed because the content is fixed; a change
 // to the Dockerfile below must change it.
 const (
-	ingressImage      = "antifailure/ingress:socat-1"
-	ingressDockerfile = "FROM alpine:3.20\nRUN apk add --no-cache socat\n"
+	// socat-2 rather than socat-1, because the rule above is this file's own:
+	// the tag is fixed only while the content is, and pinning the base image
+	// below changed the content. Left at socat-1, every machine that has run
+	// af up keeps the forwarder it built from whatever alpine:3.20 meant that
+	// day and never builds the pinned one, which is the same two images under
+	// one name that the pin exists to prevent.
+	ingressImage = "antifailure/ingress:socat-2"
+	// Pinned by digest for the reason the sidecar's base is, and found by the
+	// same gate: this literal is a Dockerfile a Go string carries, which the
+	// digest gate could not read until it was widened to read exactly this.
+	ingressDockerfile = "FROM alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc\nRUN apk add --no-cache socat\n"
 )
 
 // networks holds an environment's two network identifiers.

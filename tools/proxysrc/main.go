@@ -1,11 +1,11 @@
 // Command proxysrc packages the sidecar's source into the engine binary.
 //
 // The sidecar has to run inside the environment, which means it has to be a
-// container image, which means something has to compile it. Pulling a
-// published image would be the obvious answer and is the wrong one right now:
-// there is no release yet, and an air gapped user should not need one.
-//
-// So the engine carries the sidecar's source and builds the image itself. The
+// container image, which means something has to produce it. A release
+// publishes one, and the engine fetches it first. The engine also carries the
+// sidecar's source and can build the image itself, because a development
+// commit that changed any file below has a content digest no release ever
+// published, and an air gapped user should not need a registry at all. The
 // alternative, writing the proxy as a standalone program with its own copy of
 // the matching logic, would put two implementations of a security control in
 // one repository, and the one that drifted would be the one deciding real

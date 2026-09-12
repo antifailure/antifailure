@@ -1,11 +1,15 @@
 package main
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -1828,6 +1832,127 @@ func filesThatStartContainers(t *testing.T) []string {
 	return files
 }
 
+// goFilesThatCarryDockerfiles is every tracked Go file that could hold a
+// Dockerfile the product builds, which is the fourth place a container image
+// is named in this repository and the one this gate could not see.
+//
+// THE CASE THAT WIDENED IT. engine/internal/proxyimage carried its Dockerfile
+// as a Go string beginning `FROM golang:1.25-alpine`, and that is the image
+// every first af up compiles the egress sidecar on. The sidecar's name is
+// content addressed over that text, so when Docker Hub repointed the tag the
+// name stayed put while the compiler under it moved, and two machines could
+// hold two different sidecar binaries under one identity. Nothing flagged it,
+// because the listing below this one reads workflows, the justfile and shell,
+// and a FROM line inside a .go file is none of those. The ingress forwarder's
+// `FROM alpine:3.20` was the same shape one file over.
+//
+// WHAT IS LEFT OUT, said rather than implied:
+//   - _test.go files. Their Dockerfiles are fixtures standing in for a user's
+//     application, such as the node image cli_test.go hands the detector, and
+//     are never built into anything this product runs.
+//   - generated files, meaning any whose first line says `Code generated`.
+//     Each is a copy of something else in the tree: pages.gen.go carries the
+//     documentation's Markdown, whose Dockerfiles are examples for a reader's
+//     own application, and sources.gen.go carries Go source with no Dockerfile
+//     in it. The originals are what is checked, or are not images at all.
+//   - Dockerfiles assembled at run time from format strings, which is how
+//     engine/internal/build writes one for a user's application with the
+//     language version the user's repository declares. There is no literal to
+//     read and no digest to pin a version nobody has chosen yet to.
+func goFilesThatCarryDockerfiles(t *testing.T) []string {
+	t.Helper()
+	root := filepath.Join("..", "..")
+	cmd := exec.Command("git", "ls-files", "-z", "*.go")
+	cmd.Dir = root
+	listed, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git ls-files could not enumerate the Go files, so nothing was checked: %v", err)
+	}
+	var files []string
+	for _, name := range strings.Split(strings.TrimRight(string(listed), "\x00"), "\x00") {
+		if name == "" || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		files = append(files, filepath.Join(root, filepath.FromSlash(name)))
+	}
+	if len(files) < 100 {
+		t.Fatalf("only %d Go files were listed; the listing has probably stopped matching", len(files))
+	}
+	return files
+}
+
+// dockerfileInstruction is a line a Dockerfile has and a SQL statement does
+// not. A FROM line alone is not evidence of anything in this repository, where
+// most Go string literals carrying one are queries: `FROM pg_class c` reads as
+// an image called pg_class to a check that asks nothing else. COPY is left
+// out on purpose, because `COPY t FROM STDIN` is SQL too.
+var dockerfileInstruction = regexp.MustCompile(`(?m)^\s*(RUN|ENTRYPOINT|CMD|WORKDIR|EXPOSE)\b`)
+
+// fromLine is a Dockerfile FROM instruction, with an optional platform flag.
+var fromLine = regexp.MustCompile(`^\s*FROM\s+(?:--platform=\S+\s+)?(\S+)(?:\s+AS\s+(\S+))?\s*$`)
+
+// dockerfilesInGo reads one Go file and reports every FROM line of every
+// Dockerfile its string literals carry that names an image by tag, along with
+// how many Dockerfiles it found, so a scan that stops finding them can say so.
+//
+// Parsed, not grepped. A line scanner reads comments and prose as
+// declarations, and this repository's comments quote Dockerfiles to explain
+// them, including the unpinned line this gate was widened to catch.
+func dockerfilesInGo(name, src string) ([]imageFinding, int, error) {
+	if strings.HasPrefix(src, "// Code generated") {
+		return nil, 0, nil
+	}
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, name, src, parser.SkipObjectResolution)
+	if err != nil {
+		return nil, 0, err
+	}
+	var out []imageFinding
+	found := 0
+	ast.Inspect(file, func(n ast.Node) bool {
+		lit, ok := n.(*ast.BasicLit)
+		if !ok || lit.Kind != token.STRING {
+			return true
+		}
+		body, err := strconv.Unquote(lit.Value)
+		if err != nil || !dockerfileInstruction.MatchString(body) {
+			return true
+		}
+		lines := strings.Split(body, "\n")
+		stages := map[string]bool{}
+		var froms []int
+		for i, l := range lines {
+			if m := fromLine.FindStringSubmatch(l); m != nil {
+				froms = append(froms, i)
+				if m[2] != "" {
+					stages[strings.ToLower(m[2])] = true
+				}
+			}
+		}
+		if len(froms) == 0 {
+			return true
+		}
+		found++
+		start := fset.Position(lit.Pos()).Line
+		raw := strings.HasPrefix(lit.Value, "`")
+		for _, i := range froms {
+			ref := fromLine.FindStringSubmatch(lines[i])[1]
+			// scratch is not an image, and a name an earlier stage declared is
+			// that stage rather than something a registry serves.
+			if ref == "scratch" || stages[strings.ToLower(ref)] || strings.Contains(ref, "@sha256:") {
+				continue
+			}
+			line := start
+			if raw {
+				line += i // A raw string keeps its newlines, so the offset is real.
+			}
+			out = append(out, imageFinding{line, ref, "a Dockerfile a Go string carries names a tag"})
+		}
+		return true
+	})
+	return out, found, nil
+}
+
 func TestEveryContainerImageIsPinnedToADigest(t *testing.T) {
 	// A tag is a name the publisher can repoint. `postgres:17-alpine` resolved
 	// to 17.11 when this was written and will resolve to 17.12 with no commit
@@ -1860,6 +1985,120 @@ func TestEveryContainerImageIsPinnedToADigest(t *testing.T) {
 	}
 	if checked < 25 {
 		t.Fatalf("only %d files were read; the scan has probably stopped matching", checked)
+	}
+
+	// The fourth place an image is named: a Dockerfile a Go string carries.
+	dockerfiles := 0
+	for _, file := range goFilesThatCarryDockerfiles(t) {
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		findings, found, err := dockerfilesInGo(filepath.Base(file), string(body))
+		if err != nil {
+			// Not a skip. A file this cannot parse is a file it did not check,
+			// and a gate that prints clean over a file it could not read is the
+			// defect this repository keeps finding in its own instruments.
+			t.Fatalf("%s could not be parsed, so its Dockerfiles were not checked: %v",
+				filepath.ToSlash(file), err)
+		}
+		dockerfiles += found
+		for _, f := range findings {
+			t.Errorf("%s:%d: %s: %s\n"+
+				"    The name this image is stored under is derived from this text, so a tag that\n"+
+				"    moves under it gives two machines two different images with one name.\n"+
+				"    Pin the multi architecture index digest, resolved as described above.",
+				filepath.ToSlash(file), f.line, f.why, f.ref)
+		}
+	}
+	// Two today: the egress sidecar's and the ingress forwarder's. Fewer means
+	// the recogniser stopped recognising, which reads exactly like a clean tree.
+	if dockerfiles < 2 {
+		t.Fatalf("only %d Dockerfiles were found in Go source, and the sidecar and the ingress "+
+			"forwarder alone are two; the recogniser has probably stopped matching", dockerfiles)
+	}
+	t.Logf("%d workflow, justfile and shell files and %d Dockerfiles carried in Go source checked",
+		checked, dockerfiles)
+}
+
+// The widened half can say no, pointed at the exact line that produced it.
+//
+// The first case is the sidecar's Dockerfile as it stood on main at
+// c3eb28c8, byte for byte in its FROM lines, and it has to be refused. The
+// rest are the ways a recogniser for Dockerfiles inside Go goes wrong in this
+// repository in particular: a SQL query, which is most FROM lines here; a
+// one line format string, which is how a user's application Dockerfile is
+// assembled; and the comment that explains the defect, which quotes it.
+func TestPinningReadsADockerfileAGoStringCarries(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		src     string
+		refused []string
+		found   int
+	}{
+		{
+			name: "the sidecar's Dockerfile as it stood, a moving tag under a content addressed name",
+			src: "package p\n\nconst dockerfile = `FROM golang:1.25-alpine AS build\nWORKDIR /src\n" +
+				"COPY . .\nRUN go build ./cmd/af-proxy\n\nFROM scratch AS runtime\n" +
+				"COPY --from=build /out/af-proxy /af-proxy\nENTRYPOINT [\"/af-proxy\"]\n`\n",
+			refused: []string{"golang:1.25-alpine"},
+			found:   1,
+		},
+		{
+			name: "the same Dockerfile pinned",
+			src: "package p\n\nconst dockerfile = `FROM golang:1.25-alpine@sha256:" +
+				"1ae0735f00daffa3aaf1363a5184c0d2dc55c78e3db4ec70241cdac97bf84b59 AS build\n" +
+				"RUN go build ./cmd/af-proxy\nFROM scratch AS runtime\n`\n",
+			found: 1,
+		},
+		{
+			name:    "an interpreted string, which is how the ingress forwarder wrote its own",
+			src:     "package p\n\nconst d = \"FROM alpine:3.20\\nRUN apk add --no-cache socat\\n\"\n",
+			refused: []string{"alpine:3.20"},
+			found:   1,
+		},
+		{
+			name:  "a later stage built FROM an earlier one by its name",
+			src:   "package p\n\nconst d = `FROM a@sha256:00 AS deps\nRUN x\nFROM deps\nCMD [\"y\"]\n`\n",
+			found: 1,
+		},
+		{
+			name:  "a SQL query, which is what most FROM lines in this repository are",
+			src:   "package p\n\nconst q = `SELECT relname\n  FROM pg_class c\n WHERE c.relkind = 'r'`\n",
+			found: 0,
+		},
+		{
+			name:  "one line of a format string assembling a user's own Dockerfile",
+			src:   "package p\n\nvar f = \"FROM node:%s-bookworm-slim AS deps\\n\"\n",
+			found: 0,
+		},
+		{
+			name:  "a comment that quotes the defect",
+			src:   "package p\n\n// It began FROM golang:1.25-alpine and RUN go build.\nconst x = 1\n",
+			found: 0,
+		},
+		{
+			name:  "a generated copy of somebody else's Dockerfile",
+			src:   "// Code generated by x. DO NOT EDIT.\n\npackage p\n\nconst d = `FROM node:26\nRUN npm ci\n`\n",
+			found: 0,
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got, found, err := dockerfilesInGo("x.go", c.src)
+			if err != nil {
+				t.Fatalf("the fixture does not parse: %v", err)
+			}
+			if found != c.found {
+				t.Errorf("found %d Dockerfiles, want %d", found, c.found)
+			}
+			var refs []string
+			for _, f := range got {
+				refs = append(refs, f.ref)
+			}
+			if strings.Join(refs, ",") != strings.Join(c.refused, ",") {
+				t.Errorf("refused %v, want %v", refs, c.refused)
+			}
+		})
 	}
 }
 

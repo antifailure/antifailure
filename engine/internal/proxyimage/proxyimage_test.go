@@ -107,6 +107,71 @@ func TestTag_ChangesWithTheSources(t *testing.T) {
 	require.Len(t, strings.Split(first, ":")[1], 16)
 }
 
+func TestReferences_AreOneDigestUnderTwoNames(t *testing.T) {
+	t.Parallel()
+	// The pull finds the published image by the SAME digest the local tag
+	// carries. If the two ever derived it separately, a release would publish
+	// under a name no engine asks for and every first run would compile.
+	digest := proxyimage.SourcesDigest()
+	require.Regexp(t, `^[0-9a-f]{16}$`, digest)
+	require.Equal(t, proxyimage.LocalRepository+":"+digest, proxyimage.Tag())
+	require.Equal(t, proxyimage.PublishedRepository+":"+digest, proxyimage.PublishedRef())
+	require.True(t, strings.HasPrefix(proxyimage.PublishedRef(), "ghcr.io/antifailure/"),
+		"release.yml refuses to publish outside the repository owner's namespace")
+}
+
+// Not parallel: it changes Sources and puts it back, and every parallel test
+// in this file reads it.
+func TestSourcesDigest_MovesWithAnyPackagedFile(t *testing.T) {
+	// The content address in the direction that ships a stale proxy: edit a
+	// packaged file, and the published image for the old digest must no
+	// longer be what the engine asks for.
+	before, beforeRef := proxyimage.SourcesDigest(), proxyimage.PublishedRef()
+	const name = "internal/policy/policy.go"
+	original := proxyimage.Sources[name]
+	proxyimage.Sources[name] = original + "\n// one byte of policy moved\n"
+	after, afterRef := proxyimage.SourcesDigest(), proxyimage.PublishedRef()
+	proxyimage.Sources[name] = original
+
+	require.NotEqual(t, before, after, "a policy change left the digest where it was")
+	require.NotEqual(t, beforeRef, afterRef,
+		"a policy change would have pulled the image published for the old policy")
+	require.Equal(t, before, proxyimage.SourcesDigest(), "restoring the source did not restore the digest")
+}
+
+func TestBuildContext_PinsEveryBaseImageByDigest(t *testing.T) {
+	t.Parallel()
+	// Read out of the archive the daemon is handed, not out of the constant,
+	// so this is a claim about what gets built. The digest is part of the text
+	// the content address covers, which is what stops a moving tag from giving
+	// two machines two different binaries under one name.
+	tr := tar.NewReader(proxyimage.BuildContext())
+	for {
+		h, err := tr.Next()
+		require.NoError(t, err, "the archive carries no Dockerfile")
+		if h.Name != "Dockerfile" {
+			continue
+		}
+		body, err := io.ReadAll(tr)
+		require.NoError(t, err)
+		froms := 0
+		for _, line := range strings.Split(string(body), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) < 2 || fields[0] != "FROM" {
+				continue
+			}
+			froms++
+			if fields[1] == "scratch" {
+				continue
+			}
+			require.Contains(t, fields[1], "@sha256:",
+				"%s moves when its publisher repoints the tag, and the sidecar's name would not", fields[1])
+		}
+		require.Equal(t, 2, froms)
+		return
+	}
+}
+
 func TestBuildContext_IsAReadableArchiveWithADockerfile(t *testing.T) {
 	t.Parallel()
 	tr := tar.NewReader(proxyimage.BuildContext())
