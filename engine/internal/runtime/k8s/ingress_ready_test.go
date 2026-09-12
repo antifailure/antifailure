@@ -93,6 +93,7 @@ func TestAPublishedURLIsProbedBeforeTheServiceIsReported(t *testing.T) {
 	}
 	running, err := r.startService(context.Background(), spec, s, "urlprobe", "10.43.0.9", journal, func(string) {})
 	require.Error(t, err)
+	require.False(t, running.Ready, "a service whose published URL serves the controller's error page is not ready")
 	require.Equal(t, []string{"http://urlprobe-web.127.0.0.1.sslip.io healthz"}, asked,
 		"the probe has to be given the URL the runtime is about to report, and the declared health path")
 

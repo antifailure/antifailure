@@ -1926,7 +1926,9 @@ func gateReachable(ctx context.Context, p networkGateProbe, timeout time.Duratio
 	if err != nil {
 		return gateDenied(p.name, err)
 	}
-	defer c.Close()
+	// The probe only asks whether a packet got through. A failure to close a
+	// socket that already answered changes nothing about that answer.
+	defer func() { _ = c.Close() }()
 	if p.network == "tcp" || p.network == "tcp4" || p.network == "tcp6" {
 		// A completed TCP handshake is enough. Never request metadata or a
 		// credential, and do not depend on an HTTP status being successful.

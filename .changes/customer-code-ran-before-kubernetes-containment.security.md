@@ -1,3 +1,5 @@
+# security
+
 The Kubernetes containment preflight used a customer's shell and tools. Missing
 utilities could report success without sending a probe, and a successful
 preflight in one pod did not establish network policy for a newly scheduled

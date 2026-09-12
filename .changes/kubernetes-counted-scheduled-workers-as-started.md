@@ -1,3 +1,5 @@
+# fixed
+
 Kubernetes workers could be reported as started when only their Pod objects
 existed. A single worker also passed after a pod-list error or while its
 containment init container was still pending.

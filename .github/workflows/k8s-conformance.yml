@@ -36,17 +36,24 @@ jobs:
           go-version-file: engine/go.mod
           cache-dependency-path: engine/go.sum
       - name: Install the pinned cluster tools
+        # Pinning says WHICH bytes, never whether they arrived. A run on
+        # 2026-09-12 fetched and verified just and k3d, then died on
+        # `curl: (35) Recv failure: Connection reset by peer` fetching kubectl,
+        # and reported red having run no behaviour at all. The retries answer
+        # the fetch; the checksum below each one still refuses anything but
+        # the pinned bytes, so a retry can only ever deliver the same file.
         run: |
           set -euo pipefail
-          curl -fsSL https://github.com/casey/just/releases/download/1.58.0/just-1.58.0-x86_64-unknown-linux-musl.tar.gz -o /tmp/just.tar.gz
+          fetch() { curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 20 "$1" -o "$2"; }
+          fetch https://github.com/casey/just/releases/download/1.58.0/just-1.58.0-x86_64-unknown-linux-musl.tar.gz /tmp/just.tar.gz
           echo '4a5cc2f53e6f0f8c59092a6cc38291eb729d46a7dd95d3ae582008881b84931d  /tmp/just.tar.gz' | sha256sum -c
           mkdir /tmp/just-bin
           tar -xzf /tmp/just.tar.gz -C /tmp/just-bin just
           sudo install /tmp/just-bin/just /usr/local/bin/just
-          curl -fsSL https://github.com/k3d-io/k3d/releases/download/v5.9.0/k3d-linux-amd64 -o /tmp/k3d
+          fetch https://github.com/k3d-io/k3d/releases/download/v5.9.0/k3d-linux-amd64 /tmp/k3d
           echo '06d8f25bc3a971c4eb29e0ff08429b180402db0f4dec838c9eac427e296800a0  /tmp/k3d' | sha256sum -c
           sudo install /tmp/k3d /usr/local/bin/k3d
-          curl -fsSL https://dl.k8s.io/release/v1.35.5/bin/linux/amd64/kubectl -o /tmp/kubectl
+          fetch https://dl.k8s.io/release/v1.35.5/bin/linux/amd64/kubectl /tmp/kubectl
           echo '90f75ea6ecc9ea5633262e1c0b83a40560003b30fc94a04cb099404fcef0c224  /tmp/kubectl' | sha256sum -c
           sudo install /tmp/kubectl /usr/local/bin/kubectl
           k3d version
