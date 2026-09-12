@@ -193,6 +193,7 @@ runner/artifacts/
 /vulncheck
 /walkthrough
 /wirecheck
+/worktreegc
 engine/af-proxy
 engine/af
 
