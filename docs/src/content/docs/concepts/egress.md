@@ -5,8 +5,8 @@ sidebar:
   order: 5
 ---
 
-An environment can reach nothing on the network except the hosts listed in the
-manifest, each in the mode named. Everything else is refused, and every refusal
+An environment can reach nothing on the network except the hosts its manifest's
+rules name or match, each in the mode named. Everything else is refused, and every refusal
 carries a decision you can read.
 
 That default is the point. A preview environment that can reach production
@@ -50,6 +50,12 @@ the sandbox key on the way out, and the live key is never inside the
 environment at all. There is a conformance test that starts a container and
 proves the live value is not in its environment, its filesystem, or its process
 list.
+
+`sandbox` is refused as a default. The credential is named on a rule and a
+default names none, and with nothing to substitute a sandbox request leaves
+exactly as the application wrote it, for whatever host it named. A sandbox
+default would reach the whole internet the way `default: allow` does, and that
+is refused for the same reason.
 
 ## Narrowing a rule
 
@@ -95,6 +101,43 @@ A star has to be a whole label. `web-*.example.com` is refused rather than read
 as a prefix somebody did not write, and a pattern of nothing but stars is
 refused because it matches every host while reading as though it named one.
 Only a bare `*` matches everything, and only in `block` mode.
+
+### A pattern that lets a request out
+
+A leading wildcard in `allow` or `sandbox` is accepted, and it is not a small
+decision. `*.zapier.com` lets out every name under `zapier.com`, however many
+labels deep and including hosts nobody has written down, and a request to any
+of them reaches the real service. For a CRM catch hook, that is a rehearsal
+posting to somebody's live automation.
+
+Some providers leave no other way to write it, because the host belongs to one
+customer and is not known when the manifest is written: a Supabase project is
+`<ref>.supabase.co`. So the rule is accepted, and its breadth is said wherever
+it is explained. `af net explain`, `af net policy`, `af init`, the MCP probe
+and the fidelity report carry the same sentence, and their JSON carries it as
+`caution`:
+
+```
+POST https://hooks.zapier.com/hooks/catch/1234/abcd
+
+  ALLOW
+
+  The rule for *.zapier.com decided allow because the host ends in .zapier.com.
+
+  The rule for *.zapier.com names no host. It covers every name under
+  zapier.com, however many labels deep, including names nobody has written
+  down, and a request to any of them reaches the real host.
+```
+
+Some suffixes are handed out by a platform to its customers, and `supabase.co`
+is one. A wildcard over one reaches every customer's names and not only yours,
+and the caution says that instead. Which suffixes those are comes from the
+public suffix list compiled into the engine, so asking opens no connection.
+
+A star where the owner's name goes is refused outside `block`. `*.com`,
+`*.co.uk` and `hooks.*.com` hold still only a suffix nobody owns, so they reach
+names registered by anybody. That is the reach a bare `*` has, arrived at one
+label down.
 
 Specificity decides, never order. An exact host beats everything. A pattern
 whose stars are all interior beats a leading wildcard, because it pins both

@@ -36,6 +36,9 @@ type PolicyRuleJSON struct {
 	WebhookPath string   `json:"webhook_path,omitempty"`
 	Emulator    string   `json:"emulator,omitempty"`
 	Note        string   `json:"note,omitempty"`
+	// Caution says how far the rule reaches beyond one host, for a rule that
+	// lets requests out for real without naming where they go.
+	Caution string `json:"caution,omitempty"`
 }
 
 // PolicyJSON is the machine readable form of af net policy.
@@ -56,17 +59,22 @@ type ExplainMatchJSON struct {
 
 // ExplainJSON is the machine readable form of af net explain.
 type ExplainJSON struct {
-	Request     string             `json:"request"`
-	Mode        string             `json:"mode"`
-	Allowed     bool               `json:"allowed"`
-	Rule        string             `json:"rule,omitempty"`
-	Reason      string             `json:"reason"`
-	RateLimit   string             `json:"rate_limit,omitempty"`
-	Credential  string             `json:"credential,omitempty"`
-	Fixtures    string             `json:"fixtures,omitempty"`
-	WebhookPath string             `json:"webhook_path,omitempty"`
-	Emulator    string             `json:"emulator,omitempty"`
-	Matched     []ExplainMatchJSON `json:"matched"`
+	Request     string `json:"request"`
+	Mode        string `json:"mode"`
+	Allowed     bool   `json:"allowed"`
+	Rule        string `json:"rule,omitempty"`
+	Reason      string `json:"reason"`
+	RateLimit   string `json:"rate_limit,omitempty"`
+	Credential  string `json:"credential,omitempty"`
+	Fixtures    string `json:"fixtures,omitempty"`
+	WebhookPath string `json:"webhook_path,omitempty"`
+	Emulator    string `json:"emulator,omitempty"`
+	// Caution is the sentence the text form prints under the reason when the
+	// rule that decided lets the request out without naming its host. A
+	// script reading allowed: true for *.zapier.com is owed the same warning
+	// a person is.
+	Caution string             `json:"caution,omitempty"`
+	Matched []ExplainMatchJSON `json:"matched"`
 }
 
 // loadPolicy reads the manifest and compiles its egress section.
@@ -133,6 +141,7 @@ in the decision, no matter where it sits in the file.`),
 						Methods: r.Methods, RateLimit: r.RateLimit,
 						Credential: r.Credential, Fixtures: r.Fixtures,
 						WebhookPath: r.WebhookPath, Emulator: r.Emulator, Note: r.Note,
+						Caution: manifest.EgressCaution(r.Host, r.Mode),
 					})
 				}
 				return env.Out.JSON(doc)
@@ -174,14 +183,33 @@ in the decision, no matter where it sits in the file.`),
 				if s := scopeOf(r); s != "" {
 					env.Out.Printf("%s%s\n", strings.Repeat(" ", gutter), env.Out.S(StyleDim, s))
 				}
+				if c := manifest.EgressCaution(r.Host, r.Mode); c != "" {
+					env.Out.Printf("%s%s\n", strings.Repeat(" ", gutter),
+						env.Out.S(StyleWarn, env.Out.Wrap(c, gutter)))
+				}
 				if r.Note != "" {
 					env.Out.Printf("%s%s\n", strings.Repeat(" ", gutter),
 						env.Out.Wrap(r.Note, gutter))
 				}
 				env.Out.Println("")
 			}
-			env.Out.Hint("Ask about one request with",
-				fmt.Sprintf("af net explain GET https://%s/", rules[0].Host))
+			// The example is a host a rule names. It used to be the first rule
+			// whatever it was, so a policy whose most specific rule is
+			// *.zapier.com offered af net explain GET https://*.zapier.com/,
+			// which asks about a host that can never arrive and was answered
+			// ALLOW all the same.
+			example := ""
+			for _, r := range rules {
+				if !strings.Contains(r.Host, "*") {
+					example = r.Host
+					break
+				}
+			}
+			if example == "" {
+				env.Out.Hint("Ask about one request with af net explain, giving a method and a URL on a host these rules match.", "")
+				return nil
+			}
+			env.Out.Hint("Ask about one request with", fmt.Sprintf("af net explain GET https://%s/", example))
 			return nil
 		},
 	}
@@ -280,14 +308,15 @@ matched, so a surprising answer is diagnosable rather than mysterious.`),
 				return err
 			}
 			d, chain := eng.Explain(req)
+			caution := manifest.EgressCaution(d.RuleHost, d.Mode)
 
 			if env.Out.Format == FormatJSON {
 				doc := ExplainJSON{
 					Request: req.String(), Mode: string(d.Mode), Allowed: d.Allowed(),
 					Rule: d.RuleHost, Reason: d.Reason(), RateLimit: d.RateLimit,
 					Credential: d.Credential, Fixtures: d.Fixtures, WebhookPath: d.WebhookPath,
-					Emulator: d.Emulator,
-					Matched:  make([]ExplainMatchJSON, 0, len(chain)),
+					Emulator: d.Emulator, Caution: caution,
+					Matched: make([]ExplainMatchJSON, 0, len(chain)),
 				}
 				for i, m := range chain {
 					doc.Matched = append(doc.Matched, ExplainMatchJSON{
@@ -302,6 +331,12 @@ matched, so a surprising answer is diagnosable rather than mysterious.`),
 			env.Out.Println("")
 			env.Out.Printf("  %s\n\n", env.Out.S(styleForMode(d.Mode), strings.ToUpper(string(d.Mode))))
 			env.Out.Printf("  %s\n\n", env.Out.Wrap(d.Reason(), 2))
+			if caution != "" {
+				// Its own paragraph, and in the warning style, so that it reads
+				// as a caution with colour and without. The reason says which
+				// rule decided; this says what that rule lets through.
+				env.Out.Printf("  %s\n\n", env.Out.S(StyleWarn, env.Out.Wrap(caution, 2)))
+			}
 
 			var detail [][2]string
 			if d.Credential != "" {
@@ -385,6 +420,15 @@ func parseRequest(method, raw string) (policy.Request, error) {
 	if u.Hostname() == "" {
 		return req, aferrors.Coded(aferrors.AFNET002,
 			"request", method+" "+raw, "detail", fmt.Sprintf("%q names no host", raw))
+	}
+	// A pattern is not a destination. Asked about https://*.zapier.com/, the
+	// policy matched the star as a literal label and answered ALLOW for a host
+	// no request can ever carry, which is confidently wrong in exactly the way
+	// the strictness above exists to prevent.
+	if strings.Contains(u.Hostname(), "*") {
+		return req, aferrors.Coded(aferrors.AFNET002,
+			"request", method+" "+raw, "detail",
+			fmt.Sprintf("%q is a pattern, and a request goes to one host. Ask about a host the pattern matches", u.Hostname()))
 	}
 
 	req.Host = u.Hostname()
