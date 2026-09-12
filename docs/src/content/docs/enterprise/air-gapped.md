@@ -110,12 +110,12 @@ before the daemon is asked. Both callers look for the image locally first, so an
 installation that loaded its images from a tarball or an internal registry runs
 untouched. What is refused is the silent reach for Docker Hub.
 
-**The sidecar image.** A release publishes it to `ghcr.io`, and `af up` fetches
-it from there before it would compile anything. Under an air gap that fetch is
-refused at the container image pull, naming `ghcr.io`, and the compile is then
-refused at the container image build, naming Docker Hub, where its
-`golang:1.25-alpine` base image comes from. Both refusals land in the ledger,
-in that order, and the one error you see names both.
+**The sidecar image.** A release publishes it to `ghcr.io`, and on a machine
+that is not air gapped `af up` fetches it from there before it would compile
+anything. Under an air gap neither happens. The image has to be on the machine
+already, and when it is not, `af up` stops with one refusal, at the container
+image build, because compiling it would pull its `golang:1.25-alpine` base
+image from Docker Hub. The error names the image and both ways to supply it.
 
 Two ways through, and neither needs the internet:
 
@@ -132,6 +132,10 @@ built from, and an image fetched from anywhere whose label does not match the
 source this `af` carries is refused rather than run, whatever it is called. An
 image `af` compiled carries the label too, so pushing that into your registry
 works.
+
+The forwarder that publishes a service's port on your loopback is this same
+image started in forward mode, so an environment that publishes ports needs no
+other image and reaches for nothing more.
 
 ## Which database you may use
 

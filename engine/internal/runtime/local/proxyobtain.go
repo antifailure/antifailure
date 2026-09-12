@@ -239,6 +239,27 @@ func (j *proxyImageJob) obtain(ctx context.Context) error {
 	}
 
 	ref, named := j.namedRef()
+	// A SEALED MACHINE REACHES FOR NOTHING NOBODY NAMED. An air gapped
+	// installation is required to hold the sidecar image, and
+	// TestAirGapped_TheSidecarImageIsRequiredRatherThanBuiltOnDemand allows
+	// exactly one refusal for it. Trying the published fetch and then the
+	// compile put two in the ledger, ghcr.io and then Docker Hub, so a sealed
+	// af up reached for two places when it should reach for none. Neither is
+	// tried: the build's refusal is recorded once, because building on demand
+	// is what an absent image used to mean, and the error says how to put the
+	// image here. A named image is still fetched, through the pull check below,
+	// because naming one is how an air gapped installation says where its
+	// mirror is.
+	if !named {
+		if err := airgap.Refuse(airgap.SiteImageBuild,
+			"building the sidecar image "+local+", whose base image comes from Docker Hub"); err != nil {
+			return aferrors.Wrap(err, aferrors.AFRUN048, "detail",
+				"this installation is sealed and the sidecar image "+local+" is not on this machine, so "+
+					"nothing is fetched or compiled to put it there. Load that image into the daemon, or "+
+					"mirror "+proxyimage.PublishedRef()+" into a registry AF_AIR_GAPPED_ALLOW names and "+
+					"set AF_PROXY_IMAGE to its reference there: "+err.Error())
+		}
+	}
 	pullErr := j.pull(ctx, ref, local)
 	if pullErr == nil {
 		return nil

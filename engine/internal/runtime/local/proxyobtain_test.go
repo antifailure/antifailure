@@ -378,7 +378,7 @@ func TestProxyImage_AirGappedWithTheImagePresentReachesForNothing(t *testing.T) 
 	require.Zero(t, pulls+builds)
 }
 
-func TestProxyImage_AirGappedWithTheImageAbsentRefusesBothSitesByName(t *testing.T) {
+func TestProxyImage_AirGappedWithTheImageAbsentIsRefusedOnceAndSaysHowToSupplyIt(t *testing.T) {
 	airgap.Reset()
 	t.Cleanup(airgap.Reset)
 	airgap.Seal("this test is measuring the refusal")
@@ -391,21 +391,62 @@ func TestProxyImage_AirGappedWithTheImageAbsentRefusesBothSitesByName(t *testing
 	err := job.obtain(context.Background())
 	requireCode(t, err, aferrors.AFRUN048)
 	require.ErrorIs(t, err, airgap.ErrSealed)
-	require.Contains(t, err.Error(), "ghcr.io", "the refusal did not name the registry it would have reached")
-	require.Contains(t, err.Error(), "Docker Hub", "the refusal did not name where the build would have reached")
 
-	// Two refusals at two sites, in the order they were tried. A pull and a
-	// build reach different places, and an operator reading the ledger has
-	// to be able to tell which one this machine asked for.
+	// ONE refusal, at the build site. The air gapped claim is that the image
+	// is required rather than obtained on demand, and a sealed machine that
+	// tried the published fetch and then the compile reached for ghcr.io and
+	// then Docker Hub, two places where the claim allows none.
 	refused := airgap.Refusals()
-	require.Len(t, refused, 2)
-	require.Equal(t, airgap.SiteImagePull, refused[0].Site)
-	require.Equal(t, "ghcr.io:443", refused[0].Address)
-	require.Equal(t, airgap.SiteImageBuild, refused[1].Site)
+	require.Len(t, refused, 1, "a sealed machine with no sidecar image reached for more than one place: %v", refused)
+	require.Equal(t, airgap.SiteImageBuild, refused[0].Site)
+
+	require.Contains(t, err.Error(), proxyimage.Tag(), "the refusal did not name the image to load")
+	require.Contains(t, err.Error(), "AF_PROXY_IMAGE", "the refusal did not say how to name a mirrored image")
 
 	pulls, builds := d.counts()
 	require.Zero(t, pulls, "the daemon was asked to pull on a sealed machine")
 	require.Zero(t, builds, "the daemon was asked to build on a sealed machine")
+}
+
+func TestProxyImage_AirGappedWithANamedImageInAnAllowedRegistryFetchesIt(t *testing.T) {
+	// The documented way through: mirror the image, allow the mirror, name it.
+	airgap.Reset()
+	t.Cleanup(airgap.Reset)
+	require.NoError(t, airgap.Allow("registry.example.com"))
+	airgap.Seal("this test is measuring the refusal")
+
+	d := newFakeDaemon()
+	d.publishes(proxyimage.SourcesDigest())
+	d.compiles()
+
+	const mirror = "registry.example.com/antifailure/af-proxy:mirror"
+	job, _ := newJob(d, map[string]string{"AF_PROXY_IMAGE": mirror})
+	require.NoError(t, job.obtain(context.Background()),
+		"a sealed machine refused the mirror its own allow list names")
+	require.Empty(t, airgap.Refusals())
+	pulls, builds := d.counts()
+	require.Equal(t, 1, pulls, "the named mirror was not fetched")
+	require.Zero(t, builds, "a sealed machine compiled the sidecar")
+}
+
+func TestProxyImage_AirGappedWithANamedImageOutsideTheAllowListIsRefusedOnceAtThePull(t *testing.T) {
+	airgap.Reset()
+	t.Cleanup(airgap.Reset)
+	airgap.Seal("this test is measuring the refusal")
+
+	d := newFakeDaemon()
+	d.publishes(proxyimage.SourcesDigest())
+	d.compiles()
+
+	job, _ := newJob(d, map[string]string{"AF_PROXY_IMAGE": "registry.example.com/antifailure/af-proxy:mirror"})
+	err := job.obtain(context.Background())
+	require.ErrorIs(t, err, airgap.ErrSealed)
+	refused := airgap.Refusals()
+	require.Len(t, refused, 1, "a named image outside the allow list was refused more than once: %v", refused)
+	require.Equal(t, airgap.SiteImagePull, refused[0].Site)
+	require.Equal(t, "registry.example.com:443", refused[0].Address)
+	pulls, builds := d.counts()
+	require.Zero(t, pulls+builds, "the daemon was asked to pull or build on a sealed machine")
 }
 
 func TestProxyImage_AFetchThatHangsIsGivenUpOnAndCompiled(t *testing.T) {
