@@ -69,6 +69,15 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 			emulatorList(spec.Emulators)))
 	}
 
+	// Refused for the same reason and in the same place as emulators. A
+	// manifest that mounts a configuration file and runs without it is a
+	// service on its image's defaults reported as the one the recipe asked
+	// for; ignoring the key would be worse than refusing it, because nothing
+	// would say so. unsupportedMounts carries why each shape is not built here.
+	if detail := unsupportedMounts(spec.Services); detail != "" {
+		return env, aferrors.Coded(aferrors.AFRUN049, "detail", detail)
+	}
+
 	order, err := startOrder(spec.Services)
 	if err != nil {
 		return env, err
@@ -462,10 +471,14 @@ func (r *Runtime) startService(
 	}
 	want := s.Instances()
 	running.Instances = want
-	if s.Port > 0 {
+	// A readiness probe exists for a service with a port or a health command,
+	// and the cluster evaluates it per pod, so waiting for every pod to be
+	// ready is a wait on a real check.
+	if s.Port > 0 || s.HealthCommand != "" {
 		if err := r.waitForPods(ctx, namespace, map[string]string{
 			LabelService: s.Name,
 		}, want, timeout, s.Name); err != nil {
+			running.Readiness = provider.ReadinessFailed
 			return running, err
 		}
 		if running.URL != "" {
@@ -474,13 +487,15 @@ func (r *Runtime) startService(
 			}
 		}
 		running.Ready = true
+		running.Readiness = provider.ReadinessProved
 		running.State = "running"
 		return running, nil
 	}
-	// A service with no port is ready when it is running, and asking for more
-	// would mean inventing a protocol the application does not speak. What is
-	// still checked is that it has not already exited, because a worker that
-	// died on startup must be reported rather than counted as up.
+	// A service with neither has nothing the cluster can probe, so a pod
+	// counts as ready the moment it runs. What is checked here is that it has
+	// not already exited, and the answer is reported UNPROVED rather than
+	// ready: this used to set Ready, which is the false pass
+	// provider.Readiness exists to remove.
 	running.State = "running"
 	if want > 1 {
 		// With more than one instance there is a second question that a look
@@ -490,15 +505,17 @@ func (r *Runtime) startService(
 		// scheduled. So the count is waited for, and the exit codes are read
 		// on every look rather than once at the end.
 		if err := r.waitForInstances(ctx, namespace, s, want, timeout); err != nil {
+			running.Readiness = provider.ReadinessFailed
 			return running, err
 		}
-		running.Ready = true
+		running.Readiness = provider.ReadinessUnproved
 		return running, nil
 	}
 	if err := r.confirmStarted(ctx, namespace, s); err != nil {
+		running.Readiness = provider.ReadinessFailed
 		return running, err
 	}
-	running.Ready = true
+	running.Readiness = provider.ReadinessUnproved
 	return running, nil
 }
 
@@ -1094,7 +1111,12 @@ func (r *Runtime) Status(ctx context.Context, envID string) (provider.Env, error
 			rs = provider.RunningService{
 				Name: name, Kind: pod.Labels[LabelServiceKind], ContainerID: string(pod.UID),
 				State: string(pod.Status.Phase), Detail: podTrouble(pod), Ready: true,
+				Readiness: podReadiness(pod),
 			}
+			// A pod with no readiness probe is Ready to the cluster the moment
+			// it runs, so the cluster's word is only a promise where a probe
+			// stood behind it.
+			rs.Ready = rs.Readiness.Proved()
 			// From the pod the cluster is running, which is where a size that
 			// was accepted and not applied stops looking like one that was.
 			rs.CPUMillis, rs.MemoryBytes = appliedResources(pod.Spec)
@@ -1105,6 +1127,7 @@ func (r *Runtime) Status(ctx context.Context, envID string) (provider.Env, error
 		rs.Instances++
 		if !podReady(pod) {
 			rs.Ready = false
+			rs.Readiness = provider.ReadinessFailed
 			if !troubled[name] {
 				troubled[name] = true
 				rs.ContainerID = string(pod.UID)

@@ -154,6 +154,11 @@
           "default": "180s",
           "description": "How long to wait for readiness before failing with AF-RUN-004."
         },
+        "health_command": {
+          "type": "string",
+          "maxLength": 1024,
+          "description": "Command run inside the container that reports readiness by exiting zero. The only check a service with no published port can pass, and the only one that can tell starting from started for a store that accepts a connection before it is usable: Postgres answers on 5432 while its init scripts are still running, which is what `pg_isready` exists to distinguish and what a connection cannot. Refused alongside health_path, because two checks are two answers."
+        },
         "env": {
           "type": "array",
           "maxItems": 200,
@@ -189,6 +194,14 @@
             "maxLength": 40
           },
           "description": "Services that must be ready first. A cycle is rejected at validation."
+        },
+        "mounts": {
+          "type": "array",
+          "maxItems": 25,
+          "items": {
+            "$ref": "#/$defs/mount"
+          },
+          "description": "Files the service needs at a path of its own, and directories whose contents must survive a restart. A service built from a prebuilt image holds none of the repository, so a configuration file it reads at startup has no other way in."
         }
       }
     },
@@ -245,6 +258,34 @@
             "maxLength": 253
           },
           "description": "Hosts the build is declared to reach, such as a package registry or an engine download. DECLARED RATHER THAN ENFORCED in this release: the list is validated and shown by af explain, and the local builder does not yet seal a build or apply it. Write it as the record of what your build needs, and do not rely on it as a control."
+        }
+      }
+    },
+    "mount": {
+      "title": "Mount",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "at"
+      ],
+      "description": "One thing a service can read at a path inside its container. Exactly one of path or volume: a file or directory from the repository, or a named store the environment keeps.",
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "A file or directory inside the repository, relative to its root. The contents are COPIED into the container before it starts, never bound to the host: the service cannot write back into the working tree, the daemon needs no share of the filesystem, and a symbolic link that leaves the repository is refused rather than followed."
+        },
+        "volume": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$",
+          "maxLength": 40,
+          "description": "A named volume this environment owns, which keeps what the service writes across a restart of that service. Created on first use, removed with the environment, and never a path to the host."
+        },
+        "at": {
+          "type": "string",
+          "pattern": "^/[^\\0]*$",
+          "maxLength": 512,
+          "description": "Absolute path inside the container. Two mounts may not name the same one, because the second would decide what the first meant."
         }
       }
     },

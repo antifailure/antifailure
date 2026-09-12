@@ -359,6 +359,18 @@ type ServiceSpec struct {
 	HealthPath string
 	// HealthTimeout bounds the wait. Zero uses the runtime's default.
 	HealthTimeout time.Duration
+	// HealthCommand is a command run INSIDE the container that reports
+	// readiness by exiting zero. Empty means there is none.
+	//
+	// It is the only check a service with no published port can pass, and the
+	// only one that can tell starting from started for a store that accepts a
+	// connection before it is usable. Of the fifty services in the three
+	// published stacks this product was measured against, forty one publish no
+	// port at all, and eight of the twenty readiness checks those files declare
+	// are commands: pg_isready on Supabase's Postgres exists precisely because
+	// Postgres answers on 5432 while its init scripts are still running, which
+	// a connection cannot distinguish and this can.
+	HealthCommand string
 	// Env are additional variables. Values are secrets because some of them
 	// are, and separating the two at this layer means guessing.
 	Env map[string]secret.Value
@@ -390,6 +402,54 @@ type ServiceSpec struct {
 	// behind it. schema.Resources carries the reasoning.
 	CPUMillis   int64
 	MemoryBytes int64
+	// Mounts are what the service reads at a path of its own.
+	//
+	// The CONTENTS are here, already read out of the repository, rather than a
+	// path for the runtime to read. That is the containment decision, and it is
+	// load bearing rather than tidy. A runtime handed a host path would bind it,
+	// because binding is the one line of code that does the job, and a bind
+	// mount of the repository gives a container under rehearsal a writable
+	// handle on the source of the next build. Handing over bytes means no
+	// runtime CAN take that shortcut, it means a daemon that does not share the
+	// host's filesystem works the same as one that does, and it means the
+	// confinement check happens once, where the repository root is known,
+	// instead of once per runtime.
+	Mounts []MountSpec
+}
+
+// MountSpec is one thing a service reads at a path inside its container.
+//
+// Exactly one of the two shapes, and they are different mechanisms:
+//
+// Files non-empty is a COPY out of the repository, placed before the container
+// starts. Read only in the sense that matters, which is that nothing the
+// service writes reaches the machine.
+//
+// Volume non-empty is a named volume the runtime keeps, which is the only
+// writable surface a mount creates and the only one that survives a restart of
+// the service. It is not a path to the host: the runtime creates it, labels it
+// with the environment, and removes it with the environment.
+type MountSpec struct {
+	// At is the absolute path inside the container.
+	At string
+	// Volume is the name of a volume the runtime keeps, empty for a copy.
+	Volume string
+	// Files are the contents to place at At.
+	//
+	// One entry with an empty Rel is a single file placed AT At. More than one,
+	// each with a Rel, is a directory whose contents are placed under At.
+	Files []MountFile
+}
+
+// MountFile is one file inside a mount.
+type MountFile struct {
+	// Rel is the path under the mount's target. Empty means the mount is a
+	// single file and At names it.
+	Rel string
+	// Mode is the file mode to give it, so that an executable stays one.
+	Mode int64
+	// Data is the file's contents.
+	Data []byte
 }
 
 // Instances is how many containers or pods this service asks for.
@@ -440,8 +500,27 @@ type RunningService struct {
 	ContainerID string
 	// URL is where it can be reached from the host, when it listens.
 	URL string
-	// Ready reports whether it answered its readiness check.
+	// Ready reports whether it PROVED it was ready, which is narrower than it
+	// used to be and deliberately so. It is now exactly
+	// Readiness == ReadinessProved.
+	//
+	// It used to be set for a service with no published port the moment its
+	// container existed, which is how a stack would have reported forty one of
+	// its fifty services ready while they were still starting and, for the ones
+	// that were going to die on a blocked call at startup, right up until they
+	// exited. A boolean cannot hold three answers, so the third one lives in
+	// Readiness and this field carries the only one of them that is a promise.
 	Ready bool
+	// Readiness is what the runtime can actually SAY about this service
+	// answering, which is three things rather than two.
+	//
+	// The middle value is the point. A check that cannot say no is worse than
+	// no check, and reporting a service ready because nothing contradicted it
+	// is a check that cannot say no. A worker with no port and no command has
+	// nothing to poll, and the honest report of that is not "ready" and not
+	// "failed": it is that the runtime does not know, said out loud, so a
+	// reader who needs to know builds a check rather than trusting a tick.
+	Readiness Readiness
 	// State is the runtime's own word for what it is doing.
 	State string
 	// Detail explains a state that is not running, such as an exit code.

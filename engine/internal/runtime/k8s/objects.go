@@ -632,6 +632,8 @@ func containerFor(spec provider.EnvSpec, s provider.ServiceSpec, migration bool)
 	}
 	if !migration && s.Port > 0 {
 		c.Ports = []corev1.ContainerPort{{ContainerPort: int32(s.Port), Protocol: corev1.ProtocolTCP}}
+	}
+	if !migration && (s.Port > 0 || s.HealthCommand != "") {
 		c.ReadinessProbe = readinessProbe(s)
 	}
 	if spec.CACertPEM != "" {
@@ -1007,6 +1009,16 @@ func readinessProbe(s provider.ServiceSpec) *corev1.Probe {
 		PeriodSeconds:    2,
 		FailureThreshold: 60,
 		TimeoutSeconds:   3,
+	}
+	// A health command decides on its own, through the same /bin/sh -c the
+	// local runtime execs it with, so one string means one thing on both. It
+	// is also the only probe a service with no port can have.
+	if s.HealthCommand != "" {
+		probe.TimeoutSeconds = 10
+		probe.ProbeHandler = corev1.ProbeHandler{
+			Exec: &corev1.ExecAction{Command: []string{"/bin/sh", "-c", s.HealthCommand}},
+		}
+		return probe
 	}
 	if s.HealthPath == "" {
 		probe.ProbeHandler = corev1.ProbeHandler{

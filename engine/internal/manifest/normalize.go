@@ -132,10 +132,13 @@ func normalizeService(s *schema.Service) {
 		s.Path = c
 	}
 	if s.Kind == schema.ServiceWeb {
-		if s.HealthPath == "" {
+		// Not defaulted when a health command is declared. The command is the
+		// check, and filling in "/" beside it would make every service that
+		// wrote one look as if it had written both, which validation refuses.
+		if s.HealthPath == "" && s.HealthCommand == "" {
 			s.HealthPath = DefaultHealthPath
 		}
-		if !strings.HasPrefix(s.HealthPath, "/") {
+		if s.HealthPath != "" && !strings.HasPrefix(s.HealthPath, "/") {
 			s.HealthPath = "/" + s.HealthPath
 		}
 	}

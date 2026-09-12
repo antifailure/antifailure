@@ -2005,8 +2005,17 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	// three, and returning first would leave the dashboard showing all five
 	// starting forever.
 	for _, svc := range env.Services {
+		// Three answers, and only a failure is an exit. A service that is
+		// running with nothing to check is reported as started, at warn, with
+		// the reason in the state: calling it ready is the false pass the
+		// runtime stopped making, and calling it exited would send somebody to
+		// read the logs of a process that is fine.
 		t, level := events.ServiceReady, events.LevelInfo
-		if !svc.Ready {
+		switch {
+		case svc.Readiness == provider.ReadinessUnproved && svc.State == "running":
+			t, level = events.ServiceStarting, events.LevelWarn
+			svc.State = "running, readiness unproved"
+		case !svc.Ready:
 			t, level = events.ServiceExited, events.LevelError
 		}
 		// Empty fields are left off rather than sent empty. A real run showed
@@ -2457,7 +2466,10 @@ func (o *Orchestrator) buildServices(
 		} else {
 			built++
 		}
-		spec := serviceSpec(svc, image)
+		spec, err := serviceSpec(svc, image, o.buildRoot())
+		if err != nil {
+			return nil, built, cached, err
+		}
 		spec.Migrate = svc.Migrate
 		specs = append(specs, spec)
 	}
@@ -2483,17 +2495,32 @@ func (o *Orchestrator) buildServices(
 // commit's services against a database the current commit has already
 // migrated, so running the old migration again is the one thing it must not
 // do. Its caller sets it; this one does not.
-func serviceSpec(svc schema.Service, image string) provider.ServiceSpec {
+//
+// The root is here, and the error, because of mounts. A mount is read out of the
+// repository at this boundary and handed to the runtime as contents, so that no
+// runtime is given a host path to bind: the reasoning is on provider.MountSpec
+// and the reading is in readMounts. A root of "" reads no mounts, which is what
+// a caller that has no repository in front of it gets; it is not a way to skip
+// them, because such a caller has nothing to read.
+func serviceSpec(svc schema.Service, image, root string) (provider.ServiceSpec, error) {
 	spec := provider.ServiceSpec{
-		Name:       svc.Name,
-		Image:      image,
-		Kind:       string(orDefault(string(svc.Kind), "worker")),
-		Command:    svc.Command,
-		Port:       svc.Port,
-		HealthPath: svc.HealthPath,
-		DependsOn:  svc.DependsOn,
-		Env:        serviceEnv(svc),
-		Replicas:   svc.Replicas,
+		Name:          svc.Name,
+		Image:         image,
+		Kind:          string(orDefault(string(svc.Kind), "worker")),
+		Command:       svc.Command,
+		Port:          svc.Port,
+		HealthPath:    svc.HealthPath,
+		HealthCommand: svc.HealthCommand,
+		DependsOn:     svc.DependsOn,
+		Env:           serviceEnv(svc),
+		Replicas:      svc.Replicas,
+	}
+	if root != "" {
+		mounts, err := readMounts(root, svc)
+		if err != nil {
+			return provider.ServiceSpec{}, err
+		}
+		spec.Mounts = mounts
 	}
 	// The size, resolved here so that neither runtime parses a manifest
 	// string for itself. A quantity that will not parse is refused at
@@ -2521,7 +2548,7 @@ func serviceSpec(svc schema.Service, image string) provider.ServiceSpec {
 	if d, err := manifest.ParseDuration(svc.HealthTimeout); err == nil && d > 0 {
 		spec.HealthTimeout = d
 	}
-	return spec
+	return spec, nil
 }
 
 func orDefault(s, fallback string) string {

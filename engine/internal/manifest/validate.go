@@ -174,6 +174,8 @@ func (v *validator) services(m *schema.Manifest) {
 		v.env(base, s)
 		v.resources(base, s)
 		v.replicas(base, s)
+		v.mounts(base, s)
+		v.readinessCheck(base, s)
 
 		if _, err := ParseDuration(s.HealthTimeout); err != nil {
 			v.add(base+".health_timeout",

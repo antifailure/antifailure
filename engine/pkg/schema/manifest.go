@@ -57,6 +57,26 @@ const (
 // to find every bug in the class this field exists for.
 const MaxReplicas = 10
 
+// MaxMountBytes bounds what one mount may copy into a container, and
+// MaxMountFiles bounds how many files it may be spread across.
+//
+// Both exist because the alternative is a mount that wedges the machine rather
+// than one that is refused. A mount names a path in a repository, a repository
+// contains node_modules and .git, and the difference between
+// `path: config` and `path: .` is one character. Sixteen mebibytes is generous
+// for the thing this key was built for, which is a configuration file: the
+// largest in the three published stacks this was measured against is
+// ClickHouse's config.xml at under fifty kilobytes. Two thousand files is the
+// same judgement applied to a directory of init scripts, where the real ones
+// hold seven.
+//
+// A refusal names the mount and the figure, so somebody who genuinely needs to
+// place a large fixture knows what they hit instead of watching a daemon stall.
+const (
+	MaxMountBytes = 16 << 20
+	MaxMountFiles = 2000
+)
+
 // Service is one process the environment runs.
 type Service struct {
 	Name          string      `json:"name" yaml:"name"`
@@ -67,13 +87,55 @@ type Service struct {
 	Port          int         `json:"port,omitempty" yaml:"port,omitempty"`
 	HealthPath    string      `json:"health_path,omitempty" yaml:"health_path,omitempty"`
 	HealthTimeout string      `json:"health_timeout,omitempty" yaml:"health_timeout,omitempty"`
+	HealthCommand string      `json:"health_command,omitempty" yaml:"health_command,omitempty"`
 	Env           []EnvVar    `json:"env,omitempty" yaml:"env,omitempty"`
 	Replicas      int         `json:"replicas,omitempty" yaml:"replicas,omitempty"`
 	Resources     *Resources  `json:"resources,omitempty" yaml:"resources,omitempty"`
 	Schedule      string      `json:"schedule,omitempty" yaml:"schedule,omitempty"`
 	Migrate       string      `json:"migrate,omitempty" yaml:"migrate,omitempty"`
 	DependsOn     []string    `json:"depends_on,omitempty" yaml:"depends_on,omitempty"`
+	Mounts        []Mount     `json:"mounts,omitempty" yaml:"mounts,omitempty"`
 }
+
+// Mount is one thing a service reads at a path inside its container.
+//
+// Exactly one of Path and Volume, and the two are different mechanisms rather
+// than two spellings of one. That distinction is the containment decision this
+// type exists to hold, so it is written down here rather than left in the
+// runtime that acts on it.
+//
+// Path is COPIED IN, never bound. A bind mount of a repository file would give
+// the rehearsal a writable handle on the developer's working tree, which is a
+// way out of the sandbox in the direction nobody checks: not the container
+// reaching the host's root, but the container editing the source of the next
+// build. It would also require the daemon to share the host's filesystem,
+// which a remote or virtual-machine daemon does not. A copy costs a snapshot
+// at start instead of a live view, and for a configuration file read once at
+// startup that is the whole of the difference.
+//
+// Volume is a named volume the environment owns. It is the only writable
+// surface a mount can create, it survives a restart of the service, it is
+// removed with the environment, and it is not a path to the host: nothing the
+// service writes into it can be read as a file on the machine except through
+// the daemon that made it.
+type Mount struct {
+	// Path is a file or directory inside the repository, relative to its root.
+	Path string `json:"path,omitempty" yaml:"path,omitempty"`
+	// Volume is the name of a volume this environment keeps.
+	Volume string `json:"volume,omitempty" yaml:"volume,omitempty"`
+	// At is the absolute path inside the container.
+	At string `json:"at" yaml:"at"`
+}
+
+// IsVolume reports whether this mount is a named volume rather than a copy of
+// something in the repository.
+//
+// One predicate rather than each caller testing a field, because the two are
+// mutually exclusive and a caller that tested the wrong one would silently
+// treat a repository copy as a volume: the container would start with an empty
+// directory where its configuration should be, which is exactly the failure
+// mounts were added to stop.
+func (m Mount) IsVolume() bool { return m.Volume != "" }
 
 // BuildStrategy is how a service becomes an image.
 type BuildStrategy string

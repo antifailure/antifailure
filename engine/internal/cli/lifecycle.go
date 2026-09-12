@@ -38,12 +38,16 @@ type UpJSON struct {
 
 // ServiceJSON is one service in the JSON forms of up and status.
 type ServiceJSON struct {
-	Name   string `json:"name"`
-	Kind   string `json:"kind,omitempty"`
-	URL    string `json:"url,omitempty"`
-	Ready  bool   `json:"ready"`
-	State  string `json:"state,omitempty"`
-	Detail string `json:"detail,omitempty"`
+	Name  string `json:"name"`
+	Kind  string `json:"kind,omitempty"`
+	URL   string `json:"url,omitempty"`
+	Ready bool   `json:"ready"`
+	// Readiness is proved, unproved or failed. Ready is true only for the
+	// first, so a consumer that reads ready alone never mistakes a running
+	// service with nothing to check for one that answered a check.
+	Readiness string `json:"readiness"`
+	State     string `json:"state,omitempty"`
+	Detail    string `json:"detail,omitempty"`
 	// Instances is how many of the service are running. Always present, even
 	// at one, because a consumer reading it as "absent means one" and a
 	// consumer reading it as "absent means unknown" would both be reasonable
@@ -524,7 +528,7 @@ func servicesJSON(services []provider.RunningService) []ServiceJSON {
 		}
 		row := ServiceJSON{
 			Name: s.Name, Kind: s.Kind, URL: s.URL,
-			Ready: s.Ready, State: s.State, Detail: s.Detail,
+			Ready: s.Ready, Readiness: s.Readiness.String(), State: s.State, Detail: s.Detail,
 			Instances: instances,
 		}
 		if s.CPUMillis > 0 {
@@ -563,12 +567,19 @@ func renderServices(e *Env, services []provider.RunningService) {
 	}
 	for _, s := range services {
 		symbol := SymbolFail
-		if s.Ready {
+		switch {
+		case s.Ready:
 			symbol = SymbolOK
+		case s.Readiness == provider.ReadinessUnproved && s.State == "running":
+			// Running and not proved is neither a tick nor a cross.
+			symbol = SymbolWarn
 		}
 		detail := s.URL
 		if detail == "" {
 			detail = s.State
+		}
+		if symbol == SymbolWarn {
+			detail += ", readiness unproved: no port and no health_command"
 		}
 		// The instance count only appears when there is more than one of
 		// something, because a count of one on every line is noise on every

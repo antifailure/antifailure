@@ -505,6 +505,11 @@ var knownKeys = []string{
 	"load", "policy", "runtime", "github",
 	"path", "kind", "build", "command", "port", "health_path", "health_timeout",
 	"env", "replicas", "resources", "schedule", "migrate", "depends_on",
+	// A mount's own keys, and the readiness check a service with no port can
+	// carry. "volume" is already above, for the database's volume profile, and
+	// one flat list is what makes that fine: a suggestion only has to be close
+	// enough to be useful.
+	"mounts", "at", "health_command",
 	"strategy", "dockerfile", "target", "context", "image", "args", "allow_hosts",
 	"required", "sandbox", "value", "from", "cpu", "memory",
 	"provider", "source_url_env", "url_env", "masking_rules", "golden", "subset", "seed",

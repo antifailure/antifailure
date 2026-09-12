@@ -49,6 +49,7 @@ what it deliberately does not cover.
 | `command` | string | How to start it. |
 | `port` | int | What it listens on. `PORT` is set for you. |
 | `health_path` | string | Readiness check, default `/`. |
+| `health_command` | string | A command run inside the container that reports readiness by exiting zero. Not allowed beside `health_path`, or on a cron service. See below. |
 | `health_timeout` | duration | Default `180s`. |
 | `migrate` | string | Runs to completion before the service starts, with an elevated connection. See below. |
 | `schedule` | cron | For `kind: cron`. |
@@ -57,6 +58,29 @@ what it deliberately does not cover.
 | `env` | list | Variables this service needs, by name. |
 | `resources` | block | `cpu` and `memory`, the size one instance is given. Each is the request and the limit on both runtimes. See below. |
 | `build` | block | See below. |
+| `mounts` | list | Files and directories copied in from the repository, and named volumes. See below. |
+
+### Readiness
+
+A service reports one of three answers. **Proved** means a check passed: the
+port answered, or `health_command` exited zero. **Unproved** means it is running
+and nothing could check it, which is what a service with no port and no command
+gets. **Failed** means a check did not pass in time or the container exited.
+Only proved counts as ready. The local runtime guide describes how each is
+reached.
+
+### Mounts
+
+Each entry has `at`, an absolute path inside the container, and exactly one of:
+
+| Key | Notes |
+| --- | --- |
+| `path` | A file or directory in the repository, copied in before the process starts. Never bound to the machine. Refused if it leaves the repository, including through a symbolic link, or if it is missing. |
+| `volume` | A named volume the environment owns, kept across a restart of the service and removed by `af down`. |
+
+Two mounts on one service may not share a target. One volume may be mounted by
+several services. The Kubernetes runtime refuses mounts for now, with
+AF-RUN-049.
 
 ### What a service is given
 

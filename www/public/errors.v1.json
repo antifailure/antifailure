@@ -1422,6 +1422,39 @@
       "planned": false
     },
     {
+      "code": "AF-RUN-048",
+      "area": "RUN",
+      "areaName": "Runtime",
+      "message": "A mount on service {service} could not be read: {detail}",
+      "resolution": "Check the path the mount names, relative to the repository root. A mount is read once, before anything starts, so a source that is missing here is refused rather than becoming a container that started on its image's defaults.",
+      "docs": "https://antifailure.dev/docs/reference/manifest",
+      "retryable": false,
+      "exitCode": 3,
+      "planned": false
+    },
+    {
+      "code": "AF-RUN-049",
+      "area": "RUN",
+      "areaName": "Runtime",
+      "message": "This runtime cannot place the mounts the manifest asks for: {detail}",
+      "resolution": "Run these services on the local runtime. A named volume on a cluster needs a persistent volume claim against a storage class this runtime does not choose for you, and a repository file needs a config map path that has not been run against a real cluster yet, so both are refused by name rather than ignored.",
+      "docs": "https://antifailure.dev/docs/guides/kubernetes-runtime",
+      "retryable": false,
+      "exitCode": 3,
+      "planned": false
+    },
+    {
+      "code": "AF-RUN-050",
+      "area": "RUN",
+      "areaName": "Runtime",
+      "message": "Service {service} did not pass its health command within {timeout}.",
+      "resolution": "The last log lines are above. The command was {health}, run inside the container; it has to exit zero. Run 'af logs {service}' for the full output.",
+      "docs": "https://antifailure.dev/docs/guides/local-runtime",
+      "retryable": true,
+      "exitCode": 1,
+      "planned": false
+    },
+    {
       "code": "AF-SCH-001",
       "area": "SCH",
       "areaName": "Scheduling",

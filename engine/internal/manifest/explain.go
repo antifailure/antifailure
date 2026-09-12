@@ -80,8 +80,29 @@ func Explain(m *schema.Manifest, width int) string {
 			fmt.Fprintf(&b, " (%s)", s.Build.Dockerfile)
 		}
 		b.WriteString("\n")
-		if s.Kind == schema.ServiceWeb {
+		switch {
+		case s.HealthCommand != "":
+			fmt.Fprintf(&b, "  %-*s health command %s within %s\n", gut, "",
+				value(s.HealthCommand, gut+19, width), s.HealthTimeout)
+		case s.Kind == schema.ServiceWeb:
 			fmt.Fprintf(&b, "  %-*s health %s within %s\n", gut, "", s.HealthPath, s.HealthTimeout)
+		case s.Kind == schema.ServiceWorker:
+			// Said, because this is the document whose job is the effective
+			// configuration, and "nothing will check this" is part of it. A
+			// worker with no command is reported running and unproved, never
+			// ready, and a reader should learn that here rather than from a
+			// status line after the fact.
+			fmt.Fprintf(&b, "  %-*s health unproved: no port and no health_command\n", gut, "")
+		}
+		for _, m := range s.Mounts {
+			// One line per mount, source first, because the question a reader
+			// brings is "did my config file make it in", and the answer is on
+			// the left where the eye starts.
+			if m.IsVolume() {
+				fmt.Fprintf(&b, "  %-*s mount volume %s at %s\n", gut, "", m.Volume, m.At)
+			} else {
+				fmt.Fprintf(&b, "  %-*s mount %s at %s, copied in\n", gut, "", m.Path, m.At)
+			}
 		}
 		if s.Replicas > 1 {
 			// Only above one, so the line appears where the environment is

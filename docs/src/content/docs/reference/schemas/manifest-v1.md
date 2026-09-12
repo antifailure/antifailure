@@ -310,6 +310,16 @@ Where the project's own SQL migrations live, for a project whose migrate command
 | `format` | `sql` | no | How the files are read. Only sql exists. Defaults to `sql`. |
 | `table` | string | no | The ledger table the project's runner records applied files in, so the rehearsal computes the pending set the way the runner would: a file is applied when its name, its stem or its leading number appears in the table's name, version, filename or migration column. Unset, schema_migrations and migrations are tried. Max length 128, matches `^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$`. |
 
+## Mount
+
+One thing a service can read at a path inside its container. Exactly one of path or volume: a file or directory from the repository, or a named store the environment keeps.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `at` | string | **yes** | Absolute path inside the container. Two mounts may not name the same one, because the second would decide what the first meant. Max length 512, matches `^/[^\0]*$`. |
+| `path` | string | no | A file or directory inside the repository, relative to its root. The contents are COPIED into the container before it starts, never bound to the host: the service cannot write back into the working tree, the daemon needs no share of the filesystem, and a symbolic link that leaves the repository is refused rather than followed. Max length 512. |
+| `volume` | string | no | A named volume this environment owns, which keeps what the service writes across a restart of that service. Created on first use, removed with the environment, and never a path to the host. Max length 40, matches `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`. |
+
 ## Oracle
 
 Deploy a baseline version alongside the candidate, send both the same requests, and report every difference in what came back and in what ended up in the database.
@@ -458,10 +468,12 @@ One process the environment runs. A service is built from the repository, given 
 | `command` | string | no | Command that starts the service, overriding the image's own. Executed with an argument vector, never through a shell. Max length 4096. |
 | `depends_on` | list of string | no | Services that must be ready first. A cycle is rejected at validation. Max items 50. |
 | `env` | list of [Environment variable](#environment-variable) | no | Names of environment variables this service needs. Names only. Values come from the secrets subsystem, and a name with no value anywhere fails with AF-SEC-001 rather than starting a service that will misbehave. Max items 200. |
+| `health_command` | string | no | Command run inside the container that reports readiness by exiting zero. The only check a service with no published port can pass, and the only one that can tell starting from started for a store that accepts a connection before it is usable: Postgres answers on 5432 while its init scripts are still running, which is what `pg_isready` exists to distinguish and what a connection cannot. Refused alongside health_path, because two checks are two answers. Max length 1024. |
 | `health_path` | string | no | HTTP path that reports readiness. A service is not considered up until this returns a 2xx or 3xx status. Defaults to `/`. Max length 512. |
 | `health_timeout` | string | no | How long to wait for readiness before failing with AF-RUN-004. Defaults to `180s`. Matches `^[0-9]+(ms\|s\|m)$`. |
 | `kind` | `web`, `worker`, `cron` | no | What the service is. A web service gets a hostname and a readiness check; a worker gets neither; a cron service is invoked on a schedule instead of run continuously. Defaults to `web`. |
 | `migrate` | string | no | Command that applies pending migrations. Run once against a fresh branch before the services start, and rehearsed with timing and lock analysis when insights are on. Max length 1024. |
+| `mounts` | list of [Mount](#mount) | no | Files the service needs at a path of its own, and directories whose contents must survive a restart. A service built from a prebuilt image holds none of the repository, so a configuration file it reads at startup has no other way in. Max items 25. |
 | `name` | string | **yes** | Unique within the manifest. Appears in hostnames, logs, and container names. Max length 40, matches `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`. |
 | `path` | string | no | Directory containing the service, relative to the repository root. Defaults to the root. A path outside the repository is rejected. Max length 512. |
 | `port` | integer | no | Port the service listens on. Required for a web service unless detection found it. Minimum 1, maximum 65535. |

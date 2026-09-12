@@ -78,6 +78,13 @@ const (
 	// service whose URL it prints, so the inference was one race away from an
 	// environment that is running and reports no address.
 	LabelServiceKind = "dev.antifailure.service-kind"
+	// LabelReadinessCheck is which check a service container carries: http,
+	// tcp, command, or none. Stamped at creation so that Status, which sees a
+	// container and not the manifest it came from, can tell a service that
+	// PROVED it was ready at Up from one that was only running. Without it the
+	// status of a worker with no check read "ready" forever, which is the false
+	// pass readiness was made three valued to remove.
+	LabelReadinessCheck = "dev.antifailure.readiness-check"
 	// LabelCreated is RFC 3339, used to age out orphans whose creating
 	// process died before it could clean up.
 	LabelCreated = "dev.antifailure.created"

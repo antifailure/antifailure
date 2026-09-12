@@ -137,12 +137,13 @@ type branchStatusDoc struct {
 }
 
 type envServiceDoc struct {
-	Name   string `json:"name"`
-	Kind   string `json:"kind,omitempty"`
-	URL    string `json:"url,omitempty"`
-	Ready  bool   `json:"ready"`
-	State  string `json:"state,omitempty"`
-	Detail string `json:"detail,omitempty"`
+	Name      string `json:"name"`
+	Kind      string `json:"kind,omitempty"`
+	URL       string `json:"url,omitempty"`
+	Ready     bool   `json:"ready"`
+	Readiness string `json:"readiness"`
+	State     string `json:"state,omitempty"`
+	Detail    string `json:"detail,omitempty"`
 }
 
 type machineEnvironmentDoc struct {
@@ -324,9 +325,12 @@ func describeBranchStatus(res *env.Result) branchStatusDoc {
 		state, _ := safeIdentifier(s.State)
 		doc.Services = append(doc.Services, envServiceDoc{
 			Name: name, Kind: kind, URL: safeHostURL(s.URL), Ready: s.Ready,
-			State: state, Detail: safeText(s.Detail, 200),
+			Readiness: s.Readiness.String(), State: state, Detail: safeText(s.Detail, 200),
 		})
-		if s.Ready {
+		// Running, not ready. An environment whose services are all workers
+		// with nothing to check is running and proved nothing, and reporting
+		// it as "not running" would be the opposite false answer.
+		if s.Ready || s.Readiness == provider.ReadinessUnproved {
 			doc.Running = true
 		}
 	}

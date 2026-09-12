@@ -329,6 +329,16 @@ func services(obs Observation) Dimension {
 				Name: s.Name, State: Reproduced,
 				Detail: describeService(s, r),
 			})
+		case r.Readiness == provider.ReadinessUnproved && r.State == "running":
+			// Running is what topology measures, so it is reproduced. The
+			// detail says what was not established, because a component that
+			// is present and never checked is a weaker claim than one that
+			// answered, and the report is where a reader decides how far to
+			// trust the twin.
+			d.Components = append(d.Components, Component{
+				Name: s.Name, State: Reproduced,
+				Detail: describeService(s, r) + ", readiness unproved",
+			})
 		default:
 			// Present and not answering. Absent rather than substituted: an
 			// application nobody can reach is not standing in for anything,

@@ -467,11 +467,12 @@ type environmentDoc struct {
 }
 
 type serviceDoc struct {
-	Name  string `json:"name"`
-	Kind  string `json:"kind,omitempty"`
-	State string `json:"state,omitempty"`
-	Ready bool   `json:"ready"`
-	URL   string `json:"url,omitempty"`
+	Name      string `json:"name"`
+	Kind      string `json:"kind,omitempty"`
+	State     string `json:"state,omitempty"`
+	Ready     bool   `json:"ready"`
+	Readiness string `json:"readiness"`
+	URL       string `json:"url,omitempty"`
 	// Detail explains a state that is not running, in the runtime's words.
 	Detail   string `json:"detail,omitempty"`
 	ExitCode *int   `json:"exit_code,omitempty"`
@@ -579,7 +580,7 @@ func describeEnvironment(res *env.Result, fromUp bool) *environmentDoc {
 			// container, so they are bounded rather than repeated whole. The
 			// container id is deliberately absent: it names something on this
 			// host and a caller has no use for it.
-			State: neutralize(s.State, 64), Ready: s.Ready,
+			State: neutralize(s.State, 64), Ready: s.Ready, Readiness: s.Readiness.String(),
 			URL: neutralize(s.URL, 300), Detail: neutralize(s.Detail, 200),
 			ExitCode: s.ExitCode,
 		})

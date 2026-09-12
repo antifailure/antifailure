@@ -59,6 +59,100 @@ services:
     health_timeout: 300s
 ```
 
+## A service with no port
+
+A service that publishes no port has nothing the runtime can poll from outside,
+and most services in a real stack are like that: a compose file leaves a port
+unpublished because only other services reach it. So readiness has three
+answers rather than two.
+
+| Answer | Means |
+| --- | --- |
+| proved | A check ran and passed: the port answered, or the health command exited zero. |
+| unproved | The service is running and there was nothing to check. |
+| failed | A check did not pass in time, or the container exited. |
+
+An unproved service is not a failure, and `af up` does not stop on one. It is
+not evidence either, and `af up` and `af status` say so on its line instead of
+printing a tick. Before it is reported, the runtime watches the container for
+five seconds, which catches a process that exits on a refused outbound call at
+startup. Just before `af up` returns it looks at every service again, so one
+that passed its own check and died while later ones were starting is reported
+as failed rather than as up.
+
+To prove a service with no port, give it a command that exits zero once it is
+ready. It runs inside the container through `/bin/sh -c`, so an image with no
+shell cannot use one.
+
+```yaml
+services:
+  - name: db
+    kind: worker
+    health_command: pg_isready -U postgres
+```
+
+A command is also the right check for a store that accepts connections before
+it is usable. Postgres answers on its port while its init scripts are still
+running, and a connection cannot tell that apart from finished. A service may
+declare `health_path` or `health_command`, not both.
+
+```
+AF-RUN-050 Service db did not pass its health command within 180s.
+```
+
+The command is run for every instance of the service, so with `replicas: 3`
+each of the three has to pass it.
+
+One limit, stated: this runtime checks readiness while `af up` runs. A service
+that passes and later starts failing its check while its process keeps running
+is not noticed until something asks it for work. The Kubernetes runtime has no
+such limit, because the cluster runs the check for as long as the pod lives.
+
+## Mounting files, directories and volumes
+
+A service built from a prebuilt image holds none of your repository, so a
+configuration file it reads at startup needs a way in. `mounts` gives it one.
+
+```yaml
+services:
+  - name: keeper
+    kind: worker
+    mounts:
+      - path: clickhouse/keeper_config.xml
+        at: /etc/clickhouse-keeper/keeper_config.xml
+      - path: clickhouse/init
+        at: /docker-entrypoint-initdb.d
+      - volume: coordination
+        at: /var/lib/clickhouse-coordination
+```
+
+A `path` is a file or directory in the repository. It is **copied** into the
+container before the process starts. It is never bound to the machine. That
+choice is deliberate:
+
+- The service cannot write back into your working tree, which is the source of
+  the next build.
+- The daemon needs no share of your filesystem, so a remote or virtual machine
+  daemon behaves the same as a local one.
+- The copy is taken once, when the environment comes up. Editing the file
+  afterwards does not reach a running container, and deleting it cannot break
+  one. Run `af up` again to pick up a change.
+
+A path that leaves the repository is refused, and so is one that leaves it
+through a symbolic link. A missing path is refused before anything starts,
+because a service whose configuration did not arrive starts on its image's
+defaults and would report itself running. One mount may carry 16 MiB across at
+most 2000 files.
+
+A `volume` is a named volume this environment owns. It is the one writable
+surface a mount creates. It keeps what the service writes across a restart of
+that service, several services may share one, and `af down` removes it with the
+rest of the environment. It is never a path to your machine.
+
+```
+AF-RUN-048 A mount on service keeper could not be read: clickhouse/keeper_config.xml: no such file or directory
+```
+
 ## A service that exits immediately
 
 ```

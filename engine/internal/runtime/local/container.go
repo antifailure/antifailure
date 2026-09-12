@@ -84,6 +84,16 @@ func (r *Runtime) startService(
 	want := s.Instances()
 	running := provider.RunningService{Name: s.Name, Kind: s.Kind}
 
+	// Before the migration, because the migration runs in the service's own
+	// container shape and so carries the same mounts. A migration that reads a
+	// configuration file needs it as much as the service does.
+	if err := r.ensureVolumes(ctx, spec.EnvID, s, journal); err != nil {
+		running.State = "mount failed"
+		running.Readiness = provider.ReadinessFailed
+		running.Detail = err.Error()
+		return running, err
+	}
+
 	if s.Migrate != "" {
 		progress(fmt.Sprintf("%s: running migrations", s.Name))
 		// The migration gets its own connection string when the provider
@@ -149,6 +159,7 @@ func (r *Runtime) startService(
 	// waiting for it to answer would wait forever.
 	if s.Kind == "cron" {
 		running.Ready = true
+		running.Readiness = provider.ReadinessProved
 		progress(fmt.Sprintf("%s: ready (invoked on a schedule)", s.Name))
 		return running, nil
 	}
@@ -157,22 +168,40 @@ func (r *Runtime) startService(
 	if timeout <= 0 {
 		timeout = r.readyTimeout
 	}
+	// The weakest answer across the instances is the service's answer. Two
+	// instances proved and one unproved is a service nobody has proved.
+	readiness := provider.ReadinessProved
 	for _, id := range ids {
-		if err := r.waitReady(ctx, s, id, hostPort, timeout, progress); err != nil {
+		got, err := r.waitReady(ctx, s, id, hostPort, timeout, progress)
+		if err != nil {
+			running.Readiness = provider.ReadinessFailed
 			running.Detail = r.lastLogLines(ctx, id)
 			return running, err
 		}
+		if got != provider.ReadinessProved {
+			readiness = got
+		}
 	}
-	running.Ready = true
+	running.Readiness = readiness
+	running.Ready = readiness.Proved()
+
+	// The word is "running" rather than "ready" when nothing was proved, and
+	// the reason is on the line. Printing "ready" for a service with nothing
+	// to check is the false pass this whole distinction removes, and printing
+	// a bare "running" would leave a reader to guess why the word changed.
+	word := "ready"
+	if !readiness.Proved() {
+		word = "running, readiness unproved: no port and no health_command to check"
+	}
 	switch {
 	case running.URL != "" && want > 1:
-		progress(fmt.Sprintf("%s: ready at %s, %d instances", s.Name, running.URL, want))
+		progress(fmt.Sprintf("%s: %s at %s, %d instances", s.Name, word, running.URL, want))
 	case running.URL != "":
-		progress(fmt.Sprintf("%s: ready at %s", s.Name, running.URL))
+		progress(fmt.Sprintf("%s: %s at %s", s.Name, word, running.URL))
 	case want > 1:
-		progress(fmt.Sprintf("%s: ready, %d instances", s.Name, want))
+		progress(fmt.Sprintf("%s: %s, %d instances", s.Name, word, want))
 	default:
-		progress(fmt.Sprintf("%s: ready", s.Name))
+		progress(fmt.Sprintf("%s: %s", s.Name, word))
 	}
 	return running, nil
 }
@@ -234,6 +263,9 @@ func (r *Runtime) startInstance(
 	if err := r.installCA(ctx, created, spec); err != nil {
 		return created, err
 	}
+	if err := r.copyMounts(ctx, created, s); err != nil {
+		return created, err
+	}
 	if err := r.cli.ContainerStart(ctx, created, container.StartOptions{}); err != nil {
 		return created, aferrors.Wrap(err, aferrors.AFRUN040,
 			"detail", fmt.Sprintf("starting %s: %v", instanceLabel(s.Name, ordinal, want), err))
@@ -286,6 +318,7 @@ func (r *Runtime) create(
 	labels := r.managed(dockerutil.KindService, spec.EnvID)
 	labels[dockerutil.LabelService] = s.Name
 	labels[dockerutil.LabelServiceKind] = s.Kind
+	labels[dockerutil.LabelReadinessCheck] = readinessCheckOf(s)
 
 	cfg := &container.Config{
 		Image:  s.Image,
@@ -335,6 +368,10 @@ func (r *Runtime) create(
 			NanoCPUs: s.CPUMillis * 1_000_000,
 			Memory:   s.MemoryBytes,
 		},
+		// Named volumes only. There is no Binds field set anywhere in this
+		// runtime and no host path in the spec to set one from; volumeMounts
+		// carries the reasoning.
+		Mounts: volumeMounts(spec.EnvID, s),
 	}
 
 	// The service name resolves inside the environment, so a manifest can say
@@ -717,6 +754,9 @@ func (r *Runtime) runOnceAs(
 		defer cancel()
 		_ = dockerutil.RemoveContainer(c, r.cli, id)
 	}()
+	if err := r.copyMounts(ctx, id, s); err != nil {
+		return err
+	}
 
 	if err := r.cli.ContainerStart(ctx, id, container.StartOptions{}); err != nil {
 		return aferrors.Wrap(err, aferrors.AFRUN040,
@@ -736,7 +776,34 @@ func (r *Runtime) runOnceAs(
 	return nil
 }
 
-// waitReady blocks until the service answers, or reports why it did not.
+// waitReady blocks until the service answers, or reports why it did not, and
+// says which of the three answers it reached.
+//
+// THE FALSE PASS THIS USED TO BE. A service with no published port returned
+// here the instant its container existed, with the reasoning written in the
+// code: a worker is ready when it is running, and asking for more would mean
+// inventing a protocol the application does not speak. Right about a worker;
+// wrong about a compose file, where a service publishes no port because only
+// other services reach it. Forty one of the fifty services in the three
+// published stacks this product was measured against publish none, so a stack
+// whose services were all still starting would have been reported ready, and
+// one whose services died on a blocked call at startup would have been reported
+// ready until they exited. The fixture that reproduces it is
+// TestReadiness_APortlessServiceThatExitsDuringStartupIsReportedFailed.
+//
+// Now there are three paths and each says what it established:
+//
+// A health command is run inside the container until it exits zero. It is
+// per instance, because it is addressed to one container rather than to the
+// forwarder, which closes for these services the limit startService states
+// about readiness being checked once per service.
+//
+// A service with nothing to poll is WATCHED for a settle window rather than
+// glanced at once, which catches the exit on a blocked outbound call that is
+// the commonest way such a service fails, and is then reported UNPROVED, never
+// ready. The window cannot prove readiness and does not claim to.
+//
+// A published port is polled as before.
 func (r *Runtime) waitReady(
 	ctx context.Context,
 	s provider.ServiceSpec,
@@ -744,12 +811,18 @@ func (r *Runtime) waitReady(
 	hostPort int,
 	timeout time.Duration,
 	progress func(string),
-) error {
+) (provider.Readiness, error) {
+	if s.HealthCommand != "" {
+		if err := r.waitCommand(ctx, s, id, timeout, progress); err != nil {
+			return provider.ReadinessFailed, err
+		}
+		return provider.ReadinessProved, nil
+	}
 	if s.Port <= 0 || hostPort == 0 {
-		// Nothing to poll from here. A worker is ready when it is running, and
-		// asking for more would mean inventing a protocol the application does
-		// not speak.
-		return r.confirmStillRunning(ctx, s, id)
+		if err := r.observeSettled(ctx, s, id, timeout); err != nil {
+			return provider.ReadinessFailed, err
+		}
+		return provider.ReadinessUnproved, nil
 	}
 
 	deadline := r.clock.Now().Add(timeout)
@@ -757,10 +830,10 @@ func (r *Runtime) waitReady(
 	attempt := 0
 	for {
 		if err := r.confirmStillRunning(ctx, s, id); err != nil {
-			return err
+			return provider.ReadinessFailed, err
 		}
 		if r.probe(ctx, hc, s, hostPort) {
-			return nil
+			return provider.ReadinessProved, nil
 		}
 		attempt++
 		if attempt%20 == 0 {
@@ -771,13 +844,13 @@ func (r *Runtime) waitReady(
 			if health == "" {
 				health = "/"
 			}
-			return aferrors.Coded(aferrors.AFRUN004,
+			return provider.ReadinessFailed, aferrors.Coded(aferrors.AFRUN004,
 				"service", s.Name, "timeout", timeout.Round(time.Second).String(),
 				"health", health)
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return provider.ReadinessFailed, ctx.Err()
 		case <-r.clock.After(500 * time.Millisecond):
 		}
 	}

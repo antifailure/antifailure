@@ -1612,6 +1612,42 @@ This runtime cannot place the sizes the manifest asks for: {detail}
 | Retryable | Yes. The engine retries automatically where it can. |
 | More | [reference/manifest](/docs/reference/manifest) |
 
+### AF-RUN-048
+
+A mount on service {service} could not be read: {detail}
+
+**What to do.** Check the path the mount names, relative to the repository root. A mount is read once, before anything starts, so a source that is missing here is refused rather than becoming a container that started on its image's defaults.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [reference/manifest](/docs/reference/manifest) |
+
+### AF-RUN-049
+
+This runtime cannot place the mounts the manifest asks for: {detail}
+
+**What to do.** Run these services on the local runtime. A named volume on a cluster needs a persistent volume claim against a storage class this runtime does not choose for you, and a repository file needs a config map path that has not been run against a real cluster yet, so both are refused by name rather than ignored.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/kubernetes-runtime](/docs/guides/kubernetes-runtime) |
+
+### AF-RUN-050
+
+Service {service} did not pass its health command within {timeout}.
+
+**What to do.** The last log lines are above. The command was {health}, run inside the container; it has to exit zero. Run 'af logs {service}' for the full output.
+
+| | |
+| --- | --- |
+| Exit code | `1` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [guides/local-runtime](/docs/guides/local-runtime) |
+
 ## Scheduling
 
 ### AF-SCH-001

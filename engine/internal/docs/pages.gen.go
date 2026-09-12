@@ -9649,9 +9649,22 @@ Declaring a health path is a statement that the path reports health, so this is
 the more defensible of the two behaviours, but it is a real difference and it
 belongs in front of you rather than in a support conversation.
 
+A ` + "`" + `health_command` + "`" + ` becomes an exec readiness probe, run through the same
+` + "`" + `/bin/sh -c` + "`" + ` the local runtime uses, and it is the only probe a service with no
+port can have. A service with neither a port nor a command has no probe, so the
+cluster calls its pod ready the moment it runs. Both runtimes report that as
+unproved rather than ready.
+
 ## What this runtime does not do yet
 
 Stated here rather than discovered later.
+
+` + "`" + `mounts` + "`" + ` are refused with **AF-RUN-049**, naming every service that declares
+one. A named volume has to survive a restart, which on a cluster means a
+persistent volume claim against a storage class this runtime does not choose
+for you. A repository file would be a config map, and that path has not been
+run against a real cluster yet. Refusing both by name is better than starting
+the services without them. Run a manifest with mounts on the local runtime.
 
 ` + "`" + `af net log` + "`" + `, ` + "`" + `af inbox` + "`" + ` and ` + "`" + `af webhook trigger` + "`" + ` do not work against a cluster.
 They read what the sidecar decided and captured, and reaching a sidecar in a pod
@@ -10261,6 +10274,100 @@ services:
   - name: web
     health_path: /healthz
     health_timeout: 300s
+` + "`" + "`" + "`" + `
+
+## A service with no port
+
+A service that publishes no port has nothing the runtime can poll from outside,
+and most services in a real stack are like that: a compose file leaves a port
+unpublished because only other services reach it. So readiness has three
+answers rather than two.
+
+| Answer | Means |
+| --- | --- |
+| proved | A check ran and passed: the port answered, or the health command exited zero. |
+| unproved | The service is running and there was nothing to check. |
+| failed | A check did not pass in time, or the container exited. |
+
+An unproved service is not a failure, and ` + "`" + `af up` + "`" + ` does not stop on one. It is
+not evidence either, and ` + "`" + `af up` + "`" + ` and ` + "`" + `af status` + "`" + ` say so on its line instead of
+printing a tick. Before it is reported, the runtime watches the container for
+five seconds, which catches a process that exits on a refused outbound call at
+startup. Just before ` + "`" + `af up` + "`" + ` returns it looks at every service again, so one
+that passed its own check and died while later ones were starting is reported
+as failed rather than as up.
+
+To prove a service with no port, give it a command that exits zero once it is
+ready. It runs inside the container through ` + "`" + `/bin/sh -c` + "`" + `, so an image with no
+shell cannot use one.
+
+` + "`" + "`" + "`" + `yaml
+services:
+  - name: db
+    kind: worker
+    health_command: pg_isready -U postgres
+` + "`" + "`" + "`" + `
+
+A command is also the right check for a store that accepts connections before
+it is usable. Postgres answers on its port while its init scripts are still
+running, and a connection cannot tell that apart from finished. A service may
+declare ` + "`" + `health_path` + "`" + ` or ` + "`" + `health_command` + "`" + `, not both.
+
+` + "`" + "`" + "`" + `
+AF-RUN-050 Service db did not pass its health command within 180s.
+` + "`" + "`" + "`" + `
+
+The command is run for every instance of the service, so with ` + "`" + `replicas: 3` + "`" + `
+each of the three has to pass it.
+
+One limit, stated: this runtime checks readiness while ` + "`" + `af up` + "`" + ` runs. A service
+that passes and later starts failing its check while its process keeps running
+is not noticed until something asks it for work. The Kubernetes runtime has no
+such limit, because the cluster runs the check for as long as the pod lives.
+
+## Mounting files, directories and volumes
+
+A service built from a prebuilt image holds none of your repository, so a
+configuration file it reads at startup needs a way in. ` + "`" + `mounts` + "`" + ` gives it one.
+
+` + "`" + "`" + "`" + `yaml
+services:
+  - name: keeper
+    kind: worker
+    mounts:
+      - path: clickhouse/keeper_config.xml
+        at: /etc/clickhouse-keeper/keeper_config.xml
+      - path: clickhouse/init
+        at: /docker-entrypoint-initdb.d
+      - volume: coordination
+        at: /var/lib/clickhouse-coordination
+` + "`" + "`" + "`" + `
+
+A ` + "`" + `path` + "`" + ` is a file or directory in the repository. It is **copied** into the
+container before the process starts. It is never bound to the machine. That
+choice is deliberate:
+
+- The service cannot write back into your working tree, which is the source of
+  the next build.
+- The daemon needs no share of your filesystem, so a remote or virtual machine
+  daemon behaves the same as a local one.
+- The copy is taken once, when the environment comes up. Editing the file
+  afterwards does not reach a running container, and deleting it cannot break
+  one. Run ` + "`" + `af up` + "`" + ` again to pick up a change.
+
+A path that leaves the repository is refused, and so is one that leaves it
+through a symbolic link. A missing path is refused before anything starts,
+because a service whose configuration did not arrive starts on its image's
+defaults and would report itself running. One mount may carry 16 MiB across at
+most 2000 files.
+
+A ` + "`" + `volume` + "`" + ` is a named volume this environment owns. It is the one writable
+surface a mount creates. It keeps what the service writes across a restart of
+that service, several services may share one, and ` + "`" + `af down` + "`" + ` removes it with the
+rest of the environment. It is never a path to your machine.
+
+` + "`" + "`" + "`" + `
+AF-RUN-048 A mount on service keeper could not be read: clickhouse/keeper_config.xml: no such file or directory
 ` + "`" + "`" + "`" + `
 
 ## A service that exits immediately
@@ -19817,6 +19924,42 @@ This runtime cannot place the sizes the manifest asks for: {detail}
 | Retryable | Yes. The engine retries automatically where it can. |
 | More | [reference/manifest](/docs/reference/manifest) |
 
+### AF-RUN-048
+
+A mount on service {service} could not be read: {detail}
+
+**What to do.** Check the path the mount names, relative to the repository root. A mount is read once, before anything starts, so a source that is missing here is refused rather than becoming a container that started on its image's defaults.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `3` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [reference/manifest](/docs/reference/manifest) |
+
+### AF-RUN-049
+
+This runtime cannot place the mounts the manifest asks for: {detail}
+
+**What to do.** Run these services on the local runtime. A named volume on a cluster needs a persistent volume claim against a storage class this runtime does not choose for you, and a repository file needs a config map path that has not been run against a real cluster yet, so both are refused by name rather than ignored.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `3` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/kubernetes-runtime](/docs/guides/kubernetes-runtime) |
+
+### AF-RUN-050
+
+Service {service} did not pass its health command within {timeout}.
+
+**What to do.** The last log lines are above. The command was {health}, run inside the container; it has to exit zero. Run 'af logs {service}' for the full output.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `1` + "`" + ` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [guides/local-runtime](/docs/guides/local-runtime) |
+
 ## Scheduling
 
 ### AF-SCH-001
@@ -20141,6 +20284,7 @@ what it deliberately does not cover.
 | ` + "`" + `command` + "`" + ` | string | How to start it. |
 | ` + "`" + `port` + "`" + ` | int | What it listens on. ` + "`" + `PORT` + "`" + ` is set for you. |
 | ` + "`" + `health_path` + "`" + ` | string | Readiness check, default ` + "`" + `/` + "`" + `. |
+| ` + "`" + `health_command` + "`" + ` | string | A command run inside the container that reports readiness by exiting zero. Not allowed beside ` + "`" + `health_path` + "`" + `, or on a cron service. See below. |
 | ` + "`" + `health_timeout` + "`" + ` | duration | Default ` + "`" + `180s` + "`" + `. |
 | ` + "`" + `migrate` + "`" + ` | string | Runs to completion before the service starts, with an elevated connection. See below. |
 | ` + "`" + `schedule` + "`" + ` | cron | For ` + "`" + `kind: cron` + "`" + `. |
@@ -20149,6 +20293,29 @@ what it deliberately does not cover.
 | ` + "`" + `env` + "`" + ` | list | Variables this service needs, by name. |
 | ` + "`" + `resources` + "`" + ` | block | ` + "`" + `cpu` + "`" + ` and ` + "`" + `memory` + "`" + `, the size one instance is given. Each is the request and the limit on both runtimes. See below. |
 | ` + "`" + `build` + "`" + ` | block | See below. |
+| ` + "`" + `mounts` + "`" + ` | list | Files and directories copied in from the repository, and named volumes. See below. |
+
+### Readiness
+
+A service reports one of three answers. **Proved** means a check passed: the
+port answered, or ` + "`" + `health_command` + "`" + ` exited zero. **Unproved** means it is running
+and nothing could check it, which is what a service with no port and no command
+gets. **Failed** means a check did not pass in time or the container exited.
+Only proved counts as ready. The local runtime guide describes how each is
+reached.
+
+### Mounts
+
+Each entry has ` + "`" + `at` + "`" + `, an absolute path inside the container, and exactly one of:
+
+| Key | Notes |
+| --- | --- |
+| ` + "`" + `path` + "`" + ` | A file or directory in the repository, copied in before the process starts. Never bound to the machine. Refused if it leaves the repository, including through a symbolic link, or if it is missing. |
+| ` + "`" + `volume` + "`" + ` | A named volume the environment owns, kept across a restart of the service and removed by ` + "`" + `af down` + "`" + `. |
+
+Two mounts on one service may not share a target. One volume may be mounted by
+several services. The Kubernetes runtime refuses mounts for now, with
+AF-RUN-049.
 
 ### What a service is given
 
@@ -22175,6 +22342,16 @@ Where the project's own SQL migrations live, for a project whose migrate command
 | ` + "`" + `format` + "`" + ` | ` + "`" + `sql` + "`" + ` | no | How the files are read. Only sql exists. Defaults to ` + "`" + `sql` + "`" + `. |
 | ` + "`" + `table` + "`" + ` | string | no | The ledger table the project's runner records applied files in, so the rehearsal computes the pending set the way the runner would: a file is applied when its name, its stem or its leading number appears in the table's name, version, filename or migration column. Unset, schema_migrations and migrations are tried. Max length 128, matches ` + "`" + `^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$` + "`" + `. |
 
+## Mount
+
+One thing a service can read at a path inside its container. Exactly one of path or volume: a file or directory from the repository, or a named store the environment keeps.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| ` + "`" + `at` + "`" + ` | string | **yes** | Absolute path inside the container. Two mounts may not name the same one, because the second would decide what the first meant. Max length 512, matches ` + "`" + `^/[^\0]*$` + "`" + `. |
+| ` + "`" + `path` + "`" + ` | string | no | A file or directory inside the repository, relative to its root. The contents are COPIED into the container before it starts, never bound to the host: the service cannot write back into the working tree, the daemon needs no share of the filesystem, and a symbolic link that leaves the repository is refused rather than followed. Max length 512. |
+| ` + "`" + `volume` + "`" + ` | string | no | A named volume this environment owns, which keeps what the service writes across a restart of that service. Created on first use, removed with the environment, and never a path to the host. Max length 40, matches ` + "`" + `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$` + "`" + `. |
+
 ## Oracle
 
 Deploy a baseline version alongside the candidate, send both the same requests, and report every difference in what came back and in what ended up in the database.
@@ -22323,10 +22500,12 @@ One process the environment runs. A service is built from the repository, given 
 | ` + "`" + `command` + "`" + ` | string | no | Command that starts the service, overriding the image's own. Executed with an argument vector, never through a shell. Max length 4096. |
 | ` + "`" + `depends_on` + "`" + ` | list of string | no | Services that must be ready first. A cycle is rejected at validation. Max items 50. |
 | ` + "`" + `env` + "`" + ` | list of [Environment variable](#environment-variable) | no | Names of environment variables this service needs. Names only. Values come from the secrets subsystem, and a name with no value anywhere fails with AF-SEC-001 rather than starting a service that will misbehave. Max items 200. |
+| ` + "`" + `health_command` + "`" + ` | string | no | Command run inside the container that reports readiness by exiting zero. The only check a service with no published port can pass, and the only one that can tell starting from started for a store that accepts a connection before it is usable: Postgres answers on 5432 while its init scripts are still running, which is what ` + "`" + `pg_isready` + "`" + ` exists to distinguish and what a connection cannot. Refused alongside health_path, because two checks are two answers. Max length 1024. |
 | ` + "`" + `health_path` + "`" + ` | string | no | HTTP path that reports readiness. A service is not considered up until this returns a 2xx or 3xx status. Defaults to ` + "`" + `/` + "`" + `. Max length 512. |
 | ` + "`" + `health_timeout` + "`" + ` | string | no | How long to wait for readiness before failing with AF-RUN-004. Defaults to ` + "`" + `180s` + "`" + `. Matches ` + "`" + `^[0-9]+(ms\|s\|m)$` + "`" + `. |
 | ` + "`" + `kind` + "`" + ` | ` + "`" + `web` + "`" + `, ` + "`" + `worker` + "`" + `, ` + "`" + `cron` + "`" + ` | no | What the service is. A web service gets a hostname and a readiness check; a worker gets neither; a cron service is invoked on a schedule instead of run continuously. Defaults to ` + "`" + `web` + "`" + `. |
 | ` + "`" + `migrate` + "`" + ` | string | no | Command that applies pending migrations. Run once against a fresh branch before the services start, and rehearsed with timing and lock analysis when insights are on. Max length 1024. |
+| ` + "`" + `mounts` + "`" + ` | list of [Mount](#mount) | no | Files the service needs at a path of its own, and directories whose contents must survive a restart. A service built from a prebuilt image holds none of the repository, so a configuration file it reads at startup has no other way in. Max items 25. |
 | ` + "`" + `name` + "`" + ` | string | **yes** | Unique within the manifest. Appears in hostnames, logs, and container names. Max length 40, matches ` + "`" + `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$` + "`" + `. |
 | ` + "`" + `path` + "`" + ` | string | no | Directory containing the service, relative to the repository root. Defaults to the root. A path outside the repository is rejected. Max length 512. |
 | ` + "`" + `port` + "`" + ` | integer | no | Port the service listens on. Required for a web service unless detection found it. Minimum 1, maximum 65535. |

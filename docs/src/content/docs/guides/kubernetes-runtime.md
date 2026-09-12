@@ -153,9 +153,22 @@ Declaring a health path is a statement that the path reports health, so this is
 the more defensible of the two behaviours, but it is a real difference and it
 belongs in front of you rather than in a support conversation.
 
+A `health_command` becomes an exec readiness probe, run through the same
+`/bin/sh -c` the local runtime uses, and it is the only probe a service with no
+port can have. A service with neither a port nor a command has no probe, so the
+cluster calls its pod ready the moment it runs. Both runtimes report that as
+unproved rather than ready.
+
 ## What this runtime does not do yet
 
 Stated here rather than discovered later.
+
+`mounts` are refused with **AF-RUN-049**, naming every service that declares
+one. A named volume has to survive a restart, which on a cluster means a
+persistent volume claim against a storage class this runtime does not choose
+for you. A repository file would be a config map, and that path has not been
+run against a real cluster yet. Refusing both by name is better than starting
+the services without them. Run a manifest with mounts on the local runtime.
 
 `af net log`, `af inbox` and `af webhook trigger` do not work against a cluster.
 They read what the sidecar decided and captured, and reaching a sidecar in a pod

@@ -713,7 +713,14 @@ func (h *rtHarness) waitForReady(ctx context.Context, envID, service string) pro
 			h.t.Fatalf("Status while waiting for %s: %v", service, err)
 		}
 		for _, s := range env.Services {
-			if s.Name == service && s.Ready {
+			// Up, not proved. A worker with no port and no health command is
+			// reported unproved for as long as it runs, because nothing can
+			// check it, and waiting here for it to be proved would wait
+			// forever. The state still has to say running: a runtime that
+			// answers "starting" while calling it unproved is the fault this
+			// suite exists to catch, and it is still caught.
+			if s.Name == service && (s.Ready ||
+				(s.Readiness == provider.ReadinessUnproved && s.State == "running")) {
 				return s
 			}
 		}

@@ -31,6 +31,7 @@ import (
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/api/types/volume"
 	"github.com/docker/docker/client"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
@@ -294,6 +295,12 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 	if err := r.runStanceJobs(ctx, spec, nets, proxyIP, journal, progress); err != nil {
 		return env, err
 	}
+	// The last look, after the last thing Up starts. confirmStillUp says why
+	// a service that passed its own readiness look is looked at again.
+	if err := r.confirmStillUp(ctx, spec.EnvID, env.Services); err != nil {
+		sortByManifestOrder(env.Services, spec.Services)
+		return env, err
+	}
 
 	// Back into the order the manifest declares, not the order they started
 	// in.
@@ -533,6 +540,29 @@ func (r *Runtime) Down(ctx context.Context, envID string) (provider.Teardown, er
 		td.Removed++
 	}
 
+	// After the containers, because a volume still mounted by one cannot be
+	// removed. Before this, a named volume outlived the environment that made
+	// it: Down swept containers and networks by label and nothing else, and
+	// RemoveVolumes on a container removes only anonymous volumes. So the
+	// state a mount kept would have survived `af down` in exactly the way the
+	// emulator container once did, which is the way nobody checks.
+	vols, err := r.cli.VolumeList(ctx, volume.ListOptions{Filters: dockerutil.EnvFilter(envID)})
+	if err != nil {
+		return td, aferrors.Wrap(err, aferrors.AFRUN002, "endpoint", dockerutil.Host())
+	}
+	for _, v := range vols.Volumes {
+		if v.Labels[dockerutil.LabelKind] != dockerutil.KindVolume {
+			continue
+		}
+		if err := dockerutil.RemoveVolume(ctx, r.cli, v.Name); err != nil {
+			td.Pending = append(td.Pending, provider.PendingResource{
+				Kind: "volume", ID: v.Name, Reason: err.Error(),
+			})
+			continue
+		}
+		td.Removed++
+	}
+
 	nets, err := r.cli.NetworkList(ctx, network.ListOptions{Filters: dockerutil.EnvFilter(envID)})
 	if err != nil {
 		return td, aferrors.Wrap(err, aferrors.AFRUN002, "endpoint", dockerutil.Host())
@@ -621,7 +651,12 @@ func (r *Runtime) Status(ctx context.Context, envID string) (provider.Env, error
 				State:       c.State,
 				Detail:      c.Status,
 				Ready:       true,
+				Readiness:   statusReadiness(c.Labels),
 			}
+			// A service with no check was never proved ready, and Status
+			// looking at a running container cannot prove it now. So Ready
+			// is the promise only where there was a check to keep it.
+			rs.Ready = rs.Readiness.Proved()
 			// Off the daemon's record of the container rather than off the
 			// manifest, which is where a cap that was accepted and never
 			// applied stops looking like one that was. Once per service, on
@@ -644,6 +679,7 @@ func (r *Runtime) Status(ctx context.Context, envID string) (provider.Env, error
 				rs.Detail = c.Status
 			}
 			rs.Ready = false
+			rs.Readiness = provider.ReadinessFailed
 			// The list reports the exit code only inside a human sentence, so
 			// the number comes from an inspect. Anything that wanted it
 			// before parsed "Exited (9) 3 seconds ago" with a regular
@@ -790,4 +826,5 @@ func (r *Runtime) Logs(ctx context.Context, envID, service string, tail int) ([]
 const (
 	kindContainer = "container"
 	kindNetwork   = "network"
+	kindVolume    = "volume"
 )

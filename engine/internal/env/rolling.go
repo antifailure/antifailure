@@ -567,7 +567,18 @@ func (o *Orchestrator) buildPreviousRelease(
 		// No Migrate. This runs the previous commit's services against a
 		// database the current commit has already migrated, so running the
 		// old migration again is the one thing it must not do.
-		specs = append(specs, serviceSpec(svc, image))
+		//
+		// Mounts are read out of THAT tree rather than out of the working one,
+		// which is the same rule the image follows. A configuration file the
+		// previous release shipped is part of the previous release, and reading
+		// the current one would run the old code against the new file: a
+		// difference the check would report as a behaviour change in the
+		// application.
+		spec, err := serviceSpec(svc, image, tree)
+		if err != nil {
+			return nil, err
+		}
+		specs = append(specs, spec)
 	}
 	return specs, nil
 }

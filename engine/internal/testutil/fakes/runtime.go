@@ -174,7 +174,7 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 		}
 		rs := provider.RunningService{
 			Name: s.Name, Kind: s.Kind, ContainerID: id,
-			Ready: true, State: "running",
+			Ready: true, Readiness: provider.ReadinessProved, State: "running",
 		}
 		if s.Port != 0 {
 			rs.URL = fmt.Sprintf("http://127.0.0.1:%d", s.Port)
@@ -315,6 +315,7 @@ func (b *brokenRuntime) Up(ctx context.Context, spec provider.EnvSpec) (provider
 	if b.is(ReportsReadyBeforeHealthy) {
 		for i := range env.Services {
 			env.Services[i].Ready = false
+			env.Services[i].Readiness = provider.ReadinessUnproved
 			env.Services[i].State = "starting"
 		}
 	}

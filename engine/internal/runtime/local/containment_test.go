@@ -469,9 +469,13 @@ func TestContainment_TheMetadataEndpointIsRefusedUnderDefaultAllow(t *testing.T)
 // The container escape, which is worth more than any network one.
 //
 // A path to the daemon is a way to start a container with the host's
-// filesystem mounted, so it ends the conversation about egress. Nothing in the
-// runtime mounts anything today, and this is the test that notices when
-// somebody adds a mount for a good reason and does not think about this one.
+// filesystem mounted, so it ends the conversation about egress. A service with
+// no mounts gets no mount of any kind, which is what this asserts. A service
+// that declares mounts gets copies for its files and named volumes for its
+// state, never a bind: TestMounts_AFileAndADirectoryArriveBeforeTheProcessStarts
+// and TestMounts_ANamedVolumeKeepsWhatTheServiceWroteAcrossARestart hold that
+// half, and this test is still what notices somebody adding a mount for a good
+// reason without thinking about this one.
 func TestContainment_NoServiceGetsAPathToTheDaemonOrTheHost(t *testing.T) {
 	r := requireRuntime(t)
 	id := envID(t, r, "containmount")

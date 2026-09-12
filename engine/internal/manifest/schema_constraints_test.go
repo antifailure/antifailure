@@ -571,7 +571,7 @@ func uniquify(v any, i int) any {
 		}
 		return v
 	}
-	for _, key := range []string{"name", "id", "goal", "host", "sql", "path"} {
+	for _, key := range []string{"name", "id", "goal", "host", "sql", "path", "at", "volume"} {
 		if s, ok := m[key].(string); ok && i > 0 {
 			m[key] = fmt.Sprintf("%s-%d", s, i)
 		}
@@ -682,6 +682,7 @@ const defaultTuning = `{
       "why": "a web service built from an image, a golden from production, egress in sandbox mode",
       "overrides": {
         "database.golden.schedule": "0 3 * * *",
+        "services[].mounts[].at": "/etc/app/config.xml",
         "database.golden.max_age": "720h",
         "database.volume.max_age": "720h",
         "database.subset.virtual_relationships[].from": "orders.user_id",
@@ -707,6 +708,8 @@ const defaultTuning = `{
         }
       },
       "prune": [
+        "services[].mounts[].volume",
+        "services[].health_command",
         "database.seed",
         "datastores[].from",
         "datastores[].topics",
@@ -733,6 +736,7 @@ const defaultTuning = `{
       "why": "the other side of every mutually exclusive pair: a seeded database, a cron service, an egress rule in mock mode, a derived datastore, a variable read from the environment",
       "overrides": {
         "database.golden.schedule": "0 3 * * *",
+        "services[].mounts[].at": "/etc/app/config.xml",
         "database.golden.max_age": "720h",
         "database.volume.max_age": "720h",
         "database.subset.virtual_relationships[].from": "orders.user_id",
@@ -758,6 +762,8 @@ const defaultTuning = `{
         "datastores[].from": "primary"
       },
       "prune": [
+        "services[].mounts[].path",
+        "services[].health_command",
         "database.source_url_env",
         "datastores[].topics",
         "egress.rules[].credential",
@@ -776,6 +782,7 @@ const defaultTuning = `{
       "why": "the third side the other two cannot carry: a topics_only broker, whose topics key is refused on every other stance",
       "overrides": {
         "database.golden.schedule": "0 3 * * *",
+        "services[].mounts[].at": "/etc/app/config.xml",
         "database.golden.max_age": "720h",
         "database.volume.max_age": "720h",
         "database.subset.virtual_relationships[].from": "orders.user_id",
@@ -802,6 +809,8 @@ const defaultTuning = `{
         }
       },
       "prune": [
+        "services[].mounts[].volume",
+        "services[].health_path",
         "database.seed",
         "datastores[].from",
         "datastores[].rebuild",
@@ -827,6 +836,7 @@ const defaultTuning = `{
       "why": "the third side of the egress mode pair: a rule answered by an emulator inside the environment, which is the only mode that may carry an emulator and may carry neither a credential nor a rate limit",
       "overrides": {
         "database.golden.schedule": "0 3 * * *",
+        "services[].mounts[].at": "/etc/app/config.xml",
         "database.golden.max_age": "720h",
         "database.volume.max_age": "720h",
         "database.subset.virtual_relationships[].from": "orders.user_id",
@@ -853,6 +863,8 @@ const defaultTuning = `{
         }
       },
       "prune": [
+        "services[].mounts[].volume",
+        "services[].health_command",
         "database.seed",
         "datastores[].from",
         "datastores[].topics",
@@ -1280,7 +1292,19 @@ func TestSchemaConstraintReport(t *testing.T) {
 // because #367 moved the fact and left the sentence about it alone. Corrected
 // here rather than carried, since a comment that disagrees with its own
 // constant teaches the next reader to trust neither.
-const wantConstraints = 630
+// It is 645. The fifteen this branch adds are services[].health_command with a
+// type and a maxLength, services[].mounts with a type and a maxItems, and the
+// eleven in the new $defs/mount: its own type, additionalProperties and
+// required=at, then path with a type and a maxLength, volume with a type, a
+// pattern and a maxLength, and at with a type, a pattern and a maxLength.
+//
+// COUNTED, NOT INCREMENTED, twice and independently. This test's own walk
+// reports 645 against the pin of 630. A separate diff of the constraint
+// inventory of this schema against the base it branched from reports fifteen
+// added and none removed, naming each one, and 630 plus 15 is 645. Two
+// implementations of the count that agree on the same tree, which is the whole
+// reason the number is written down rather than bumped.
+const wantConstraints = 645
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and

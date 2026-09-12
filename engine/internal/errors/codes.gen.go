@@ -412,6 +412,12 @@ const (
 	AFRUN046 Code = "AF-RUN-046"
 	// This runtime cannot place the sizes the manifest asks for: {detail}
 	AFRUN047 Code = "AF-RUN-047"
+	// A mount on service {service} could not be read: {detail}
+	AFRUN048 Code = "AF-RUN-048"
+	// This runtime cannot place the mounts the manifest asks for: {detail}
+	AFRUN049 Code = "AF-RUN-049"
+	// Service {service} did not pass its health command within {timeout}.
+	AFRUN050 Code = "AF-RUN-050"
 
 	// Scheduling
 	// No runtime satisfies the placement requirement {requirement}.
@@ -1858,6 +1864,33 @@ var catalog = map[Code]Entry{
 		Message:   "This runtime cannot place the sizes the manifest asks for: {detail}",
 		NextStep:  "Lower resources.cpu or resources.memory on the services named, run fewer environments on this machine, or place it somewhere with room.",
 		Docs:      "reference/manifest",
+		Retryable: true,
+		ExitCode:  ExitFailure,
+	},
+	AFRUN048: {
+		Code:      AFRUN048,
+		Area:      "RUN",
+		Message:   "A mount on service {service} could not be read: {detail}",
+		NextStep:  "Check the path the mount names, relative to the repository root. A mount is read once, before anything starts, so a source that is missing here is refused rather than becoming a container that started on its image's defaults.",
+		Docs:      "reference/manifest",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFRUN049: {
+		Code:      AFRUN049,
+		Area:      "RUN",
+		Message:   "This runtime cannot place the mounts the manifest asks for: {detail}",
+		NextStep:  "Run these services on the local runtime. A named volume on a cluster needs a persistent volume claim against a storage class this runtime does not choose for you, and a repository file needs a config map path that has not been run against a real cluster yet, so both are refused by name rather than ignored.",
+		Docs:      "guides/kubernetes-runtime",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFRUN050: {
+		Code:      AFRUN050,
+		Area:      "RUN",
+		Message:   "Service {service} did not pass its health command within {timeout}.",
+		NextStep:  "The last log lines are above. The command was {health}, run inside the container; it has to exit zero. Run 'af logs {service}' for the full output.",
+		Docs:      "guides/local-runtime",
 		Retryable: true,
 		ExitCode:  ExitFailure,
 	},
