@@ -35,11 +35,13 @@ import (
 var sources = []string{
 	"pkg/schema/manifest.go",
 	"pkg/schema/stream.go",
+	"pkg/provider/database_route.go",
 	"internal/policy/policy.go",
 	"cmd/af-proxy/main.go",
 	"cmd/af-proxy/network_gate.go",
 	"cmd/af-proxy/forward.go",
 	"cmd/af-proxy/destination.go",
+	"cmd/af-proxy/database.go",
 	"cmd/af-proxy/dns.go",
 	"cmd/af-proxy/transparent.go",
 	"cmd/af-proxy/mitm.go",

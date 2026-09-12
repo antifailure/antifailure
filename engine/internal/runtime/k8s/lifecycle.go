@@ -44,6 +44,11 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 	if spec.EnvID == "" {
 		return provider.Env{}, aferrors.Coded(aferrors.AFRUN040, "detail", "the environment has no id")
 	}
+	databaseRoutes, err := provider.ResolveDatabaseRoutes(ctx, spec.DatabaseRoutes)
+	if err != nil {
+		return provider.Env{}, aferrors.Wrap(err, aferrors.AFRUN040, "detail", "the database route cannot be used: "+err.Error())
+	}
+	spec.DatabaseRoutes = databaseRoutes
 	journal := spec.Journal
 	if journal == nil {
 		journal = func(string, string) error { return nil }
@@ -111,11 +116,11 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 	if err := r.ensureNamespace(ctx, spec.EnvID); err != nil {
 		return env, err
 	}
-	if err := r.applyPolicies(ctx, spec.EnvID, namespace, egressRules(spec.Egress)); err != nil {
+	if err := r.applyPolicies(ctx, spec.EnvID, namespace, egressRules(spec.Egress), spec.DatabaseRoutes...); err != nil {
 		return env, err
 	}
 
-	if spec.CACertPEM != "" {
+	if spec.CACertPEM != "" || spec.DatabaseCACertPEM != "" {
 		if err := r.ensureCASecret(ctx, spec, namespace); err != nil {
 			return env, err
 		}
@@ -301,9 +306,14 @@ func egressRules(e *schema.Egress) []schema.EgressRule {
 
 // applyPolicies writes every NetworkPolicy the environment needs.
 func (r *Runtime) applyPolicies(
-	ctx context.Context, envID, namespace string, rules []schema.EgressRule,
+	ctx context.Context, envID, namespace string, rules []schema.EgressRule, routes ...provider.DatabaseRoute,
 ) error {
-	for _, policy := range networkPolicies(envID, namespace, r.domain != "", rules) {
+	databasePolicies, err := databaseNetworkPolicies(envID, namespace, routes)
+	if err != nil {
+		return aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
+	}
+	policies := append(networkPolicies(envID, namespace, r.domain != "", rules), databasePolicies...)
+	for _, policy := range policies {
 		_, err := r.cli.NetworkingV1().NetworkPolicies(namespace).Create(ctx, policy, metav1.CreateOptions{})
 		if apierrors.IsAlreadyExists(err) {
 			continue
@@ -317,18 +327,21 @@ func (r *Runtime) applyPolicies(
 
 // ensureCASecret places the environment certificate where services mount it.
 func (r *Runtime) ensureCASecret(ctx context.Context, spec provider.EnvSpec, namespace string) error {
+	certificates := make(map[string][]byte)
+	if spec.CACertPEM != "" {
+		certificates["ca.crt"] = []byte(spec.CACertPEM)
+	}
+	if spec.DatabaseCACertPEM != "" {
+		certificates["database-ca.crt"] = []byte(spec.DatabaseCACertPEM)
+	}
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: caSecretName, Namespace: namespace,
 			Labels: labelsFor(spec.EnvID, ComponentService),
 		},
-		Data: map[string][]byte{"ca.crt": []byte(spec.CACertPEM)},
+		Data: certificates,
 	}
-	_, err := r.cli.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
-	if err != nil && !apierrors.IsAlreadyExists(err) {
-		return aferrors.Wrap(err, aferrors.AFRUN002, "endpoint", r.rest.Host)
-	}
-	return nil
+	return r.createOrReplaceSecret(ctx, namespace, secret)
 }
 
 // startProxy places the sidecar and returns the address services resolve
@@ -353,14 +366,10 @@ func (r *Runtime) startProxy(
 	if err := r.createOrReplaceSecret(ctx, namespace, secret); err != nil {
 		return "", err
 	}
-	if _, err := r.cli.AppsV1().Deployments(namespace).Create(ctx, deployment, metav1.CreateOptions{}); err != nil &&
-		!apierrors.IsAlreadyExists(err) {
+	if _, err := r.createOrReplaceDeployment(ctx, namespace, deployment); err != nil {
 		return "", aferrors.Wrap(err, aferrors.AFRUN002, "endpoint", r.rest.Host)
 	}
-	created, err := r.cli.CoreV1().Services(namespace).Create(ctx, service, metav1.CreateOptions{})
-	if apierrors.IsAlreadyExists(err) {
-		created, err = r.cli.CoreV1().Services(namespace).Get(ctx, service.Name, metav1.GetOptions{})
-	}
+	created, err := r.createOrReplaceService(ctx, namespace, service)
 	if err != nil {
 		return "", aferrors.Wrap(err, aferrors.AFRUN002, "endpoint", r.rest.Host)
 	}
@@ -372,7 +381,7 @@ func (r *Runtime) startProxy(
 	// one. And every service resolves through the sidecar, so its address has
 	// to exist before any of them are created.
 	if err := r.waitForPods(ctx, namespace, map[string]string{
-		LabelComponent: ComponentProxy,
+		LabelComponent: ComponentProxy, configurationLabel: deployment.Spec.Template.Labels[configurationLabel],
 	}, 1, r.readyWait, "the egress sidecar"); err != nil {
 		return "", err
 	}
@@ -392,6 +401,14 @@ func (r *Runtime) startProxy(
 func (r *Runtime) createOrReplaceSecret(ctx context.Context, namespace string, secret *corev1.Secret) error {
 	_, err := r.cli.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
+		existing, getErr := r.cli.CoreV1().Secrets(namespace).Get(ctx, secret.Name, metav1.GetOptions{})
+		if getErr != nil {
+			return aferrors.Wrap(getErr, aferrors.AFRUN002, "endpoint", r.rest.Host)
+		}
+		if !ownedConfiguration(existing.Labels, secret.Labels[LabelEnv]) {
+			return aferrors.Coded(aferrors.AFRUN040, "detail", "the existing secret does not belong to this environment")
+		}
+		secret.ResourceVersion = existing.ResourceVersion
 		_, err = r.cli.CoreV1().Secrets(namespace).Update(ctx, secret, metav1.UpdateOptions{})
 	}
 	if err != nil {
@@ -421,17 +438,8 @@ func (r *Runtime) startService(
 		return running, err
 	}
 	deployment := r.deploymentFor(spec, s, namespace, resolverIP)
-	created, err := r.cli.AppsV1().Deployments(namespace).Create(ctx, deployment, metav1.CreateOptions{})
-	switch {
-	case apierrors.IsAlreadyExists(err):
-		// A second af up addresses the first environment rather than making a
-		// second one, so the Deployment that is already there is the one to
-		// report on.
-		created, err = r.cli.AppsV1().Deployments(namespace).Get(ctx, s.Name, metav1.GetOptions{})
-		if err != nil {
-			return running, aferrors.Wrap(err, aferrors.AFRUN002, "endpoint", r.rest.Host)
-		}
-	case err != nil:
+	created, err := r.createOrReplaceDeployment(ctx, namespace, deployment)
+	if err != nil {
 		return running, aferrors.Wrap(err, aferrors.AFRUN040,
 			"detail", fmt.Sprintf("creating %s: %v", s.Name, err))
 	}
@@ -441,9 +449,8 @@ func (r *Runtime) startService(
 	// then report what a correct one reports.
 	running.CPUMillis, running.MemoryBytes = appliedResources(created.Spec.Template.Spec)
 
-	if _, err := r.cli.CoreV1().Services(namespace).Create(ctx,
-		serviceObject(spec.EnvID, namespace, s), metav1.CreateOptions{}); err != nil &&
-		!apierrors.IsAlreadyExists(err) {
+	if _, err := r.createOrReplaceService(ctx, namespace,
+		serviceObject(spec.EnvID, namespace, s)); err != nil {
 		return running, aferrors.Wrap(err, aferrors.AFRUN002, "endpoint", r.rest.Host)
 	}
 

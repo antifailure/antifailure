@@ -105,6 +105,14 @@ type EnvSpec struct {
 	// than one that refuses. Zero means use DatabaseURL for both, which is
 	// correct for a provider with no pool.
 	MigrationDatabaseURL secret.Value
+	// DatabaseRoutes are fixed relays to database branches selected by the
+	// orchestrator. They are not manifest egress rules. The runtime resolves
+	// and validates their destinations before creating any resources.
+	DatabaseRoutes []DatabaseRoute
+	// DatabaseCACertPEM is the database provider's public trust bundle. It is
+	// installed separately from the HTTP inspection authority, whose private
+	// key is held by the sidecar and must not authenticate database servers.
+	DatabaseCACertPEM string
 	// PublicPorts maps a service name to the host port it will be reachable
 	// on, reserved before anything starts.
 	//
