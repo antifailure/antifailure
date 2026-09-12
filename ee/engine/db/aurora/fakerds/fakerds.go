@@ -680,6 +680,11 @@ func (s *Server) restore(w http.ResponseWriter, form url.Values) {
 	source := form.Get("SourceDBClusterIdentifier")
 	target := form.Get("DBClusterIdentifier")
 	restoreType := form.Get("RestoreType")
+	tags, err := tagsFrom(form)
+	if err != nil {
+		writeFault(w, http.StatusBadRequest, "InvalidParameterValue", err.Error())
+		return
+	}
 
 	if restoreType != "copy-on-write" {
 		// Refused rather than tolerated. This provider's whole claim is that a
@@ -750,7 +755,7 @@ func (s *Server) restore(w http.ResponseWriter, form url.Values) {
 		engine: parent.engine, engineVersion: parent.engineVersion,
 		master: parentMaster, password: parentPassword,
 		database: database, storageGB: parentStorage,
-		created: time.Now().UTC(), tags: tagsFrom(form), source: source,
+		created: time.Now().UTC(), tags: tags, source: source,
 		// One describe in creating, so the provider's wait actually waits.
 		pending: 1,
 	}
@@ -855,6 +860,11 @@ func (s *Server) modifyCluster(w http.ResponseWriter, form url.Values) {
 }
 
 func (s *Server) addTags(w http.ResponseWriter, form url.Values) {
+	tags, err := tagsFrom(form)
+	if err != nil {
+		writeFault(w, http.StatusBadRequest, "InvalidParameterValue", err.Error())
+		return
+	}
 	name := form.Get("ResourceName")
 	identifier := name
 	if i := strings.LastIndex(name, ":"); i >= 0 {
@@ -870,7 +880,7 @@ func (s *Server) addTags(w http.ResponseWriter, form url.Values) {
 		return
 	}
 	if s.opts.Fault != FaultTagsAreNotRecorded {
-		for k, v := range tagsFrom(form) {
+		for k, v := range tags {
 			if len(v) > 256 {
 				s.faultLocked(w, http.StatusBadRequest, "InvalidParameterValue",
 					"the tag "+k+" is longer than the 256 characters AWS allows")
@@ -983,17 +993,30 @@ func (s *Server) dropCluster(identifier string) error {
 	return nil
 }
 
-// tagsFrom reads the query API's Tags.member.N form back into a map.
-func tagsFrom(form url.Values) map[string]string {
+// tagsFrom reads the query API's Tags.Tag.N form back into a map, and refuses
+// the Tags.member.N spelling.
+//
+// Refused rather than tolerated, because this fake used to parse exactly the
+// member spelling the provider sent, so the suite agreed with the provider and
+// could not say no. No AWS SDK sends it: RDS's service model names TagList's
+// member Tag. Whether AWS itself would accept it is not known here, and a fake
+// that accepts what no official client sends is the wrong side to be wrong on.
+func tagsFrom(form url.Values) (map[string]string, error) {
+	for k := range form {
+		if strings.HasPrefix(k, "Tags.member.") {
+			return nil, fmt.Errorf("fakerds refuses a tag list spelled Tags.member.N; RDS's " +
+				"service model names TagList's member Tag, so every AWS SDK sends Tags.Tag.N")
+		}
+	}
 	out := map[string]string{}
 	for i := 1; ; i++ {
-		key := form.Get("Tags.member." + strconv.Itoa(i) + ".Key")
+		key := form.Get("Tags.Tag." + strconv.Itoa(i) + ".Key")
 		if key == "" {
 			break
 		}
-		out[key] = form.Get("Tags.member." + strconv.Itoa(i) + ".Value")
+		out[key] = form.Get("Tags.Tag." + strconv.Itoa(i) + ".Value")
 	}
-	return out
+	return out, nil
 }
 
 // ---------------------------------------------------------------------------
