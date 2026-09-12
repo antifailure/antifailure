@@ -93,6 +93,15 @@ preview and nothing else. And the source cluster's own password is never read
 and never needed. Any high entropy string will do, and changing it changes
 every branch's password.
 
+Rotating the master password is not the whole of it. A clone carries every
+other login the source had, and a password change ends no session that has
+already authenticated. So before a golden is masked, and again before it is
+published, the provider disables every other login role in the clone's own
+catalog, clears its password, and ends its sessions along with any other session
+of the administrator. `rdsadmin` and `rdsrepladmin`, which AWS reserves, are
+left alone. A login the administrator cannot disable stops publication rather
+than surviving into it.
+
 The AWS credentials themselves come from the environment, an ECS or EKS Pod
 Identity credential endpoint, or an EC2 instance role, in that order, and
 version 2 of the instance metadata service only. A profile in `~/.aws` and a
@@ -103,6 +112,23 @@ The IAM actions needed are `rds:RestoreDBClusterToPointInTime` on the source
 cluster, and `rds:CreateDBInstance`, `rds:ModifyDBCluster`,
 `rds:AddTagsToResource`, `rds:DescribeDBClusters`, `rds:DescribeDBInstances`,
 `rds:DeleteDBInstance` and `rds:DeleteDBCluster` on the clones.
+
+## Connections verify the server
+
+`AF_AURORA_SSLMODE` defaults to `verify-full`, which checks the certificate and
+the hostname, and nothing weaker is accepted for a remote endpoint. The provider
+carries AWS's published RDS root bundles for the commercial and GovCloud
+partitions, pinned by digest in its tests, and uses the one for the source's
+partition. The engine installs the same public bundle inside service and
+migration containers, separately from the proxy's HTTP inspection authority, so
+that authority cannot vouch for a database. `disable` is accepted only when the
+cluster's endpoint is loopback, which is the test fixture and nothing else.
+
+A clone is created in the source cluster's DB subnet group and security groups,
+read from the source rather than configured, with IAM database authentication
+off, and its writer is not publicly accessible. Every resource is scoped to the
+source cluster's ARN, so a second source in the same account is never listed,
+adopted or deleted by this one.
 
 ## What this provider will not do
 
@@ -153,6 +179,11 @@ and is isolated from the golden and from other branches, and that nothing
 leaks across a whole run. It also proves the requests are signed correctly for
 the region and service they are sent to, because the fake recomputes the
 signature and refuses one that does not match.
+
+The verification path runs a real PostgreSQL SSLRequest and TLS handshake
+through the same driver the provider uses, against a certificate authority the
+test generates. It refuses a wrong hostname and a wrong signer. No connection has
+met a certificate issued by RDS.
 
 It does not prove that AWS accepts those requests, and it cannot produce a wall
 clock for a real clone. The benchmark says `UNMEASURED` in those cells rather

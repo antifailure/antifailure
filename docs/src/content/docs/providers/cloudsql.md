@@ -68,13 +68,25 @@ the source instance over a connection.
 | `AF_CLOUDSQL_BRANCH_KEY` | The key every clone's password is derived from |
 | `AF_CLOUDSQL_STOP_GOLDENS` | `1` to stop a published golden's compute. Read the section below first |
 | `AF_CLOUDSQL_TIER` | Overrides the machine tier. Empty keeps the source's, which is what keeps a clone fast |
-| `AF_CLOUDSQL_TLS_MODE` | The `sslmode` of the connection strings. Defaults to `require` |
+| `AF_CLOUDSQL_TLS_MODE` | `verify-ca` or `verify-full`. Empty chooses from the instance's CA mode. `require` and `disable` are refused |
 
 The branch key is **not** the source instance's password. A distinct password is
 derived from it for every clone, so a preview environment never holds
 production's database credential. That matters more here than it sounds: Google
 documents that a clone carries the source's users and passwords, so without the
 derived password every branch would be reachable with production's.
+
+Every connection string verifies the server, because encryption without
+verification lets anything on the path present a certificate. An instance on
+Google's per instance CA gets `verify-ca` against that instance's own CA,
+fetched through the authenticated Admin API. An instance on a shared or
+customer CA gets `verify-full`, which also checks the hostname. An instance
+whose CA mode the provider does not recognise is refused rather than guessed.
+`require` checks nothing and is refused, and so is `disable`, which the
+provider permits only behind a loopback proxy that a manifest cannot configure.
+The engine installs the same public CA material
+inside service and migration containers, separately from the proxy's HTTP
+inspection authority, so that authority cannot vouch for a database.
 
 Admin API calls use a service account supplied through
 `GOOGLE_APPLICATION_CREDENTIALS`, or the attached Google identity through the
@@ -83,17 +95,18 @@ SQL permissions needed to clone, configure and delete instances. An empty or
 failed token is refused before the request reaches the API. These control
 plane credentials are separate from the branch key and database password.
 
-## Goldens cost compute here, and Aurora's trick does not exist
+## Goldens cost compute here, and there is no shape that would make them free
 
-The Aurora provider publishes a golden by deleting its writer instance and
-keeping the volume, because an Aurora cluster's storage exists whether or not an
-instance is attached and is still clonable. A published Aurora golden costs
-storage and no compute.
+An Aurora cluster's volume exists whether or not an instance is attached, so a
+published Aurora golden could in principle drop its compute and stay cloneable.
+The Aurora provider does not do that. Nobody who wrote it has an Aurora account,
+so the saving is unmeasured and its golden keeps its writer instance, which
+[the Aurora page](/docs/providers/aurora) states in full.
 
-**Cloud SQL has no such thing.** An instance is compute and storage together and
-there is no clonable object underneath it. The closest shape available is an
-instance whose activation policy is `NEVER`, which stops the compute and keeps
-the disk.
+**Cloud SQL does not have that shape at all.** An instance is compute and
+storage together and there is no cloneable object underneath it. The closest
+shape available is an instance whose activation policy is `NEVER`, which stops
+the compute and keeps the disk.
 
 Whether Cloud SQL will fast clone an instance that is stopped is **not
 established**. Google's clone documentation does not address a stopped source in

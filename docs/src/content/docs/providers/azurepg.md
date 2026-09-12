@@ -86,7 +86,13 @@ qualified domain name is accepted too and the server name is taken from it.
 | `AF_AZUREPG_ALLOW_CIDR` | The range the created firewall rule admits. Required for public sources |
 | `AF_AZUREPG_DATABASE` | The application database. Required when several application databases exist |
 | `AF_AZUREPG_LOCATION` | The region. A restore lands in its source's region |
-| `AF_AZUREPG_TLS_MODE` | The `sslmode` of the connection strings. Defaults to `require` |
+| `AF_AZUREPG_TLS_MODE` | The `sslmode` of the connection strings. Defaults to `verify-full`, which checks the server certificate and hostname |
+
+Remote connections require `verify-full`. The provider supplies Microsoft's
+published Azure root certificates through an explicit certificate file, so
+clients that do not use the operating system trust store still verify the
+server. The engine installs that public bundle inside service containers.
+Weaker modes are restricted to loopback API fixtures.
 
 `AF_AZUREPG_ALLOW_CIDR` has no default on purpose. A default of `0.0.0.0/0`
 would make every branch work immediately and would open a copy of production to
@@ -98,6 +104,9 @@ permission to read and restore servers, update their credentials and metadata,
 and delete the resources this provider owns. Scope that permission to the
 dedicated resource group. These are control plane credentials, separate from
 the database administrator password derived from the branch key.
+
+With no client secret, the existing Azure token source uses the host's managed
+identity. Set `AZURE_CLIENT_ID` to select a user-assigned identity when needed.
 
 Collection reads follow Azure pagination. An invalid row is logged and skipped
 without discarding valid rows, and continuation URLs cannot send the identity
