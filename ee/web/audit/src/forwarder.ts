@@ -54,23 +54,52 @@
 // arrive later. That is the behaviour docs/enterprise/audit-stream.md already
 // describes for the engine, "accepts every entry and writes none", and here it
 // avoids repeatedly reading entries deliberately declined by the licence.
+//
+// SIX, added when a destination stopped being one per process: the sink is
+// resolved per organization, per pass, and an organization's entries reach its
+// own destination and nothing else. The installation sink from the environment
+// is the destination for an organization that has not chosen one, and only for
+// such an organization; a row in audit_stream_destinations decides for its
+// organization even when it is switched off. The read query does not return an
+// organization with no route at all, so an installation where nobody has
+// configured anything reads nothing and advances nothing, and an organization
+// that configures a destination later starts from the `from_seq` its row
+// carries rather than from wherever an idle position happened to be.
+//
+// The entitlement is asked BEFORE the destination is resolved, so an
+// organization whose entitlement was withdrawn never has its credential opened.
 
 // `sql` through @antifailure/db rather than from drizzle-orm directly, for the
 // reason web/packages/db/src/index.ts opens with: a second physical copy of
 // drizzle gives a nominally different SQL type and the compile error names a
 // private field rather than the cause.
-import { sql, type Pool } from '@antifailure/db'
+import { sql, type Db, type Pool } from '@antifailure/db'
 import { Queue, type Clock, type Entry, type Sink } from './sink.ts'
+import type { Route } from './destinations.ts'
 
 export interface ForwarderOptions {
   pool: Pool
   clock: Clock
-  /** One destination per installation. Replicas share delivery positions.
-   *  Multiple destinations require a collector that fans out after receiving. */
-  sink: Sink
-  /** Signs the batch manifests, so an object sitting in an archive can be
-   *  checked without reaching back to the control plane that wrote it. */
-  key: string
+  /** The installation's destination, from the environment, for every
+   *  organization that has not chosen its own. Null when the operator has not
+   *  configured one, which on a hosted installation is the ordinary case.
+   *  Replicas share delivery positions. */
+  sink?: Sink | null
+  /** Signs the manifests of batches delivered to the installation sink, so an
+   *  object sitting in an archive can be checked without reaching back to the
+   *  control plane that wrote it. Required whenever `sink` is. A batch delivered
+   *  to an organization's own destination is signed under a key derived from
+   *  that organization's credential instead; see `manifestKeyFor`. */
+  key?: string
+  /**
+   * Resolves one organization's own destination, inside the forwarder's scope.
+   *
+   * Null when this process cannot open a sealed credential, which means
+   * AF_PROVIDER_KEY_SECRET is unset. A destination row that exists then is
+   * REFUSED rather than skipped, so its entries wait for a sealing key instead
+   * of being advanced past and lost.
+   */
+  destinations?: ((db: Db, orgId: string) => Promise<Route>) | null
   /**
    * Whether one organization may have its audit log forwarded, right now.
    *
@@ -112,6 +141,12 @@ export interface Pass {
   delivered: number
   /** Entries skipped because their organization is not entitled. */
   unlicensed: number
+  /** Entries skipped because their organization switched its own stream off. */
+  disabled: number
+  /** Entries held because their organization's destination could not be built:
+   *  a credential that will not open, or a URL the customer rule refuses. Held,
+   *  not skipped, so they are delivered once the organization repairs it. */
+  refused: number
   /** The cursor before and after. Equal means the pass moved nothing, which is
    *  correct for an empty log and is a stuck stream for a failing sink. */
   from: number
@@ -132,6 +167,10 @@ interface Row extends Record<string, unknown> {
   detail: unknown
   occurred_at: Date | string
   entry_hash: string
+  /** Whether the organization has a row in audit_stream_destinations, enabled
+   *  or not. Read in the same statement, so the decision about which sink an
+   *  entry goes to cannot see a different state from the one that selected it. */
+  routed: boolean
 }
 
 /**
@@ -183,6 +222,12 @@ export class Forwarder {
   private readonly log: (line: string) => void
 
   constructor(options: ForwarderOptions) {
+    if (options.sink && !options.key) {
+      // The same refusal configure.ts makes about the environment, repeated here
+      // for an embedder that passes a sink directly: a manifest signed under a
+      // key nobody chose is a decoration rather than evidence.
+      throw new Error('An installation sink needs a manifest signing key, and none was given.')
+    }
     this.opts = options
     this.batchSize = options.batchSize ?? 500
     this.deliveryBatchSize = options.deliveryBatchSize ?? this.batchSize
@@ -202,20 +247,37 @@ export class Forwarder {
     const now = this.opts.clock.now()
     const from = await this.cursor()
 
+    // An organization is read when it has a destination row of its own, or when
+    // the installation has a sink that covers everybody without one. Nobody else
+    // is read at all, so a hosted installation where no organization has
+    // configured anything reads nothing on every pass rather than reading every
+    // entry and discarding it.
+    //
+    // `greatest` with the destination's `from_seq` is what makes "entries arrive
+    // and then a destination is configured" start at the configuration rather
+    // than at the beginning of the organization's history. See migration 0044.
+    const installation = this.opts.sink ? sql`true` : sql`false`
     const rows = await this.opts.pool.withAuditForwarder(async (db) =>
       db.execute<Row>(sql`
         SELECT a.seq, a.org_id, a.actor_label, a.action, a.target_type, a.target_id,
-               a.origin, a.detail, a.occurred_at, a.entry_hash
+               a.origin, a.detail, a.occurred_at, a.entry_hash,
+               (d.org_id IS NOT NULL) AS routed
         FROM audit_entries a
         LEFT JOIN audit_stream_positions p ON p.org_id = a.org_id
-        WHERE a.seq > coalesce(p.delivered_seq, 0)
+        LEFT JOIN audit_stream_destinations d ON d.org_id = a.org_id
+        WHERE a.seq > greatest(coalesce(p.delivered_seq, 0), coalesce(d.from_seq, 0))
+          AND (d.org_id IS NOT NULL OR ${installation})
         ORDER BY a.seq ASC
         LIMIT ${this.batchSize}`),
     )
 
     const entries = rows.map(toEntry)
+    const routed = new Set(rows.filter((r) => r.routed === true).map((r) => r.org_id))
     if (entries.length === 0) {
-      return { read: 0, delivered: 0, unlicensed: 0, from, to: from, organizations: [] }
+      return {
+        read: 0, delivered: 0, unlicensed: 0, disabled: 0, refused: 0,
+        from, to: from, organizations: [],
+      }
     }
 
     // Grouped in sequence order within each organization, which is what the
@@ -229,6 +291,8 @@ export class Forwarder {
 
     let delivered = 0
     let unlicensed = 0
+    let disabled = 0
+    let refused = 0
     // The lowest sequence number that was neither delivered nor deliberately
     // skipped. The cursor stops below it, so the next pass reads it again.
     let blocked: number | null = null
@@ -240,10 +304,32 @@ export class Forwarder {
         continue
       }
 
+      // Which sink, decided for THIS organization and only for it. The one
+      // property the whole per organization design rests on is that the sink
+      // built here is handed this organization's entries and nothing else, and
+      // `byOrg` is what guarantees it: a queue never sees two organizations.
+      const target = await this.resolve(orgId, routed.has(orgId))
+      if (target.state === 'off') {
+        disabled += forOrg.length
+        await this.advanceOrganization(orgId, forOrg[forOrg.length - 1]!.seq)
+        continue
+      }
+      if (target.state === 'refused') {
+        // Held below the position, NOT advanced past. A credential that will not
+        // open after a sealing key rotation looks exactly like a tampered row,
+        // and either way the entries must still be there when it is repaired.
+        refused += forOrg.length
+        const stuck = forOrg[0]!.seq
+        blocked = blocked === null ? stuck : Math.min(blocked, stuck)
+        await this.recordAttempt(orgId, now, 0, target.reason)
+        this.log(`audit stream: ${orgId} has a destination that cannot be used: ${target.reason}`)
+        continue
+      }
+
       const queue = new Queue({
-        sink: this.opts.sink,
+        sink: target.sink,
         clock: this.opts.clock,
-        key: this.opts.key,
+        key: target.key,
         batchSize: this.deliveryBatchSize,
         capacity: Math.max(10_000, forOrg.length),
       })
@@ -255,6 +341,11 @@ export class Forwarder {
       if (completed > 0) {
         await this.advanceOrganization(orgId, forOrg[completed - 1]!.seq)
       }
+      const outcome = queue.state
+      await this.recordAttempt(
+        orgId, now, sent,
+        sent === forOrg.length ? null : 'reason' in outcome ? outcome.reason : `${outcome.state}`,
+      )
 
       // WHAT STILL WAITS, NOT WHAT WAS NOT DELIVERED, and the difference is the
       // whole correctness of the cursor.
@@ -283,7 +374,7 @@ export class Forwarder {
         // reason for a stalled or a lossy stream exists.
         const state = queue.state
         this.log(
-          `audit stream: ${this.opts.sink.name()} took ${String(sent)} of ` +
+          `audit stream: ${target.sink.name()} took ${String(sent)} of ` +
             `${String(forOrg.length)} entries for ${orgId}, ${String(queue.depth)} waiting, ` +
             `${String(queue.dropped)} given up on, and is ${state.state}` +
             ('reason' in state ? `: ${state.reason}` : ''),
@@ -299,10 +390,81 @@ export class Forwarder {
       read: entries.length,
       delivered,
       unlicensed,
+      disabled,
+      refused,
       from,
       to,
       organizations: [...byOrg.keys()].sort(),
     }
+  }
+
+  /**
+   * The sink one organization's entries go to on this pass.
+   *
+   * `routed` is whether the read statement saw a destination row for this
+   * organization. It is passed in rather than asked again so that an
+   * organization whose row was deleted between the read and here is not
+   * silently rerouted to the installation sink: it resolves to `none`, and the
+   * installation sink applies only because that is what `none` means.
+   */
+  private async resolve(
+    orgId: string,
+    routed: boolean,
+  ): Promise<{ state: 'sink'; sink: Sink; key: string } | { state: 'off' } | { state: 'refused'; reason: string }> {
+    let route: Route = { state: 'none' }
+    if (routed) {
+      route = this.opts.destinations
+        ? await this.opts.pool.withAuditForwarder((db) => this.opts.destinations!(db, orgId))
+        : {
+            state: 'refused',
+            reason:
+              'This organization has a destination and this control plane cannot open its ' +
+              'credential, because AF_PROVIDER_KEY_SECRET is not set. Its entries are held.',
+          }
+    }
+    if (route.state === 'sink') {
+      return { state: 'sink', sink: route.sink, key: route.manifestKey }
+    }
+    if (route.state === 'off' || route.state === 'refused') return route
+    if (this.opts.sink && this.opts.key) {
+      return { state: 'sink', sink: this.opts.sink, key: this.opts.key }
+    }
+    // Reachable only when a row was read and then deleted before this pass got
+    // to it, with no installation sink to fall back on. Held, so the next pass
+    // decides with the table as it now is; the read query will not return these
+    // entries again unless a destination reappears.
+    return { state: 'refused', reason: 'The destination was removed while this pass was running.' }
+  }
+
+  /** What happened for one organization on this pass, where it can read it.
+   *
+   *  A failure increments the count and replaces the reason; a pass that
+   *  delivered everything clears both. `last_delivered_at` moves only when
+   *  something was accepted, so a stream failing for a week still says when it
+   *  last worked. */
+  private async recordAttempt(
+    orgId: string,
+    at: Date,
+    sent: number,
+    error: string | null,
+  ): Promise<void> {
+    const when = at.toISOString()
+    const deliveredAt = sent > 0 ? when : null
+    await this.opts.pool.withAuditForwarder(async (db) => {
+      await db.execute(sql`
+        INSERT INTO audit_stream_positions (
+          org_id, delivered_seq, updated_at, last_attempt_at, last_delivered_at,
+          last_error, consecutive_failures)
+        VALUES (${orgId}, 0, ${when}, ${when}, ${deliveredAt}, ${error}, ${error === null ? 0 : 1})
+        ON CONFLICT (org_id) DO UPDATE SET
+          last_attempt_at = EXCLUDED.last_attempt_at,
+          last_delivered_at = coalesce(EXCLUDED.last_delivered_at, audit_stream_positions.last_delivered_at),
+          last_error = EXCLUDED.last_error,
+          consecutive_failures = CASE
+            WHEN EXCLUDED.last_error IS NULL THEN 0
+            ELSE audit_stream_positions.consecutive_failures + 1
+          END`)
+    })
   }
 
   /** Where the last pass got to. Zero on an installation that has never
@@ -409,3 +571,4 @@ export function startForwarder(
 
   return { stop: () => clearInterval(timer) }
 }
+

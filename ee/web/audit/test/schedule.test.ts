@@ -4,7 +4,7 @@ import { it } from 'node:test'
 import assert from 'node:assert/strict'
 import { startForwarder } from '../src/index.ts'
 
-const empty = { read: 0, delivered: 0, unlicensed: 0, from: 0, to: 0, organizations: [] }
+const empty = { read: 0, delivered: 0, unlicensed: 0, disabled: 0, refused: 0, from: 0, to: 0, organizations: [] }
 
 it('a stopped forwarder makes no subsequent pass', async (t) => {
   t.mock.timers.enable({ apis: ['setInterval'] })

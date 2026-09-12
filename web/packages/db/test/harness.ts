@@ -292,6 +292,15 @@ export async function seedTenant(admin: postgres.Sql, label: string): Promise<Fi
     INSERT INTO provider_keys (org_id, provider, ciphertext, nonce, fingerprint, last4)
     VALUES (${orgId}, 'anthropic', ${Buffer.from(`not-a-key-${slug}`)},
             ${Buffer.from('000000000000')}, ${'fp-' + slug.slice(0, 12)}, '0000')`
+  // A destination per tenant, so the generic read and write loops in
+  // tenancy.test.ts cover the table holding a customer's sealed collector
+  // credential rather than passing over it as an empty table. The bytes are
+  // not a real sealed value and do not need to be: the property under test is
+  // who can reach the row, not whether it opens.
+  await admin`
+    INSERT INTO audit_stream_destinations (org_id, kind, url, ciphertext, nonce, fingerprint, last4)
+    VALUES (${orgId}, 'webhook', ${`https://${slug}.collector.example/ingest`},
+            ${Buffer.alloc(40, 7)}, ${Buffer.alloc(12, 3)}, 'fingerprint', 'abcd')`
   await admin`
     INSERT INTO provider_budgets (org_id, provider, period, cap_usd, spent_usd)
     VALUES (${orgId}, 'anthropic', date_trunc('month', now())::date, 100, 0)`

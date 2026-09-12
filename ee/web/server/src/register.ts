@@ -14,10 +14,16 @@ import { scimExtension } from '@antifailure-ee/scim'
 import { declare, licensed } from '@antifailure-ee/features'
 import {
   Forwarder,
+  auditStreamExtension,
   fromEnvironment,
+  scheduleFromEnvironment,
+  sealingKeyFrom,
+  sinkFor,
   startForwarder,
+  SealError,
   SinkEnv,
   SinkRefused,
+  type Fetcher,
   type ForwarderHandle,
 } from '@antifailure-ee/audit'
 import { gated, statusNow } from './gate.ts'
@@ -29,6 +35,12 @@ import { licenseFromEnv, LicenseRefused, ALL_FEATURES, type Claims, type Status 
 // callback the forwarder asks on every pass; the licence question is asked
 // there and nowhere else on this path.
 declare('audit_stream', 'ee/web/server/src/register.ts:startAuditStream')
+// The second site, and it is a second place the question is asked rather than a
+// second name for the first. A hosted organization chooses its own destination
+// through these routes, and a route that let an unentitled organization store a
+// destination would be configuration for a stream the forwarder then declines,
+// which reads to the customer exactly like a stream that is broken.
+declare('audit_stream', 'ee/web/server/src/register.ts:auditStreamRoutes')
 
 export interface RegisterOptions {
   pool: Pool
@@ -45,6 +57,13 @@ export interface RegisterOptions {
    *  environment when absent, which is what the deployment does; supplied
    *  directly by the suite, which must not have a key in its environment. */
   encryptionKey?: Buffer
+  /** The transport every audit sink uses, the installation's and each
+   *  organization's. The environment's fetch when absent, which is what the
+   *  deployment does. Supplied by the suite so a customer destination that names
+   *  a public host can be delivered to a receiver the suite holds, while the
+   *  customer destination rule, which refuses every loopback and private
+   *  address, stays exactly as strict as it is in production. */
+  fetch?: Fetcher
 }
 
 export interface Registered {
@@ -191,15 +210,79 @@ export function registerEnterprise(options: RegisterOptions): Registered {
     gate,
   )
 
+  const sealingKey = auditSealingKey(options)
+  const audit = gated(auditStreamRoutes(options, gate, sealingKey), 'audit_stream', gate)
+
   registerExtension(sso)
   registerExtension(scim)
+  registerExtension(audit)
   setSignInPolicy(signInPolicy(options.pool))
 
   return {
     claims,
-    mounted: [sso.name, scim.name],
-    auditStream: startAuditStream(options, gate),
+    mounted: [sso.name, scim.name, audit.name],
+    auditStream: startAuditStream(options, gate, sealingKey),
   }
+}
+
+/**
+ * The key an organization's collector credential is sealed under, or null.
+ *
+ * AF_PROVIDER_KEY_SECRET, the variable the community control plane already
+ * seals a customer's provider key under, and deliberately not a new one: it
+ * already reaches every hosted deployment from Key Vault, so a customer
+ * destination needs no configuration an operator does not already have. See
+ * ee/web/audit/src/destinations.ts for the whole argument.
+ *
+ * Unset is a supported state and says so: the routes answer, saving refuses
+ * with 503 naming the variable, and an installation sink from the environment
+ * still works. Malformed is not, and refuses to start, for the reason
+ * readLicense gives about a key that does not parse: it is a deployment mistake,
+ * and starting anyway would mean a control plane that fails on the first save
+ * somebody attempts rather than at the deploy that broke it.
+ */
+function auditSealingKey(options: RegisterOptions): Buffer | null {
+  try {
+    const key = sealingKeyFrom(options.env.AF_PROVIDER_KEY_SECRET)
+    if (!key) {
+      options.log(
+        'AF_PROVIDER_KEY_SECRET is not set, so no organization can choose its own audit stream ' +
+          'destination. The installation sink, if one is configured, is unaffected.',
+      )
+    }
+    return key
+  } catch (err) {
+    if (err instanceof SealError) {
+      options.log(`the audit stream sealing key was refused: ${err.message}`)
+      process.exit(2)
+    }
+    throw err
+  }
+}
+
+/**
+ * The routes an organization chooses its own destination through.
+ *
+ * The ORGANIZATION'S entitlement is asked here, per request, and `gated` asks the
+ * INSTALLATION'S licence around every route. Both, for the reason
+ * startAuditStream gives for asking both per pass: either one alone would let
+ * somebody configure a stream they are not supposed to have.
+ */
+function auditStreamRoutes(
+  options: RegisterOptions,
+  gate: { claims: Claims | null; org: string; now: () => Date; revoked: ReadonlySet<string> },
+  sealingKey: Buffer | null,
+) {
+  return auditStreamExtension({
+    pool: options.pool,
+    clock: options.clock,
+    sealingKey,
+    log: options.log,
+    permitted: async (orgId, now) => {
+      if (!statusNow(gate).enabled('audit_stream')) return false
+      return licensed(options.pool, orgId, 'audit_stream', now)
+    },
+  })
 }
 
 /**
@@ -222,10 +305,14 @@ export function registerEnterprise(options: RegisterOptions): Registered {
 function startAuditStream(
   options: RegisterOptions,
   gate: { claims: Claims | null; org: string; now: () => Date; revoked: ReadonlySet<string> },
+  sealingKey: Buffer | null,
 ): ForwarderHandle | null {
+  const fetcher: Fetcher = options.fetch ?? ((url, init) => fetch(url, init))
   let config
+  let schedule
   try {
-    config = fromEnvironment(options.env)
+    config = fromEnvironment(options.env, fetcher)
+    schedule = config ?? scheduleFromEnvironment(options.env)
   } catch (err) {
     if (err instanceof SinkRefused) {
       // Refused, not degraded, and the same rule the engine's sink follows.
@@ -238,25 +325,34 @@ function startAuditStream(
     throw err
   }
 
-  if (!config) {
+  if (!config && !sealingKey) {
     // Said out loud, in the state that forwards nothing, for the reason
     // readLicense says its own line out loud: an installation that forwards and
     // one that does not produced identical logs, and the first person to
     // discover the difference was an auditor asking where the entries went.
     options.log(
-      `no ${SinkEnv} is set, so the control plane's audit log is written and not forwarded. ` +
-        'The log itself is unaffected: it is written whatever a sink does.',
+      `no ${SinkEnv} is set and no organization can choose a destination, so the control ` +
+        "plane's audit log is written and not forwarded. The log itself is unaffected: it is " +
+        'written whatever a sink does.',
     )
     return null
   }
 
+  // STARTED WITH NO INSTALLATION SINK AT ALL when organizations can choose their
+  // own, which is the hosted shape. A forwarder that started only when the
+  // environment named a sink would mean a customer who saved a destination saw
+  // nothing arrive until somebody restarted the control plane for an unrelated
+  // reason. With nothing configured anywhere, a pass reads nothing: the query
+  // returns no organization that has neither a destination nor an installation
+  // sink covering it.
   const forwarder = new Forwarder({
     pool: options.pool,
     clock: options.clock,
-    sink: config.sink,
-    key: config.key,
-    batchSize: config.batchSize,
-    deliveryBatchSize: config.deliveryBatchSize,
+    sink: config?.sink ?? null,
+    key: config?.key,
+    destinations: sealingKey ? (db, orgId) => sinkFor(db, sealingKey, fetcher, orgId) : null,
+    batchSize: schedule.batchSize,
+    deliveryBatchSize: schedule.deliveryBatchSize,
     log: options.log,
     // BOTH GATES, ASKED PER PASS, AND NEITHER IS THE OTHER.
     //
@@ -280,12 +376,15 @@ function startAuditStream(
   })
 
   options.log(
-    `audit stream: forwarding the control plane's audit log to ${config.sink.name()} ` +
-      `every ${String(config.intervalMs)}ms, ${String(config.batchSize)} entries a pass ` +
-      `and ${String(config.deliveryBatchSize)} a delivery`,
+    'audit stream: forwarding ' +
+      (config ? `to ${config.sink.name()} for every organization without its own destination` : '') +
+      (config && sealingKey ? ', and ' : '') +
+      (sealingKey ? "to each organization's own destination where it has chosen one" : '') +
+      `, every ${String(schedule.intervalMs)}ms, ${String(schedule.batchSize)} entries a pass ` +
+      `and ${String(schedule.deliveryBatchSize)} a delivery`,
   )
 
-  return startForwarder(forwarder, config.intervalMs, (err) =>
+  return startForwarder(forwarder, schedule.intervalMs, (err) =>
     options.log(`audit stream: ${err instanceof Error ? err.message : String(err)}`),
   )
 }
