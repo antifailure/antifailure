@@ -85,28 +85,51 @@ var ledger = []generator{
 	{"cp schemas/manifest.v1.json engine/internal/manifest/manifest.v1.json", []string{
 		"engine/internal/manifest/manifest.v1.json",
 	}},
-	{"cd engine && go test ./internal/policy -update-vectors", []string{
+	// EVERY `go test` GENERATOR CARRIES `-timeout 30m`, and the number is a
+	// measurement rather than a guess.
+	//
+	// Go's default package timeout is ten minutes. These generators run a whole
+	// package, and on 2026-09-09 a `-generate` sweep on a loaded machine died at
+	// `FAIL github.com/antifailure/antifailure/engine/internal/masking 600.303s`,
+	// which is that default to three decimal places. An earlier sweep the same
+	// hour stopped at the cli reference generator instead, and that command
+	// passes standalone in 59 seconds, so neither generator is slow: the machine
+	// was, with a build lock queue seven deep and a Docker daemon carrying 250
+	// containers.
+	//
+	// WHY THIS MATTERS MORE THAN THE MINUTES. A generator killed by the default
+	// stops the sweep, and everything after it in this ledger is never run. The
+	// mode says so, "a generator that did not finish, and NOT a stale file", so
+	// nothing is silently reported clean. But the files after the casualty go
+	// UNCHECKED, and on both of those runs one of them was
+	// `engine/internal/docs/pages.gen.go`, which sits after masking here. A
+	// verdict that stops early is honest and still leaves the question open.
+	//
+	// Thirty minutes rather than sixty because a generator that genuinely needs
+	// half an hour is a defect worth failing on, and rather than fifteen because
+	// twelve minutes of real sweep was measured on a machine that was not idle.
+	{"cd engine && go test ./internal/policy -update-vectors -timeout 30m", []string{
 		"schemas/policy-vectors.json",
 	}},
-	{"cd engine && go test ./internal/mockpack -update-vectors", []string{
+	{"cd engine && go test ./internal/mockpack -update-vectors -timeout 30m", []string{
 		"schemas/mockpack-vectors.json",
 	}},
-	{"cd engine && go test ./internal/webhook -update-vectors", []string{
+	{"cd engine && go test ./internal/webhook -update-vectors -timeout 30m", []string{
 		"schemas/webhook-vectors.json",
 	}},
-	{"cd engine && go test ./internal/cli -update-reference", []string{
+	{"cd engine && go test ./internal/cli -update-reference -timeout 30m", []string{
 		"docs/src/content/docs/reference/cli.md",
 	}},
-	{"cd engine && go test ./internal/events -update-schema", []string{
+	{"cd engine && go test ./internal/events -update-schema -timeout 30m", []string{
 		"schemas/events.v1.json",
 	}},
 	{"go run ./tools/eventcheck -freeze .", []string{
 		"engine/internal/events/stream.register.json",
 	}},
-	{"cd engine && go test ./internal/masking -update-transforms", []string{
+	{"cd engine && go test ./internal/masking -update-transforms -timeout 30m", []string{
 		"docs/src/content/docs/reference/transforms.md",
 	}},
-	{"cd engine && go test ./internal/hud -update-frames", []string{
+	{"cd engine && go test ./internal/hud -update-frames -timeout 30m", []string{
 		"engine/internal/hud/testdata",
 		"docs/src/content/docs/guides/dashboard.md",
 	}},
