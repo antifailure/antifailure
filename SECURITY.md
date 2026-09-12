@@ -225,15 +225,17 @@ redirects, confusable hosts, a `Host` header choosing the port, a DNS tunnel, a
 name that resolves to the metadata address, and a TLS connection with no server
 name.
 
-Neither suite reaches the Kubernetes runtime, which has a gate of its own.
-Since #373 each customer pod there starts behind a trusted init container,
-built from the engine's own sidecar image, which holds customer code until it
-has observed its own escape routes denied. The shared runtime conformance suite
-then reported 37 of 37 behaviours and immediate startup containment, with
-nothing skipped. Hold that to what it measured: one isolated single node k3s
-cluster on a CI runner, not AKS, EKS or GKE, and not a cluster running a
-customer's own network policy controller. What it does not prove is in
-`docs/security/pentest-readiness.md`.
+Neither suite reaches the Kubernetes runtime, which has a gate of its own. A
+NetworkPolicy is programmed some time after the API server accepts a pod, and a
+run once caught a service reaching out inside that window. Each customer pod now
+starts with a trusted init container, built from the engine's own proxy image
+rather than the application's, that holds customer code until it has observed
+its own escape routes denied three times over. An isolated single node k3s run
+measured 37 of 37 runtime conformance behaviours and the immediate startup proof
+with zero skipped. What that does not settle is in
+`docs/security/pentest-readiness.md`: one cluster and one policy controller,
+nothing about other CNIs or managed Kubernetes, and no response based probe can
+prove the absence of a one way packet to a receiver that never answers.
 
 ## Incident history
 
