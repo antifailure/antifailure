@@ -306,7 +306,7 @@ nobody has seen.
    ```
 
    It must say `2 sealing keys (v1, v2)`. One key means the secret reference did
-   not arrive and step 4 would report every row as unopenable.
+   not arrive and step 4 would report that no row can be opened.
 
 3. Seal new keys under the new version. In the same tfvars:
 
@@ -366,6 +366,14 @@ nobody has seen.
    report zero rows that could not be opened and zero rows not yet at `v2`.
    Without this check, "nothing left to re-seal" and "every row is at the new
    version and none of them open" look identical.
+
+   A row still at `v1` here, reported as naming a key this revision does not
+   hold or simply counted as not yet at `v2`, is not a failed job. It is a key a
+   customer saved through a revision that was still sealing under `v1` after
+   step 4 had finished, which no guard in the job can see because the write came
+   after it.
+   Run step 4 again and then this check again. Both are safe to repeat as often
+   as it takes.
 
 6. Remove the old key, which is the last proof that step 4 finished. In the
    tfvars:

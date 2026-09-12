@@ -57,6 +57,7 @@ import {
   open,
   resealValue,
   SealError,
+  versionLabel,
 } from './seal.ts'
 
 /** An argument or a configuration an operator can fix, as opposed to a failure
@@ -226,7 +227,7 @@ interface SealedRow extends Record<string, unknown> {
  * Re-seals, or reports what re-sealing would do, or checks that every row opens.
  *
  * Returns a report rather than throwing on the first row it cannot open. An
- * operator mid-rotation needs the whole list: one unopenable row and four
+ * operator mid-rotation needs the whole list: one row that will not open and four
  * hundred is the difference between a bad row and a missing key, and a tool that
  * stops at the first one cannot tell them which they have. The CLI turns a
  * non-empty problem list into a non-zero exit.
@@ -323,7 +324,7 @@ async function oneTable(pool: Pool, spec: SealedTable, pass: Pass): Promise<Tabl
   report.versionsBefore = await versionCounts(pool, spec)
   const before = Object.entries(report.versionsBefore)
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([v, n]) => `${v}=${n}`)
+    .map(([v, n]) => `${versionLabel(v)}=${n}`)
     .join(' ')
   pass.log(`${spec.table}  ${before === '' ? 'no rows' : before}`)
 
@@ -477,9 +478,12 @@ export function describe(report: ResealReport): string[] {
       lines.push(`${t.table.padEnd(20)} absent from this database`)
       continue
     }
+    // Every label through versionLabel: they come out of an unconstrained text
+    // column, and one carrying a newline would otherwise write a line of this
+    // report that the tool never wrote.
     const at = Object.entries(t.versionsBefore)
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([v, n]) => `${v}=${n}`)
+      .map(([v, n]) => `${versionLabel(v)}=${n}`)
       .join(' ')
     lines.push(`${t.table.padEnd(20)} ${at === '' ? 'no rows' : at}`)
     lines.push(
@@ -498,7 +502,7 @@ export function describe(report: ResealReport): string[] {
       const these = report.problems.filter((p) => p.kind === kind)
       if (these.length === 0) continue
       lines.push(`${these.length} row${these.length === 1 ? '' : 's'}: ${kind}`)
-      const versions = [...new Set(these.map((p) => p.keyVersion))].sort()
+      const versions = [...new Set(these.map((p) => versionLabel(p.keyVersion)))].sort()
       lines.push(`  under version${versions.length === 1 ? '' : 's'} ${versions.join(', ')}`)
       for (const p of these.slice(0, 10)) lines.push(`  ${p.table} ${p.id}`)
       if (these.length > 10) lines.push(`  and ${these.length - 10} more`)

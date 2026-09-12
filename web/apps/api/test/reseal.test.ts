@@ -36,10 +36,12 @@ const KEY_C = `${ANTHROPIC}-cccccccccccccccccccccccccccc3333`
 
 const K1 = randomBytes(32)
 const K2 = randomBytes(32)
+const K3 = randomBytes(32)
 const v1 = Keyring.of(K1, 'v1')
 const v2 = Keyring.of(K2, 'v2')
 const both = Keyring.from([['v1', K1], ['v2', K2]], 'v2')
 const bothSealingOld = Keyring.from([['v1', K1], ['v2', K2]], 'v1')
+const v3 = Keyring.of(K3, 'v3')
 
 describe('rotating the sealing key', { skip: (await available()) ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let api: ApiHarness
@@ -73,6 +75,29 @@ describe('rotating the sealing key', { skip: (await available()) ? false : 'no P
     await setBudget(api.pool, api.clock, { ...actor, orgId: org.orgId, provider: 'anthropic', capUsd: 10 })
     await setBudget(api.pool, api.clock, { ...actor, orgId: org.orgId, provider: 'openai', capUsd: 10 })
     await setBudget(api.pool, api.clock, { ...actor, orgId: other.orgId, provider: 'anthropic', capUsd: 10 })
+  }
+
+  /** A run KILLED part way, rather than one that finished in small batches.
+   *  The hook lets `rows` writes land and then throws before the next, which is
+   *  the state a process killed between two rows leaves behind: some rows moved,
+   *  the rest untouched, and no report. */
+  async function killedAfter(rows: number, keyring: Keyring, to: string): Promise<void> {
+    let written = 0
+    await assert.rejects(
+      reseal({
+        adminUrl, keyring, to, batchSize: 1,
+        onBeforeWrite: async () => {
+          if (written === rows) throw new Error('the process was killed here')
+          written += 1
+        },
+      }),
+      /killed here/,
+    )
+  }
+
+  /** Which plaintext each seeded row holds, by its organization and provider. */
+  function seededKey(orgId: string, provider: string): string {
+    return provider === 'openai' ? KEY_B : orgId === org.orgId || orgId === other.orgId ? KEY_A : ''
   }
 
   async function versions(): Promise<Record<string, number>> {
@@ -325,6 +350,173 @@ describe('rotating the sealing key', { skip: (await available()) ? false : 'no P
       (await borrowKey(api.pool, api.clock, both, { orgId: other.orgId, provider: 'anthropic' })).key,
       KEY_C,
     )
+  })
+
+  test('a row relabelled under us with its bytes unchanged is left alone too', async () => {
+    // The VERSION half of the guard, isolated the same way. Every legitimate
+    // writer that changes a version also produces new ciphertext, so the
+    // ciphertext half catches all of them and removing the version half leaves
+    // every other test green. The case it alone decides is a write to the label
+    // and nothing else. The tool promises not to overwrite a concurrent write to
+    // any column it read, and a promise that holds for two of the three columns
+    // only is the kind that is discovered rather than stated.
+    await seedUnderV1()
+    const [target] = await api.admin<{ id: string }[]>`
+      SELECT id::text AS id FROM provider_keys WHERE org_id = ${other.orgId}`
+    let raced = false
+    const report = await reseal({
+      adminUrl,
+      keyring: both,
+      to: 'v2',
+      onBeforeWrite: async ({ id }) => {
+        if (id !== target!.id || raced) return
+        raced = true
+        await api.admin`UPDATE provider_keys SET key_version = 'v2' WHERE id = ${target!.id}::uuid`
+      },
+    })
+    assert.ok(raced, 'the hook never fired, so this proved nothing')
+    assert.equal(report.changedUnderUs, 1)
+    assert.equal(report.resealed, 2)
+    // Left exactly as the other writer made it: labelled v2, holding v1 bytes,
+    // which the check then reports as a row that will not open under a key that
+    // IS held. The tool reports that; it does not paper over it.
+    const check = await reseal({ adminUrl, keyring: both, mode: 'check', to: 'v2' })
+    assert.equal(check.problems.length, 1)
+    assert.equal(check.problems[0]!.id, target!.id)
+    assert.equal(check.problems[0]!.kind, 'cannot open')
+  })
+
+  test('a second rotation, v2 to v3, after v1 is already gone', async () => {
+    // Rotation is routine or it is not a rotation. Every other test here starts
+    // from rows at v1, so a tool that only ever moved rows off the first version
+    // there was would pass all of them and fail the second time anybody used it.
+    await seedUnderV1()
+    assert.equal((await reseal({ adminUrl, keyring: both, to: 'v2' })).resealed, 3)
+    assert.deepEqual(await versions(), { v2: 3 })
+
+    const next = Keyring.from([['v2', K2], ['v3', K3]], 'v3')
+    const report = await reseal({ adminUrl, keyring: next, to: 'v3' })
+    assert.deepEqual(report.problems, [])
+    assert.equal(report.resealed, 3)
+    assert.equal(report.remaining, 0)
+    assert.deepEqual(await versions(), { v3: 3 })
+
+    // And the proof step again, with a keyring that has never held v1 or v2.
+    for (const [o, provider] of [[org.orgId, 'anthropic'], [org.orgId, 'openai'], [other.orgId, 'anthropic']] as const) {
+      assert.equal((await borrowKey(api.pool, api.clock, v3, { orgId: o, provider })).key, seededKey(o, provider))
+    }
+    const check = await reseal({ adminUrl, keyring: v3, mode: 'check', to: 'v3' })
+    assert.deepEqual(check.problems, [])
+    assert.equal(check.scanned, 3)
+  })
+
+  test('a third key added before the second rotation finished takes rows from both older versions', async () => {
+    // Rotate, get killed part way, then rotate again to a newer key rather than
+    // finishing. The table then holds two old versions at once, and one run has
+    // to open each row under its own.
+    await seedUnderV1()
+    await killedAfter(1, both, 'v2')
+    assert.deepEqual(await versions(), { v1: 2, v2: 1 })
+
+    const all = Keyring.from([['v1', K1], ['v2', K2], ['v3', K3]], 'v3')
+    const report = await reseal({ adminUrl, keyring: all, to: 'v3' })
+    assert.deepEqual(report.problems, [])
+    assert.equal(report.resealed, 3)
+    assert.deepEqual(await versions(), { v3: 3 })
+    const check = await reseal({ adminUrl, keyring: v3, mode: 'check', to: 'v3' })
+    assert.deepEqual(check.problems, [])
+    assert.equal(check.scanned, 3)
+  })
+
+  test('the old key removed before the re-seal finished: moved rows open, the rest name v1, and the key coming back finishes it', async () => {
+    // The mistake the runbook's check exists to prevent, made anyway. What has
+    // to hold: nothing is corrupted, the rows already moved keep working, every
+    // row left behind says WHICH key it needs rather than that it was altered,
+    // and putting that key back lets the same tool finish.
+    await seedUnderV1()
+    await killedAfter(1, both, 'v2')
+    assert.deepEqual(await versions(), { v1: 2, v2: 1 })
+
+    const check = await reseal({ adminUrl, keyring: v2, mode: 'check', to: 'v2' })
+    assert.equal(check.scanned, 3)
+    assert.equal(check.remaining, 2)
+    assert.deepEqual(
+      check.problems.map((p) => [p.kind, p.keyVersion]),
+      [['missing key', 'v1'], ['missing key', 'v1']],
+    )
+
+    // Through the real read path, one of each.
+    const [moved] = await api.admin<{ org: string; provider: 'anthropic' | 'openai' }[]>`
+      SELECT org_id::text AS org, provider FROM provider_keys WHERE key_version = 'v2'`
+    assert.equal(
+      (await borrowKey(api.pool, api.clock, v2, { orgId: moved!.org, provider: moved!.provider })).key,
+      seededKey(moved!.org, moved!.provider),
+    )
+    const [left] = await api.admin<{ org: string; provider: 'anthropic' | 'openai' }[]>`
+      SELECT org_id::text AS org, provider FROM provider_keys WHERE key_version = 'v1' ORDER BY id LIMIT 1`
+    const err = await borrowKey(api.pool, api.clock, v2, { orgId: left!.org, provider: left!.provider })
+      .then(() => null, (e: unknown) => e)
+    assert.ok(err instanceof MissingSealingKeyError, String(err))
+    assert.equal(err.keyVersion, 'v1')
+
+    // An apply without the key writes nothing, and says why per row.
+    const refused = await reseal({ adminUrl, keyring: v2, to: 'v2' })
+    assert.equal(refused.resealed, 0)
+    assert.ok(refused.problems.length === 2 && refused.problems.every((p) => p.kind === 'missing key'))
+    assert.deepEqual(await versions(), { v1: 2, v2: 1 })
+
+    // The key comes back, and the same tool finishes.
+    const finished = await reseal({ adminUrl, keyring: both, to: 'v2' })
+    assert.equal(finished.resealed, 2)
+    const clean = await reseal({ adminUrl, keyring: v2, mode: 'check', to: 'v2' })
+    assert.deepEqual(clean.problems, [])
+    assert.equal(clean.scanned, 3)
+  })
+
+  test('a key saved under v1 after the re-seal finished is caught by the check, and a second run moves it', async () => {
+    // The write lands AFTER the tool is done, so no guard can see it. It happens
+    // while a revision still sealing under v1 serves traffic, and it is why the
+    // check is run after the new version is sealing everywhere rather than the
+    // apply's own count being trusted.
+    await seedUnderV1()
+    assert.equal((await reseal({ adminUrl, keyring: both, to: 'v2' })).remaining, 0)
+    await saveKey(api.pool, api.clock, bothSealingOld, {
+      ...actor, orgId: other.orgId, provider: 'openai', key: KEY_B,
+    })
+    assert.deepEqual(await versions(), { v1: 1, v2: 3 })
+
+    const check = await reseal({ adminUrl, keyring: v2, mode: 'check', to: 'v2' })
+    assert.equal(check.remaining, 1)
+    assert.deepEqual(check.problems.map((p) => [p.kind, p.keyVersion]), [['missing key', 'v1']])
+
+    const again = await reseal({ adminUrl, keyring: both, to: 'v2' })
+    assert.equal(again.resealed, 1)
+    const clean = await reseal({ adminUrl, keyring: v2, mode: 'check', to: 'v2' })
+    assert.deepEqual(clean.problems, [])
+    assert.equal(clean.scanned, 4)
+  })
+
+  test('a row under a label no key could have is refused by name, and the label cannot write a line of the report', async () => {
+    // key_version is unconstrained text. A label carrying a newline, printed raw,
+    // would put a sentence into the report the tool never wrote, in the output an
+    // operator reads before deleting a key.
+    await seedUnderV1()
+    const forged = 'v1\n0 rows: missing key, safe to remove v1'
+    await api.admin`UPDATE provider_keys SET key_version = ${forged} WHERE org_id = ${other.orgId}`
+    const logged: string[] = []
+    const report = await reseal({ adminUrl, keyring: both, to: 'v2', log: (line) => logged.push(line) })
+    assert.equal(report.resealed, 2)
+    assert.equal(report.problems.length, 1)
+    assert.equal(report.problems[0]!.kind, 'missing key')
+    assert.equal(report.problems[0]!.keyVersion, forged)
+    // Refused, not written: the row keeps its label and its bytes.
+    assert.deepEqual(await versions(), { v2: 2, [forged]: 1 })
+
+    const lines = describeReseal(report)
+    assert.ok(lines.every((l) => !l.includes('\n')), lines.join('\n'))
+    assert.ok(!lines.some((l) => l.trimStart().startsWith('0 rows: missing key')), lines.join('\n'))
+    assert.ok(lines.some((l) => l.includes(JSON.stringify(forged))), lines.join('\n'))
+    assert.ok(logged.every((l) => !l.includes('\n')), logged.join('|'))
   })
 
   test('the application replacing a key mid-rotation leaves the customer with their new key', async () => {

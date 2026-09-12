@@ -178,6 +178,17 @@ function quoteVersion(version: string): string {
   return JSON.stringify(version.slice(0, 64))
 }
 
+/** A version as it appears in a report line: bare when it is a version, and as
+ *  its own JSON string when it is not.
+ *
+ *  The re-sealing report prints the label of every version it counted, and the
+ *  label comes out of a text column with no constraint on it. A label carrying a
+ *  newline, printed raw, is a line of the report that the tool did not write,
+ *  and the report is what an operator reads before deleting a key. */
+export function versionLabel(version: string): string {
+  return VERSION_SHAPE.test(version) ? version : JSON.stringify(version.slice(0, 64))
+}
+
 /**
  * The sealing keys this process holds, addressed by version.
  *

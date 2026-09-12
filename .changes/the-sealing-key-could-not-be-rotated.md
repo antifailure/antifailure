@@ -1,3 +1,5 @@
+# security
+
 The secret that seals every customer's stored provider key could not be
 rotated. Replacing it made every stored key stop opening, permanently, and the
 failure was silent: rows recorded which key version sealed them and nothing read

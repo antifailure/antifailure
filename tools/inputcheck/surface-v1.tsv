@@ -257,6 +257,8 @@ terraform:modules/control-plane	variable	posthog_project_key	string	optional
 terraform:modules/control-plane	variable	posthog_region	string	optional
 terraform:modules/control-plane	variable	product_name	string	optional
 terraform:modules/control-plane	variable	provider_key_secret_enabled	bool	optional
+terraform:modules/control-plane	variable	provider_key_secrets_name	string	optional
+terraform:modules/control-plane	variable	provider_key_version	string	optional
 terraform:modules/control-plane	variable	public_url	string	optional
 terraform:modules/control-plane	variable	resend_api_key_secret_name	string	optional
 terraform:modules/control-plane	variable	resource_group_name	string	required
