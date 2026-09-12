@@ -24,8 +24,9 @@ package azurepg
 // workaround and it is written as one: if engine/pkg ever exports a code
 // constructor, every use of this file should become a call to it.
 //
-// The recognition is by the first AF-XXX-000 shaped token in the rendered
-// target, because engine/internal/errors renders "AF-DB-004: the golden ..."
+// The recognition is by the first token shaped like an error code, AF then
+// capital letters then digits, in the rendered target, because
+// engine/internal/errors renders "AF-DB-004: the golden ..."
 // and prefixes an operation when one is set. Matching the first token rather
 // than searching the whole string is what stops a catalog message that
 // happened to mention another code from matching the wrong one.
