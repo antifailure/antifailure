@@ -345,7 +345,7 @@ export function TermsPage() {
               ],
               [
                 "Availability",
-                "Nothing here is a service level commitment. There is none, and the reasons are set out on the service levels page rather than left for a customer to discover.",
+                "Nothing here is a service level commitment, and there is none.",
               ],
             ]}
           />

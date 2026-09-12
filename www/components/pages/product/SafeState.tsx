@@ -22,7 +22,7 @@ export function SafeStatePage() {
             { title: "Deterministic masking", body: "Format-preserving replacement with uniqueness preserved, inside the customer boundary." },
             { title: "Nothing that grants access survives", body: "A session token is deleted. A key, a secret and a password become a keyed hash of the same length that unlocks nothing." },
             { title: "Free-text PII", body: "Scan for emails, cards, phones, and keys that schema rules miss." },
-            { title: "Evidence report", body: "Distribution validation, schema-drift handling, and a signed sanitization attestation." },
+            { title: "Evidence report", body: "The tables, columns and rows sampled, every detector finding, and a signed sanitization attestation. A rule naming a column the schema no longer has is refused by name." },
           ]}
         />
       </PageSection>
@@ -53,7 +53,7 @@ export function SafeStatePage() {
           <PageHeading title="<strong>Postgres first.</strong> Deep enterprise data platforms can be an external provider, not a rebuild." />
           <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
             The built-in engine covers common Postgres cases: restore, subset, mask, delete credentials,
-            validate distribution, then destroy. Matching a dedicated test-data platform’s connector depth
+            scan the result back with the detectors that would find a leak, then destroy. Matching a dedicated test-data platform’s connector depth
             is not the point. What this returns is a decision about a deployment, not a dataset.
           </p>
         </Split>

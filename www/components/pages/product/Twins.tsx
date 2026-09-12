@@ -183,8 +183,9 @@ export function TwinsPage() {
             <div>
               <MonoLabel tone="reader" className="uppercase tracking-[0.14em]">limit</MonoLabel>
               <p className="mt-1.5 text-[15px] leading-6 tracking-extra-tight text-black">
-                There is no automatic time-to-live and no independent reaper yet. The sweep is a
-                command a person or a schedule runs.
+                Every environment is created with a lifetime, 24 hours unless the manifest says
+                otherwise, and af env reap removes the ones past it. Nothing runs that on its own:
+                a person or a schedule does.
               </p>
             </div>
           </div>

@@ -87,16 +87,33 @@ const PLANS: Plan[] = [
     secondary: {
       label: "Annual contract",
       value: "$30,000 to $250,000+",
-      hint: "annually · scale, governance, residency, fleet",
+      hint: "annually · scale, governance, and where environments run",
     },
     tagline: "More repositories, organization policy, and the controls enterprises buy.",
     cta: { href: "/contact#book", label: "Talk to us", theme: "outlined" },
+    // Two lines of this list used to sell things nothing behind the page does.
+    //
+    // "Fleet management and premium connectors". Fleet is the vendor's own
+    // operator surface, web/apps/api/src/admin/fleet.ts, which no customer can
+    // reach, and "premium connectors" appeared on this line and nowhere else in
+    // the repository. Single sign-on and SCIM replace it because they are what
+    // the enterprise edition really adds, proved against real identity
+    // providers. They live in ee/web/server, and the hosted control plane runs
+    // the community image, so the line says where they are.
+    //
+    // "Governance, evidence retention, and residency". retentionDays is
+    // declared per plan in entitlements.ts and nothing reads it: the partition
+    // sweeper applies one AF_EVENT_RETENTION_MONTHS to every organization.
+    // Residency is real for environments, through the allowed_regions policy
+    // and the region a runtime target carries. It is not a property of the
+    // hosted control plane, which runs in one Azure region, and the paragraph
+    // above the cards says so.
     includes: [
       "More repositories, volume, and peak workload",
       `Up to ${members("enterprise")} members, counting invitations not yet accepted`,
       "Organization-wide release policy",
-      "Governance, evidence retention, and residency",
-      "Fleet management and premium connectors",
+      "Residency, so environments run only in the regions you name",
+      "Single sign-on and SCIM, in the enterprise edition you run",
       "Support and service-level commitments, sold when references exist",
     ],
   },
@@ -108,7 +125,7 @@ const VALUE_METRICS: [string, string][] = [
   ["Environment execution", "Minutes the twin is provisioned, exercised, and destroyed."],
   ["Data volume", "Sanitized, referential state restored inside your boundary."],
   ["Peak workload", "Traffic shape and concurrency, not model fan-out."],
-  ["Governance and support", "Policy scope, evidence retention, residency, and response level."],
+  ["Governance and support", "Policy scope, the regions environments may run in, and response level."],
 ];
 
 function PlanCard({ plan }: { plan: Plan }) {
@@ -292,6 +309,9 @@ export function PricingPage() {
           below and are enforced from the first environment. Team is bought from the console
           with a card at the price on its card, and cancelled from the same page. Enterprise is
           arranged with a person, so its band is illustrative and its button books a call.
+          Residency on that plan is about where your environments run, which a policy holds to
+          the regions you name. The hosted control plane itself runs in one Azure region,
+          Central US, and it can also be run on your own infrastructure in a region you choose.
         </p>
         <ul className="grid grid-cols-3 items-stretch gap-x-12 max-xl:grid-cols-1 max-xl:gap-y-12">
           {PLANS.map((plan) => (
