@@ -23031,9 +23031,8 @@ Four limits, so that nobody quotes this for more than it says.
 It is a reading of the source at one commit. It says what the software does. It
 says nothing about how any particular deployment is configured, what the hosted
 instance retains, or for how long. For the hosted instance, the
-[published vendor list](https://antifailure.dev/subprocessors) is the
-companion document and it is built the same way, from the code that talks to
-each vendor.
+[privacy notice](https://antifailure.dev/privacy) is the companion document and
+it is built the same way, from the code that talks to each vendor.
 
 Exact redaction covers values the engine loaded. A credential that the secrets
 subsystem never saw is caught only if it matches a pattern rule, and the pattern

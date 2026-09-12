@@ -14,13 +14,6 @@ import {
   SpecTable,
 } from "@/components/pages/kit";
 import { cn } from "@/lib/cn";
-import { BACKUP_RECOVERY, LOG_RETENTION } from "@/lib/legal-facts";
-import {
-  NOT_ENGAGED,
-  SUBPROCESSOR_CHANGES,
-  SUBPROCESSORS,
-  SUBPROCESSORS_REVIEWED,
-} from "@/lib/subprocessors";
 
 const NOT_CLAIMED = [
   "Zero rollback. No deployment can ever fail.",
@@ -64,27 +57,6 @@ function Ledger({ items, measure }: { items: string[]; measure?: boolean }) {
   );
 }
 
-/** A dated entry in a document's own history, newest first. */
-function ChangeLog({ entries }: { entries: { date: string; change: string }[] }) {
-  return (
-    <ul className="mt-12 flex flex-col border-t border-black/10 max-md:mt-8">
-      {entries.map((entry) => (
-        <li
-          key={`${entry.date}-${entry.change}`}
-          className="flex gap-x-8 border-b border-black/10 py-4 max-md:flex-col max-md:gap-y-1"
-        >
-          <span className="w-[160px] shrink-0 font-mono text-[13px] leading-6 tracking-snug text-black max-md:w-full">
-            {entry.date}
-          </span>
-          <span className="text-[16px] leading-7 tracking-extra-tight text-gray-new-40">
-            {entry.change}
-          </span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 /** The line every one of these pages carries, in one place so they agree. */
 function CounselNotice({ children }: { children: ReactNode }) {
   return (
@@ -97,14 +69,6 @@ function CounselNotice({ children }: { children: ReactNode }) {
 }
 
 
-/** A published number spelled as a word, at the start of a sentence. The words
- *  live in legal-facts.ts so a test can hold them to the Terraform that sets
- *  them, and they are lower case there because most of their uses are mid
- *  sentence. */
-function cap(word: string): string {
-  return word.charAt(0).toUpperCase() + word.slice(1);
-}
-
 export function PrivacyPage() {
   return (
     <PageShell>
@@ -115,11 +79,11 @@ export function PrivacyPage() {
         lead="The hosted control plane holds organizations, policy, aggregated reports, and plan limits. Raw snapshots, secrets, and captured request bodies stay in your cloud by default."
         actions={
           <>
-            <Button href="/dpa" theme="outlined">
-              Data Processing Agreement
+            <Button href="/terms" theme="outlined">
+              Terms of Use
             </Button>
-            <Button href="/data-retention" theme="outlined">
-              Retention and deletion
+            <Button href="/docs/security/data-boundary" theme="outlined">
+              The data boundary
             </Button>
           </>
         }
@@ -187,7 +151,7 @@ export function PrivacyPage() {
             integration, and it is active only where <code>AF_STRIPE_SECRET_KEY</code> and{" "}
             <code>AF_STRIPE_WEBHOOK_SECRET</code> are set. Where they are, Stripe holds the
             customer, subscription and invoice records for that deployment and is a processor for
-            it, listed on the <Link prefetch={false} href="/subprocessors">subprocessor page</Link>. Where they are
+            it. Where they are
             not, the billing routes refuse and name the missing variables, and an organization
             carries nothing but a plan name, which sets its rate limits and quotas. The control
             plane says which of the two it is on the first line it logs when it starts.
@@ -255,11 +219,9 @@ export function PrivacyPage() {
             <strong>PostHog, Inc. receives all of that, and we will not dress that up.</strong>{" "}
             Your browser does not talk to a posthog.com host: it talks to an endpoint we run at{" "}
             <code>app.antifailure.dev</code>, which forwards. That changes where the request goes
-            and not who reads it, so PostHog is on our{" "}
-            <Link prefetch={false} href="/subprocessors">
-              subprocessor list
-            </Link>{" "}
-            with a row of its own saying so. What the arrangement genuinely buys you is two things.
+            and not who reads it, so PostHog is a processor for this website and is named as one
+            here. The data is processed in the United States, on PostHog Cloud US. What the
+            arrangement genuinely buys you is two things.
             A content blocker does not recognise the request, so the numbers are not quietly half
             missing and nobody here is tempted to guess at the gap. And your IP address is not
             forwarded, so PostHog never receives it, which costs us any real geography on those
@@ -282,39 +244,30 @@ export function PrivacyPage() {
         <MeasurementSwitch />
       </PageSection>
       <PageSection>
-        <CounselNotice>
-          This notice describes the architecture and the code as they stand. It is not a
-          counsel-reviewed privacy policy, and it names no legal entity, because there is not yet a
-          generally available control plane for one to contract about.
-        </CounselNotice>
-        <Prose className="mt-10">
+        <Prose>
           <p>
             Signing in creates a session record and grants membership of the organization the
-            GitHub App was installed on. The three documents that a security review asks for
-            by name are now drafted rather than promised: the{" "}
-            <Link prefetch={false} href="/dpa">Data Processing Agreement</Link>, the{" "}
-            <Link prefetch={false} href="/subprocessors">subprocessor list</Link>, and the{" "}
-            <Link prefetch={false} href="/data-retention">retention and deletion commitments</Link>. Read them as the
-            current shape of the answer, not as a signed one.
+            GitHub App was installed on. That record, the organization and its policy are what the
+            control plane keeps. Everything this notice calls production data stays in your cloud.
           </p>
         </Prose>
       </PageSection>
       <RelatedGrid
         items={[
           {
-            href: "/dpa",
-            title: "Data Processing Agreement",
-            description: "Roles, security measures, and what we cannot yet do.",
+            href: "/terms",
+            title: "Terms of Use",
+            description: "What the product is allowed to do to your database.",
           },
           {
-            href: "/subprocessors",
-            title: "Subprocessors",
-            description: "Who receives data, and who deliberately does not.",
+            href: "/docs/security/data-boundary",
+            title: "The data boundary",
+            description: "Which plane holds what, and what can cross.",
           },
           {
-            href: "/data-retention",
-            title: "Retention and deletion",
-            description: "How long each thing is kept, and how it goes away.",
+            href: "/acceptable-use",
+            title: "Acceptable Use",
+            description: "The few things you may not point this at.",
           },
         ]}
       />
@@ -335,8 +288,8 @@ export function TermsPage() {
             <Button href="/privacy" theme="outlined">
               Privacy Notice
             </Button>
-            <Button href="/sla" theme="outlined">
-              Service levels
+            <Button href="/acceptable-use" theme="outlined">
+              Acceptable Use
             </Button>
           </>
         }
@@ -515,7 +468,6 @@ export function TermsPage() {
             title: "Developer policy",
             description: "The API, the MCP surface, and the tokens that reach them.",
           },
-          { href: "/sla", title: "Service levels", description: "There is no SLA. Here is what there is." },
         ]}
       />
     </PageShell>
@@ -724,720 +676,6 @@ export function DeveloperPolicyPage() {
             href: "/acceptable-use",
             title: "Acceptable use",
             description: "What the product may not be pointed at.",
-          },
-          { href: "/sla", title: "Service levels", description: "There is no SLA. Here is what there is." },
-        ]}
-      />
-    </PageShell>
-  );
-}
-
-export function DpaPage() {
-  return (
-    <PageShell>
-      <PageHero
-        path="/dpa"
-        eyebrow="Data Processing Agreement"
-        title="The terms under which we would process data on your behalf."
-        lead="A draft, published before there is anything to sign, so that a security review can read it now and tell us where it is wrong. Its subprocessor annex is a separate page because that is the part that goes stale."
-        actions={
-          <>
-            <Button href="/subprocessors" theme="outlined">
-              Subprocessors
-            </Button>
-            <Button href="/data-retention" theme="outlined">
-              Retention and deletion
-            </Button>
-          </>
-        }
-      />
-      <PageSection>
-        <CounselNotice>
-          No lawyer has read this. It is drafted from the code rather than from a template, which
-          makes it accurate about what the system does and says nothing about whether it is
-          enforceable. It must be reviewed before anybody relies on it.
-        </CounselNotice>
-      </PageSection>
-      <PageSection tone="ruled">
-        <PageHeading kicker="Parties" title="<strong>Who is agreeing, and under which law.</strong>" />
-        <div className="mt-14 max-md:mt-10">
-          <SpecTable
-            rows={[
-              ["Processor", "Antifailure, trading as the legal entity named on the signed copy."],
-              ["Controller", "The customer organization named on the order form."],
-              [
-                "Governing law",
-                "Not yet chosen. A jurisdiction stated here before it is decided would be a guess in a contract.",
-              ],
-              [
-                "Contact for data protection",
-                "No address at antifailure.dev can receive mail: the domain publishes no mail exchanger. Security reports go through GitHub private vulnerability reporting, and the contact page lists the routes that resolve today. A privacy address will be published with the signed copy.",
-              ],
-            ]}
-          />
-        </div>
-        <Prose className="mt-10">
-          <p>
-            Four values are missing because no part of this product knows them: the registered
-            entity <Blank>entity name</Blank>, its address <Blank>registered address</Blank>, the
-            governing law and venue <Blank>jurisdiction</Blank>, and the privacy contact address{" "}
-            <Blank>privacy contact</Blank>. They are left visibly blank rather than filled with a
-            plausible default, because a plausible default in a contract is the kind of error nobody
-            catches on a second reading.
-          </p>
-        </Prose>
-      </PageSection>
-      <PageSection>
-        <PageHeading
-          kicker="Roles"
-          title="<strong>Who controls what.</strong> Not everything here is yours, and saying so is part of the agreement."
-        />
-        <div className="mt-14 max-md:mt-10">
-          <SpecTable
-            rows={[
-              [
-                "You control, we process",
-                "Account records, organization and repository metadata, policy configuration, run events, and audit entries for your organization. We act only on your instructions, which are the product's own documented operations.",
-              ],
-              [
-                "You control, we never receive",
-                "Production snapshots, secrets, captured request bodies before redaction, and raw logs from the twin. These stay inside your cloud by architecture, not by a promise in this document.",
-              ],
-              [
-                "We control",
-                "The account and session records signing in creates, what somebody leaves on the contact form, and our own operational records about running the service.",
-              ],
-              [
-                "Purpose limitation",
-                "The data is used to run the service, to keep it secure, and to bill for it if there is ever billing. It is not used to train any model, and no path in this product sends it anywhere that would.",
-              ],
-            ]}
-          />
-        </div>
-      </PageSection>
-      <PageSection tone="panel">
-        <PageHeading
-          kicker="Security"
-          title="<strong>The measures that exist</strong>, described as what the code does rather than as a category."
-        />
-        <div className="mt-14 max-md:mt-10">
-          <SpecTable
-            rows={[
-              [
-                "Tenant isolation",
-                "Every tenant table carries a row-level security policy keyed on the organization, enforced by the database rather than by a query the application has to remember to filter. The event partitions carry the policy too, so naming one directly is isolated by the same rule.",
-              ],
-              [
-                "Least privilege in the database",
-                "The application role cannot run DDL. Partition maintenance runs as a separate migration role on a connection opened for the pass and closed after it, because a role that can alter a table can drop the policies that isolate tenants.",
-              ],
-              [
-                "Secrets",
-                "Database URLs, the sign-in client secret, and the GitHub App private key live in Azure Key Vault and are read by a managed identity. The storage account for masked dumps has shared key access disabled, so every read is attributable to an identity.",
-              ],
-              [
-                "Model provider keys",
-                "Encrypted at rest with a key the control plane holds separately, decrypted for the length of a single request, and never written to a log. Without that key configured, the control plane refuses to store a provider key at all rather than storing it weakly.",
-              ],
-              [
-                "Sessions",
-                "Stored as a hash, never as the token. Absolute lifetime of thirty days with no extension, and expired rows are deleted by a sweep that runs every five minutes.",
-              ],
-              [
-                "Audit log",
-                "Hash chained, so an entry cannot be altered or removed without breaking the verification of every entry after it.",
-              ],
-              [
-                "Transport",
-                "HTTPS only. The engine's control plane client refuses a non-HTTPS endpoint outright, and refuses to send at all unless a redactor is attached.",
-              ],
-              [
-                "Recoverability",
-                `${cap(BACKUP_RECOVERY.production.words)} days of point-in-time recovery on the production database, with geo-redundant backup storage. Staging keeps ${BACKUP_RECOVERY.staging.words} days in one region. A restore is verified against a manifest taken at backup time and then asked, through the unprivileged role, to refuse a cross-tenant read.`,
-              ],
-            ]}
-          />
-        </div>
-      </PageSection>
-      <PageSection>
-        <PageHeading title="<strong>And the measures that do not exist yet.</strong>" />
-        <Ledger
-          items={[
-            "No SOC 2 report, no ISO 27001 certificate, and no third-party penetration test. None is claimed anywhere on this site.",
-            "Monitoring we will not vouch for from here. Alert rules, an availability test and runbooks are written and version controlled, and production is configured to create them (alerting_enabled is true in infra/terraform/stacks/control-plane/production.tfvars). Whether that configuration has been applied to the live subscription is not something you can check from outside this company, and it is not something this page will assert on your behalf. Ask for the evidence and it will be produced or the claim withdrawn.",
-            "No self-service account or organization deletion. Closing an account or removing an organization is carried out by hand against the database by somebody who can reach it. Two things you can do yourself: export your audit log, which is an endpoint, and delete a stored model provider key, which is also an endpoint. There is no self-service export of anything else.",
-            "No SLA, no support commitment, and no published uptime history. Production is deployed and answering, at app.antifailure.dev, with a separate staging deployment at app.dev.antifailure.dev. What does not exist is anything you could hold us to about how long it stays up.",
-          ]}
-        />
-        <Prose className="mt-10">
-          <p>
-            The point of listing these is that a security review will find every one of them. Better
-            it finds them here, next to the measures that are real, than in a questionnaire answer
-            that has to be walked back. The <Link prefetch={false} href="/sla">service levels page</Link> sets out what
-            would have to change first.
-          </p>
-          <p>
-            One of them had to be walked back here first. This list read &ldquo;No production
-            deployment. What exists is a staging control plane behind a sign-in allowlist,&rdquo;
-            and production was deployed and answering the whole time:{" "}
-            <code>app.antifailure.dev/readyz</code> returns ready, and staging is a separate, newer
-            deployment at <code>app.dev.antifailure.dev</code> serving a different commit. A
-            reviewer checking the address our own README gives them disproves that sentence in
-            thirty seconds, and then has cause to doubt every other line on a page whose only asset
-            is that it can be checked. It is corrected above rather than deleted, because a page
-            that quietly drops the item it got wrong is worth less than one that says which item it
-            was.
-          </p>
-        </Prose>
-      </PageSection>
-      <PageSection tone="ruled">
-        <PageHeading
-          kicker="Obligations"
-          title="<strong>What we would owe you</strong>, and how quickly the honest answer is a range."
-        />
-        <div className="mt-14 max-md:mt-10">
-          <SpecTable
-            rows={[
-              [
-                "Subprocessors",
-                "The current list is published and dated. Thirty days written notice before a new subprocessor begins processing, with a right to object during that period. See the subprocessor page for how the notice actually reaches you today.",
-              ],
-              [
-                "Breach notification",
-                "Without undue delay after becoming aware of a personal data breach. The qualifier matters and is not boilerplate: with no continuous monitoring in place, becoming aware can lag the event, and no number here can honestly say by how much.",
-              ],
-              [
-                "Data subject requests",
-                "Assistance with access, correction, and erasure requests. Executed by hand, because there is no self-service path, so the practical turnaround is days rather than seconds.",
-              ],
-              [
-                "Audit and information",
-                "The data plane is open source and can be read rather than described. For the control plane, the answer today is a conversation and this documentation, not an audit report.",
-              ],
-              [
-                "Return and deletion",
-                "On termination, control plane records for the organization are deleted on request. Backups age out on their own schedule, which is set out on the retention page.",
-              ],
-              [
-                "International transfers",
-                "Processing happens in the United States, in the Azure Central US region, which the infrastructure code enforces rather than assumes. A transfer mechanism for customers outside the United States is not yet in place.",
-              ],
-            ]}
-          />
-        </div>
-        <Prose className="mt-10">
-          <p>
-            The transfer mechanism is the fifth missing value:{" "}
-            <Blank>transfer mechanism</Blank>. Standard contractual clauses are the usual answer and
-            none have been executed, so this document does not claim them.
-          </p>
-        </Prose>
-      </PageSection>
-      <RelatedGrid
-        items={[
-          {
-            href: "/subprocessors",
-            title: "Subprocessors",
-            description: "The annex to this agreement, kept on its own page.",
-          },
-          {
-            href: "/data-retention",
-            title: "Retention and deletion",
-            description: "The periods this agreement refers to.",
-          },
-          { href: "/privacy", title: "Privacy Notice", description: "What we collect and never take." },
-        ]}
-      />
-    </PageShell>
-  );
-}
-
-export function SubprocessorsPage() {
-  // THE SCOPE FILTER IS LOAD BEARING, not tidying. Before it, this page grouped
-  // on `engagement` alone, so PostHog, which is conditional, rendered under the
-  // heading "Model providers receive nothing unless you give us a key" and the
-  // paragraph under that heading saying "these two". A row inserted in the
-  // wrong place is not a thing to be careful about on a subprocessor page; it
-  // is a thing to make impossible, so the page reads the field.
-  const product = SUBPROCESSORS.filter((s) => s.scope === "product");
-  const always = product.filter((s) => s.engagement === "always");
-  const conditional = product.filter((s) => s.engagement === "conditional");
-  const website = SUBPROCESSORS.filter((s) => s.scope === "website");
-
-  return (
-    <PageShell>
-      <PageHero
-        path="/subprocessors"
-        eyebrow="Subprocessors"
-        title="Everyone who receives data, and everyone who deliberately does not."
-        lead={`Established by reading the code that talks to each vendor, not by recalling what a product like this usually uses. Last checked against the code on ${SUBPROCESSORS_REVIEWED}.`}
-        actions={
-          <>
-            <Button href="/dpa" theme="outlined">
-              Data Processing Agreement
-            </Button>
-            <Button href="/privacy" theme="outlined">
-              Privacy Notice
-            </Button>
-          </>
-        }
-      />
-      <PageSection>
-        <PageHeading
-          kicker="Engaged for every organization"
-          title="<strong>Two vendors receive data from every deployment.</strong>"
-        />
-        {always.map((vendor) => (
-          <div key={vendor.name} className="mt-14 max-md:mt-10">
-            <h3 className="mb-5 text-[22px] leading-snug tracking-extra-tight text-black max-md:text-[19px]">
-              {vendor.name}
-            </h3>
-            <SpecTable
-              rows={[
-                ["Services", vendor.service],
-                ["Purpose", vendor.purpose],
-                ["Data received", vendor.data],
-                ["Where", vendor.location],
-                ["Established from", vendor.evidence],
-              ]}
-            />
-          </div>
-        ))}
-      </PageSection>
-      <PageSection tone="panel">
-        <PageHeading
-          kicker="Engaged only under a condition"
-          title="<strong>Model providers receive nothing unless you give us a key.</strong>"
-        />
-        <Prose className="mt-10">
-          <p>
-            Model-driven planning is optional. With no provider key stored, the engine plans
-            deterministically and no request leaves for either vendor. When the engine calls a model
-            directly from your own continuous integration with your own key, that is your
-            relationship with the vendor rather than ours. These two are listed as our subprocessors
-            for the case that matters to a review: a request that transits the hosted control plane.
-          </p>
-        </Prose>
-        {conditional.map((vendor) => (
-          <div key={vendor.name} className="mt-14 max-md:mt-10">
-            <h3 className="mb-5 text-[22px] leading-snug tracking-extra-tight text-black max-md:text-[19px]">
-              {vendor.name}
-            </h3>
-            <SpecTable
-              rows={[
-                ["Services", vendor.service],
-                ["Purpose", vendor.purpose],
-                ["Data received", vendor.data],
-                ["Where", vendor.location],
-                ["Engaged when", vendor.condition ?? ""],
-                ["Established from", vendor.evidence],
-              ]}
-            />
-          </div>
-        ))}
-      </PageSection>
-      <PageSection>
-        <PageHeading
-          kicker="Engaged by this website, and by nothing in the product"
-          title="<strong>One vendor sees this website.</strong> It sees nothing a customer runs."
-        />
-        <Prose className="mt-10">
-          <p>
-            This site counts page views itself and always will, but a counter that sends no
-            address, no element and no ordering cannot say where somebody gave up on it. PostHog
-            answers that, with autocapture and session replay, for the pages you are reading right
-            now. It is listed separately from the two sections above because it is engaged by a
-            different thing: no account, organization, repository, policy, run, audit entry or
-            piece of your production data reaches it, because nothing that handles any of those
-            calls it. Its requests go through an endpoint we run rather than to a vendor address,
-            and that is transport rather than a boundary: PostHog, Inc. receives what they carry,
-            which is why it is on this page at all.
-          </p>
-          <p>
-            Every value typed into a form is replaced in the browser before anything is sent, so a
-            recording of the careers form or the contact form holds fields filling up with
-            asterisks and not what was written in them. There is no cookie, no identifier that
-            outlives a tab, and no IP address: the endpoint in front of PostHog does not forward
-            one. A reader whose browser sends Global Privacy Control or Do Not Track, or
-            who has switched measurement off on the{" "}
-            <Link prefetch={false} href="/privacy">
-              privacy page
-            </Link>
-            , never fetches PostHog&rsquo;s code at all.
-          </p>
-        </Prose>
-        {website.map((vendor) => (
-          <div key={vendor.name} className="mt-14 max-md:mt-10">
-            <h3 className="mb-5 text-[22px] leading-snug tracking-extra-tight text-black max-md:text-[19px]">
-              {vendor.name}
-            </h3>
-            <SpecTable
-              rows={[
-                ["Services", vendor.service],
-                ["Purpose", vendor.purpose],
-                ["Data received", vendor.data],
-                ["Where", vendor.location],
-                ["Engaged when", vendor.condition ?? ""],
-                ["Established from", vendor.evidence],
-              ]}
-            />
-          </div>
-        ))}
-      </PageSection>
-      <PageSection tone="ruled">
-        <PageHeading
-          kicker="Not engaged"
-          title="<strong>The vendors a reviewer asks about next</strong>, and why each one is absent."
-        />
-        <div className="mt-14 max-md:mt-10">
-          <SpecTable rows={NOT_ENGAGED} />
-        </div>
-      </PageSection>
-      <PageSection>
-        <PageHeading kicker="Notice" title="<strong>How you find out when this list changes.</strong>" />
-        <div className="mt-14 max-md:mt-10">
-          <SpecTable
-            rows={[
-              [
-                "Today",
-                "This page and the log below. The list is a single file in a public repository, so every change to it is a public commit with a date and an author, and can be watched without asking us.",
-              ],
-              [
-                "Under a signed agreement",
-                "Thirty days written notice to the address on the order form before a new subprocessor begins processing, and a right to object within that period.",
-              ],
-              [
-                "Why the difference",
-                "Nothing in this product can send an email. That is a fact about the code rather than a policy, and promising a notification that nothing could deliver is the failure this page exists to avoid.",
-              ],
-            ]}
-          />
-        </div>
-        <Prose className="mt-10">
-          <p>
-            The thirty day period is a drafted commitment rather than a negotiated one. It is the
-            common term and it is written here so that a review has something concrete to accept or
-            push back on.
-          </p>
-        </Prose>
-      </PageSection>
-      <PageSection tone="ruled">
-        <PageHeading title="<strong>Change log.</strong>" />
-        <ChangeLog entries={SUBPROCESSOR_CHANGES} />
-      </PageSection>
-      <RelatedGrid
-        items={[
-          {
-            href: "/dpa",
-            title: "Data Processing Agreement",
-            description: "The agreement this list annexes.",
-          },
-          { href: "/privacy", title: "Privacy Notice", description: "What we collect and never take." },
-          {
-            href: "/data-retention",
-            title: "Retention and deletion",
-            description: "How long each thing is kept.",
-          },
-        ]}
-      />
-    </PageShell>
-  );
-}
-
-export function ServiceLevelsPage() {
-  return (
-    <PageShell>
-      <PageHero
-        path="/sla"
-        eyebrow="Service levels"
-        title="There is no service level agreement."
-        lead="A control plane is deployed and open to anyone who signs in, and no agreement is offered on it yet. Rather than leave a security review to discover that, this page says what is not committed, what holds anyway, and what would have to be true before a number here meant anything."
-        actions={
-          <>
-            <Button href="/terms" theme="outlined">
-              Terms of Use
-            </Button>
-            <Button href="/docs" theme="outlined">
-              Read the docs
-            </Button>
-          </>
-        }
-      />
-      <PageSection>
-        <PageHeading kicker="Not committed" title="<strong>None of this is promised.</strong>" />
-        <Ledger
-          items={[
-            "No uptime target, and no measured uptime to quote instead.",
-            "No support response time, and no support tier to attach one to.",
-            "No service credits, because there is nothing to credit against.",
-            "A status page, at antifailure.github.io/antifailure, that probes production and says how old its last check is. No uptime target sits behind it.",
-            "No on-call rotation. An outage today reaches a person when a person happens to look.",
-          ]}
-        />
-      </PageSection>
-      <PageSection tone="panel">
-        <PageHeading
-          kicker="True anyway"
-          title="<strong>The part that survives our outage.</strong> The thing that gates your pull request does not run here."
-        />
-        <div className="mt-14 max-md:mt-10">
-          <SpecTable
-            rows={[
-              [
-                "The verdict is local",
-                "The engine runs inside your own continuous integration and reaches a verdict there. No control plane is required to run it, and none is configured on most runs.",
-              ],
-              [
-                "An outage cannot fail your build",
-                "Events buffer in memory, spill to a durable spool on disk, and are delivered by a later command. When the buffer is full the oldest events are dropped and the count is reported, because an environment must not stall because a dashboard is down.",
-              ],
-              [
-                "Proven, not asserted",
-                "A chaos test runs a real command through the real orchestrator against a control plane that is genuinely unreachable, asserts the command did not fail, and asserts the control plane really did receive nothing.",
-              ],
-              [
-                "Nothing phones home",
-                "There is no license server and no activation call. The enterprise edition reads a key from the environment. Nothing expires.",
-              ],
-            ]}
-          />
-        </div>
-      </PageSection>
-      <PageSection tone="ruled">
-        <PageHeading
-          kicker="What is deployed"
-          title="<strong>A production control plane and a staging one</strong>, and only two people can sign in to either."
-        />
-        <div className="mt-14 max-md:mt-10">
-          <SpecTable
-            rows={[
-              [
-                "Environment",
-                "Two: production at app.antifailure.dev and staging at app.dev.antifailure.dev, in separate resource groups, with separate databases and separate GitHub OAuth applications. Both are behind a sign-in allowlist naming the same two accounts. Production is reached only by promoting the exact image digest staging tested, behind an approval on a GitHub environment.",
-              ],
-              [
-                "Redundancy",
-                "Production is configured for two application replicas and a zone-redundant database standby. Staging runs one replica and no high availability, deliberately, because a post-deploy health probe measuring a cold start measures nothing. The figures on this row are the ones the production stack declares, in infra/terraform/stacks/control-plane/production.tfvars.",
-              ],
-              [
-                "Backups",
-                `Production is configured for ${BACKUP_RECOVERY.production.words} days of point-in-time recovery with geo-redundant backup storage, so a region losing its storage does not take the backups with it. Staging keeps ${BACKUP_RECOVERY.staging.words} days in one region with geo-redundancy off. A standby is not a backup: a bad migration reaches it instantly.`,
-              ],
-              [
-                "Monitoring",
-                "Metric alert rules and an action group are in the infrastructure and are enabled on production and off on staging, on purpose, because staging is meant to break several times a week and a page for that is a page somebody learns to ignore. Each rule's description carries the URL of its own runbook. Nobody is on call, so an alert reaches a mailbox rather than a person who is awake.",
-              ],
-              [
-                "Recovery time",
-                "The restore drill now runs weekly against a real Postgres. It has reported under two seconds on a continuous integration runner and up to 160 seconds on a loaded laptop, and neither number is a recovery time objective: the only one that would mean anything is measured on the hardware you would actually recover onto.",
-              ],
-            ]}
-          />
-        </div>
-      </PageSection>
-      <PageSection>
-        <PageHeading title="<strong>What has to be true before there is an SLA.</strong>" />
-        <Ledger
-          items={[
-            "A production environment, separate from staging, with its own credentials and its own sign-in application. In place.",
-            "High availability on the database and more than one application replica. Configured on production.",
-            "Geo-redundant backup, and a restore drill that runs on a schedule and fails loudly. Configured, and the drill runs weekly.",
-            "Alerting that reaches a person, and a runbook per alert that the alert actually points at. The rules and the runbooks exist; who they reach is a mailbox, not a rotation.",
-            "On-call, even if it is one person with a phone. Not yet.",
-            "A status page, and enough measured history behind it for a number to mean something. Not yet: the probe runs, and its output is not published anywhere.",
-          ]}
-        />
-        <div className="mt-14 max-md:mt-10">
-          <CounselNotice>
-            An availability commitment is a contractual term, not a documentation change. This page
-            describes the current state so that nobody has to infer it. It is not itself a
-            commitment, and the wording of any future one needs counsel.
-          </CounselNotice>
-        </div>
-      </PageSection>
-      <RelatedGrid
-        items={[
-          { href: "/terms", title: "Terms of Use", description: "The promise is evidence, not zero-failure." },
-          {
-            href: "/dpa",
-            title: "Data Processing Agreement",
-            description: "The security measures that do and do not exist.",
-          },
-          { href: "/pricing", title: "Pricing", description: "Community, team, and enterprise." },
-        ]}
-      />
-    </PageShell>
-  );
-}
-
-export function DataRetentionPage() {
-  return (
-    <PageShell>
-      <PageHero
-        path="/data-retention"
-        eyebrow="Retention and deletion"
-        title="How long each thing is kept, and how it goes away."
-        lead="Every period below is one the running system already enforces, or one this page says plainly that it does not. A retention promise the code cannot keep is worse than no promise, because somebody plans around it."
-        actions={
-          <>
-            <Button href="/privacy" theme="outlined">
-              Privacy Notice
-            </Button>
-            <Button href="/dpa" theme="outlined">
-              Data Processing Agreement
-            </Button>
-          </>
-        }
-      />
-      <PageSection>
-        <PageHeading kicker="Periods" title="<strong>What is kept, and for how long.</strong>" />
-        <div className="mt-14 max-md:mt-10">
-          <SpecTable
-            rows={[
-              [
-                "Run events",
-                "A whole number of months, set per deployment. The staging control plane keeps twelve. Unset would keep everything forever, and this is stated because it is the default the software ships with.",
-              ],
-              [
-                "Account and organization records",
-                "For as long as the account exists. There is no automatic expiry, and pretending otherwise would be inventing a sweep that nothing runs.",
-              ],
-              [
-                "Audit entries",
-                "For the life of the organization. The log is hash chained, so removing one entry breaks the verification of every entry after it. Selective deletion from the audit log is therefore not offered rather than quietly unreliable.",
-              ],
-              [
-                "Sessions",
-                "Thirty days at the most, with no extension. Expired rows are deleted by a sweep every five minutes. The stored value is a hash, so an expired row does not hold a usable token even before it is swept.",
-              ],
-              [
-                "Command line sign-in codes",
-                "Fifteen minutes of validity, and the row is removed twenty four hours after it expires. Expiry is checked on every read, so a late sweep costs table size and nothing else.",
-              ],
-              [
-                "Model provider keys",
-                "Removal is an endpoint you can call, not a request you have to send us, and it stops the key working immediately. It marks the record revoked rather than deleting the row, so the encrypted value remains until the row is removed with the organization. Rotating a key does the same to the one it replaces.",
-              ],
-              [
-                "Contact form messages",
-                "Kept until you ask for removal, which is carried out by hand: the role serving public requests holds insert and no select on that table, so there is deliberately no endpoint that reads one back or deletes one. An operator reads the queue on a separate credential and marks each one handled, which is how a request for removal reaches somebody.",
-              ],
-              [
-                "Careers applications",
-                "Removed from the live database by the scheduled maintenance pass once they are older than 180 days, whether reviewed or not. An operator can remove an application sooner. If maintenance fails, removal waits for the next successful pass. Audit records retain a record identifier and action, not the applicant's answers. Existing backups expire on their separate recovery schedule.",
-              ],
-              [
-                "Database backups",
-                `${cap(BACKUP_RECOVERY.production.words)} days of point-in-time recovery on production, ${BACKUP_RECOVERY.staging.words} on staging. A deletion is reflected in every backup only after that window has passed.`,
-              ],
-              [
-                "Analytics events",
-                "Raw analytics events are kept for as long as the deployment sets, and the daily counts computed from them outlive that: a count of page views by channel has nothing in it that identifies anybody. An event carries a keyed hash of the organization rather than its identifier, so the store can count organizations and cannot name one.",
-              ],
-              [
-                "Operational logs",
-                `${cap(LOG_RETENTION.production.words)} days on production and ${LOG_RETENTION.staging.words} on staging, in Azure Monitor. They hold request paths, status codes and timings, and never a request body, a token or a snapshot.`,
-              ],
-              [
-                "Masked dumps",
-                "No deployment stores any today. The storage account for them is not created unless it is explicitly enabled. If it is enabled, a deleted blob is recoverable for thirty days.",
-              ],
-            ]}
-          />
-        </div>
-      </PageSection>
-      <PageSection tone="panel">
-        <PageHeading
-          kicker="Precision"
-          title="<strong>What the event retention actually does</strong>, including the part that is not exact."
-        />
-        <Prose className="mt-10">
-          <p>
-            The events table is partitioned by month on the timestamp the sender stamped, and
-            retention drops whole partitions. A daily pass creates the months ahead first and
-            unconditionally, because a partitioned table with no partition for an incoming row does
-            not slow down, it fails. Only then does it drop what the retention window has condemned.
-          </p>
-          <p className="mt-5">
-            Two consequences follow, and both are stated because a customer who plans around a
-            precise number would be planning around the wrong one.
-          </p>
-        </Prose>
-        <Ledger
-          items={[
-            "Granularity is a month, not a day. An event survives until the whole month it occurred in falls outside the window, so it can outlive a twelve month retention by up to a month and a day.",
-            "A drop is permanent. Archiving a month to a file before dropping it is supported by the code and is not switched on in any deployment, so a dropped month is gone rather than moved.",
-            "A late event that arrived after its month was already gone lands in a default partition and is pruned by age, a bounded number of rows per pass, rather than dropped with its month.",
-            "If the daily pass fails, nothing is dropped. An archive that fails costs a retention run rather than the events.",
-          ]}
-        />
-      </PageSection>
-      <PageSection tone="ruled">
-        <PageHeading kicker="Deletion" title="<strong>How to have data deleted, and what happens then.</strong>" />
-        <div className="mt-14 max-md:mt-10">
-          <SpecTable
-            rows={[
-              [
-                "How to ask",
-                "Write to the privacy contact once it is published. Until then, open a GitHub private vulnerability report, which reaches a person who can act on it without posting anything publicly. Mail is not a route: the domain publishes no mail exchanger, so a request sent to any address at antifailure.dev is delivered nowhere.",
-              ],
-              [
-                "What happens",
-                "Somebody with database access carries the request out by hand. There is no account deletion endpoint and no organization deletion endpoint, so this page does not describe a self-service path that does not exist.",
-              ],
-              [
-                "How long it takes",
-                "Days rather than seconds, and no shorter commitment is made while the work is manual.",
-              ],
-              [
-                "Backups",
-                `A deletion applies to the live database immediately and to backups only as they age out, over the ${BACKUP_RECOVERY.production.words} day recovery window on production and ${BACKUP_RECOVERY.staging.words} on staging. Restoring a backup within that window restores the deleted rows, and any deletion request is applied again afterwards.`,
-              ],
-              [
-                "The audit log",
-                "Entries about an organization are removed with the organization. They are not removed individually, for the chaining reason above.",
-              ],
-              [
-                "A person who asks to be removed",
-                "Their personal fields are erased and the account row is kept. The row is kept by choice, not because the database refuses: the audit log references it with ON DELETE SET NULL and the delete would succeed. What it would also do is set a column that is inside the hash chain to null, so every entry that person ever wrote would stop hashing to its recorded hash and the organization\u2019s audit log would report itself as altered. Erasing the fields removes the personal data; deleting the row would remove the ability to prove nothing else had been changed.",
-              ],
-            ]}
-          />
-        </div>
-        <Prose className="mt-10">
-          <p>
-            The privacy contact is the one value this page cannot supply:{" "}
-            <Blank>privacy contact</Blank>. It is left blank rather than pointed at an address
-            nobody monitors.
-          </p>
-        </Prose>
-      </PageSection>
-      <PageSection>
-        <CounselNotice>
-          These are the periods the software enforces today, written so that a review can check them
-          against the running system. Whether they satisfy a particular regulation is a question for
-          counsel, and no compliance claim is made here.
-        </CounselNotice>
-        <Prose className="mt-10">
-          <p>
-            An operator running their own control plane sets these periods themselves. The variables
-            and what each one does are in the{" "}
-            <a href="/docs/reference/control-plane">control plane reference</a>.
-          </p>
-        </Prose>
-      </PageSection>
-      <RelatedGrid
-        items={[
-          { href: "/privacy", title: "Privacy Notice", description: "What we collect and never take." },
-          {
-            href: "/dpa",
-            title: "Data Processing Agreement",
-            description: "Roles, security measures, and obligations.",
-          },
-          {
-            href: "/subprocessors",
-            title: "Subprocessors",
-            description: "Who receives data, and who deliberately does not.",
           },
         ]}
       />

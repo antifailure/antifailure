@@ -238,39 +238,6 @@ export const ROUTES: readonly Route[] = [
     parent: "/",
   },
   {
-    path: "/dpa",
-    title: pageTitle("Data Processing Agreement"),
-    description:
-      "A draft DPA written from the code: the roles, the security measures that exist, and the ones that do not yet.",
-    summary: "The data processing agreement, and which of its measures are real today.",
-    section: "legal",
-    indexable: true,
-    priority: 0.3,
-    parent: "/privacy",
-  },
-  {
-    path: "/subprocessors",
-    title: pageTitle("Subprocessors"),
-    description:
-      "Everyone who receives data, everyone who deliberately does not, and how the list changes.",
-    summary: "The subprocessor list and the notice period for changing it.",
-    section: "legal",
-    indexable: true,
-    priority: 0.3,
-    parent: "/privacy",
-  },
-  {
-    path: "/data-retention",
-    title: pageTitle("Retention and deletion"),
-    description:
-      "How long each thing is kept, how it goes away, and where the period is not exact.",
-    summary: "Retention periods per data class, and where the boundary is approximate.",
-    section: "legal",
-    indexable: true,
-    priority: 0.3,
-    parent: "/privacy",
-  },
-  {
     path: "/acceptable-use",
     title: pageTitle("Acceptable Use"),
     description:
@@ -287,17 +254,6 @@ export const ROUTES: readonly Route[] = [
     description:
       "The rules for the control plane API and for the engine's Model Context Protocol surface.",
     summary: "What a token may reach, what a model driving the engine is responsible for, and what may change without notice.",
-    section: "legal",
-    indexable: true,
-    priority: 0.3,
-    parent: "/terms",
-  },
-  {
-    path: "/sla",
-    title: pageTitle("Service levels"),
-    description:
-      "There is no service level agreement. What is not committed, what holds anyway, and what would have to change.",
-    summary: "What is and is not promised about availability, stated as a limit.",
     section: "legal",
     indexable: true,
     priority: 0.3,

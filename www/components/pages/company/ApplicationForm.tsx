@@ -369,14 +369,7 @@ export function ApplicationForm() {
         </button>
         <p className="text-[13px] leading-5 tracking-extra-tight text-gray-new-40">
           Read by a person, never sold or added to a newsletter. Removed after
-          180 days under our{" "}
-          <a
-            href="/data-retention"
-            className="text-black underline decoration-black/20 underline-offset-4"
-          >
-            retention policy
-          </a>{" "}
-          and described in our{" "}
+          180 days, and described in our{" "}
           <a
             href="/privacy"
             className="text-black underline decoration-black/20 underline-offset-4"

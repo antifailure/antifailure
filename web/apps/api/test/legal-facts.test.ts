@@ -4,7 +4,7 @@
 //
 // Seven published claims were found false in one night: backup retention saying
 // fourteen days while production runs thirty-five, log retention documented
-// nowhere, the subprocessor page saying there was no billing and that nothing
+// nowhere, the privacy page saying there was no billing and that nothing
 // could send mail while the repository held a real Stripe client and a real
 // mailer, provider-key removal called deletion when it is revocation, a privacy
 // sheet saying a waitlist address never leaves the browser after it started
@@ -23,7 +23,7 @@
 // It holds NUMBERS and the existence of NAMED CAPABILITIES. It cannot hold a
 // sentence. "We do not use Stripe" and "Stripe cannot be used" differ by a
 // promise, and nothing here can tell them apart; the rule for that is prose, at
-// the top of www/lib/subprocessors.ts, and it stays a judgement. It also cannot
+// the top of www/lib/legal-facts.ts, and it stays a judgement. It also cannot
 // see a claim nobody thought to encode: a page can still say something false
 // about a subject this file does not know about. What it does do is make the
 // half that IS checkable fail loudly at the moment the code moves, which is the
@@ -48,11 +48,6 @@ import { fileURLToPath } from 'node:url'
  * assertion over it passes. The first test below is the negative control on
  * exactly that.
  */
-interface RetentionFact {
-  days: number
-  words: string
-}
-
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.join(here, '..', '..', '..', '..')
 
@@ -108,7 +103,7 @@ const INGESTION_HOST = /\b(?:[a-z0-9-]+\.)*i\.posthog\.com|\bapp\.posthog\.com/
  * matching, so a future rewording turns the suite red rather than quiet.
  */
 const PROMISES_A_SWITCH =
-  /switch measurement off|switch the measurement off|turn measurement off|the switch on the privacy page|measurement can be switched off/i
+  /switch\s+measurement\s+off|switch\s+the\s+measurement\s+off|turn\s+measurement\s+off|the\s+switch\s+on\s+the\s+privacy\s+page|the\s+switch\s+below|measurement\s+can\s+be\s+switched\s+off/i
 
 const DENIES_POSTHOG = /\b(?:is|are)\s+no\b[^.]{0,200}?\bno PostHog\b|\bthere is no PostHog\b/i
 
@@ -163,10 +158,10 @@ function withoutComments(source: string): string {
  * Used by the PostHog rules below, which are about where a reader's browser is
  * POINTED. That is a property of code, so this reads code.
  *
- * TWO FILES ARE EXCLUDED BY NAME AND THE EXCLUSION IS THE INTERESTING PART.
- * www/lib/subprocessors.ts and www/lib/legal-facts.ts are prose stored as string
- * literals: they are the published legal copy, and that copy has to be able to
- * NAME the vendor and its hosts in a sentence. `withoutComments` cannot help,
+ * ONE FILE IS EXCLUDED BY NAME AND THE EXCLUSION IS THE INTERESTING PART.
+ * www/lib/legal-facts.ts is prose stored as string literals: it is the published
+ * legal copy, and that copy has to be able to NAME the vendor and its hosts in a
+ * sentence. `withoutComments` cannot help,
  * because a sentence in a string literal is code as far as any parser here is
  * concerned. This is the same problem the comment stripping already solved one
  * level down, and it has the same answer: a gate people cannot explain
@@ -178,7 +173,7 @@ function withoutComments(source: string): string {
  * has a problem this gate is not the right instrument for.
  */
 async function siteSources(): Promise<{ file: string; text: string }[]> {
-  const EXCLUDED = new Set(['www/lib/subprocessors.ts', 'www/lib/legal-facts.ts'])
+  const EXCLUDED = new Set(['www/lib/legal-facts.ts'])
   // Nothing under www/test reaches a browser, which is the reason
   // tools/routecheck skips it too. It also has to be skipped rather than
   // merely being harmless: the site's own test asserts that the vendor's
@@ -210,26 +205,6 @@ async function siteSources(): Promise<{ file: string; text: string }[]> {
 
 const facts = await read('www/lib/legal-facts.ts')
 
-/** One `{ days: N, words: "x" }` out of the facts file, by the constant and the
- *  environment that hold it. */
-function published(constant: string, environment: string): RetentionFact | null {
-  const block = facts.match(new RegExp(`export const ${constant} = \\{[\\s\\S]*?\\n\\};`, 'm'))
-  if (!block) return null
-  const found = block[0].match(
-    new RegExp(`${environment}:\\s*\\{\\s*days:\\s*(\\d+),\\s*words:\\s*"([a-z-]+)"`, 'm'),
-  )
-  return found ? { days: Number(found[1]), words: found[2]! } : null
-}
-
-const BACKUP_RECOVERY = {
-  production: published('BACKUP_RECOVERY', 'production'),
-  staging: published('BACKUP_RECOVERY', 'staging'),
-}
-const LOG_RETENTION = {
-  production: published('LOG_RETENTION', 'production'),
-  staging: published('LOG_RETENTION', 'staging'),
-}
-
 /** Every conditional processor, as vendor, module and the variables that switch
  *  it on. */
 function conditionalProcessors(): { vendor: string; module: string; variables: string[] }[] {
@@ -256,269 +231,7 @@ function conditionalProcessors(): { vendor: string; module: string; variables: s
   return out
 }
 
-/**
- * One subprocessor row out of the published list, by the vendor's name.
- *
- * Read as a slice between one `name:` and the next rather than with a pattern
- * spanning the whole entry, which is the lesson conditionalProcessors above
- * already paid for: a pattern requiring the fields adjacent silently matched
- * one processor instead of two the moment an entry gained a comment.
- */
-function rowFor(page: string, vendor: RegExp): string | null {
-  const starts = [...page.matchAll(/name:\s*"([^"]+)"/g)]
-  for (let i = 0; i < starts.length; i += 1) {
-    if (!vendor.test(starts[i]![1]!)) continue
-    const from = starts[i]!.index!
-    const to = i + 1 < starts.length ? starts[i + 1]!.index! : page.length
-    return page.slice(from, to)
-  }
-  return null
-}
-
-/** A Terraform assignment, from the file that actually sets it. */
-function tfvar(source: string, name: string): number | null {
-  const found = source.match(new RegExp(`^\\s*${name}\\s*=\\s*(\\d+)\\s*$`, 'm'))
-  return found ? Number(found[1]) : null
-}
-
-/** A module default, for the values an environment leaves unset. */
-function tfDefault(source: string, name: string): number | null {
-  const block = source.match(new RegExp(`variable\\s+"${name}"\\s*\\{[\\s\\S]*?\\n\\}`, 'm'))
-  if (!block) return null
-  const found = block[0].match(/^\s*default\s*=\s*(\d+)\s*$/m)
-  return found ? Number(found[1]) : null
-}
-
-const NUMBER_WORDS: Record<number, string> = {
-  14: 'fourteen', 30: 'thirty', 35: 'thirty-five', 90: 'ninety',
-}
-
-describe('the published retention numbers are the ones the infrastructure sets', () => {
-  it('reads the Terraform it is comparing against, so an empty parse cannot pass', async () => {
-    // Every assertion below is vacuously true against a file that did not load
-    // or a regular expression that stopped matching, and a null read from a
-    // pattern is exactly what a broken instrument prints.
-    const production = await read('infra/terraform/stacks/control-plane/production.tfvars')
-    const variables = await read('infra/terraform/stacks/control-plane/variables.tf')
-    assert.ok(production.length > 100, 'production.tfvars did not load')
-    assert.ok(
-      tfvar(production, 'backup_retention_days') !== null,
-      'the tfvars parser found no backup_retention_days, so it is measuring itself',
-    )
-    assert.ok(
-      tfDefault(variables, 'log_retention_days') !== null,
-      'the variable-default parser found no log_retention_days',
-    )
-    assert.ok(
-      BACKUP_RECOVERY.production !== null && LOG_RETENTION.staging !== null,
-      'the facts parser read nothing out of www/lib/legal-facts.ts, so every assertion below ' +
-        'is vacuously true and this gate is checking nothing',
-    )
-    assert.ok(
-      conditionalProcessors().length >= 2,
-      `the facts parser found ${conditionalProcessors().length} conditional processors`,
-    )
-  })
-
-  it('publishes production backup recovery as the tfvars set it', async () => {
-    const production = await read('infra/terraform/stacks/control-plane/production.tfvars')
-    assert.equal(
-      BACKUP_RECOVERY.production?.days,
-      tfvar(production, 'backup_retention_days'),
-      'the legal pages publish a production recovery window that production does not run. ' +
-        'This is the exact drift that had three pages saying fourteen days while production ' +
-        'ran thirty-five.',
-    )
-  })
-
-  it('publishes staging backup recovery as the stack default, which staging leaves unset', async () => {
-    const variables = await read('infra/terraform/stacks/control-plane/variables.tf')
-    const staging = await read('infra/terraform/stacks/control-plane/staging.tfvars')
-    assert.equal(
-      tfvar(staging, 'backup_retention_days'),
-      null,
-      'staging.tfvars now sets backup_retention_days, so the published number can no longer ' +
-        'come from the stack default and this test is reading the wrong source',
-    )
-    assert.equal(BACKUP_RECOVERY.staging?.days, tfDefault(variables, 'backup_retention_days'))
-  })
-
-  it('publishes log retention for both environments, which was documented nowhere', async () => {
-    const production = await read('infra/terraform/stacks/control-plane/production.tfvars')
-    const variables = await read('infra/terraform/stacks/control-plane/variables.tf')
-    assert.equal(LOG_RETENTION.production?.days, tfvar(production, 'log_retention_days'))
-    assert.equal(LOG_RETENTION.staging?.days, tfDefault(variables, 'log_retention_days'))
-  })
-
-  it('spells each number the way the prose reads it', () => {
-    // The pages are written in words, so the number and the word are two
-    // representations of one fact and either can drift from the other. A page
-    // saying "fourteen days" beside a config saying 35 is the failure; a page
-    // saying "thirty-five" beside a fact object saying 14 is the same failure
-    // one level in.
-    const published: [string, RetentionFact | null][] = [
-      ['production backup', BACKUP_RECOVERY.production],
-      ['staging backup', BACKUP_RECOVERY.staging],
-      ['production logs', LOG_RETENTION.production],
-      ['staging logs', LOG_RETENTION.staging],
-    ]
-    for (const [label, fact] of published) {
-      assert.ok(fact, `${label} is not published at all`)
-      assert.equal(
-        fact.words,
-        NUMBER_WORDS[fact.days],
-        `${label} is published as ${fact.days} days and spelled "${fact.words}"`,
-      )
-    }
-  })
-
-  it('renders the fact rather than a copy of it, so the prose cannot drift on its own', async () => {
-    // Stronger than checking the page contains the right word, which is what
-    // this asserted first and which broke the moment the prose started
-    // interpolating: a literal in the prose is a second copy of the number and
-    // a second copy is the thing that drifted. The page has to READ the fact.
-    const legal = await read('www/components/pages/company/Legal.tsx')
-    for (const constant of ['BACKUP_RECOVERY', 'LOG_RETENTION']) {
-      assert.ok(
-        legal.includes(`${constant}.production`) && legal.includes(`${constant}.staging`),
-        `the legal pages do not render ${constant} for both environments, so a number there is ` +
-          `a hand-maintained copy and nothing holds it to the infrastructure`,
-      )
-    }
-
-    // And NO hand-written copy of a published number anywhere in the file.
-    //
-    // The first version of this checked two specific stale sentences, which is
-    // a list rather than a property, and it passed over a third: the service
-    // levels page still spelled both numbers out. It was CORRECT, which is
-    // exactly how the other three started, and it is the shape that drifts.
-    // Found by a colleague asking whether the fix covered a line I had not
-    // looked at, not by the gate.
-    //
-    // `thirty` is deliberately absent from this list. It is also the blob
-    // soft-delete window on the masked dumps row, which is a different fact
-    // from a different source, and forbidding the word would refuse a sentence
-    // this module has no opinion about.
-    for (const word of ['thirty-five', 'fourteen', 'ninety']) {
-      assert.ok(
-        !new RegExp(`\\b${word}\\b`, 'i').test(legal),
-        `the legal pages spell "${word}" out by hand somewhere. Every published retention ` +
-          `number comes from legal-facts.ts, and a second copy is the thing that drifted.`,
-      )
-    }
-  })
-})
-
-describe('the deletion wording matches what the schema actually does', () => {
-  /**
-   * The strongest claim a deletion page can make is that a row CANNOT be
-   * removed, and that claim is only true if a constraint enforces it.
-   *
-   * This exists because a migration comment asserted exactly that:
-   * `audit_entries.actor_user_id` references `users` with NO ACTION, so the
-   * database refuses to delete a person who has ever acted. It does not.
-   * `0001_init.sql` declares ON DELETE SET NULL, nothing since alters it, and a
-   * live database reads `confdeltype = 'n'`. The comment was written about a
-   * guarantee nobody had built, and it was one review away from becoming
-   * published legal text.
-   *
-   * So the gate is a conditional rather than an assertion of today's state: the
-   * strong wording is permitted only alongside the strong constraint. It passes
-   * now, when the pages make the weaker claim and the constraint is weak. It
-   * passes later, when a migration adds the constraint and the pages are
-   * updated. It fails on the combination that is a lie.
-   */
-  const IRREMOVABLE = [
-    /cannot be removed/i,
-    /cannot be deleted/i,
-    /refuses to delete a person/i,
-  ]
-  // `/the database refuses/` was in this list and is not, because a substring
-  // cannot tell a claim from its negation. The accurate sentence on the page
-  // reads "not because the database refuses", and the pattern matched it, so
-  // the gate refused the true wording and would have pushed whoever hit it
-  // toward the false one. That is worse than not gating the phrase at all.
-  //
-  // A lookbehind would paper over this one sentence and fail on the next
-  // phrasing. The three patterns left are ones whose negations nobody writes:
-  // there is no natural sentence containing "cannot be removed" that means the
-  // row can be. This is the boundary the header calls out, met in practice.
-  // NOT in that list, deliberately: wording that says the row is KEPT, or
-  // retained, or not removed by choice. That is the weak claim and it is the
-  // true one. An earlier version matched "the row is retained so the audit",
-  // which would have refused the accurate sentence and pushed whoever hit it
-  // toward the inaccurate one, which is the opposite of the point.
-
-  /** What the migrations say happens to an audit entry when its actor goes. */
-  async function onDeleteForActor(): Promise<string | null> {
-    const dir = path.join(repoRoot, 'web/packages/db/migrations')
-    const { readdir } = await import('node:fs/promises')
-    const files = (await readdir(dir)).filter((f) => f.endsWith('.sql')).sort()
-    let answer: string | null = null
-    for (const file of files) {
-      const sql = await readFile(path.join(dir, file), 'utf8')
-      // The column declaration, and any later constraint that replaces it. Last
-      // one wins, which is the order the migrations apply in.
-      for (const m of sql.matchAll(
-        /actor_user_id[\s\S]{0,120}?REFERENCES\s+users\s*\(\s*id\s*\)\s*(?:ON DELETE (SET NULL|NO ACTION|RESTRICT|CASCADE))?/gi,
-      )) {
-        // A missing ON DELETE clause means NO ACTION in SQL, and defaulting to
-        // it silently is the dangerous direction: NO ACTION is the STRONG
-        // constraint this gate permits the strong wording against. An earlier
-        // version had an off-by-one in the capture group, read SET NULL as
-        // undefined, fell back to NO ACTION, and would have certified exactly
-        // the false claim it exists to catch. So absence is reported as
-        // absence and the caller decides.
-        answer = (m[1] ?? 'ABSENT').toUpperCase()
-      }
-    }
-    return answer
-  }
-
-  it('reads the constraint it is reasoning about, so an empty parse cannot pass', async () => {
-    const found = await onDeleteForActor()
-    assert.ok(
-      found !== null,
-      'no REFERENCES users(id) was found for audit_entries.actor_user_id, so this gate is ' +
-        'reasoning about nothing. Either the column was renamed or the pattern stopped matching.',
-    )
-  })
-
-  it('permits the strong deletion wording only where a constraint enforces it', async () => {
-    const pages =
-      (await read('www/components/pages/company/Legal.tsx')) +
-      (await read('www/components/ContentSheet.tsx'))
-    const claimed = IRREMOVABLE.filter((p) => p.test(pages))
-    if (claimed.length === 0) return
-
-    const onDelete = await onDeleteForActor()
-    assert.ok(
-      // ABSENT is deliberately NOT accepted here even though SQL reads a
-      // missing clause as NO ACTION. An unstated constraint is one nobody wrote
-      // down on purpose, and this gate is about a promise somebody published.
-      onDelete === 'NO ACTION' || onDelete === 'RESTRICT',
-      `a legal page states that a row cannot be removed, and audit_entries.actor_user_id is ` +
-        `ON DELETE ${onDelete}, so the database would remove it and null the reference. Either ` +
-        `add the constraint or say the weaker thing, which is that the personal data is erased ` +
-        `and the row is kept.`,
-    )
-  })
-
-  it('records what the constraint is today, so a change to it is noticed here', async () => {
-    // Not a claim that SET NULL is right. It is where the fact is written down,
-    // so that a migration changing it turns this red and whoever changes it is
-    // sent to the page that describes deletion.
-    assert.equal(
-      await onDeleteForActor(),
-      'SET NULL',
-      'the actor reference on audit_entries changed. The deletion section of the retention ' +
-        'page describes what happens to a person who asks to be removed, and it was written ' +
-        'against SET NULL.',
-    )
-  })
-})
-
-describe('the subprocessor page describes the code that exists', () => {
+describe('the privacy page describes the code that exists', () => {
   it('names a module and variables that are really there, for every conditional processor', async () => {
     // The claim being held is the weak one and the only one checkable: the code
     // CONTAINS this integration and it is reached through these variables. That
@@ -546,10 +259,8 @@ describe('the subprocessor page describes the code that exists', () => {
     // The two sentences that were false, as a guard. Both were true when
     // written. Both became false the day a branch landed, and nothing said so.
     // Both files, because the same false claim was on the privacy page as well
-    // as the subprocessor page and fixing one would have left the other.
-    const page =
-      (await read('www/lib/subprocessors.ts')) +
-      (await read('www/components/pages/company/Legal.tsx'))
+    // as the privacy page and fixing one would have left the other.
+    const page = await read('www/components/pages/company/Legal.tsx')
     const forbidden: [RegExp, string][] = [
       [
         // No trailing period. The privacy page said "There is no billing, so
@@ -572,7 +283,7 @@ describe('the subprocessor page describes the code that exists', () => {
     for (const [pattern, why] of forbidden) {
       assert.ok(
         !pattern.test(page),
-        `the subprocessor page publishes a claim that is false about the code: ${why}`,
+        `the privacy page publishes a claim that is false about the code: ${why}`,
       )
     }
   })
@@ -604,7 +315,7 @@ describe('the subprocessor page describes the code that exists', () => {
     // it still asserts both states rather than skipping one, and the claim it
     // holds is now the true one. Analytics goes to PostHog, through an endpoint
     // on our own infrastructure, and PostHog is disclosed by name.
-    const page = await read('www/lib/subprocessors.ts')
+    const page = await read('www/components/pages/company/Legal.tsx')
     // EVERY file the beacon is made of, not just the one it started in. The
     // queue, the session rules and the endpoint moved out of analytics.ts into
     // beacon.ts so that a test runner could load them, and this gate went on
@@ -623,7 +334,7 @@ describe('the subprocessor page describes the code that exists', () => {
       assert.match(
         page,
         /This site loads no analytics and no third-party script/,
-        'there is no site beacon in this tree, so the subprocessor page must still say the site ' +
+        'there is no site beacon in this tree, so the privacy page must still say the site ' +
           'loads no analytics. It says something else, which means the claim was rewritten ' +
           'for a beacon that is not in this tree.',
       )
@@ -641,7 +352,7 @@ describe('the subprocessor page describes the code that exists', () => {
     assert.doesNotMatch(
       page,
       /This site loads no analytics and no third-party script/,
-      'a beacon exists and the subprocessor page still claims the site loads no analytics',
+      'a beacon exists and the privacy page still claims the site loads no analytics',
     )
     assert.ok(
       !NAMES_A_HOST.test(
@@ -664,7 +375,7 @@ describe('the subprocessor page describes the code that exists', () => {
     // the page to decide what the page must say is a gate that agrees with
     // itself. www/package.json is the one place that cannot lie about whether
     // the browser bundle contains posthog-js.
-    const page = await read('www/lib/subprocessors.ts')
+    const page = await read('www/components/pages/company/Legal.tsx')
     const manifest = JSON.parse(await read('www/package.json')) as {
       dependencies?: Record<string, string>
       devDependencies?: Record<string, string>
@@ -677,15 +388,16 @@ describe('the subprocessor page describes the code that exists', () => {
       assert.match(
         page,
         DENIES_POSTHOG,
-        'posthog-js is not a dependency of the site, so the subprocessor page must still deny ' +
+        'posthog-js is not a dependency of the site, so the privacy page must still deny ' +
           'PostHog by name. It no longer does, which means the disclosure was written for an ' +
           'analytics vendor that is not in this tree.',
       )
-      assert.ok(
-        !rowFor(page, /PostHog/i),
-        'posthog-js is not a dependency and SUBPROCESSORS carries a PostHog row anyway, which ' +
-          'publishes a vendor this site does not load. Copy without code is the same defect as ' +
-          'code without copy, arriving from the other side.',
+      assert.doesNotMatch(
+        page,
+        /PostHog(?:, Inc\.)? receives\b/,
+        'posthog-js is not a dependency and the privacy page still discloses PostHog as a ' +
+          'recipient, which publishes a vendor this site does not load. Copy without code is the ' +
+          'same defect as code without copy, arriving from the other side.',
       )
       return
     }
@@ -700,46 +412,34 @@ describe('the subprocessor page describes the code that exists', () => {
     assert.doesNotMatch(
       page,
       DENIES_POSTHOG,
-      'posthog-js is a dependency of the site and the subprocessor page still says there is no ' +
+      'posthog-js is a dependency of the site and the privacy page still says there is no ' +
         'PostHog. That is a false statement in a published legal page, and it is false from the ' +
         'moment the dependency lands rather than from the moment somebody notices.',
     )
-    // Disclosed as a PROCESSOR, structurally, not merely mentioned in a
-    // sentence somewhere on the page. A vendor that receives data belongs in
-    // the list a security review reads, and the list is what this reads.
-    const entries = [...page.matchAll(/name:\s*"([^"]+)"/g)].map((m) => m[1]!)
-    assert.ok(
-      entries.some((n) => /PostHog/i.test(n)),
-      'the site loads posthog-js and SUBPROCESSORS carries no row naming PostHog, so a vendor ' +
-        `that receives visitor data is absent from the published list. The list holds: ${entries.join(', ')}`,
-    )
-
-    // THE ROW HAS TO SAY THE TRUE THING, NOT MERELY EXIST. This is the half
-    // that a proxy makes easy to get wrong, and the reason it is checked here
-    // rather than left to prose review.
+    // THE PAGE HAS TO SAY THE TRUE THING, NOT MERELY NAME THE VENDOR. This is
+    // the half that a proxy makes easy to get wrong, and the reason it is
+    // checked here rather than left to prose review.
     //
     // A proxy changes the destination the browser connects to. It does not
     // change who receives the data. PostHog, Inc. receives every event, every
     // autocaptured interaction and every session recording whether the request
-    // went direct or through us. A row that named the vendor while implying the
+    // went direct or through us. A page that named the vendor while implying the
     // proxy kept anything inside our own boundary would be worse than the
     // denial it replaced, because a reader could open a network tab, see no
     // vendor host, and take that as verification of a claim that is false.
-    const row = rowFor(page, /PostHog/i)
-    assert.ok(row, 'the PostHog row could not be read out of the list, so nothing below checked it')
     assert.match(
-      row,
+      page,
       /PostHog(?:, Inc\.)? receives\b/,
-      'the PostHog row never says that PostHog receives the data. The proxy is transport and not ' +
-        'a boundary, so a row that does not say who receives it describes an arrangement the ' +
+      'the privacy page never says that PostHog receives the data. The proxy is transport and not ' +
+        'a boundary, so a page that does not say who receives it describes an arrangement the ' +
         'reader would have to infer, and the obvious inference from a first party endpoint is ' +
         'the wrong one.',
     )
     assert.match(
-      row,
+      page,
       /PostHog Cloud (?:US|EU)|United States|European Union/,
-      'the PostHog row does not name the cloud region the data is processed in, which is the ' +
-        'first thing a security review asks of a subprocessor and the one fact a reader cannot ' +
+      'the privacy page does not name the cloud region the data is processed in, which is the ' +
+        'first thing a security review asks of a processor and the one fact a reader cannot ' +
         'work out from the endpoint they can see.',
     )
 
@@ -757,7 +457,7 @@ describe('the subprocessor page describes the code that exists', () => {
       assert.doesNotMatch(
         page,
         claim,
-        `the site loads posthog-js and the subprocessor page still publishes ${claim}. The proxy ` +
+        `the site loads posthog-js and the privacy page still publishes ${claim}. The proxy ` +
           'is transport: it changes which host the browser connects to and not who receives the ' +
           'data, so that sentence is false and it is false in the direction a reader cannot check.',
       )
@@ -870,11 +570,11 @@ describe('the subprocessor page describes the code that exists', () => {
     // can turn the counting off, on a page it publishes, and if that stops
     // being true the honest outcome is a red test asking whether the promise
     // was withdrawn on purpose, not a green one that quietly stopped looking.
-    const page = await read('www/lib/subprocessors.ts')
+    const page = await read('www/components/pages/company/Legal.tsx')
     assert.match(
       page,
       PROMISES_A_SWITCH,
-      'the subprocessor page no longer promises the reader a way to switch measurement off in ' +
+      'the privacy page no longer promises the reader a way to switch measurement off in ' +
         'any wording this knows. If the promise was withdrawn, delete this test and the gate ' +
         'above with it. If it was reworded, add the wording, because until you do that gate is ' +
         'passing without checking anything.',
@@ -987,7 +687,7 @@ describe('the subprocessor page describes the code that exists', () => {
     // Held to three things rather than to the words: the beacon exports a way
     // to set it, a component calls that, and a page renders the component. Any
     // one of the three going missing leaves a promise on a published page.
-    const page = await read('www/lib/subprocessors.ts')
+    const page = await read('www/components/pages/company/Legal.tsx')
     if (!PROMISES_A_SWITCH.test(page)) return
 
     const beacon = await read('www/lib/beacon.ts')

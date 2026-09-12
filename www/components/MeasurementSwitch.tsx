@@ -10,7 +10,7 @@ import {
 } from "@/lib/analytics";
 
 /**
- * The control the subprocessor page already promises exists.
+ * The control the privacy page already promises exists.
  *
  * That page says, of the counting this site does, "if you switch measurement
  * off, a single flag saying so is kept in this browser". Until this component

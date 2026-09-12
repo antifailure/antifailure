@@ -238,7 +238,7 @@ export function routeIdFor(pathname: string): SiteRoute {
   if (path === "/contact") return "contact";
   if (path === "/signin") return "signin";
   if (path === "/signup") return "signup";
-  if (["/privacy", "/terms", "/dpa", "/subprocessors", "/data-retention", "/sla"].includes(path)) {
+  if (["/privacy", "/terms", "/acceptable-use", "/developer-policy"].includes(path)) {
     return "legal";
   }
   return "other";

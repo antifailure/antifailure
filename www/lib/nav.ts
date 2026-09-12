@@ -141,10 +141,6 @@ export const STATUS_URL = "https://antifailure.github.io/antifailure/";
 export const LEGAL_LINKS = [
   { text: "Privacy", href: "/privacy" },
   { text: "Terms", href: "/terms" },
-  { text: "DPA", href: "/dpa" },
-  { text: "Subprocessors", href: "/subprocessors" },
-  { text: "Retention", href: "/data-retention" },
-  { text: "Service levels", href: "/sla" },
 ];
 
 export const FOOTER_MENUS = [

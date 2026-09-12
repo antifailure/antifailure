@@ -8,7 +8,7 @@
  * recording a great deal more, so the whole of this file is the fence around
  * what "more" means.
  *
- * WHAT IS CAPTURED, IN FULL. The list below is the one the subprocessor page,
+ * WHAT IS CAPTURED, IN FULL. The list below is the one the privacy page,
  * the legal page and docs/src/content/docs/security/data-boundary.md all
  * describe, and it is written here beside the configuration that produces it so
  * the two cannot drift.
@@ -69,7 +69,7 @@
  * tab that shows no vendor host would make that sentence look verified while it
  * was false, which is worse than the unproxied version, because the arrangement
  * it hides is the one a security review is asking about. PostHog is on the
- * subprocessor list with a row of its own for that reason.
+ * privacy page names as a processor for that reason.
  *
  * IT IS SAME SITE, NOT SAME ORIGIN, AND THE DIFFERENCE IS NOT PEDANTRY HERE.
  * This site is a static export on Azure Static Web Apps with no server at
