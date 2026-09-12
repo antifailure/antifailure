@@ -393,6 +393,13 @@ errors:
     docs: providers/pgurl
     retryable: false
     exit_code: 3
+  - code: AF-DB-037
+    area: DB
+    message: "The role {role} on {host} may not create databases, and {vendor} does not let you grant it."
+    next_step: "On {vendor} the fix AF-DB-035 gives is not available: {reason}. Keep {vendor} as database.source_url_env, which needs read access only, and point {variable} at a Postgres you administer, which is where the goldens and the branches are made. The verdict was read from {citation}."
+    docs: providers/managed-postgres
+    retryable: false
+    exit_code: 3
 
   # Masking
   - code: AF-MSK-001

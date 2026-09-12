@@ -10749,6 +10749,217 @@ A branch size cap and a history retention window are both common on free tiers
 and both bite later than the branch count does. They are the provider's, not
 this tool's, and the provider's documentation is where the current numbers are.
 `,
+	"providers/managed-postgres.md": `---
+title: Managed Postgres vendors
+description: What each of thirteen managed Postgres products can do, what serves it here, and what nobody measured.
+sidebar:
+  order: 7
+---
+
+Thirteen managed Postgres products were looked at to decide one thing per
+vendor: whether Antifailure has to build anything for it, or whether the
+[` + "`" + `pgurl` + "`" + `](/docs/providers/pgurl) provider already serves it.
+
+The answer for eleven of them is that ` + "`" + `pgurl` + "`" + ` serves it and nothing needed
+building. One, Xata, has real copy on write branching, and it got a provider of
+its own: [` + "`" + `xata` + "`" + `](/docs/providers/xata). One, Tembo Cloud, no longer sells
+managed Postgres at all.
+
+Eleven and one and one is the finding rather than an apology for one. Thirteen
+thin providers that each call ` + "`" + `pgurl` + "`" + ` and add a name to a list would compile,
+would look like thirteen integrations, and would do nothing the one provider
+underneath was not already doing.
+
+## What was proved, and what was not
+
+Every verdict on this page was read from the vendor's own published
+documentation, on the date recorded beside it. **No account was created on any
+of these thirteen services, no request was sent to any of their control planes,
+and no database was branched on any of them.** So this page records what each
+vendor says its product does. It does not record what any of them did, and no
+number on this page was measured against a vendor.
+
+The refusal is deliberate. A seconds figure for a service nobody connected to
+is an upper bound wearing the clothes of an answer, and it would be quoted as a
+measurement by the first person who read it.
+
+## The two questions that are not the same question
+
+The ` + "`" + `pgurl` + "`" + ` provider needs two connection strings and they are two different
+servers.
+
+The **source** is production, read once per refresh by ` + "`" + `pg_dump` + "`" + `, which needs
+read access and nothing else. Every one of the thirteen can be a source.
+
+The **host server** is where the goldens and the branches are made, and it
+needs a role that may ` + "`" + `CREATE DATABASE` + "`" + `. It is not the source and the provider's
+own documentation says it should not be the production server. So a vendor that
+refuses ` + "`" + `CREATE DATABASE` + "`" + ` is not a vendor Antifailure cannot serve. It is a
+vendor that cannot also be the host server, which is a smaller and truer claim
+than a row of ticks would have made.
+
+## The thirteen
+
+` + "`" + `CoW` + "`" + ` is copy on write: whether a branch shares storage with its parent, so that
+branch time does not grow with the database. It is the field
+` + "`" + `engine/conformance/cow.go` + "`" + ` can falsify on a provider, and it is recorded here
+for vendors no provider was written for so the table is not the word "fork"
+thirteen times.
+
+| Vendor | Its own mechanism | CoW | Can host goldens | Read on |
+| --- | --- | --- | --- | --- |
+| Aiven for PostgreSQL | fork restored from a backup | no | yes, additional databases are supported | [aiven.io](https://aiven.io/docs/platform/concepts/service-forking) |
+| Crunchy Bridge | fork restored from a backup, point in time | no | yes, the ` + "`" + `postgres` + "`" + ` role is a superuser | [docs.crunchybridge.com](https://docs.crunchybridge.com/api/cluster) |
+| DigitalOcean Managed Databases for PostgreSQL | fork restored from a backup | no | yes, a cluster holds many databases | [docs.digitalocean.com](https://docs.digitalocean.com/products/databases/postgresql/how-to/fork-clusters/) |
+| Fly Managed Postgres | fork, mechanism not published | not stated | unverified | [docs.machines.dev](https://docs.machines.dev/postgres-clusters/Postgres_fork) |
+| Heroku Postgres | fork restored from a snapshot | no | **no**, one database per add on and no superuser | [help.heroku.com](https://help.heroku.com/IV1DHMS2/can-i-get-superuser-privileges-or-create-a-superuser-in-heroku-postgres) |
+| Nile | none documented | no | unverified | [thenile.dev](https://thenile.dev/docs/support/backup_restore) |
+| PlanetScale Postgres | branch created empty, or restored from a backup | no | yes, the default role carries ` + "`" + `CREATEDB` + "`" + ` | [planetscale.com](https://planetscale.com/docs/postgres/branching) |
+| Prisma Postgres | none documented | no | unverified | [prisma.io](https://www.prisma.io/docs/postgres/database/backups) |
+| Railway Postgres | none documented | no | yes, the official Postgres image and its superuser | [docs.railway.com](https://docs.railway.com/databases/postgresql) |
+| Render Postgres | point in time recovery into a new instance | no | yes, ` + "`" + `CREATE DATABASE` + "`" + ` in psql is documented | [render.com](https://render.com/docs/postgresql-backups) |
+| Tembo Cloud | **the product was withdrawn** | no | no, there is no service | [tembo.io](https://www.tembo.io/) |
+| Tiger Cloud, formerly Timescale Cloud | fork restored from a backup on paid tiers, copy on write on free | no | **no**, a service holds exactly one database | [tigerdata.com](https://www.tigerdata.com/docs/use-timescale/latest/fork-services) |
+| Xata | **copy on write branch** | **yes** | unverified | [xata.io](https://xata.io/docs/core-concepts/branching) |
+
+Every quote behind those verdicts is in
+` + "`" + `engine/internal/db/managed/vendors.go` + "`" + `, with the page and the date it was read.
+
+### Unverified is an answer
+
+Four vendors carry ` + "`" + `unverified` + "`" + ` above, and it is not a polite no. It means the
+vendor's published documentation did not answer the question at the date it was
+read. Fly Managed Postgres documents creating additional databases through its
+dashboard and ` + "`" + `flyctl` + "`" + ` and says nothing about whether a SQL role carries
+` + "`" + `CREATEDB` + "`" + `. Guessing in either direction would put a number of ticks in this
+table that nobody could check.
+
+The engine follows the same rule. A host recognised as a vendor whose
+documentation says the grant is unavailable is refused before anything reads
+production. A host recognised as a vendor this repository could not verify is
+named and not refused.
+
+### Three vendors worth reading twice
+
+**Tembo Cloud no longer sells managed Postgres.** The company pivoted and the
+site now sells agent orchestration. There is nothing to point anything at, and
+the row is kept rather than deleted because a vendor missing from a list of
+thirteen reads as a vendor nobody looked at.
+
+**Xata is the only genuine copy on write branch on this list**, and the only one
+of the thirteen whose mechanism earned a provider of its own. It is documented as
+a storage level copy on write snapshot that completes in seconds at terabyte
+scale, on CloudNativePG and OpenEBS, and the platform is Apache 2.0 and self
+hostable. The provider is [` + "`" + `xata` + "`" + `](/docs/providers/xata), it declares
+` + "`" + `CopyOnWrite: true` + "`" + `, and what that declaration is worth today is
+[below](#what-xatas-copy-on-write-declaration-is-worth-today).
+
+**Prisma Postgres issues a connection string that is not one.** The Console's
+default is a ` + "`" + `prisma+postgres://accelerate.prisma-data.net/?api_key=...` + "`" + ` URL,
+which is an HTTP protocol address ` + "`" + `pg_dump` + "`" + ` cannot speak. Prisma also issues a
+direct TCP string on ` + "`" + `db.prisma.io` + "`" + `, and its own documentation says to use that
+one with ` + "`" + `psql` + "`" + `, ` + "`" + `pg_dump` + "`" + ` and ` + "`" + `pg_restore` + "`" + `. Pasting the first into
+` + "`" + `database.source_url_env` + "`" + ` gets ` + "`" + `AF-DB-024` + "`" + `, which correctly says the scheme is
+wrong.
+
+## Heroku cannot be recognised, and that is a property of Heroku
+
+A Heroku Postgres host is an EC2 name of the form
+` + "`" + `ec2-ADDRESS.compute-1.amazonaws.com` + "`" + `, which is the name every other machine on
+EC2 also has. There is no suffix that identifies one without also claiming every
+self hosted Postgres running on an EC2 instance, and a wrong recognition is
+worse than none: it would attach Heroku's refusal to somebody whose own server
+does grant ` + "`" + `CREATEDB` + "`" + `.
+
+So Heroku, the vendor with the strongest documented refusal on this list, is the
+one the engine cannot warn about from a hostname. Somebody who points
+` + "`" + `PGURL_ADMIN_URL` + "`" + ` at a Heroku database gets the general ` + "`" + `AF-DB-035` + "`" + `, which tells
+them to run ` + "`" + `ALTER ROLE ... CREATEDB` + "`" + `, and on Heroku there is no role that can.
+That limit is stated here rather than left to be discovered.
+
+## Branch time and first golden time
+
+The number this row owes the comparison table, and the cells that are refusals.
+
+Twelve of the thirteen still sell a Postgres, and every one of those twelve can
+be a ` + "`" + `pgurl` + "`" + ` source today, so the branch time that applies to them is ` + "`" + `pgurl` + "`" + `'s
+on whatever host server is chosen. That is a real number and it was
+measured, on a local Postgres 17, by ` + "`" + `just benchmark` + "`" + `, which is
+` + "`" + `engine/internal/db/pgurl/benchmark_test.go` + "`" + ` in this repository. It is **not**
+any vendor's number: nothing in this row was timed against a vendor's service.
+
+| Provider or vendor | Time to first golden | Time to branch | Where the number is from |
+| --- | --- | --- | --- |
+| ` + "`" + `pgurl` + "`" + `, small database, 357 MB | 71 seconds, 205 seconds per GB | 52 seconds, 149 seconds per GB | measured, ` + "`" + `benchmarks/2026-09-07-1002-pgurl.md` + "`" + ` |
+| ` + "`" + `pgurl` + "`" + `, large database, 1.43 GB | 242 seconds, 169 seconds per GB | 110 seconds, 77 seconds per GB | measured, same report |
+| ` + "`" + `pgurl` + "`" + `, 100 GB | not measured, and the rate above extrapolates to about four hours forty minutes | not measured, and the rate above extrapolates to about two hours eight minutes | arithmetic on a measured rate, not a measurement |
+| Xata, copy on write branch | refused, no account | refused, no account. Documented as seconds at terabyte scale | not measured |
+| Tiger Cloud, free tier fork | refused, no account | refused, no account. Documented as 30 to 90 seconds | not measured |
+| Tiger Cloud, paid tier fork | refused, no account | refused, no account. Documented as 5 to 20 or more minutes | not measured |
+| Heroku fork | refused, no account | refused, no account. Documented as several minutes to several hours, with the dataset | not measured |
+| Aiven, Crunchy Bridge, DigitalOcean, Fly, Render forks | refused, no account | refused, no account, and none of the five publishes a figure | not measured |
+| Nile, Prisma, Railway | no mechanism to time | no mechanism to time | not applicable |
+| Tembo Cloud | the product was withdrawn | the product was withdrawn | not applicable |
+
+Read the per gigabyte rate from the LARGER row. A small database is mostly fixed
+cost, so dividing a few seconds by a few megabytes produces a rate that is real
+for nothing.
+
+The 100 GB row is arithmetic and it is labelled as arithmetic. Extrapolating a
+rate measured at 1.43 GB out by seventy times is a projection, and a projection
+printed in the same column as a measurement, with nothing to tell them apart, is
+how a figure nobody took gets quoted as one somebody did.
+
+## What Xata's copy on write declaration is worth today
+
+The [` + "`" + `xata` + "`" + `](/docs/providers/xata) provider declares ` + "`" + `CopyOnWrite: true` + "`" + `, which
+is what Xata's own reference says its branches are. Nothing in this repository
+has confirmed it, and the reason is worth writing down rather than leaving as a
+gap somebody discovers.
+
+` + "`" + `engine/conformance/cow.go` + "`" + ` can falsify a copy on write claim. It builds a small
+golden and a large one, times several branches of each, and refuses the
+declaration when the larger one costs more than the machine's own noise can
+account for. It is two sided, so exactly one of true and false fails on any
+measurement whatsoever, which is the property a check needs before anybody
+should believe a green one.
+
+That behaviour has not been run against this provider, and it cannot be run
+against the harness the provider is tested with. The test is a fake control
+plane over a real local Postgres, which proves the provider's logic, its request
+shapes and its error mapping, and cannot exhibit copy on write: the only way one
+local Postgres can produce a second database holding the first one's data is to
+copy the files, and a copy is what the behaviour refuses.
+
+So there were three ways to ship and two of them were refused. Declaring
+` + "`" + `CopyOnWrite: false` + "`" + ` is green and false about the product. Switching the
+behaviour off turns the instrument off for the one capability it exists to
+check. What shipped is the truthful declaration with the measurement not made,
+said here and in the provider's own source, and a lane is building a third
+verdict for the suite so that a harness which structurally cannot exhibit copy
+on write can answer UNPROVEN instead of pass or fail.
+
+Running the whole suite against the fake is one command and it is expected to
+fail on exactly that behaviour:
+
+` + "`" + "`" + "`" + `
+AF_XATA_FAKE_SUITE=1 go test ./internal/db/xata -run TestConformanceAgainstTheFake -v
+` + "`" + "`" + "`" + `
+
+The thing that settles it is an account. ` + "`" + `TestConformance` + "`" + ` in the same package
+runs the suite against the real service and skips by name without credentials.
+
+## What to do on each of them today
+
+Point ` + "`" + `database.source_url_env` + "`" + ` at the vendor. It is read once per refresh and
+needs read access only, and every one of the twelve that still exists can supply
+it.
+
+Point ` + "`" + `PGURL_ADMIN_URL` + "`" + ` at a Postgres that grants ` + "`" + `CREATE DATABASE` + "`" + `. On Aiven,
+Crunchy Bridge, DigitalOcean, PlanetScale, Railway and Render that can be the
+same service. On Heroku and Tiger Cloud it cannot, and it has to be a server you
+administer: a container, a small instance, or the ` + "`" + `docker` + "`" + ` provider instead.
+`,
 	"providers/neon.md": `---
 title: Neon
 description: Using Neon as the database provider, what it does well, and what it costs.
@@ -10898,7 +11109,7 @@ outside this repository.
 
 ` + "`" + "`" + "`" + `yaml
 database:
-  provider: docker   # or neon, supabase, dblab, or pgurl
+  provider: docker   # or neon, supabase, dblab, pgurl, or xata
   version: 17
 ` + "`" + "`" + "`" + `
 
@@ -10911,6 +11122,7 @@ database:
 | [` + "`" + `dblab` + "`" + `](/docs/providers/dblab) | A Database Lab Engine you run | Flat, because clones are copy on write | A Database Lab Engine, ZFS, and its verification token |
 | [` + "`" + `supabase` + "`" + `](/docs/providers/supabase) | A Supabase branch, which is a whole separate project | Grows with the database, because a Supabase branch is created empty | A Supabase project on a paid plan and an access token |
 | [` + "`" + `pgurl` + "`" + `](/docs/providers/pgurl) | A database on any Postgres server you name | Grows with the database, because a branch is a server side file copy | A reachable Postgres and a role that may create databases |
+| [` + "`" + `xata` + "`" + `](/docs/providers/xata) | A branch of a Xata project | Flat where Xata's own documentation says so, and this repository has not measured it | A Xata project and an API key |
 
 ` + "`" + `docker` + "`" + ` is the default and needs nothing. It is the right choice for a
 repository whose database is small enough that copying it is not the slow part.
@@ -10930,6 +11142,17 @@ vendor is not in this list. It needs no account and no vendor at all, only a
 server it may create databases on. Branch time is not flat there, and the
 measured seconds per gigabyte are published in ` + "`" + `benchmarks/` + "`" + ` rather than
 described.
+
+` + "`" + `xata` + "`" + ` is the one of thirteen managed Postgres vendors whose branching turned
+out to be branching rather than a fork restored from a backup. Its branches are
+copy on write snapshots at the storage layer, so branch time does not grow with
+the database. That is Xata's claim rather than a measurement made here, and
+[the provider page](/docs/providers/xata) says exactly which half was proved.
+
+[Managed Postgres vendors](/docs/providers/managed-postgres) is the decision
+that was made for thirteen of those vendors one by one: what each one's own
+branching or forking actually is, whether it can be the server ` + "`" + `pgurl` + "`" + ` makes
+the goldens on, and what nobody measured because no account was opened.
 
 ` + "`" + `supabase` + "`" + ` is the right choice when your application already lives there.
 Branch time is not flat, because Supabase creates a branch with no data in it
@@ -11370,6 +11593,137 @@ Supabase Management API, on a project created for the purpose. Not against a
 fake: a fake would have agreed that a persistent branch can be deleted, that a
 database copies cleanly into another one, and that the pooled connection string
 you are given can be connected to. None of those is true.
+`,
+	"providers/xata.md": `---
+title: Xata
+description: Copy on write branches of a masked, verified golden, and what has not been measured about them.
+sidebar:
+  order: 8
+---
+
+Xata is a Postgres platform whose branches are copy on write snapshots at the
+storage layer. Its own documentation says a child branch copies the parent's
+schema and data using a copy on write storage snapshot and completes in seconds
+even for terabyte scale databases, on OpenEBS volumes under CloudNativePG.
+
+Of the thirteen managed Postgres vendors on the
+[comparison page](/docs/providers/managed-postgres), it is the only one whose
+branching is really branching. Every other one calls the operation a fork and
+restores a backup, where the clock grows with the data.
+
+` + "`" + "`" + "`" + `yaml
+database:
+  provider: xata
+  version: 17
+  project: my-organization/my-project
+  api_key_env: XATA_API_KEY
+  source_url_env: PRODUCTION_DATABASE_URL
+` + "`" + "`" + "`" + `
+
+` + "`" + `database.project` + "`" + ` is ` + "`" + `<organization>/<project>` + "`" + `, both as they appear in the
+Xata console. Both are path segments of every call the provider makes and
+neither can be discovered from the other, so a manifest with one of them is
+refused rather than left to fail at the first refresh with a message about a
+path nobody wrote.
+
+` + "`" + `database.api_key_env` + "`" + ` names the variable holding an API key with the
+` + "`" + `branch:read` + "`" + ` and ` + "`" + `branch:write` + "`" + ` scopes. It is named rather than carried,
+because a manifest is committed and a key is not. It defaults to
+` + "`" + `XATA_API_KEY` + "`" + `.
+
+## The model
+
+A Xata project holds production on its root branch. A golden is a copy on write
+branch of that root, masked and verified in place and then published by a
+rename. An environment's database is a copy on write branch of the golden.
+Nothing is copied by this provider at any point, which is the reason to choose a
+vendor whose branches share storage.
+
+Publishing is the rename and nothing else. The attestation does not exist until
+the candidate has been masked and scanned, which is after the branch was
+created, so there is no way to create a branch that is already published. A
+refresh that fails at any earlier step deletes the candidate rather than leaving
+a branchable copy of unmasked production behind.
+
+The attestation, the rules hash and the provenance are written into a
+` + "`" + `_antifailure.golden` + "`" + ` table inside the golden itself. In the database rather
+than beside it, because a verification statement is about that data and should
+travel with it: a copy on write branch inherits the row for free, so whoever
+holds an environment can read what was scanned and what was found without asking
+the engine. It is also the only place it can go. Xata's branch object has one
+free text field, ` + "`" + `description` + "`" + `, capped at fifty characters, which is enough for
+a golden version identifier and nothing else.
+
+## What is declared, and what is not
+
+| Capability | Value | Why |
+| --- | --- | --- |
+| Branching | yes | copy on write branches are the product |
+| Copy on write | yes | Xata's own reference, and see the section below |
+| Reset | **no** | Xata publishes no endpoint returning a branch to another branch's state |
+| Subsetting | **no** | a candidate already holds the whole database, so a subset could only mean deleting down |
+| Pooled endpoints | **no** | the credentials endpoint returns one connection string and documents no pooled variant |
+| Provider masking | no | the engine's rules are the single implementation, and masking is a claim where verification is a check |
+
+Reset is refused rather than faked. Implementing it as a delete and a recreate
+would hand back a different branch on a different connection string while the
+caller's environment still holds the old one, so the capability is declared
+false and the conformance suite skips that behaviour naming what is missing
+instead of passing it silently.
+
+## What has not been measured
+
+The provider declares copy on write. Nothing in this repository has confirmed
+it.
+
+` + "`" + `engine/conformance/cow.go` + "`" + ` can falsify the claim: it builds a small golden and
+a large one, times several branches of each, and refuses the declaration when
+the larger one costs more than the machine's own noise can account for. It is
+two sided, so exactly one of true and false fails on any measurement whatsoever.
+
+That behaviour has not been run against this provider. The test in the tree is a
+fake control plane over a real local Postgres, which proves the provider's
+logic, its request shapes and its error mapping, and cannot exhibit copy on
+write: the only way one local Postgres can produce a second database holding the
+first one's data is to copy the files, and a copy is what the behaviour refuses.
+
+So this page states the boundary rather than leaving it to be assumed. **The
+harness proves the provider's logic, its request shapes and its error mapping.
+It does not prove that Xata accepts those requests, and it cannot produce a wall
+clock number.** No account was created and no branch was made on Xata.
+
+Running the whole suite against the fake is one command, and it is expected to
+fail on exactly that behaviour:
+
+` + "`" + "`" + "`" + `
+AF_XATA_FAKE_SUITE=1 go test ./internal/db/xata -run TestConformanceAgainstTheFake -v
+` + "`" + "`" + "`" + `
+
+What settles it is an account. ` + "`" + `TestConformance` + "`" + ` in the same package runs the
+suite against the real service and skips by name without credentials:
+
+` + "`" + "`" + "`" + `
+AF_XATA_API_KEY=... AF_XATA_ORG=... AF_XATA_PROJECT=... \
+  go test ./internal/db/xata -run TestConformance -v
+` + "`" + "`" + "`" + `
+
+That run costs one branch per golden and one per environment, each sharing
+storage with its parent, all removed by the suite's own cleanup and checked by
+its leak assertion at the end.
+
+## Cleaning up after a killed run
+
+A failing behaviour leaves its branches behind on purpose, so they can be looked
+at. Removing them is a separate command rather than something the suite does
+for you, because a sweep that ran automatically would destroy the evidence:
+
+` + "`" + "`" + "`" + `
+AF_XATA_SWEEP=1 AF_XATA_API_KEY=... AF_XATA_ORG=... AF_XATA_PROJECT=... \
+  go test ./internal/db/xata -run TestSweepLeftovers -v
+` + "`" + "`" + "`" + `
+
+It removes environment branches first and goldens last, because a golden
+something came from is refused.
 `,
 	"reference/action.md": `---
 title: The GitHub Action
@@ -15733,6 +16087,18 @@ The database {database} on {host} was not created by Antifailure and will not be
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [providers/pgurl](/docs/providers/pgurl) |
 
+### AF-DB-037
+
+The role {role} on {host} may not create databases, and {vendor} does not let you grant it.
+
+**What to do.** On {vendor} the fix AF-DB-035 gives is not available: {reason}. Keep {vendor} as database.source_url_env, which needs read access only, and point {variable} at a Postgres you administer, which is where the goldens and the branches are made. The verdict was read from {citation}.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `3` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [providers/managed-postgres](/docs/providers/managed-postgres) |
+
 ## Detection
 
 ### AF-DET-001
@@ -18483,7 +18849,7 @@ Where the environment's Postgres comes from, and how the production copy is made
 | ` + "`" + `max_branches` + "`" + ` | integer | no | The plan's concurrent branch limit, where the provider has one it cannot read from its own API. Reaching it fails with AF-DB-006 rather than hanging. Minimum 1. |
 | ` + "`" + `migrations` + "`" + ` | [Migrations](#migrations) | no | Where the project's own SQL migrations live, for a project whose migrate command is its own script rather than a tool the rehearsal recognises. |
 | ` + "`" + `project` + "`" + ` | string | no | The account-side project a hosted provider creates branches in, such as a Neon project. Not a secret, which is why it lives here and the key that reaches it does not. |
-| ` + "`" + `provider` + "`" + ` | ` + "`" + `docker` + "`" + `, ` + "`" + `neon` + "`" + `, ` + "`" + `supabase` + "`" + `, ` + "`" + `dblab` + "`" + `, ` + "`" + `pgurl` + "`" + ` | no | Which provider creates branches. docker is local and needs nothing; neon, supabase, and dblab talk to a service; pgurl is any reachable Postgres, which is where the goldens and the branches are kept as databases on a server you name. Defaults to ` + "`" + `docker` + "`" + `. |
+| ` + "`" + `provider` + "`" + ` | ` + "`" + `docker` + "`" + `, ` + "`" + `neon` + "`" + `, ` + "`" + `supabase` + "`" + `, ` + "`" + `dblab` + "`" + `, ` + "`" + `pgurl` + "`" + `, ` + "`" + `xata` + "`" + ` | no | Which provider creates branches. docker is local and needs nothing; neon, supabase, dblab and xata talk to a service; pgurl is any reachable Postgres, which is where the goldens and the branches are kept as databases on a server you name. For xata, database.project is '<organization>/<project>'. Defaults to ` + "`" + `docker` + "`" + `. |
 | ` + "`" + `seed` + "`" + ` | string | no | Command that fills the golden with data, for a project with no production database yet. It runs once per refresh with DATABASE_URL set, and every branch is a copy of what it made, so the cost is paid once rather than per environment. Mutually exclusive with source_url_env. Max length 1024. |
 | ` + "`" + `source_url_env` + "`" + ` | string | no | Name of the environment variable holding the read only connection string of the production database. The value is read once, during a golden refresh, on the operator's machine or runner, and never stored. Max length 128, matches ` + "`" + `^[A-Za-z_][A-Za-z0-9_]*$` + "`" + `. |
 | ` + "`" + `subset` + "`" + ` | [Subset](#subset) | no | Take a production shaped slice rather than the whole database. |

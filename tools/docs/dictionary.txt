@@ -2,6 +2,7 @@
 # Kept as a file rather than inside cspell.json so that adding one is a one
 # line diff a reviewer can read, and so the list stays sorted.
 # Words this project uses that no general dictionary has.
+aiven
 antifailure
 autocapture
 autocaptured
@@ -16,6 +17,7 @@ BYPASSRLS
 bytea
 cobra
 CREATEDB
+crunchybridge
 cspell
 dblab
 dbname
@@ -31,6 +33,7 @@ goldens
 goleak
 gosec
 govulncheck
+hostable
 kubeconfig
 llms
 lockfile
@@ -44,6 +47,7 @@ pgbouncer
 pgurl
 pgvector
 PKCE
+planetscale
 pooler
 postgres
 posthog
@@ -64,8 +68,11 @@ subsetting
 supabase
 supergateway
 syft
+tembo
 testcontainers
 tfvars
+thenile
+tigerdata
 TOTP
 tripwire
 tripwires
@@ -76,3 +83,4 @@ vale
 versionless
 vhs
 waitlist
+xata

@@ -748,6 +748,18 @@ The database {database} on {host} was not created by Antifailure and will not be
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [providers/pgurl](/docs/providers/pgurl) |
 
+### AF-DB-037
+
+The role {role} on {host} may not create databases, and {vendor} does not let you grant it.
+
+**What to do.** On {vendor} the fix AF-DB-035 gives is not available: {reason}. Keep {vendor} as database.source_url_env, which needs read access only, and point {variable} at a Postgres you administer, which is where the goldens and the branches are made. The verdict was read from {citation}.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [providers/managed-postgres](/docs/providers/managed-postgres) |
+
 ## Detection
 
 ### AF-DET-001

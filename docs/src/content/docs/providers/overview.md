@@ -11,7 +11,7 @@ outside this repository.
 
 ```yaml
 database:
-  provider: docker   # or neon, supabase, dblab, or pgurl
+  provider: docker   # or neon, supabase, dblab, pgurl, or xata
   version: 17
 ```
 
@@ -24,6 +24,7 @@ database:
 | [`dblab`](/docs/providers/dblab) | A Database Lab Engine you run | Flat, because clones are copy on write | A Database Lab Engine, ZFS, and its verification token |
 | [`supabase`](/docs/providers/supabase) | A Supabase branch, which is a whole separate project | Grows with the database, because a Supabase branch is created empty | A Supabase project on a paid plan and an access token |
 | [`pgurl`](/docs/providers/pgurl) | A database on any Postgres server you name | Grows with the database, because a branch is a server side file copy | A reachable Postgres and a role that may create databases |
+| [`xata`](/docs/providers/xata) | A branch of a Xata project | Flat where Xata's own documentation says so, and this repository has not measured it | A Xata project and an API key |
 
 `docker` is the default and needs nothing. It is the right choice for a
 repository whose database is small enough that copying it is not the slow part.
@@ -43,6 +44,17 @@ vendor is not in this list. It needs no account and no vendor at all, only a
 server it may create databases on. Branch time is not flat there, and the
 measured seconds per gigabyte are published in `benchmarks/` rather than
 described.
+
+`xata` is the one of thirteen managed Postgres vendors whose branching turned
+out to be branching rather than a fork restored from a backup. Its branches are
+copy on write snapshots at the storage layer, so branch time does not grow with
+the database. That is Xata's claim rather than a measurement made here, and
+[the provider page](/docs/providers/xata) says exactly which half was proved.
+
+[Managed Postgres vendors](/docs/providers/managed-postgres) is the decision
+that was made for thirteen of those vendors one by one: what each one's own
+branching or forking actually is, whether it can be the server `pgurl` makes
+the goldens on, and what nobody measured because no account was opened.
 
 `supabase` is the right choice when your application already lives there.
 Branch time is not flat, because Supabase creates a branch with no data in it

@@ -15,6 +15,7 @@ import (
 	neondb "github.com/antifailure/antifailure/engine/internal/db/neon"
 	pgurldb "github.com/antifailure/antifailure/engine/internal/db/pgurl"
 	supabasedb "github.com/antifailure/antifailure/engine/internal/db/supabase"
+	xatadb "github.com/antifailure/antifailure/engine/internal/db/xata"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/pkg/extension"
@@ -108,11 +109,37 @@ func TestAProviderThisBuildDoesNotHaveIsRefusedRatherThanSubstituted(t *testing.
 		// its own.
 		for _, built := range []schema.DBProvider{
 			schema.DBDocker, schema.DBNeon, schema.DBSupabase, schema.DBDBLab, schema.DBPgURL,
+			schema.DBXata,
 		} {
 			require.Contains(t, err.Error(), string(built),
 				"the refusal does not name %s, which this build has", built)
 		}
 	}
+}
+
+func TestAManifestAskingForXataGetsXata(t *testing.T) {
+	p, err := orchestrator(t, &schema.Database{
+		Provider: schema.DBXata, Project: "my-org/my-project", APIKeyEnv: "MY_XATA_KEY",
+	}, map[string]string{"MY_XATA_KEY": "xau_whatever"}).newDatabaseProvider(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = p.Close() })
+	require.Equal(t, "xata", p.Name())
+	require.IsType(t, &xatadb.Provider{}, p)
+}
+
+func TestXataWithoutBothHalvesOfItsProjectIsRefused(t *testing.T) {
+	// Xata addresses a project by an organization AND a project identifier,
+	// both path segments of every call the provider makes, and neither can be
+	// discovered from the other. A build that guessed one would send every
+	// request to a project nobody named, so a project with no slash in it is
+	// refused here rather than at the first refresh.
+	_, err := orchestrator(t, &schema.Database{
+		Provider: schema.DBXata, Project: "my-project", APIKeyEnv: "MY_XATA_KEY",
+	}, map[string]string{"MY_XATA_KEY": "xau_whatever"}).newDatabaseProvider(context.Background())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "organization",
+		"the refusal has to say which half is missing, because the manifest field looks "+
+			"complete: got %v", err)
 }
 
 func TestAManifestAskingForSupabaseGetsSupabase(t *testing.T) {

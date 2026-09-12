@@ -652,6 +652,17 @@
       "planned": false
     },
     {
+      "code": "AF-DB-037",
+      "area": "DB",
+      "areaName": "Database",
+      "message": "The role {role} on {host} may not create databases, and {vendor} does not let you grant it.",
+      "resolution": "On {vendor} the fix AF-DB-035 gives is not available: {reason}. Keep {vendor} as database.source_url_env, which needs read access only, and point {variable} at a Postgres you administer, which is where the goldens and the branches are made. The verdict was read from {citation}.",
+      "docs": "https://antifailure.dev/docs/providers/managed-postgres",
+      "retryable": false,
+      "exitCode": 3,
+      "planned": false
+    },
+    {
       "code": "AF-DET-001",
       "area": "DET",
       "areaName": "Detection",

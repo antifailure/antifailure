@@ -318,10 +318,11 @@
             "neon",
             "supabase",
             "dblab",
-            "pgurl"
+            "pgurl",
+            "xata"
           ],
           "default": "docker",
-          "description": "Which provider creates branches. docker is local and needs nothing; neon, supabase, and dblab talk to a service; pgurl is any reachable Postgres, which is where the goldens and the branches are kept as databases on a server you name."
+          "description": "Which provider creates branches. docker is local and needs nothing; neon, supabase, dblab and xata talk to a service; pgurl is any reachable Postgres, which is where the goldens and the branches are kept as databases on a server you name. For xata, database.project is '<organization>/<project>'."
         },
         "version": {
           "type": "integer",

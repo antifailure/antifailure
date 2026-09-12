@@ -34,6 +34,7 @@ import (
 	neondb "github.com/antifailure/antifailure/engine/internal/db/neon"
 	pgurldb "github.com/antifailure/antifailure/engine/internal/db/pgurl"
 	supabasedb "github.com/antifailure/antifailure/engine/internal/db/supabase"
+	xatadb "github.com/antifailure/antifailure/engine/internal/db/xata"
 	"github.com/antifailure/antifailure/engine/internal/envcert"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/events"
@@ -1122,6 +1123,45 @@ func (o *Orchestrator) newDatabaseProvider(ctx context.Context) (provider.Databa
 			MaxBranches: db.MaxBranches,
 		})
 
+	case schema.DBXata:
+		db := m.Database
+		org, project, ok := strings.Cut(db.Project, "/")
+		if !ok || org == "" || project == "" {
+			// Refused rather than defaulted. Both identifiers are path
+			// segments of every call the provider makes and neither can be
+			// discovered from the other, so a build that guessed one would
+			// send every request to a project nobody named.
+			return nil, aferrors.Coded(aferrors.AFMAN002,
+				"path", filepath.Join(o.opts.Root, "antifailure.yaml"),
+				"detail", "database.provider is xata and database.project is not "+
+					"'<organization>/<project>'; Xata addresses a project by both "+
+					"identifiers and neither can be discovered from the other")
+		}
+		name := db.APIKeyEnv
+		if name == "" {
+			name = xatadb.DefaultAPIKeyVariable
+		}
+		key, _, found, err := o.secretChain().Lookup(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		if !found || key.IsZero() {
+			return nil, aferrors.Coded(aferrors.AFSEC001,
+				"names", name,
+				"sources", strings.Join(o.secretChain().Considered(ctx), ", "))
+		}
+		p, err := xatadb.New(xatadb.Options{
+			APIKey:      key,
+			OrgID:       org,
+			ProjectID:   project,
+			Clock:       o.opts.Clock,
+			MaxBranches: db.MaxBranches,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return p, nil
+
 	case schema.DBPgURL:
 		// No project, and that is the difference between this provider and the
 		// three above it. There is no account to name: the whole address of
@@ -1200,7 +1240,7 @@ func (o *Orchestrator) databaseProviderNames() []string {
 	out := []string{
 		string(schema.DBDocker), string(schema.DBNeon),
 		string(schema.DBSupabase), string(schema.DBDBLab),
-		string(schema.DBPgURL),
+		string(schema.DBPgURL), string(schema.DBXata),
 	}
 	return append(out, o.extensions().DatabaseProviderNames()...)
 }

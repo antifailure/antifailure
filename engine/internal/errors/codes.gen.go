@@ -168,6 +168,9 @@ const (
 	// The database {database} on {host} was not created by Antifailure and
 	// will not be dropped or written to.
 	AFDB036 Code = "AF-DB-036"
+	// The role {role} on {host} may not create databases, and {vendor}
+	// does not let you grant it.
+	AFDB037 Code = "AF-DB-037"
 
 	// Detection
 	// No application could be detected in {path}.
@@ -1026,6 +1029,15 @@ var catalog = map[Code]Entry{
 		Message:   "The database {database} on {host} was not created by Antifailure and will not be dropped or written to.",
 		NextStep:  "Rename or remove that database yourself if it is disposable, or point the provider at a server that does not already hold one by that name. Nothing here is deleted on the strength of its name.",
 		Docs:      "providers/pgurl",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFDB037: {
+		Code:      AFDB037,
+		Area:      "DB",
+		Message:   "The role {role} on {host} may not create databases, and {vendor} does not let you grant it.",
+		NextStep:  "On {vendor} the fix AF-DB-035 gives is not available: {reason}. Keep {vendor} as database.source_url_env, which needs read access only, and point {variable} at a Postgres you administer, which is where the goldens and the branches are made. The verdict was read from {citation}.",
+		Docs:      "providers/managed-postgres",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
 	},
