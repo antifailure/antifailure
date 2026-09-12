@@ -15,10 +15,17 @@ package aurora_test
 // provider, so it could not say no. lane-rds found it, writing the RDS provider
 // against the same model.
 //
-// The two botocore files the rule was read from were kept unmodified:
+// The two botocore files the rule was read from, as they stood on botocore's
+// develop branch. A git blob hash is the content, so these pin it exactly:
 //
-//	service-2.json  sha256 27fc5b72e4bd43c4efe708c8d48fc3e8a8f539373abf35fb649986346f5699bf
-//	serialize.py    sha256 fe3a276ea81fb75d35b9c579c44c4eaa5d684f629d0f7fed057ecab7f2a1f3ff
+//	botocore/data/rds/2014-10-31/service-2.json
+//	  blob   d6264e8fa036977425ba7c8a8bdb58af7513b288
+//	  sha256 27fc5b72e4bd43c4efe708c8d48fc3e8a8f539373abf35fb649986346f5699bf
+//	  last changed by 0ba3a7417517f5a49f1c7f0d0072803bee1dbaec, 2026-08-27
+//	botocore/serialize.py
+//	  blob   547d5aa12f9a64e49942c5b0560ada5b5b2becd9
+//	  sha256 fe3a276ea81fb75d35b9c579c44c4eaa5d684f629d0f7fed057ecab7f2a1f3ff
+//	  last changed by 262e5e603f8949a02859fc6ac568cfcc48aa0ddb, 2026-09-11
 //
 // What is NOT known is whether AWS also accepts the member spelling, because
 // nobody who wrote this provider has an AWS account. The spelling sent now is
