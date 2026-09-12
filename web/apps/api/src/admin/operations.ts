@@ -187,7 +187,7 @@ export async function failureGroups(
     JOIN workloads w ON w.id = r.workload_id
     WHERE r.updated_at >= ${from.toISOString()}::timestamptz
       AND r.updated_at <= ${to.toISOString()}::timestamptz
-      AND r.state::text IN ('failed', 'timed_out', 'abandoned')
+      AND r.state::text IN ${[...FAILED_STATES]}
       AND (${orgId}::uuid IS NULL OR r.org_id = ${orgId}::uuid)
     GROUP BY r.failure_code, w.kind, r.state
     ORDER BY runs DESC, last_seen DESC
