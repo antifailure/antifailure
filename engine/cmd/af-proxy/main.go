@@ -33,6 +33,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/mockpack"
 	"github.com/antifailure/antifailure/engine/internal/policy"
 	"github.com/antifailure/antifailure/engine/pkg/livekey"
+	"github.com/antifailure/antifailure/engine/pkg/provider"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -82,6 +83,8 @@ type Config struct {
 	// connection and never needs one.
 	CACert string `json:"ca_cert,omitempty"`
 	CAKey  string `json:"ca_key,omitempty"`
+	// DatabaseRoutes are supplied by the orchestrator, never by an application.
+	DatabaseRoutes []provider.DatabaseRoute `json:"database_routes,omitempty"`
 }
 
 func main() {
@@ -173,7 +176,14 @@ func main() {
 	// Every listener is started before anything is announced as ready, so a
 	// service that begins its first outbound call the instant it starts finds
 	// a decision rather than a closed port.
-	errs := make(chan error, 4+len(schema.ByteStreamProtocols)+len(engine.Rules()))
+	errs := make(chan error, 4+len(schema.ByteStreamProtocols)+len(engine.Rules())+len(cfg.DatabaseRoutes))
+	databaseRelays, err := p.startDatabaseRelays(context.Background(), self.String(), cfg.DatabaseRoutes, func(err error) {
+		errs <- err
+	})
+	if err != nil {
+		log.Fatalf("af-proxy: %v", err)
+	}
+	defer databaseRelays.Close()
 	udp, err := net.ListenPacket("udp", ":53")
 	if err != nil {
 		log.Fatalf("af-proxy: %v", err)
@@ -406,6 +416,9 @@ type proxy struct {
 	// which is what the sidecar always uses; a test sets it to say what a
 	// name resolves to.
 	resolve func(context.Context, string) ([]net.IP, error)
+	// databaseDial supplies the transport in protocol tests. The process uses
+	// a normal TCP dialer, with its destination already pinned and validated.
+	databaseDial func(context.Context, string) (net.Conn, error)
 	// synth invents a response when a rule asks for one. Nil when no model
 	// key is available, in which case a synth rule refuses and says so.
 	synth *synthConfig

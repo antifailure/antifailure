@@ -1818,11 +1818,14 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	// interface says as much; this is where that becomes true rather than a
 	// comment.
 	insideURL, insideMigrateURL := dbURL, migrateURL
+	var databaseRoutes []provider.DatabaseRoute
 	attachable, isLocalBranch := s.dbProv.(local.Attachable)
 	switch {
 	case !isLocalBranch:
-		// Nothing to do. The provider handed over an address that already
-		// works from wherever the services are going to run.
+		insideURL, insideMigrateURL, databaseRoutes, err = relayDatabaseURLs(dbURL, migrateURL, o.opts.Manifest.Egress)
+		if err != nil {
+			return result, err
+		}
 	case !s.runtime.Capabilities().AttachesLocalDatabase:
 		// A database that is a container on this machine and a runtime that
 		// is not on this machine. Every service would come up holding a
@@ -1908,6 +1911,7 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 		Egress:               o.opts.Manifest.Egress,
 		DatabaseURL:          insideURL,
 		MigrationDatabaseURL: insideMigrateURL,
+		DatabaseRoutes:       databaseRoutes,
 		Journal:              recordIntent,
 		Progress: func(line string) {
 			// engine.progress, not service.log. A real run showed why: the
@@ -1982,6 +1986,10 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 		o.opts.Redactor.Register(value)
 	}
 
+	trust, err := databaseTrust(ctx, s.dbProv, branch)
+	if err != nil {
+		return result, err
+	}
 	if needsInspection(o.opts.Manifest.Egress) {
 		ca, caErr := envcert.Generate(o.envID, o.opts.Clock.Now())
 		if caErr != nil {
@@ -1991,6 +1999,14 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 		o.opts.Redactor.Register(ca.KeyPEM.Reveal())
 		o.progress("issued an environment certificate so the proxy can read inside TLS where the policy needs it")
 	}
+	if err := installDatabaseTrust(&spec, trust); err != nil {
+		return result, err
+	}
+	if trust != "" {
+		o.progress("prepared database certificates for the service containers")
+	}
+	o.opts.Redactor.Register(spec.DatabaseURL.Reveal())
+	o.opts.Redactor.Register(spec.MigrationDatabaseURL.Reveal())
 
 	for _, svc := range spec.Services {
 		o.event(s, events.ServiceStarting, svc.Name+" is starting",
@@ -2382,6 +2398,14 @@ func (o *Orchestrator) branchFrom(
 	}
 	branch, err := s.dbProv.Branch(ctx, version, o.envID)
 	if err != nil {
+		if branch.ProviderRef != "" {
+			journalCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			commitErr := s.journal.Commit(journalCtx, rec.ID, branch.ProviderRef)
+			cancel()
+			if commitErr != nil {
+				return "", zero, secrets.Value{}, secrets.Value{}, fmt.Errorf("branch failed (%v) and its partial resource could not be journalled: %w", err, commitErr)
+			}
+		}
 		return "", zero, secrets.Value{}, secrets.Value{}, err
 	}
 	// The provider's own reference for the branch, which for a hosted provider

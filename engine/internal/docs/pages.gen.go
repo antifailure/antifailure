@@ -12660,6 +12660,9 @@ and delete the resources this provider owns. Scope that permission to the
 dedicated resource group. These are control plane credentials, separate from
 the database administrator password derived from the branch key.
 
+With no client secret, the existing Azure token source uses the host's managed
+identity. Set ` + "`" + `AZURE_CLIENT_ID` + "`" + ` to select a user-assigned identity when needed.
+
 Collection reads follow Azure pagination. An invalid row is logged and skipped
 without discarding valid rows, and continuation URLs cannot send the identity
 to another origin. Accepted restores that are cancelled are cleaned up with a
@@ -12785,11 +12788,11 @@ plane credentials are separate from the branch key and database password.
 
 The Aurora provider publishes a golden by deleting its writer instance and
 keeping the volume, because an Aurora cluster's storage exists whether or not an
-instance is attached and is still clonable. A published Aurora golden costs
+instance is attached and is still cloneable. A published Aurora golden costs
 storage and no compute.
 
 **Cloud SQL has no such thing.** An instance is compute and storage together and
-there is no clonable object underneath it. The closest shape available is an
+there is no cloneable object underneath it. The closest shape available is an
 instance whose activation policy is ` + "`" + `NEVER` + "`" + `, which stops the compute and keeps
 the disk.
 
@@ -20418,7 +20421,7 @@ exported on the laptop that started it.
 
 | Key | Notes |
 | --- | --- |
-| ` + "`" + `provider` + "`" + ` | ` + "`" + `docker` + "`" + ` (default), ` + "`" + `neon` + "`" + `, ` + "`" + `supabase` + "`" + `, ` + "`" + `dblab` + "`" + `, ` + "`" + `pgurl` + "`" + `, or ` + "`" + `aurora` + "`" + `. ` + "`" + `aurora` + "`" + ` is in the enterprise edition; a community build names it and refuses it. |
+| ` + "`" + `provider` + "`" + ` | ` + "`" + `docker` + "`" + ` (default), ` + "`" + `neon` + "`" + `, ` + "`" + `supabase` + "`" + `, ` + "`" + `dblab` + "`" + `, ` + "`" + `pgurl` + "`" + `, ` + "`" + `aurora` + "`" + `, ` + "`" + `cloudsql` + "`" + `, or ` + "`" + `azurepg` + "`" + `. The last three require the enterprise cloud provider entitlement; a community build names them and refuses them. |
 | ` + "`" + `version` + "`" + ` | Postgres major, 14 through 18, default 17. Match it to production: a golden on a different major is an environment running a Postgres your application does not. |
 | ` + "`" + `url_env` + "`" + ` | The variable services receive the connection string in. |
 | ` + "`" + `source_url_env` + "`" + ` | Names the variable holding production's read only URL. |
@@ -22068,7 +22071,7 @@ Where the environment's Postgres comes from, and how the production copy is made
 | ` + "`" + `max_branches` + "`" + ` | integer | no | The plan's concurrent branch limit, where the provider has one it cannot read from its own API. Reaching it fails with AF-DB-006 rather than hanging. Minimum 1. |
 | ` + "`" + `migrations` + "`" + ` | [Migrations](#migrations) | no | Where the project's own SQL migrations live, for a project whose migrate command is its own script rather than a tool the rehearsal recognises. |
 | ` + "`" + `project` + "`" + ` | string | no | The account-side project a hosted provider creates branches in, such as a Neon project. Not a secret, which is why it lives here and the key that reaches it does not. |
-| ` + "`" + `provider` + "`" + ` | string | no | Which provider creates branches. docker is local and needs nothing; neon, supabase, and dblab talk to a service; pgurl is any reachable Postgres, which is where the goldens and the branches are kept as databases on a server you name. aurora clones an Amazon Aurora PostgreSQL cluster and is in the enterprise edition, so a community build names it here and refuses it when a manifest selects it. Defaults to ` + "`" + `docker` + "`" + `. |
+| ` + "`" + `provider` + "`" + ` | string | no | Which provider creates branches. docker is local and needs nothing; neon, supabase, and dblab talk to a service; pgurl is any reachable Postgres, which is where the goldens and the branches are kept as databases on a server you name. aurora clones an Amazon Aurora PostgreSQL cluster and is in the enterprise edition, so a community build names it here and refuses it when a manifest selects it. cloudsql fast clones a Google Cloud SQL for PostgreSQL instance and azurepg restores an Azure Database for PostgreSQL Flexible Server to a point in time; both are enterprise for the same reason. azurepg is the one provider here that does not branch in time flat in the size of the database, because a restore replays write ahead logs after the snapshot and that half is not flat. Defaults to ` + "`" + `docker` + "`" + `. |
 | ` + "`" + `seed` + "`" + ` | string | no | Command that fills the golden with data, for a project with no production database yet. It runs once per refresh with DATABASE_URL set, and every branch is a copy of what it made, so the cost is paid once rather than per environment. Mutually exclusive with source_url_env. Max length 1024. |
 | ` + "`" + `source_url_env` + "`" + ` | string | no | Name of the environment variable holding the read only connection string of the production database. The value is read once, during a golden refresh, on the operator's machine or runner, and never stored. Max length 128, matches ` + "`" + `^[A-Za-z_][A-Za-z0-9_]*$` + "`" + `. |
 | ` + "`" + `subset` + "`" + ` | [Subset](#subset) | no | Take a production shaped slice rather than the whole database. |
