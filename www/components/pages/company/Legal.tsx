@@ -14,6 +14,7 @@ import {
   SpecTable,
 } from "@/components/pages/kit";
 import { cn } from "@/lib/cn";
+import { CONDITIONAL_PROCESSORS } from "@/lib/legal-facts";
 
 const NOT_CLAIMED = [
   "Zero rollback. No deployment can ever fail.",
@@ -68,6 +69,20 @@ function CounselNotice({ children }: { children: ReactNode }) {
   );
 }
 
+
+/**
+ * The environment variables that switch one conditional processor on, as the
+ * page reads them out loud.
+ *
+ * Typed into the prose by hand until legal-facts.ts lost its last importer and
+ * tools/gatecheck said so. A published claim naming a variable, beside a list a
+ * test holds to the code that reads it, is two copies of the same fact, and the
+ * page was the copy nothing checked. Now there is one copy and the page renders
+ * it, so renaming the variable moves the sentence with it.
+ */
+function switchedOnBy(vendor: string): string[] {
+  return CONDITIONAL_PROCESSORS.find((p) => p.vendor === vendor)?.variables ?? [];
+}
 
 export function PrivacyPage() {
   return (
@@ -148,8 +163,14 @@ export function PrivacyPage() {
           </p>
           <p>
             What is conditional is everything else. The control plane contains a real Stripe
-            integration, and it is active only where <code>AF_STRIPE_SECRET_KEY</code> and{" "}
-            <code>AF_STRIPE_WEBHOOK_SECRET</code> are set. Where they are, Stripe holds the
+            integration, and it is active only where{" "}
+            {switchedOnBy("Stripe").map((name, i, all) => (
+              <span key={name}>
+                <code>{name}</code>
+                {i < all.length - 1 ? (i === all.length - 2 ? " and " : ", ") : ""}
+              </span>
+            ))}{" "}
+            are set. Where they are, Stripe holds the
             customer, subscription and invoice records for that deployment and is a processor for
             it. Where they are
             not, the billing routes refuse and name the missing variables, and an organization

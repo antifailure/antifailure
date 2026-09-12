@@ -27,3 +27,9 @@ longer published anywhere. Both repointed assertions were mutation tested: with
 the "PostHog, Inc. receives" clause removed the suite reports that the page
 never says who receives the data, and with the region removed it reports that
 the page does not name the cloud region.
+
+The privacy page now renders the Stripe variable names out of
+`www/lib/legal-facts.ts` rather than repeating them in prose. Removing the
+retention page left that module with no importer, which `tools/gatecheck`
+refuses, and the two copies of the same variable name were exactly the drift the
+module exists to prevent.
