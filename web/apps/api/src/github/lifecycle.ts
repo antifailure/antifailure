@@ -45,6 +45,7 @@ import {
   shortSha,
   type TeardownState,
 } from './render.ts'
+import { trimTrailingSlashes } from '../trailingslash.ts'
 import {
   checkShapeFor,
   stateFromReport,
@@ -940,7 +941,7 @@ async function concludeUnclaimed(
  */
 export function unclaimedDetail(consoleBase: string | null): string {
   const here = consoleBase
-    ? `\`${consoleBase.replace(/\/+$/, '')}\``
+    ? `\`${trimTrailingSlashes(consoleBase)}\``
     : "this control plane's address"
   return (
     'The Antifailure workflow finished and never reported to this control plane, so nothing ' +
@@ -1498,7 +1499,7 @@ async function publishCheck(
     // on the generic list. The commit stays in the URL for a reader.
     ...(deps.consoleBase
       ? {
-          detailsUrl: `${deps.consoleBase.replace(/\/+$/, '')}/runs?pr=${state.pullRequest.number}&commit=${encodeURIComponent(
+          detailsUrl: `${trimTrailingSlashes(deps.consoleBase)}/runs?pr=${state.pullRequest.number}&commit=${encodeURIComponent(
             state.generation.head_sha,
           )}`,
         }

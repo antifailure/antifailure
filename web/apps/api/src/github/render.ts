@@ -19,6 +19,7 @@
 import type { CheckOutput } from './api.ts'
 import type { GenerationState } from './states.ts'
 import { checkShapeFor } from './states.ts'
+import { trimTrailingSlashes } from '../trailingslash.ts'
 
 /** The marker that identifies the comment this control plane maintains.
  *
@@ -160,7 +161,7 @@ function environmentLine(input: CommentInput): string | null {
   if (!input.consoleBase) {
     return `Environment ${name}.`
   }
-  const href = `${input.consoleBase.replace(/\/+$/, '')}/environments?env=${encodeURIComponent(input.envId)}`
+  const href = `${trimTrailingSlashes(input.consoleBase)}/environments?env=${encodeURIComponent(input.envId)}`
   return `Environment [${input.envId}](${href}), with its runs, verdicts and evidence.`
 }
 

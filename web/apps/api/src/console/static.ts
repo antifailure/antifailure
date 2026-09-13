@@ -15,6 +15,7 @@
 import { createHash } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
 import { join, normalize, resolve, sep } from 'node:path'
+import { trimTrailingSlashes } from '../trailingslash.ts'
 
 export interface ConsoleBuild {
   /** Absolute path of the exported directory, whether or not it exists. */
@@ -105,7 +106,7 @@ export async function readAsset(build: ConsoleBuild, urlPath: string): Promise<A
       ? ['index.html']
       : extensionOf(clean)
         ? [clean.replace(/^\/+/, '')]
-        : [`${clean.replace(/^\/+/, '').replace(/\/+$/, '')}.html`]
+        : [`${trimTrailingSlashes(clean.replace(/^\/+/, ''))}.html`]
 
   for (const candidate of candidates) {
     const full = resolve(build.dir, normalize(candidate))
