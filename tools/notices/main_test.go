@@ -116,7 +116,7 @@ func TestTheModuleListIsRenderedSortedAndCounted(t *testing.T) {
 			{Path: "example.com/b", Version: "v2.0.0"},
 		},
 	)
-	if !strings.Contains(out, "## Go modules (2)") {
+	if !strings.Contains(out, "\n### Go modules (2)\n") {
 		t.Errorf("the heading does not count the modules:\n%s", out)
 	}
 	if !strings.Contains(out, "Platforms: linux/amd64.") {

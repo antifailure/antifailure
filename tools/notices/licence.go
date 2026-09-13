@@ -18,8 +18,8 @@ package main
 // Why not github.com/google/licensecheck. It is the classifier this idea is
 // usually reached for, its last release is from 2020, and it answers a wider
 // question with a confidence score. The question here is narrow and the answer
-// has to be yes or a named failure, so a matcher that knows six texts exactly
-// and refuses the seventh is the smaller and the more honest instrument.
+// has to be yes or a named failure, so a matcher that knows seven texts exactly
+// and refuses the eighth is the smaller and the more honest instrument.
 
 import (
 	"fmt"
@@ -49,6 +49,14 @@ var licences = []licenceText{
 	}},
 	{"ISC", []string{
 		"permission to use, copy, modify, and/or distribute this software for any purpose with or without fee is hereby granted, provided that the above copyright notice and this permission notice appear in all copies",
+	}},
+	// The Geist fonts the console export carries. Its permission clause begins
+	// with the same words as the MIT grant, so the second phrase is one only the
+	// font licence has, and the MIT entry's own second phrase is one the font
+	// licence lacks: neither can be read as the other.
+	{"OFL-1.1", []string{
+		"sil open font license version 1.1",
+		"to use, study, copy, merge, embed, modify, redistribute, and sell modified and unmodified copies of the font software",
 	}},
 	// SQLite is not under a licence at all. Its authors dedicated it to the
 	// public domain, and modernc.org/sqlite ships that dedication beside its own

@@ -469,9 +469,20 @@ jobs:
           go-version-file: engine/go.mod
           cache-dependency-path: engine/go.sum
 
+      # Node and npm, because the notices generator needs them. The image
+      # sections of THIRD_PARTY_NOTICES.md come from replaying each image's own
+      # npm ci and building the console, and the generator fails rather than
+      # falling back to a lockfile when npm is not there. ubuntu-latest happens
+      # to carry a Node, and a release that works because of what an image
+      # happens to carry stops working the day the image changes, so the
+      # version is the one ci.yml generates the committed copy with.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+
       - name: Third party notices
-        # Generated from what is actually linked rather than maintained by
-        # hand. MIT does not require a NOTICE file, but the Apache licensed
+        # Generated from what is actually linked and installed rather than
+        # maintained by hand. MIT does not require a NOTICE file, but the Apache licensed
         # dependencies still require attribution, and a stale list attributes
         # the wrong people.
         #

@@ -158,6 +158,7 @@ func TestTheArchiveShipsEverythingItPromises(t *testing.T) {
 		"af":                       "the binary, which is the whole point",
 		"LICENSE":                  "the terms the binary is offered under",
 		"README.md":                "what to do next, for somebody who unpacked the tar by hand",
+		"THIRD_PARTY_NOTICES.md":   "the attribution the licences of the linked modules require to travel with the binary",
 		"runner/package.json":      "what af runner install reads to know node and the dependencies",
 		"runner/package-lock.json": "the exact versions, without which npm resolves the ranges afresh per machine",
 		"runner/tsconfig.json":     "what node --experimental-strip-types needs to agree with",

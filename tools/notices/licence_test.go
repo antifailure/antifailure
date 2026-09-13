@@ -29,6 +29,7 @@ func TestEachLicenceTheLinkedModulesCarryIsNamedFromItsOwnText(t *testing.T) {
 		{"BSD-2-Clause.txt", "BSD-2-Clause"},
 		{"ISC.txt", "ISC"},
 		{"SQLite-public-domain.txt", "LicenseRef-SQLite-public-domain"},
+		{"OFL-1.1.txt", "OFL-1.1"},
 	} {
 		t.Run(c.want, func(t *testing.T) {
 			// Exactly this and nothing else, so a three clause text also being
@@ -46,6 +47,7 @@ func TestATextThatOnlyResemblesALicenceIsNamedAsNothing(t *testing.T) {
 		"a bare copyright line": "Copyright 2020 Somebody. All rights reserved.",
 		"the MIT grant without the condition that makes it the MIT licence": "Permission is hereby granted, free of charge, to any person obtaining a copy of this software.",
 		"a sentence that names the Apache licence without carrying it":      "This project is licensed under the Apache License, Version 2.0.",
+		"a sentence that names the font licence without carrying it":        "These fonts are licensed under the SIL Open Font License, Version 1.1.",
 		"the four clause BSD licence, which must not be read as three clause": fixture(t, "BSD-3-Clause.txt") +
 			"\n4. All advertising materials mentioning features or use of this software must display the following acknowledgement.\n",
 	} {

@@ -152,7 +152,10 @@ LABEL org.opencontainers.image.title="Antifailure enterprise control plane" \
       org.opencontainers.image.licenses="LicenseRef-Antifailure-Enterprise" \
       org.opencontainers.image.version="${AF_VERSION}" \
       org.opencontainers.image.revision="${AF_COMMIT}" \
-      org.opencontainers.image.created="${AF_BUILD_DATE}"
+      org.opencontainers.image.created="${AF_BUILD_DATE}" \
+      # Where the third party notices are inside the image, so somebody
+      # holding only the image can find what its licences require it to carry.
+      dev.antifailure.notices="/usr/share/doc/antifailure/THIRD_PARTY_NOTICES.md"
 
 ENV NODE_ENV=production \
     AF_PORT=8080 \
@@ -200,6 +203,13 @@ COPY ee/web/sso ./sso
 COPY ee/web/scim ./scim
 COPY ee/web/server ./server
 COPY ee/LICENSE.md /app/ee/LICENSE.md
+
+# The third party notices travel with the image, because the licences of what
+# it contains ask that attribution be carried with every copy, and a notice
+# that lives only in the repository is not carried with anything. One
+# generated file covers the af binary, this image and the enterprise image,
+# each in a marked section, and the label above names where it is.
+COPY THIRD_PARTY_NOTICES.md /usr/share/doc/antifailure/THIRD_PARTY_NOTICES.md
 
 WORKDIR /app/web
 

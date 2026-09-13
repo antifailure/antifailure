@@ -142,11 +142,12 @@ func checkCarveOut(root string) []string {
 	// README.md is in this list for a reason that is not obvious, and it is
 	// about the RELEASE ARCHIVE rather than the repository.
 	//
-	// tools/release/build.sh copies exactly LICENSE and README.md into the
-	// tarball. It does not copy LICENSING.md, and it should not: the archive
-	// contains no ee/ code, so a document about ee/ inside it would point at a
-	// directory that is not there. That is the dangling reference the old
-	// LICENSE already had, naming ee/LICENSE.md in an archive with no ee/.
+	// tools/release/build.sh copies LICENSE, README.md and the generated
+	// THIRD_PARTY_NOTICES.md into the tarball. It does not copy LICENSING.md,
+	// and it should not: the archive contains no ee/ code, so a document about
+	// ee/ inside it would point at a directory that is not there. That is the
+	// dangling reference the old LICENSE already had, naming ee/LICENSE.md in an
+	// archive with no ee/.
 	//
 	// Which leaves README.md as the only file that both states the carve out
 	// AND travels with the release. Somebody rewriting the README could drop

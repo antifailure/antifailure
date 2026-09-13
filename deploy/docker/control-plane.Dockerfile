@@ -99,7 +99,10 @@ LABEL org.opencontainers.image.title="Antifailure control plane" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.version="${AF_VERSION}" \
       org.opencontainers.image.revision="${AF_COMMIT}" \
-      org.opencontainers.image.created="${AF_BUILD_DATE}"
+      org.opencontainers.image.created="${AF_BUILD_DATE}" \
+      # Where the third party notices are inside the image, so somebody
+      # holding only the image can find what its licences require it to carry.
+      dev.antifailure.notices="/usr/share/doc/antifailure/THIRD_PARTY_NOTICES.md"
 
 ENV NODE_ENV=production \
     AF_PORT=8080 \
@@ -132,6 +135,13 @@ COPY deploy/docker/personas.mjs ./personas.mjs
 # overridable with AF_CONSOLE_DIR for a self-hosted operator who serves it some
 # other way.
 COPY --from=console /console/out ./console-out
+
+# The third party notices travel with the image, because the licences of what
+# it contains ask that attribution be carried with every copy, and a notice
+# that lives only in the repository is not carried with anything. One
+# generated file covers the af binary, this image and the enterprise image,
+# each in a marked section, and the label above names where it is.
+COPY THIRD_PARTY_NOTICES.md /usr/share/doc/antifailure/THIRD_PARTY_NOTICES.md
 
 # The migrations are read from disk at runtime by AF_MIGRATE=1, so they have to
 # be in the image. Asserted rather than assumed: an image whose migration
