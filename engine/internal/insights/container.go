@@ -10,10 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/client"
-	"github.com/docker/docker/pkg/stdcopy"
+	"github.com/moby/moby/api/pkg/stdcopy"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/client"
 
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
@@ -160,8 +159,11 @@ func (a *ContainerApplier) Apply(
 			//
 			// The disconnect is of somebody else's container from our network,
 			// which removes nothing and is what lets the network go.
-			_ = cli.NetworkDisconnect(c, netID, a.DatabaseRef, true)
-			_ = cli.NetworkRemove(c, netID)
+			_, _ = cli.NetworkDisconnect(c, netID, client.NetworkDisconnectOptions{
+				Container: a.DatabaseRef,
+				Force:     true,
+			})
+			_, _ = cli.NetworkRemove(c, netID, client.NetworkRemoveOptions{})
 		}()
 		rewritten, rErr := rewriteHost(url, databaseAlias, port)
 		if rErr != nil {
@@ -188,13 +190,16 @@ func (a *ContainerApplier) Apply(
 	}
 
 	progress("rehearsing the migrations in " + a.Image)
-	created, err := cli.ContainerCreate(ctx,
-		&container.Config{
+	created, err := cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config: &container.Config{
 			Image:  a.Image,
 			Env:    env,
 			Cmd:    []string{"sh", "-lc", a.Command},
 			Labels: dockerutil.Managed("rehearsal", a.EnvID, time.Now().UTC()),
-		}, hostCfg, nil, nil, name)
+		},
+		HostConfig: hostCfg,
+		Name:       name,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("insights: create the rehearsal container: %w", err)
 	}
@@ -204,7 +209,7 @@ func (a *ContainerApplier) Apply(
 		_ = dockerutil.RemoveContainer(c, cli, created.ID)
 	}()
 
-	if err := cli.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
+	if _, err := cli.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
 		return nil, fmt.Errorf("insights: start the rehearsal container: %w", err)
 	}
 
@@ -233,7 +238,7 @@ func (a *ContainerApplier) Apply(
 func (a *ContainerApplier) joinDatabase(
 	ctx context.Context, cli *client.Client,
 ) (netID string, port int, err error) {
-	created, err := cli.NetworkCreate(ctx, "af-rehearse-"+a.EnvID, network.CreateOptions{
+	created, err := cli.NetworkCreate(ctx, "af-rehearse-"+a.EnvID, client.NetworkCreateOptions{
 		Driver: "bridge",
 		// No route to anywhere but the other container on it.
 		Internal: true,
@@ -246,7 +251,7 @@ func (a *ContainerApplier) joinDatabase(
 	if err != nil {
 		// Removed by the id the create above returned, so it is provably the
 		// network this call made rather than one that answers to the name.
-		_ = cli.NetworkRemove(ctx, created.ID)
+		_, _ = cli.NetworkRemove(ctx, created.ID, client.NetworkRemoveOptions{})
 		return "", 0, fmt.Errorf("insights: attach the branch to the rehearsal network: %w", err)
 	}
 	return created.ID, port, nil
@@ -270,7 +275,7 @@ func rewriteHost(v secrets.Value, host string, port int) (secrets.Value, error) 
 
 // lastLines is the tail of a failed migration's output.
 func lastLines(ctx context.Context, cli *client.Client, id string) string {
-	logs, err := cli.ContainerLogs(ctx, id, container.LogsOptions{
+	logs, err := cli.ContainerLogs(ctx, id, client.ContainerLogsOptions{
 		ShowStdout: true, ShowStderr: true, Tail: "20",
 	})
 	if err != nil {

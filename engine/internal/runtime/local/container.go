@@ -7,14 +7,15 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/network"
-	"github.com/docker/go-connections/nat"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/network"
+	"github.com/moby/moby/client"
 
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	"github.com/antifailure/antifailure/engine/internal/envcert"
@@ -211,15 +212,15 @@ func (r *Runtime) startInstance(
 	// with no address. It now takes the same path as a fresh one from the
 	// ingress onwards.
 	var id string
-	if existing, err := r.cli.ContainerInspect(ctx, name); err == nil {
+	if existing, err := r.cli.ContainerInspect(ctx, name, client.ContainerInspectOptions{}); err == nil {
 		switch {
-		case existing.State != nil && existing.State.Running && r.runsImage(ctx, existing, s.Image):
-			id = existing.ID
-		case existing.State != nil && existing.State.Running:
+		case existing.Container.State != nil && existing.Container.State.Running && r.runsImage(ctx, existing.Container, s.Image):
+			id = existing.Container.ID
+		case existing.Container.State != nil && existing.Container.State.Running:
 			progress(fmt.Sprintf("%s: replacing the running container, which runs an image this tree no longer builds", instanceLabel(s.Name, ordinal, want)))
 			fallthrough
 		default:
-			if rmErr := dockerutil.RemoveContainer(ctx, r.cli, existing.ID); rmErr != nil {
+			if rmErr := dockerutil.RemoveContainer(ctx, r.cli, existing.Container.ID); rmErr != nil {
 				return "", rmErr
 			}
 		}
@@ -235,7 +236,7 @@ func (r *Runtime) startInstance(
 	if err := r.installCA(ctx, created, spec); err != nil {
 		return created, err
 	}
-	if err := r.cli.ContainerStart(ctx, created, container.StartOptions{}); err != nil {
+	if _, err := r.cli.ContainerStart(ctx, created, client.ContainerStartOptions{}); err != nil {
 		return created, aferrors.Wrap(err, aferrors.AFRUN040,
 			"detail", fmt.Sprintf("starting %s: %v", instanceLabel(s.Name, ordinal, want), err))
 	}
@@ -305,6 +306,15 @@ func (r *Runtime) create(
 		cfg.Entrypoint = []string{}
 	}
 
+	// The sidecar address arrives as a string and HostConfig takes a
+	// netip.Addr. Parsing it here fails the create rather than dropping the DNS
+	// entry, which would let a service resolve past the sidecar and out of the
+	// environment.
+	dnsAddr, err := netip.ParseAddr(proxyIP)
+	if err != nil {
+		return "", aferrors.Wrap(err, aferrors.AFRUN040,
+			"detail", "the sidecar address is not a valid IP: "+proxyIP)
+	}
 	host := &container.HostConfig{
 		// Every name this service looks up that is not inside the environment
 		// resolves to the sidecar, which then decides whether the connection
@@ -312,7 +322,7 @@ func (r *Runtime) create(
 		// client rather than to the ones that read their proxy variables:
 		// Node ignores them entirely, and a great many SDKs bundle a client
 		// that does the same.
-		DNS: []string{proxyIP},
+		DNS: []netip.Addr{dnsAddr},
 		// Restart is deliberately off. A service that crash loops must be
 		// visible as a crash loop, not hidden behind a runtime that keeps
 		// starting it until the readiness wait times out with no explanation.
@@ -355,7 +365,12 @@ func (r *Runtime) create(
 		},
 	}
 
-	resp, err := r.cli.ContainerCreate(ctx, cfg, host, netCfg, nil, name)
+	resp, err := r.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config:           cfg,
+		HostConfig:       host,
+		NetworkingConfig: netCfg,
+		Name:             name,
+	})
 	if err != nil {
 		return "", aferrors.Wrap(err, aferrors.AFRUN040,
 			"detail", fmt.Sprintf("creating %s: %v", s.Name, err))
@@ -401,11 +416,11 @@ func (r *Runtime) startIngress(
 	if err := journal(kindContainer, name); err != nil {
 		return 0, err
 	}
-	if existing, err := r.cli.ContainerInspect(ctx, name); err == nil {
-		if p, ok := publishedPort(existing.NetworkSettings.Ports); ok {
+	if existing, err := r.cli.ContainerInspect(ctx, name, client.ContainerInspectOptions{}); err == nil {
+		if p, ok := publishedPort(existing.Container.NetworkSettings.Ports); ok {
 			return p, nil
 		}
-		if rmErr := dockerutil.RemoveContainer(ctx, r.cli, existing.ID); rmErr != nil {
+		if rmErr := dockerutil.RemoveContainer(ctx, r.cli, existing.Container.ID); rmErr != nil {
 			return 0, rmErr
 		}
 	}
@@ -464,36 +479,38 @@ func (r *Runtime) createIngress(
 	name string,
 	hostPort int,
 ) error {
-	port, err := nat.NewPort("tcp", strconv.Itoa(s.Port))
+	port, err := network.ParsePort(strconv.Itoa(s.Port) + "/tcp")
 	if err != nil {
 		return aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
 	}
 	labels := r.managed(dockerutil.KindSidecar, spec.EnvID)
 	labels[dockerutil.LabelService] = s.Name
 
-	resp, err := r.cli.ContainerCreate(ctx,
-		&container.Config{
+	resp, err := r.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config: &container.Config{
 			// The sidecar's own image, which startProxy obtained before any
 			// service was created, so publishing a port fetches and builds
 			// nothing of its own.
 			Image:        proxyimage.Tag(),
 			Labels:       labels,
 			Cmd:          ingressCommand(s),
-			ExposedPorts: nat.PortSet{port: struct{}{}},
+			ExposedPorts: network.PortSet{port: struct{}{}},
 		},
-		&container.HostConfig{
+		HostConfig: &container.HostConfig{
 			RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyDisabled},
-			PortBindings: nat.PortMap{port: []nat.PortBinding{{
+			PortBindings: network.PortMap{port: []network.PortBinding{{
 				// Loopback only. Publishing on every interface would put an
 				// environment holding a copy of production data on whatever
 				// network the laptop happens to be joined to, which for a
 				// laptop is a coffee shop.
-				HostIP: "127.0.0.1", HostPort: strconv.Itoa(hostPort),
+				HostIP: netip.MustParseAddr("127.0.0.1"), HostPort: strconv.Itoa(hostPort),
 			}}},
 		},
-		&network.NetworkingConfig{
+		NetworkingConfig: &network.NetworkingConfig{
 			EndpointsConfig: map[string]*network.EndpointSettings{nets.edge: {}},
-		}, nil, name)
+		},
+		Name: name,
+	})
 	if err != nil {
 		return aferrors.Wrap(err, aferrors.AFRUN040,
 			"detail", fmt.Sprintf("creating the forwarder for %s: %v", s.Name, err))
@@ -504,12 +521,15 @@ func (r *Runtime) createIngress(
 		// the name against every retry after it.
 		_ = dockerutil.RemoveContainer(context.WithoutCancel(ctx), r.cli, resp.ID)
 	}
-	if err := r.cli.NetworkConnect(ctx, nets.inner, resp.ID, &network.EndpointSettings{}); err != nil {
+	if _, err := r.cli.NetworkConnect(ctx, nets.inner, client.NetworkConnectOptions{
+		Container:      resp.ID,
+		EndpointConfig: &network.EndpointSettings{},
+	}); err != nil {
 		remove()
 		return aferrors.Wrap(err, aferrors.AFRUN040,
 			"detail", fmt.Sprintf("attaching the forwarder for %s: %v", s.Name, err))
 	}
-	if err := r.cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+	if _, err := r.cli.ContainerStart(ctx, resp.ID, client.ContainerStartOptions{}); err != nil {
 		remove()
 		return aferrors.Wrap(err, aferrors.AFRUN040,
 			"detail", fmt.Sprintf("starting the forwarder for %s: %v", s.Name, err))
@@ -531,7 +551,7 @@ func ingressCommand(s provider.ServiceSpec) []string {
 }
 
 // publishedPort reads the host port out of a port map.
-func publishedPort(ports nat.PortMap) (int, bool) {
+func publishedPort(ports network.PortMap) (int, bool) {
 	for _, bindings := range ports {
 		for _, b := range bindings {
 			if n, err := strconv.Atoi(b.HostPort); err == nil && n > 0 {
@@ -734,7 +754,7 @@ func (r *Runtime) runOnceAs(
 		_ = dockerutil.RemoveContainer(c, r.cli, id)
 	}()
 
-	if err := r.cli.ContainerStart(ctx, id, container.StartOptions{}); err != nil {
+	if _, err := r.cli.ContainerStart(ctx, id, client.ContainerStartOptions{}); err != nil {
 		return aferrors.Wrap(err, aferrors.AFRUN040,
 			"detail", fmt.Sprintf("starting the %s: %v", role, err))
 	}
@@ -840,16 +860,16 @@ func (r *Runtime) probe(ctx context.Context, hc *http.Client, s provider.Service
 // naming the exit code, rather than letting the readiness loop wait out its
 // whole timeout on something that will never answer.
 func (r *Runtime) confirmStillRunning(ctx context.Context, s provider.ServiceSpec, id string) error {
-	insp, err := r.cli.ContainerInspect(ctx, id)
+	insp, err := r.cli.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
 	if err != nil {
 		return aferrors.Wrap(err, aferrors.AFRUN040,
 			"detail", fmt.Sprintf("inspecting %s: %v", s.Name, err))
 	}
-	if insp.State == nil || insp.State.Running {
+	if insp.Container.State == nil || insp.Container.State.Running {
 		return nil
 	}
 	return aferrors.Coded(aferrors.AFRUN005,
-		"service", s.Name, "code", strconv.Itoa(insp.State.ExitCode))
+		"service", s.Name, "code", strconv.Itoa(insp.Container.State.ExitCode))
 }
 
 // maxLogLines is what is kept from a failed service.
@@ -860,7 +880,7 @@ const maxLogLines = 40
 
 // lastLogLines reads the end of a container's output, redacted.
 func (r *Runtime) lastLogLines(ctx context.Context, id string) string {
-	rc, err := r.cli.ContainerLogs(context.WithoutCancel(ctx), id, container.LogsOptions{
+	rc, err := r.cli.ContainerLogs(context.WithoutCancel(ctx), id, client.ContainerLogsOptions{
 		ShowStdout: true, ShowStderr: true, Tail: strconv.Itoa(maxLogLines),
 	})
 	if err != nil {

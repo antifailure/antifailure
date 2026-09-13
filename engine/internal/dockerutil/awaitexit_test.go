@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
+	"github.com/moby/moby/client"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
@@ -20,7 +20,8 @@ func TestAwaitExit_ReturnsTheExitCode(t *testing.T) {
 	defer cancel()
 
 	id := createRunning(t, cli, []string{"sh", "-c", "exit 7"})
-	require.NoError(t, cli.ContainerStart(ctx, id, container.StartOptions{}))
+	_, startErr := cli.ContainerStart(ctx, id, client.ContainerStartOptions{})
+	require.NoError(t, startErr)
 
 	code, err := dockerutil.AwaitExit(ctx, cli, id)
 	require.NoError(t, err)
@@ -51,7 +52,8 @@ func TestAwaitExit_ADeadlineEndsTheWaitAndLeavesNothingParked(t *testing.T) {
 	before := goleak.IgnoreCurrent()
 
 	id := createRunning(t, cli, []string{"sleep", "60"})
-	require.NoError(t, cli.ContainerStart(ctx, id, container.StartOptions{}))
+	_, startErr := cli.ContainerStart(ctx, id, client.ContainerStartOptions{})
+	require.NoError(t, startErr)
 
 	short, stop := context.WithTimeout(ctx, 300*time.Millisecond)
 	defer stop()

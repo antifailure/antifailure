@@ -24,12 +24,8 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/client"
-	"github.com/docker/go-connections/nat"
+	"github.com/moby/moby/api/types/network"
+	"github.com/moby/moby/client"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
@@ -280,7 +276,7 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 		changes = append(changes, `LABEL `+dockerutil.LabelAttestation+`=`+
 			base64.StdEncoding.EncodeToString([]byte(attestation)))
 	}
-	if _, err := p.cli.ContainerCommit(ctx, c.id, container.CommitOptions{
+	if _, err := p.cli.ContainerCommit(ctx, c.id, client.ContainerCommitOptions{
 		Reference: tag,
 		Comment:   "Antifailure golden " + version,
 		Changes:   changes,
@@ -341,14 +337,14 @@ func (p *Provider) loadSource(ctx context.Context, target secrets.Value, spec pr
 
 // ListGoldens returns published versions, newest first.
 func (p *Provider) ListGoldens(ctx context.Context) ([]provider.GoldenVersion, error) {
-	images, err := p.cli.ImageList(ctx, image.ListOptions{
-		Filters: filters.NewArgs(filters.Arg("reference", ImageRepo+":*")),
+	images, err := p.cli.ImageList(ctx, client.ImageListOptions{
+		Filters: make(client.Filters).Add("reference", ImageRepo+":*"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("db.docker: list golden images: %w", err)
 	}
 	var out []provider.GoldenVersion
-	for _, img := range images {
+	for _, img := range images.Items {
 		for _, tag := range img.RepoTags {
 			id, ok := strings.CutPrefix(tag, ImageRepo+":")
 			if !ok {
@@ -431,7 +427,7 @@ func (p *Provider) DestroyGolden(ctx context.Context, version string) error {
 			return aferrors.Coded(aferrors.AFDB005, "version", version, "count", "1")
 		}
 	}
-	_, err = p.cli.ImageRemove(ctx, tag, image.RemoveOptions{PruneChildren: true})
+	_, err = p.cli.ImageRemove(ctx, tag, client.ImageRemoveOptions{PruneChildren: true})
 	if err != nil && !cerrdefs.IsNotFound(err) {
 		return fmt.Errorf("db.docker: remove the golden image %s: %w", version, err)
 	}
@@ -564,12 +560,12 @@ func (p *Provider) ConnString(ctx context.Context, b provider.Branch, mode provi
 
 	var lastErr error
 	for _, ref := range refs {
-		info, err := p.cli.ContainerInspect(ctx, ref)
+		info, err := p.cli.ContainerInspect(ctx, ref, client.ContainerInspectOptions{})
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		port, perr := publishedPort(info.NetworkSettings.Ports)
+		port, perr := publishedPort(info.Container.NetworkSettings.Ports)
 		if perr != nil {
 			lastErr = perr
 			continue
@@ -631,7 +627,7 @@ func (p *Provider) Inventory(ctx context.Context) ([]provider.Resource, error) {
 			Labels: map[string]string{
 				"name":   strings.TrimPrefix(dockerutil.FirstName(c.Names), "/"),
 				"golden": c.Labels[LabelGolden],
-				"state":  c.State,
+				"state":  string(c.State),
 			},
 		})
 	}
@@ -677,7 +673,7 @@ func joinInts(v []int) string {
 	return strings.Join(parts, ", ")
 }
 
-func publishedPort(ports nat.PortMap) (int, error) {
+func publishedPort(ports network.PortMap) (int, error) {
 	for _, bindings := range ports {
 		for _, b := range bindings {
 			if n, err := strconv.Atoi(b.HostPort); err == nil && n > 0 {
@@ -704,17 +700,17 @@ func (p *Provider) freePort() (int, error) { return p.ports.Free() }
 // runs again on every push and reconnecting would be an error every time
 // after the first.
 func (p *Provider) AttachToNetwork(ctx context.Context, ref, networkID, alias string) (int, error) {
-	insp, err := p.cli.ContainerInspect(ctx, ref)
+	insp, err := p.cli.ContainerInspect(ctx, ref, client.ContainerInspectOptions{})
 	if err != nil {
 		return 0, aferrors.Wrap(err, aferrors.AFDB004, "env", ref)
 	}
-	if insp.Config == nil || !dockerutil.IsOurs(insp.Config.Labels) {
+	if insp.Container.Config == nil || !dockerutil.IsOurs(insp.Container.Config.Labels) {
 		return 0, fmt.Errorf("%w: container %s", dockerutil.ErrNotOurs, dockerutil.ShortID(ref))
 	}
 
 	already := false
-	if insp.NetworkSettings != nil {
-		for id, ep := range insp.NetworkSettings.Networks {
+	if insp.Container.NetworkSettings != nil {
+		for id, ep := range insp.Container.NetworkSettings.Networks {
 			if id == networkID || (ep != nil && ep.NetworkID == networkID) {
 				already = true
 				break
@@ -722,8 +718,11 @@ func (p *Provider) AttachToNetwork(ctx context.Context, ref, networkID, alias st
 		}
 	}
 	if !already {
-		err = p.cli.NetworkConnect(ctx, networkID, ref, &network.EndpointSettings{
-			Aliases: []string{alias},
+		_, err = p.cli.NetworkConnect(ctx, networkID, client.NetworkConnectOptions{
+			Container: ref,
+			EndpointConfig: &network.EndpointSettings{
+				Aliases: []string{alias},
+			},
 		})
 		if err != nil && !strings.Contains(err.Error(), "already exists") {
 			return 0, aferrors.Wrap(err, aferrors.AFDB004, "env", ref)

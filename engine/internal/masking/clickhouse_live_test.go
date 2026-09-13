@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"strconv"
@@ -14,10 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/client"
-	"github.com/docker/go-connections/nat"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/network"
+	dockerclient "github.com/moby/moby/client"
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
@@ -319,7 +319,7 @@ func requireClickHouse(t *testing.T) *chServer {
 	t.Cleanup(cancel)
 
 	if _, err := cli.ImageInspect(ctx, clickhouseImage); err != nil {
-		rc, pullErr := cli.ImagePull(ctx, clickhouseImage, image.PullOptions{})
+		rc, pullErr := cli.ImagePull(ctx, clickhouseImage, dockerclient.ImagePullOptions{})
 		if pullErr != nil {
 			t.Skipf("skipped: %s could not be pulled: %v", clickhouseImage, pullErr)
 		}
@@ -329,9 +329,9 @@ func requireClickHouse(t *testing.T) *chServer {
 	port := freePort(t)
 	name := fmt.Sprintf("af-mask-ch-%d", time.Now().UnixNano()%1e9)
 	const password = "af-masking-test"
-	httpPort := nat.Port("8123/tcp")
-	resp, err := cli.ContainerCreate(ctx,
-		&container.Config{
+	httpPort := network.MustParsePort("8123/tcp")
+	resp, err := cli.ContainerCreate(ctx, dockerclient.ContainerCreateOptions{
+		Config: &container.Config{
 			Image: clickhouseImage,
 			// Labelled as ours, and that is not cosmetic: RemoveContainer
 			// REFUSES a container it cannot see a label on, so an unlabelled
@@ -345,17 +345,19 @@ func requireClickHouse(t *testing.T) *chServer {
 				"CLICKHOUSE_PASSWORD=" + password,
 				"CLICKHOUSE_DB=af_masking",
 			},
-			ExposedPorts: nat.PortSet{httpPort: struct{}{}},
+			ExposedPorts: network.PortSet{httpPort: struct{}{}},
 		},
-		&container.HostConfig{
-			PortBindings: nat.PortMap{httpPort: []nat.PortBinding{{
+		HostConfig: &container.HostConfig{
+			PortBindings: network.PortMap{httpPort: []network.PortBinding{{
 				// Loopback only, which is what makes a fixed password
 				// acceptable: the server is unreachable from anywhere but
 				// this machine.
-				HostIP: "127.0.0.1", HostPort: strconv.Itoa(port),
+				HostIP: netip.MustParseAddr("127.0.0.1"), HostPort: strconv.Itoa(port),
 			}}},
 			RestartPolicy: container.RestartPolicy{Name: "no"},
-		}, nil, nil, name)
+		},
+		Name: name,
+	})
 	if err != nil {
 		t.Skipf("skipped: no ClickHouse container could be created: %v", err)
 	}
@@ -364,7 +366,8 @@ func requireClickHouse(t *testing.T) *chServer {
 			t.Errorf("the ClickHouse container %s was left behind: %v", name, err)
 		}
 	})
-	require.NoError(t, cli.ContainerStart(ctx, resp.ID, container.StartOptions{}))
+	_, startErr := cli.ContainerStart(ctx, resp.ID, dockerclient.ContainerStartOptions{})
+	require.NoError(t, startErr)
 
 	server := &chServer{
 		base:     "http://127.0.0.1:" + strconv.Itoa(port),
@@ -568,8 +571,8 @@ func TestClickHouseLive_TheStatementsTheDialectCompilesRun(t *testing.T) {
 
 // containerLog returns the tail of a container's output, for a message that
 // would otherwise say only that nothing answered.
-func containerLog(ctx context.Context, cli *client.Client, id string) string {
-	rc, err := cli.ContainerLogs(ctx, id, container.LogsOptions{
+func containerLog(ctx context.Context, cli *dockerclient.Client, id string) string {
+	rc, err := cli.ContainerLogs(ctx, id, dockerclient.ContainerLogsOptions{
 		ShowStdout: true, ShowStderr: true, Tail: "20",
 	})
 	if err != nil {

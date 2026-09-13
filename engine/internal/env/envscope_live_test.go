@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/moby/moby/client"
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
@@ -161,11 +162,11 @@ func containerEnv(t *testing.T, ctx context.Context, o *Orchestrator, service st
 	require.NoError(t, err)
 	defer func() { _ = cli.Close() }()
 
-	info, err := cli.ContainerInspect(ctx, "af-svc-"+o.envID+"-"+service)
+	info, err := cli.ContainerInspect(ctx, "af-svc-"+o.envID+"-"+service, client.ContainerInspectOptions{})
 	require.NoError(t, err, "no container for %s", service)
-	require.NotNil(t, info.Config)
+	require.NotNil(t, info.Container.Config)
 	out := map[string]string{}
-	for _, kv := range info.Config.Env {
+	for _, kv := range info.Container.Config.Env {
 		k, v, _ := strings.Cut(kv, "=")
 		out[k] = v
 	}

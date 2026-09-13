@@ -14,8 +14,9 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/network"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/network"
+	"github.com/moby/moby/client"
 
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 
@@ -103,11 +104,11 @@ func (r *Runtime) startProxy(
 	if err := journal(kindContainer, name); err != nil {
 		return "", err
 	}
-	if existing, err := r.cli.ContainerInspect(ctx, name); err == nil {
-		if existing.State != nil && existing.State.Running {
-			return runningProxyIP(existing.NetworkSettings, nets.inner)
+	if existing, err := r.cli.ContainerInspect(ctx, name, client.ContainerInspectOptions{}); err == nil {
+		if existing.Container.State != nil && existing.Container.State.Running {
+			return runningProxyIP(existing.Container.NetworkSettings, nets.inner)
 		}
-		if rmErr := dockerutil.RemoveContainer(ctx, r.cli, existing.ID); rmErr != nil {
+		if rmErr := dockerutil.RemoveContainer(ctx, r.cli, existing.Container.ID); rmErr != nil {
 			return "", rmErr
 		}
 	}
@@ -115,8 +116,8 @@ func (r *Runtime) startProxy(
 	labels := r.managed(dockerutil.KindSidecar, envID)
 	labels[dockerutil.LabelService] = ProxyAlias
 
-	resp, err := r.cli.ContainerCreate(ctx,
-		&container.Config{
+	resp, err := r.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config: &container.Config{
 			Image:  proxyimage.Tag(),
 			Labels: labels,
 			Cmd:    []string{"-config", configPath},
@@ -126,21 +127,25 @@ func (r *Runtime) startProxy(
 			// given none.
 			Env: modelEnv,
 		},
-		&container.HostConfig{
+		HostConfig: &container.HostConfig{
 			RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyDisabled},
 		},
-		&network.NetworkingConfig{
+		NetworkingConfig: &network.NetworkingConfig{
 			// Created on the outer network, because that is the one with a
 			// route out. The inner one is attached before it starts.
 			EndpointsConfig: map[string]*network.EndpointSettings{nets.edge: {}},
-		}, nil, name)
+		},
+		Name: name,
+	})
 	if err != nil {
 		return "", aferrors.Wrap(err, aferrors.AFRUN040,
 			"detail", "creating the egress proxy: "+err.Error())
 	}
 
-	if err := r.cli.NetworkConnect(ctx, nets.inner, resp.ID,
-		&network.EndpointSettings{Aliases: []string{ProxyAlias}}); err != nil {
+	if _, err := r.cli.NetworkConnect(ctx, nets.inner, client.NetworkConnectOptions{
+		Container:      resp.ID,
+		EndpointConfig: &network.EndpointSettings{Aliases: []string{ProxyAlias}},
+	}); err != nil {
 		return "", aferrors.Wrap(err, aferrors.AFRUN040,
 			"detail", "attaching the egress proxy: "+err.Error())
 	}
@@ -189,7 +194,7 @@ func (r *Runtime) startProxy(
 		return "", err
 	}
 
-	if err := r.cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+	if _, err := r.cli.ContainerStart(ctx, resp.ID, client.ContainerStartOptions{}); err != nil {
 		return "", aferrors.Wrap(err, aferrors.AFRUN040,
 			"detail", "starting the egress proxy: "+err.Error())
 	}
@@ -219,13 +224,13 @@ func plural(n int, one, many string) string {
 
 // networkSubnet reads a network's address range.
 func (r *Runtime) networkSubnet(ctx context.Context, networkID string) (string, error) {
-	insp, err := r.cli.NetworkInspect(ctx, networkID, network.InspectOptions{})
+	insp, err := r.cli.NetworkInspect(ctx, networkID, client.NetworkInspectOptions{})
 	if err != nil {
 		return "", aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
 	}
-	for _, cfg := range insp.IPAM.Config {
-		if cfg.Subnet != "" {
-			return cfg.Subnet, nil
+	for _, cfg := range insp.Network.IPAM.Config {
+		if cfg.Subnet.IsValid() {
+			return cfg.Subnet.String(), nil
 		}
 	}
 	return "", aferrors.Coded(aferrors.AFRUN040,
@@ -234,11 +239,11 @@ func (r *Runtime) networkSubnet(ctx context.Context, networkID string) (string, 
 
 // startedProxyIP reads the sidecar's address once it is running.
 func (r *Runtime) startedProxyIP(ctx context.Context, id, networkID string) (string, error) {
-	insp, err := r.cli.ContainerInspect(ctx, id)
+	insp, err := r.cli.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
 	if err != nil {
 		return "", aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
 	}
-	return runningProxyIP(insp.NetworkSettings, networkID)
+	return runningProxyIP(insp.Container.NetworkSettings, networkID)
 }
 
 // runningProxyIP reads the sidecar's address on the environment's inner
@@ -250,8 +255,8 @@ func (r *Runtime) startedProxyIP(ctx context.Context, id, networkID string) (str
 func runningProxyIP(settings *container.NetworkSettings, networkID string) (string, error) {
 	if settings != nil {
 		for _, ep := range settings.Networks {
-			if ep != nil && ep.NetworkID == networkID && ep.IPAddress != "" {
-				return ep.IPAddress, nil
+			if ep != nil && ep.NetworkID == networkID && ep.IPAddress.IsValid() {
+				return ep.IPAddress.String(), nil
 			}
 		}
 	}
@@ -309,16 +314,16 @@ func (r *Runtime) waitProxyReady(ctx context.Context, id string) error {
 }
 
 func (r *Runtime) proxyStillRunning(ctx context.Context, id, out string) error {
-	insp, err := r.cli.ContainerInspect(ctx, id)
+	insp, err := r.cli.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
 	if err != nil {
 		return aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
 	}
-	if insp.State == nil || insp.State.Running {
+	if insp.Container.State == nil || insp.Container.State.Running {
 		return nil
 	}
 	return aferrors.Coded(aferrors.AFRUN005,
 		"service", "the egress proxy",
-		"code", strconv.Itoa(insp.State.ExitCode)+"\n"+out)
+		"code", strconv.Itoa(insp.Container.State.ExitCode)+"\n"+out)
 }
 
 // ensureProxyImage puts the sidecar image on this daemon: present, then
@@ -361,8 +366,10 @@ func (r *Runtime) copyInto(ctx context.Context, id, path string, mode int64, bod
 	}
 	// Copied to the root, with the path carried in the header, because the
 	// runtime image is scratch and has no directories to copy into.
-	err := r.cli.CopyToContainer(ctx, id, "/", bytes.NewReader(buf.Bytes()),
-		container.CopyToContainerOptions{})
+	_, err := r.cli.CopyToContainer(ctx, id, client.CopyToContainerOptions{
+		DestinationPath: "/",
+		Content:         bytes.NewReader(buf.Bytes()),
+	})
 	if err != nil {
 		return aferrors.Wrap(err, aferrors.AFRUN040,
 			"detail", "writing the policy into the proxy: "+err.Error())
@@ -457,7 +464,7 @@ func (r *Runtime) Decisions(ctx context.Context, envID string, limit int) ([]Dec
 		limit = 200
 	}
 	id := proxyName(envID)
-	if _, err := r.cli.ContainerInspect(ctx, id); err != nil {
+	if _, err := r.cli.ContainerInspect(ctx, id, client.ContainerInspectOptions{}); err != nil {
 		if cerrdefs.IsNotFound(err) {
 			// Nothing running is not an error. Somebody asking what the
 			// environment reached before bringing it up should be told that,
@@ -467,7 +474,7 @@ func (r *Runtime) Decisions(ctx context.Context, envID string, limit int) ([]Dec
 		return nil, aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
 	}
 
-	rc, err := r.cli.ContainerLogs(ctx, id, container.LogsOptions{
+	rc, err := r.cli.ContainerLogs(ctx, id, client.ContainerLogsOptions{
 		ShowStdout: true, ShowStderr: true, Tail: strconv.Itoa(limit + 50),
 	})
 	if err != nil {
@@ -574,7 +581,7 @@ func (r *Runtime) Messages(ctx context.Context, envID string, limit int) ([]Mess
 // sidecarLines reads the tail of the sidecar's output.
 func (r *Runtime) sidecarLines(ctx context.Context, envID string, tail int) ([]string, error) {
 	id := proxyName(envID)
-	if _, err := r.cli.ContainerInspect(ctx, id); err != nil {
+	if _, err := r.cli.ContainerInspect(ctx, id, client.ContainerInspectOptions{}); err != nil {
 		if cerrdefs.IsNotFound(err) {
 			// Nothing running is not an error. Somebody asking what arrived
 			// before bringing the environment up should be told that, not
@@ -583,7 +590,7 @@ func (r *Runtime) sidecarLines(ctx context.Context, envID string, tail int) ([]s
 		}
 		return nil, aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
 	}
-	rc, err := r.cli.ContainerLogs(ctx, id, container.LogsOptions{
+	rc, err := r.cli.ContainerLogs(ctx, id, client.ContainerLogsOptions{
 		ShowStdout: true, ShowStderr: true, Tail: strconv.Itoa(tail),
 	})
 	if err != nil {

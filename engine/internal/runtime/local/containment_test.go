@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/network"
+	"github.com/moby/moby/client"
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
@@ -264,15 +264,15 @@ func TestContainment_TheSameProbeEscapesWithoutIt(t *testing.T) {
 	const boxName = "af-contain-loose-probe"
 	// Removed first, in case a previous run was killed between create and
 	// remove. Both carry our label, so this cannot touch anything else.
-	_ = cli.ContainerRemove(ctx, boxName, container.RemoveOptions{Force: true})
-	_ = cli.NetworkRemove(ctx, netName)
+	_, _ = cli.ContainerRemove(ctx, boxName, client.ContainerRemoveOptions{Force: true})
+	_, _ = cli.NetworkRemove(ctx, netName, client.NetworkRemoveOptions{})
 
 	// Internal is false, which is the whole difference. Turning off IP
 	// masquerading instead would look like the same thing and would not be:
 	// on Docker Desktop the traffic is translated again at the virtual
 	// machine's gateway, and that is the mistake this suite exists to keep
 	// caught.
-	loose, err := cli.NetworkCreate(ctx, netName, network.CreateOptions{
+	loose, err := cli.NetworkCreate(ctx, netName, client.NetworkCreateOptions{
 		Driver:   "bridge",
 		Internal: false,
 		Labels:   dockerutil.Managed(dockerutil.KindNetwork, "contain-loose", time.Now()),
@@ -281,22 +281,25 @@ func TestContainment_TheSameProbeEscapesWithoutIt(t *testing.T) {
 	t.Cleanup(func() {
 		c, cancelRemove := context.WithTimeout(context.Background(), time.Minute)
 		defer cancelRemove()
-		_ = cli.ContainerRemove(c, boxName, container.RemoveOptions{Force: true})
+		_, _ = cli.ContainerRemove(c, boxName, client.ContainerRemoveOptions{Force: true})
 		_ = dockerutil.RemoveNetwork(c, cli, loose.ID)
 	})
 
-	created, err := cli.ContainerCreate(ctx,
-		&container.Config{
+	created, err := cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config: &container.Config{
 			Image:  proberImage,
 			Cmd:    []string{"/bin/sh", "-c", escapeScript},
 			Labels: dockerutil.Managed(dockerutil.KindService, "contain-loose", time.Now()),
 		},
-		&container.HostConfig{RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyDisabled}},
-		&network.NetworkingConfig{
+		HostConfig: &container.HostConfig{RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyDisabled}},
+		NetworkingConfig: &network.NetworkingConfig{
 			EndpointsConfig: map[string]*network.EndpointSettings{netName: {}},
-		}, nil, boxName)
+		},
+		Name: boxName,
+	})
 	require.NoError(t, err)
-	require.NoError(t, cli.ContainerStart(ctx, created.ID, container.StartOptions{}))
+	_, startErr := cli.ContainerStart(ctx, created.ID, client.ContainerStartOptions{})
+	require.NoError(t, startErr)
 
 	text := awaitLooseProbe(t, ctx, created.ID)
 	res := parseProbe(text)
@@ -317,13 +320,13 @@ func awaitLooseProbe(t *testing.T, ctx context.Context, id string) string {
 
 	deadline := time.Now().Add(3 * time.Minute)
 	for {
-		insp, inspErr := cli.ContainerInspect(ctx, id)
+		insp, inspErr := cli.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
 		require.NoError(t, inspErr)
 		text := containerOutput(t, cli, id)
 		if strings.Contains(text, controlMarker) {
 			return text
 		}
-		if insp.State != nil && !insp.State.Running {
+		if insp.Container.State != nil && !insp.Container.State.Running {
 			return text
 		}
 		if time.Now().After(deadline) {
@@ -492,43 +495,43 @@ func TestContainment_NoServiceGetsAPathToTheDaemonOrTheHost(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = cli.Close() })
 
-	list, err := cli.ContainerList(ctx, container.ListOptions{
+	list, err := cli.ContainerList(ctx, client.ContainerListOptions{
 		All: true, Filters: dockerutil.EnvFilter(id),
 	})
 	require.NoError(t, err)
-	require.NotEmpty(t, list, "no container was found for this environment, so nothing was checked")
+	require.NotEmpty(t, list.Items, "no container was found for this environment, so nothing was checked")
 
 	var checkedService, checkedSidecar bool
-	for _, c := range list {
-		insp, inspErr := cli.ContainerInspect(ctx, c.ID)
+	for _, c := range list.Items {
+		insp, inspErr := cli.ContainerInspect(ctx, c.ID, client.ContainerInspectOptions{})
 		require.NoError(t, inspErr)
-		name := insp.Config.Labels[dockerutil.LabelService]
+		name := insp.Container.Config.Labels[dockerutil.LabelService]
 
-		require.Empty(t, insp.HostConfig.Binds, "%s has a bind mount", name)
-		require.Empty(t, insp.Mounts, "%s has a mount", name)
-		require.False(t, insp.HostConfig.Privileged, "%s is privileged", name)
-		require.Empty(t, insp.HostConfig.CapAdd, "%s adds capabilities", name)
-		require.NotEqual(t, "host", string(insp.HostConfig.NetworkMode),
+		require.Empty(t, insp.Container.HostConfig.Binds, "%s has a bind mount", name)
+		require.Empty(t, insp.Container.Mounts, "%s has a mount", name)
+		require.False(t, insp.Container.HostConfig.Privileged, "%s is privileged", name)
+		require.Empty(t, insp.Container.HostConfig.CapAdd, "%s adds capabilities", name)
+		require.NotEqual(t, "host", string(insp.Container.HostConfig.NetworkMode),
 			"%s is on the host's network, which has no containment at all", name)
-		require.NotEqual(t, "host", string(insp.HostConfig.PidMode), "%s shares the host's processes", name)
-		require.Empty(t, insp.HostConfig.Devices, "%s has a device", name)
+		require.NotEqual(t, "host", string(insp.Container.HostConfig.PidMode), "%s shares the host's processes", name)
+		require.Empty(t, insp.Container.HostConfig.Devices, "%s has a device", name)
 
 		switch name {
 		case local.ProxyAlias:
 			// The sidecar is on both networks. That is the design: it is the
 			// only thing in the environment with a route out.
-			require.Len(t, insp.NetworkSettings.Networks, 2,
+			require.Len(t, insp.Container.NetworkSettings.Networks, 2,
 				"the sidecar is not on both networks, so either nothing is contained "+
 					"or nothing can get out at all")
 			checkedSidecar = true
 		case "idle":
-			require.Len(t, insp.NetworkSettings.Networks, 1,
+			require.Len(t, insp.Container.NetworkSettings.Networks, 1,
 				"a service is attached to more than one network, and the second one is "+
 					"the one with a route out")
-			for netName := range insp.NetworkSettings.Networks {
-				insp, netErr := cli.NetworkInspect(ctx, netName, network.InspectOptions{})
+			for netName := range insp.Container.NetworkSettings.Networks {
+				insp, netErr := cli.NetworkInspect(ctx, netName, client.NetworkInspectOptions{})
 				require.NoError(t, netErr)
-				require.True(t, insp.Internal,
+				require.True(t, insp.Network.Internal,
 					"the network a service sits on is not internal, so it has a route out. "+
 						"Turning off IP masquerading looks like the same thing and is not: "+
 						"Docker Desktop translates the traffic again at the virtual machine's gateway")
@@ -545,7 +548,7 @@ func containerOutput(t *testing.T, cli *client.Client, id string) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	rc, err := cli.ContainerLogs(ctx, id, container.LogsOptions{ShowStdout: true, ShowStderr: true})
+	rc, err := cli.ContainerLogs(ctx, id, client.ContainerLogsOptions{ShowStdout: true, ShowStderr: true})
 	if err != nil {
 		return fmt.Sprintf("the output could not be read: %v", err)
 	}

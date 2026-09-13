@@ -2,11 +2,14 @@ package dockerutil_test
 
 import (
 	"errors"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/moby/moby/client"
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
@@ -51,10 +54,19 @@ func TestIsOurs_OnlyClaimsWhatCarriesTheLabel(t *testing.T) {
 	}), "the kind label alone is not a claim of ownership")
 }
 
+// labelTerms returns the label filter's value set as a sorted slice.
+//
+// client.Filters is a set keyed by value rather than the old ordered Args, so
+// the assertions below need a deterministic slice to compare against. Sorting
+// is the test's own concern: the daemon receives a JSON object either way.
+func labelTerms(f client.Filters) []string {
+	return slices.Sorted(maps.Keys(f["label"]))
+}
+
 func TestFilter_AlwaysRequiresTheManagedLabel(t *testing.T) {
 	t.Parallel()
 	f := dockerutil.Filter(dockerutil.LabelKind, dockerutil.KindService)
-	got := f.Get("label")
+	got := labelTerms(f)
 	// The bare key is an existence test, so a resource an older release
 	// stamped with a different value is still found.
 	require.Contains(t, got, "dev.antifailure.managed")
@@ -62,8 +74,8 @@ func TestFilter_AlwaysRequiresTheManagedLabel(t *testing.T) {
 	require.Contains(t, got, "dev.antifailure.kind=service")
 
 	env := dockerutil.EnvFilter("env-1")
-	require.Contains(t, env.Get("label"), "dev.antifailure.managed")
-	require.Contains(t, env.Get("label"), "dev.antifailure.env=env-1")
+	require.Contains(t, labelTerms(env), "dev.antifailure.managed")
+	require.Contains(t, labelTerms(env), "dev.antifailure.env=env-1")
 }
 
 func TestFilter_IgnoresATrailingKeyWithNoValue(t *testing.T) {
@@ -72,7 +84,7 @@ func TestFilter_IgnoresATrailingKeyWithNoValue(t *testing.T) {
 	// filter it gets must still be a narrowing one. Dropping the managed
 	// label instead would widen a delete to every container on the machine.
 	f := dockerutil.Filter(dockerutil.LabelKind)
-	require.Equal(t, []string{"dev.antifailure.managed"}, f.Get("label"))
+	require.Equal(t, []string{"dev.antifailure.managed"}, labelTerms(f))
 }
 
 func TestPortAllocator_NeverHandsOutTheSamePortTwice(t *testing.T) {

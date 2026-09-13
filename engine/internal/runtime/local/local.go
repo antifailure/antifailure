@@ -28,9 +28,7 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/client"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
@@ -262,8 +260,8 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 		// An ingress left by an earlier run already holds a port, and reusing
 		// it is what makes a second Up address the same environment rather
 		// than a new one.
-		if existing, err := r.cli.ContainerInspect(ctx, ingressName(spec.EnvID, s.Name)); err == nil {
-			if p, ok := publishedPort(existing.NetworkSettings.Ports); ok {
+		if existing, err := r.cli.ContainerInspect(ctx, ingressName(spec.EnvID, s.Name), client.ContainerInspectOptions{}); err == nil {
+			if p, ok := publishedPort(existing.Container.NetworkSettings.Ports); ok {
 				spec.PublicPorts[s.Name] = p
 				continue
 			}
@@ -491,13 +489,13 @@ func (r *Runtime) Down(ctx context.Context, envID string) (provider.Teardown, er
 		return td, aferrors.Coded(aferrors.AFRUN040, "detail", "the environment has no id")
 	}
 
-	containers, err := r.cli.ContainerList(ctx, container.ListOptions{
+	containers, err := r.cli.ContainerList(ctx, client.ContainerListOptions{
 		All: true, Filters: dockerutil.EnvFilter(envID),
 	})
 	if err != nil {
 		return td, aferrors.Wrap(err, aferrors.AFRUN002, "endpoint", dockerutil.Host())
 	}
-	for _, c := range containers {
+	for _, c := range containers.Items {
 		switch c.Labels[dockerutil.LabelKind] {
 		// The emulator is here because the environment created it and nothing
 		// else owns it. Leaving it out was a real leak found before it
@@ -524,16 +522,16 @@ func (r *Runtime) Down(ctx context.Context, envID string) (provider.Teardown, er
 		td.Removed++
 	}
 
-	nets, err := r.cli.NetworkList(ctx, network.ListOptions{Filters: dockerutil.EnvFilter(envID)})
+	nets, err := r.cli.NetworkList(ctx, client.NetworkListOptions{Filters: dockerutil.EnvFilter(envID)})
 	if err != nil {
 		return td, aferrors.Wrap(err, aferrors.AFRUN002, "endpoint", dockerutil.Host())
 	}
-	for _, n := range nets {
+	for _, n := range nets.Items {
 		// Anything still attached that this teardown did not remove, such as
 		// the database branch, has to be detached or Docker refuses to remove
 		// the network and it is reported pending forever.
 		r.disconnectForeign(ctx, n.ID)
-		if err := r.cli.NetworkRemove(ctx, n.ID); err != nil {
+		if _, err := r.cli.NetworkRemove(ctx, n.ID, client.NetworkRemoveOptions{}); err != nil {
 			if cerrdefs.IsNotFound(err) {
 				continue
 			}
@@ -550,7 +548,7 @@ func (r *Runtime) Down(ctx context.Context, envID string) (provider.Teardown, er
 // Status reports what is running for an environment.
 func (r *Runtime) Status(ctx context.Context, envID string) (provider.Env, error) {
 	env := provider.Env{EnvID: envID}
-	containers, err := r.cli.ContainerList(ctx, container.ListOptions{
+	containers, err := r.cli.ContainerList(ctx, client.ContainerListOptions{
 		All: true, Filters: dockerutil.EnvFilter(envID),
 	})
 	if err != nil {
@@ -560,7 +558,7 @@ func (r *Runtime) Status(ctx context.Context, envID string) (provider.Env, error
 	// the port off the service container would report every web service as
 	// having no address, which is the one thing status exists to tell you.
 	published := map[string]int{}
-	for _, c := range containers {
+	for _, c := range containers.Items {
 		if c.Labels[dockerutil.LabelKind] != dockerutil.KindSidecar {
 			continue
 		}
@@ -590,15 +588,15 @@ func (r *Runtime) Status(ctx context.Context, envID string) (provider.Env, error
 	// instance that is NOT running wins those fields where there is one,
 	// because a service with one dead instance out of three is a report about
 	// the dead one.
-	sort.Slice(containers, func(i, j int) bool {
-		return dockerutil.FirstName(containers[i].Names) < dockerutil.FirstName(containers[j].Names)
+	sort.Slice(containers.Items, func(i, j int) bool {
+		return dockerutil.FirstName(containers.Items[i].Names) < dockerutil.FirstName(containers.Items[j].Names)
 	})
 	byService := map[string]*provider.RunningService{}
 	// Which services already have an instance that is not running, so that
 	// the second dead one does not overwrite the first's report.
 	troubled := map[string]bool{}
 	var order []string
-	for _, c := range containers {
+	for _, c := range containers.Items {
 		if c.Labels[dockerutil.LabelKind] != dockerutil.KindService {
 			continue
 		}
@@ -609,7 +607,7 @@ func (r *Runtime) Status(ctx context.Context, envID string) (provider.Env, error
 				Name:        name,
 				ContainerID: c.ID,
 				Kind:        c.Labels[dockerutil.LabelServiceKind],
-				State:       c.State,
+				State:       string(c.State),
 				Detail:      c.Status,
 				Ready:       true,
 			}
@@ -631,7 +629,7 @@ func (r *Runtime) Status(ctx context.Context, envID string) (provider.Env, error
 				// first one seen.
 				troubled[name] = true
 				rs.ContainerID = c.ID
-				rs.State = c.State
+				rs.State = string(c.State)
 				rs.Detail = c.Status
 			}
 			rs.Ready = false
@@ -640,9 +638,9 @@ func (r *Runtime) Status(ctx context.Context, envID string) (provider.Env, error
 			// before parsed "Exited (9) 3 seconds ago" with a regular
 			// expression, which is a format Docker has never promised to
 			// keep.
-			if insp, err := r.cli.ContainerInspect(ctx, c.ID); err == nil &&
-				insp.State != nil && !insp.State.Running && insp.State.FinishedAt != "" {
-				code := insp.State.ExitCode
+			if insp, err := r.cli.ContainerInspect(ctx, c.ID, client.ContainerInspectOptions{}); err == nil &&
+				insp.Container.State != nil && !insp.Container.State.Running && insp.Container.State.FinishedAt != "" {
+				code := insp.Container.State.ExitCode
 				rs.ExitCode = &code
 			}
 		}
@@ -656,9 +654,9 @@ func (r *Runtime) Status(ctx context.Context, envID string) (provider.Env, error
 	}
 	sort.Slice(env.Services, func(i, j int) bool { return env.Services[i].Name < env.Services[j].Name })
 
-	nets, err := r.cli.NetworkList(ctx, network.ListOptions{Filters: dockerutil.EnvFilter(envID)})
-	if err == nil && len(nets) > 0 {
-		env.NetworkID = nets[0].ID
+	nets, err := r.cli.NetworkList(ctx, client.NetworkListOptions{Filters: dockerutil.EnvFilter(envID)})
+	if err == nil && len(nets.Items) > 0 {
+		env.NetworkID = nets.Items[0].ID
 	}
 	return env, nil
 }
@@ -667,13 +665,13 @@ func (r *Runtime) Status(ctx context.Context, envID string) (provider.Env, error
 func (r *Runtime) Inventory(ctx context.Context) ([]provider.Resource, error) {
 	var out []provider.Resource
 
-	containers, err := r.cli.ContainerList(ctx, container.ListOptions{
+	containers, err := r.cli.ContainerList(ctx, client.ContainerListOptions{
 		All: true, Filters: dockerutil.Filter(),
 	})
 	if err != nil {
 		return nil, aferrors.Wrap(err, aferrors.AFRUN002, "endpoint", dockerutil.Host())
 	}
-	for _, c := range containers {
+	for _, c := range containers.Items {
 		kind := c.Labels[dockerutil.LabelKind]
 		if kind != dockerutil.KindService && kind != dockerutil.KindSidecar &&
 			kind != dockerutil.KindEmulator {
@@ -685,7 +683,7 @@ func (r *Runtime) Inventory(ctx context.Context) ([]provider.Resource, error) {
 			Labels: map[string]string{
 				"name":    dockerutil.FirstName(c.Names),
 				"service": c.Labels[dockerutil.LabelService],
-				"state":   c.State,
+				"state":   string(c.State),
 				// Carried through so the reaper reads one shape of resource
 				// rather than talking to each runtime's own client. Empty when
 				// the resource states no lifetime, which the reaper reads as
@@ -695,11 +693,11 @@ func (r *Runtime) Inventory(ctx context.Context) ([]provider.Resource, error) {
 		})
 	}
 
-	nets, err := r.cli.NetworkList(ctx, network.ListOptions{Filters: dockerutil.Filter()})
+	nets, err := r.cli.NetworkList(ctx, client.NetworkListOptions{Filters: dockerutil.Filter()})
 	if err != nil {
 		return nil, aferrors.Wrap(err, aferrors.AFRUN002, "endpoint", dockerutil.Host())
 	}
-	for _, n := range nets {
+	for _, n := range nets.Items {
 		out = append(out, provider.Resource{
 			Kind: "network", ID: n.ID, EnvID: n.Labels[dockerutil.LabelEnv],
 			CreatedAt: n.Created.UTC(),
@@ -729,7 +727,7 @@ func (r *Runtime) Logs(ctx context.Context, envID, service string, tail int) ([]
 	if tail <= 0 {
 		tail = 200
 	}
-	containers, err := r.cli.ContainerList(ctx, container.ListOptions{
+	containers, err := r.cli.ContainerList(ctx, client.ContainerListOptions{
 		All: true, Filters: dockerutil.EnvFilter(envID),
 	})
 	if err != nil {
@@ -737,7 +735,7 @@ func (r *Runtime) Logs(ctx context.Context, envID, service string, tail int) ([]
 	}
 
 	var out []LogLine
-	for _, c := range containers {
+	for _, c := range containers.Items {
 		if c.Labels[dockerutil.LabelKind] != dockerutil.KindService {
 			continue
 		}
@@ -745,7 +743,7 @@ func (r *Runtime) Logs(ctx context.Context, envID, service string, tail int) ([]
 		if service != "" && name != service {
 			continue
 		}
-		rc, logErr := r.cli.ContainerLogs(ctx, c.ID, container.LogsOptions{
+		rc, logErr := r.cli.ContainerLogs(ctx, c.ID, client.ContainerLogsOptions{
 			ShowStdout: true, ShowStderr: true, Tail: strconv.Itoa(tail),
 		})
 		if logErr != nil {

@@ -10548,6 +10548,15 @@ reached.
 ` + "`" + `af doctor` + "`" + ` checks this and everything else about the machine before you need
 it, and names the command that fixes each thing it finds.
 
+The daemon has to speak Docker API 1.40 or later, which is Docker Engine 19.03
+and every release since. The floor belongs to the Docker client library the
+engine is built with rather than to a policy of ours: below it the client
+refuses to negotiate a version and sends its requests unversioned, and what an
+older daemon does with those is not something any release has been checked
+against. ` + "`" + `af doctor` + "`" + ` reads the daemon's API version and fails its Docker check
+below the floor, naming the version it found, so the mismatch is reported
+before an environment is attempted rather than halfway through one.
+
 ## The egress sidecar image
 
 The first thing ` + "`" + `af up` + "`" + ` needs is the egress sidecar's image, and a release

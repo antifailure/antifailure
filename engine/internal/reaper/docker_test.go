@@ -11,9 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/network"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/client"
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
@@ -125,21 +124,25 @@ func makeEnv(t *testing.T, r *local.Runtime, envID string, expires time.Time) {
 
 	now := time.Now().UTC()
 	netLabels := dockerutil.ManagedUntil(dockerutil.KindNetwork, envID, now, expires)
-	_, err = cli.NetworkCreate(ctx, envID+"-net", network.CreateOptions{
+	_, err = cli.NetworkCreate(ctx, envID+"-net", client.NetworkCreateOptions{
 		Driver: "bridge", Labels: netLabels,
 	})
 	require.NoError(t, err)
 
 	cLabels := dockerutil.ManagedUntil(dockerutil.KindService, envID, now, expires)
 	cLabels[dockerutil.LabelService] = "app"
-	created, err := cli.ContainerCreate(ctx,
-		&container.Config{
+	created, err := cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config: &container.Config{
 			Image:  "busybox:latest",
 			Cmd:    []string{"sleep", "600"},
 			Labels: cLabels,
-		}, &container.HostConfig{}, nil, nil, envID+"-app")
+		},
+		HostConfig: &container.HostConfig{},
+		Name:       envID + "-app",
+	})
 	require.NoError(t, err)
-	require.NoError(t, cli.ContainerStart(ctx, created.ID, container.StartOptions{}))
+	_, startErr := cli.ContainerStart(ctx, created.ID, client.ContainerStartOptions{})
+	require.NoError(t, startErr)
 }
 
 func ensureBusybox(t *testing.T) {
@@ -409,7 +412,7 @@ func makeEnvUnstamped(t *testing.T, r *local.Runtime, envID string) {
 	})
 
 	now := time.Now().UTC()
-	_, err = cli.NetworkCreate(ctx, envID+"-net", network.CreateOptions{
+	_, err = cli.NetworkCreate(ctx, envID+"-net", client.NetworkCreateOptions{
 		Driver: "bridge",
 		Labels: dockerutil.Managed(dockerutil.KindNetwork, envID, now),
 	})
@@ -426,7 +429,7 @@ func countFor(inv []provider.Resource, envID string) int {
 	return n
 }
 
-func imagePullOptions() image.PullOptions { return image.PullOptions{} }
+func imagePullOptions() client.ImagePullOptions { return client.ImagePullOptions{} }
 
 func readAll(r interface{ Read([]byte) (int, error) }) ([]byte, error) {
 	buf := make([]byte, 0, 4096)

@@ -11,29 +11,29 @@ import (
 	"testing"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/api/types/image"
+	"github.com/moby/moby/client"
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 )
 
 type fakeInspector struct {
-	resp image.InspectResponse
+	resp client.ImageInspectResult
 	err  error
 	refs []string
 }
 
 func (f *fakeInspector) ImageInspect(
 	_ context.Context, ref string, _ ...client.ImageInspectOption,
-) (image.InspectResponse, error) {
+) (client.ImageInspectResult, error) {
 	f.refs = append(f.refs, ref)
 	return f.resp, f.err
 }
 
 func TestImagePresent_APresentImageIsPresent(t *testing.T) {
 	t.Parallel()
-	f := &fakeInspector{resp: image.InspectResponse{ID: "sha256:abc"}}
+	f := &fakeInspector{resp: client.ImageInspectResult{InspectResponse: image.InspectResponse{ID: "sha256:abc"}}}
 	got, err := dockerutil.ImagePresent(context.Background(), f, "antifailure/proxy:tag")
 	require.NoError(t, err)
 	require.True(t, got)

@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
 	"github.com/jackc/pgx/v5"
+	"github.com/moby/moby/client"
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
@@ -472,7 +472,7 @@ func managedContainers(t *testing.T) string {
 		return "the daemon could not be reached: " + err.Error()
 	}
 	defer func() { _ = cli.Close() }()
-	list, err := cli.ContainerList(context.Background(), container.ListOptions{
+	list, err := cli.ContainerList(context.Background(), client.ContainerListOptions{
 		All:     true,
 		Filters: dockerutil.Filter(dockerutil.LabelManaged, dockerutil.ManagedValue),
 	})
@@ -480,7 +480,7 @@ func managedContainers(t *testing.T) string {
 		return "the daemon would not list containers: " + err.Error()
 	}
 	var b strings.Builder
-	for _, c := range list {
+	for _, c := range list.Items {
 		fmt.Fprintf(&b, "  %s %s kind=%s env=%s state=%s\n",
 			c.ID[:12], strings.TrimPrefix(dockerutil.FirstName(c.Names), "/"),
 			c.Labels[dockerutil.LabelKind], c.Labels[dockerutil.LabelEnv], c.State)
@@ -516,7 +516,7 @@ func serviceOutput(t *testing.T, ctx context.Context, o *Orchestrator, service s
 	deadline := time.Now().Add(2 * time.Minute)
 	var out string
 	for {
-		rc, logErr := cli.ContainerLogs(ctx, name, container.LogsOptions{
+		rc, logErr := cli.ContainerLogs(ctx, name, client.ContainerLogsOptions{
 			ShowStdout: true, ShowStderr: true,
 		})
 		if logErr == nil {

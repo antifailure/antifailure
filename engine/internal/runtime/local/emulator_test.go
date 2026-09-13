@@ -9,10 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/client"
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
@@ -84,39 +81,39 @@ func TestEmulator_ContainerHasNoRouteOutAndTheNetworkSaysWhy(t *testing.T) {
 	require.NoError(t, err, "the environment did not come up with an emulator in it")
 
 	name := "af-emu-probe-" + id
-	insp, err := cli.ContainerInspect(ctx, name)
+	insp, err := cli.ContainerInspect(ctx, name, client.ContainerInspectOptions{})
 	require.NoError(t, err, "the emulator container was not created under the name the "+
 		"sidecar's route points at")
 
 	// One network and one only. An emulator on a second network is an
 	// emulator whose containment depends on which one, and the whole design
 	// is that it is on the inner one and nothing else.
-	require.Len(t, insp.NetworkSettings.Networks, 1,
+	require.Len(t, insp.Container.NetworkSettings.Networks, 1,
 		"the emulator is attached to %d networks; the containment argument is that it is "+
-			"on the inner network alone", len(insp.NetworkSettings.Networks))
+			"on the inner network alone", len(insp.Container.NetworkSettings.Networks))
 
 	var attached string
-	for _, ep := range insp.NetworkSettings.Networks {
+	for _, ep := range insp.Container.NetworkSettings.Networks {
 		attached = ep.NetworkID
 	}
-	netInsp, err := cli.NetworkInspect(ctx, attached, network.InspectOptions{})
+	netInsp, err := cli.NetworkInspect(ctx, attached, client.NetworkInspectOptions{})
 	require.NoError(t, err)
-	require.True(t, netInsp.Internal,
+	require.True(t, netInsp.Network.Internal,
 		"the network the emulator actually attached to, %s, is not internal. Internal is "+
 			"the only setting that removes a container's route to the internet: turning "+
 			"off IP masquerading looks like it does the same thing and does not, because "+
 			"Docker Desktop translates the traffic again at the virtual machine's gateway",
-		netInsp.Name)
+		netInsp.Network.Name)
 
 	// The control first, so that a failure here is read as "this container
 	// cannot reach anything" rather than as containment working.
-	control := execInContainer(t, ctx, cli, insp.ID,
+	control := execInContainer(t, ctx, cli, insp.Container.ID,
 		"nc -w 5 -z "+local.ProxyAlias+" 3128 && echo AF-CONTROL-OK")
 	require.Contains(t, control, "AF-CONTROL-OK",
 		"the emulator container could not reach the sidecar by name, so it cannot reach "+
 			"anything at all and the escape attempt below proves nothing.\n%s", control)
 
-	escape := execInContainer(t, ctx, cli, insp.ID,
+	escape := execInContainer(t, ctx, cli, insp.Container.ID,
 		"nc -w 5 -z "+emulatorEscapeAddress+" && echo AF-ESCAPED")
 	require.NotContains(t, escape, "AF-ESCAPED",
 		"the emulator container opened a connection to %s. It runs a third party image and "+
@@ -155,7 +152,7 @@ func TestEmulator_TeardownRemovesTheContainer(t *testing.T) {
 	require.NoError(t, err)
 
 	name := "af-emu-probe-" + id
-	_, err = cli.ContainerInspect(ctx, name)
+	_, err = cli.ContainerInspect(ctx, name, client.ContainerInspectOptions{})
 	require.NoError(t, err, "the emulator container was never created, so its removal "+
 		"below would prove nothing")
 
@@ -177,7 +174,7 @@ func TestEmulator_TeardownRemovesTheContainer(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, td.Pending, "teardown left something behind: %+v", td.Pending)
 
-	_, err = cli.ContainerInspect(ctx, name)
+	_, err = cli.ContainerInspect(ctx, name, client.ContainerInspectOptions{})
 	require.Error(t, err,
 		"the emulator container survived Down. An emulator holds state nothing else in "+
 			"the environment can see, and state that outlives the environment is state "+
@@ -192,7 +189,7 @@ func repoDigest(
 	t.Helper()
 	insp, err := cli.ImageInspect(ctx, ref)
 	if err != nil {
-		rc, pullErr := cli.ImagePull(ctx, ref, image.PullOptions{})
+		rc, pullErr := cli.ImagePull(ctx, ref, client.ImagePullOptions{})
 		if pullErr != nil {
 			t.Skipf("skipped: %s could not be pulled, and this test needs a real image "+
 				"pinned by digest: %v", ref, pullErr)
@@ -219,13 +216,13 @@ func execInContainer(
 	t *testing.T, ctx context.Context, cli *client.Client, id, script string,
 ) string {
 	t.Helper()
-	created, err := cli.ContainerExecCreate(ctx, id, container.ExecOptions{
+	created, err := cli.ExecCreate(ctx, id, client.ExecCreateOptions{
 		Cmd:          []string{"/bin/sh", "-c", script},
 		AttachStdout: true, AttachStderr: true,
 	})
 	require.NoError(t, err)
 
-	attached, err := cli.ContainerExecAttach(ctx, created.ID, container.ExecAttachOptions{})
+	attached, err := cli.ExecAttach(ctx, created.ID, client.ExecAttachOptions{})
 	require.NoError(t, err)
 	defer attached.Close()
 

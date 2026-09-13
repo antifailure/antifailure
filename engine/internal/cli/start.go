@@ -344,7 +344,11 @@ func dockerState(ctx context.Context, e *Env, p startProbe) stage {
 	r := checkDocker(ctx, e, p)
 	s := stage{name: "Docker", detail: r.Detail}
 	switch r.Status {
-	case CheckPass:
+	// A warning is a daemon that answered with something worth reading, such
+	// as an API version that could not be read. That is not a machine that
+	// cannot run, and blocking the rung on it would send somebody with a
+	// working Docker to fix nothing. The detail carries the note either way.
+	case CheckPass, CheckWarn:
 		s.state = StageDone
 	case CheckSkip:
 		s.state, s.why = StageUnchecked, r.Detail

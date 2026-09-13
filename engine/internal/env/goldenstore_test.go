@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types/image"
 	"github.com/jackc/pgx/v5"
+	"github.com/moby/moby/client"
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
@@ -587,8 +587,8 @@ func TestOrchestratorTeardown_LeavesGoldensItDidNotCreate(t *testing.T) {
 	for _, id := range []string{foreign, ours} {
 		ref := dockerdb.ImageRepo + ":" + id
 		body, importErr := cli.ImageImport(ctx,
-			image.ImportSource{Source: bytes.NewReader(make([]byte, 1024)), SourceName: "-"},
-			ref, image.ImportOptions{})
+			client.ImageImportSource{Source: bytes.NewReader(make([]byte, 1024)), SourceName: "-"},
+			ref, client.ImageImportOptions{})
 		if importErr != nil {
 			t.Skipf("this daemon will not import a scratch image: %v", importErr)
 		}
@@ -596,7 +596,7 @@ func TestOrchestratorTeardown_LeavesGoldensItDidNotCreate(t *testing.T) {
 		t.Cleanup(func() {
 			c, done := context.WithTimeout(context.Background(), time.Minute)
 			defer done()
-			_, _ = cli.ImageRemove(c, ref, image.RemoveOptions{Force: true})
+			_, _ = cli.ImageRemove(c, ref, client.ImageRemoveOptions{Force: true})
 		})
 	}
 

@@ -6,9 +6,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/network"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/network"
+	"github.com/moby/moby/client"
 
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
@@ -128,11 +128,11 @@ func (r *Runtime) startEmulator(
 	if err := journal(kindContainer, name); err != nil {
 		return err
 	}
-	if existing, err := r.cli.ContainerInspect(ctx, name); err == nil {
-		if existing.State != nil && existing.State.Running {
+	if existing, err := r.cli.ContainerInspect(ctx, name, client.ContainerInspectOptions{}); err == nil {
+		if existing.Container.State != nil && existing.Container.State.Running {
 			return nil
 		}
-		if rmErr := dockerutil.RemoveContainer(ctx, r.cli, existing.ID); rmErr != nil {
+		if rmErr := dockerutil.RemoveContainer(ctx, r.cli, existing.Container.ID); rmErr != nil {
 			return rmErr
 		}
 	}
@@ -146,29 +146,31 @@ func (r *Runtime) startEmulator(
 	labels := r.managed(dockerutil.KindEmulator, envID)
 	labels[dockerutil.LabelService] = e.Name
 
-	resp, err := r.cli.ContainerCreate(ctx,
-		&container.Config{
+	resp, err := r.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config: &container.Config{
 			Image:  e.Image,
 			Labels: labels,
 			Env:    emulatorEnv(e.Env),
 			Cmd:    e.Command,
 		},
-		&container.HostConfig{
+		HostConfig: &container.HostConfig{
 			RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyDisabled},
 		},
-		&network.NetworkingConfig{
+		NetworkingConfig: &network.NetworkingConfig{
 			// The inner network alone. This is the whole containment story
 			// for an emulator: no edge endpoint means no route out, and it is
 			// enforced by Docker rather than by a rule somebody could change.
 			EndpointsConfig: map[string]*network.EndpointSettings{
 				nets.inner: {Aliases: []string{EmulatorAlias(e.Name)}},
 			},
-		}, nil, name)
+		},
+		Name: name,
+	})
 	if err != nil {
 		return aferrors.Wrap(err, aferrors.AFRUN040,
 			"detail", fmt.Sprintf("creating the %s emulator: %v", e.Name, err))
 	}
-	if err := r.cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+	if _, err := r.cli.ContainerStart(ctx, resp.ID, client.ContainerStartOptions{}); err != nil {
 		return aferrors.Wrap(err, aferrors.AFRUN040,
 			"detail", fmt.Sprintf("starting the %s emulator: %v", e.Name, err))
 	}
@@ -209,11 +211,11 @@ func (r *Runtime) startCompanions(
 		if err := journal(kindContainer, name); err != nil {
 			return err
 		}
-		if existing, err := r.cli.ContainerInspect(ctx, name); err == nil {
-			if existing.State != nil && existing.State.Running {
+		if existing, err := r.cli.ContainerInspect(ctx, name, client.ContainerInspectOptions{}); err == nil {
+			if existing.Container.State != nil && existing.Container.State.Running {
 				continue
 			}
-			if rmErr := dockerutil.RemoveContainer(ctx, r.cli, existing.ID); rmErr != nil {
+			if rmErr := dockerutil.RemoveContainer(ctx, r.cli, existing.Container.ID); rmErr != nil {
 				return rmErr
 			}
 		}
@@ -225,29 +227,31 @@ func (r *Runtime) startCompanions(
 		labels := r.managed(dockerutil.KindEmulator, envID)
 		labels[dockerutil.LabelService] = c.Name
 
-		resp, err := r.cli.ContainerCreate(ctx,
-			&container.Config{
+		resp, err := r.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+			Config: &container.Config{
 				Image:  c.Image,
 				Labels: labels,
 				Env:    emulatorEnv(c.Env),
 				Cmd:    c.Command,
 			},
-			&container.HostConfig{
+			HostConfig: &container.HostConfig{
 				RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyDisabled},
 			},
-			&network.NetworkingConfig{
+			NetworkingConfig: &network.NetworkingConfig{
 				// The inner network alone, exactly as the emulator gets. A
 				// companion with a route out would be a hole shaped like
 				// "the emulator needed a database".
 				EndpointsConfig: map[string]*network.EndpointSettings{
 					nets.inner: {Aliases: []string{CompanionAlias(c.Name)}},
 				},
-			}, nil, name)
+			},
+			Name: name,
+		})
 		if err != nil {
 			return aferrors.Wrap(err, aferrors.AFRUN040, "detail",
 				fmt.Sprintf("creating the %s emulator's companion %s: %v", e.Name, c.Name, err))
 		}
-		if err := r.cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+		if _, err := r.cli.ContainerStart(ctx, resp.ID, client.ContainerStartOptions{}); err != nil {
 			return aferrors.Wrap(err, aferrors.AFRUN040, "detail",
 				fmt.Sprintf("starting the %s emulator's companion %s: %v", e.Name, c.Name, err))
 		}
@@ -275,7 +279,7 @@ func (r *Runtime) ensureImageByRef(
 		return aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
 	}
 	progress(fmt.Sprintf("pulling the image for %s (once per digest)", what))
-	rc, err := r.cli.ImagePull(ctx, ref, image.PullOptions{})
+	rc, err := r.cli.ImagePull(ctx, ref, client.ImagePullOptions{})
 	if err != nil {
 		return aferrors.Wrap(err, aferrors.AFRUN040,
 			"detail", fmt.Sprintf("pulling %s for %s: %v", ref, what, err))

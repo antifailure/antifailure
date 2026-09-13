@@ -3,14 +3,15 @@ package docker
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/go-connections/nat"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/network"
+	"github.com/moby/moby/client"
 
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
@@ -87,9 +88,9 @@ func (p *Provider) startWithRetry(
 		all[k] = v
 	}
 
-	hostPort := nat.Port("5432/tcp")
-	resp, err := p.cli.ContainerCreate(ctx,
-		&container.Config{
+	hostPort := network.MustParsePort("5432/tcp")
+	resp, err := p.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config: &container.Config{
 			Image:  img,
 			Labels: all,
 			// The image's own entrypoint, told to preload pg_stat_statements.
@@ -108,7 +109,7 @@ func (p *Provider) startWithRetry(
 				"POSTGRES_DB=antifailure",
 				"PGDATA=" + dataDir,
 			},
-			ExposedPorts: nat.PortSet{hostPort: struct{}{}},
+			ExposedPorts: network.PortSet{hostPort: struct{}{}},
 			Healthcheck: &container.HealthConfig{
 				Test:     []string{"CMD-SHELL", "pg_isready -U antifailure -d antifailure"},
 				Interval: time.Second,
@@ -116,12 +117,12 @@ func (p *Provider) startWithRetry(
 				Retries:  30,
 			},
 		},
-		&container.HostConfig{
-			PortBindings: nat.PortMap{hostPort: []nat.PortBinding{{
+		HostConfig: &container.HostConfig{
+			PortBindings: network.PortMap{hostPort: []network.PortBinding{{
 				// Loopback only. This is the security boundary that makes the
 				// fixed password acceptable: the database is unreachable from
 				// anywhere but this machine.
-				HostIP:   "127.0.0.1",
+				HostIP:   netip.MustParseAddr("127.0.0.1"),
 				HostPort: strconv.Itoa(port),
 			}}},
 			// The container is removed when it stops, so a crashed run leaves
@@ -133,7 +134,8 @@ func (p *Provider) startWithRetry(
 			// rather than a clear message.
 			ShmSize: 256 << 20,
 		},
-		nil, nil, name)
+		Name: name,
+	})
 	if err != nil {
 		if isNoSpace(err) {
 			return started{}, aferrors.Wrap(err, aferrors.AFRUN020, "detail", err.Error())
@@ -141,7 +143,7 @@ func (p *Provider) startWithRetry(
 		return started{}, fmt.Errorf("db.docker: create the container %s: %w", name, err)
 	}
 
-	if err := p.cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+	if _, err := p.cli.ContainerStart(ctx, resp.ID, client.ContainerStartOptions{}); err != nil {
 		_ = p.remove(context.WithoutCancel(ctx), resp.ID)
 		// A port that was free when it was probed and taken when it was bound.
 		//
@@ -177,7 +179,7 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) error {
 	if err := airgap.CheckImage(airgap.SiteImagePull, ref); err != nil {
 		return fmt.Errorf("db.docker: %s is not present locally and cannot be pulled: %w", ref, err)
 	}
-	rc, err := p.cli.ImagePull(ctx, ref, image.PullOptions{})
+	rc, err := p.cli.ImagePull(ctx, ref, client.ImagePullOptions{})
 	if err != nil {
 		return fmt.Errorf("db.docker: pull %s: %w", ref, err)
 	}
@@ -197,7 +199,7 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) error {
 // every start, which turns a two second branch into a fifteen second one.
 func (p *Provider) stop(ctx context.Context, ref string) error {
 	timeout := 30
-	if err := p.cli.ContainerStop(ctx, ref, container.StopOptions{Timeout: &timeout}); err != nil {
+	if _, err := p.cli.ContainerStop(ctx, ref, client.ContainerStopOptions{Timeout: &timeout}); err != nil {
 		if cerrdefs.IsNotFound(err) {
 			return nil
 		}
@@ -209,7 +211,7 @@ func (p *Provider) stop(ctx context.Context, ref string) error {
 // remove deletes a container. Removing one that is already gone succeeds,
 // because teardown retries and a crash leaves a partial state.
 func (p *Provider) remove(ctx context.Context, ref string) error {
-	err := p.cli.ContainerRemove(ctx, ref, container.RemoveOptions{
+	_, err := p.cli.ContainerRemove(ctx, ref, client.ContainerRemoveOptions{
 		Force: true,
 		// The anonymous volume Postgres creates for its data directory goes
 		// with the container. Leaving it is the most common way a Docker based
@@ -234,11 +236,11 @@ func (p *Provider) listContainers(ctx context.Context, kind string) ([]container
 	if kind != "" {
 		args.Add("label", LabelKind+"="+kind)
 	}
-	out, err := p.cli.ContainerList(ctx, container.ListOptions{All: true, Filters: args})
+	out, err := p.cli.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: args})
 	if err != nil {
 		return nil, fmt.Errorf("db.docker: list containers: %w", err)
 	}
-	return out, nil
+	return out.Items, nil
 }
 
 // findBranch returns the existing branch for an environment, if there is one.

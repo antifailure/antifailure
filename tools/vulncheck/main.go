@@ -137,7 +137,11 @@ func run(args []string, out io.Writer) error {
 	// tools is included even though it does not ship. A compromised code
 	// generator or merge gate is a supply chain problem whether or not its
 	// output carries a version number.
-	modules, err := discoverModules(root)
+	// With the banned import guard applied before the scan, because it costs
+	// milliseconds where the scan costs minutes and a banned import is a
+	// failure either way. imports.go says why it lives here and not in a lint
+	// rule.
+	modules, err := discoverAndGuard(root)
 	if err != nil {
 		return err
 	}
