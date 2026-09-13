@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -40,6 +39,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/redact"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
+	"github.com/antifailure/antifailure/engine/pkg/secret"
 )
 
 // DatabaseAlias is the hostname the database answers to inside an environment.
@@ -424,7 +424,9 @@ func (r *Runtime) AttachStore(
 
 // rewriteHost replaces the host and port of a connection URL.
 func rewriteHost(raw, host string, port int) (string, error) {
-	u, err := url.Parse(raw)
+	// secret.ParseURL, because AF-RUN-040 prints its cause and this is a
+	// connection string: url.Parse's error would quote it, password included.
+	u, err := secret.ParseURL(raw)
 	if err != nil {
 		return "", aferrors.Wrap(err, aferrors.AFRUN040,
 			"detail", "the database connection string is not a URL")

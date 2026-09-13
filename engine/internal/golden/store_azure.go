@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/antifailure/antifailure/engine/pkg/airgap"
+	"github.com/antifailure/antifailure/engine/pkg/secret"
 )
 
 // azureStore keeps goldens in an Azure Blob container.
@@ -39,9 +40,12 @@ type azureStore struct {
 const azureAPIVersion = "2021-08-06"
 
 func newAzureStore(raw string) (Store, error) {
-	u, err := url.Parse(strings.TrimSpace(raw))
+	u, err := secret.ParseURL(strings.TrimSpace(raw))
 	if err != nil {
-		return nil, fmt.Errorf("golden: %q is not a usable container URL: %w", redactURL(raw), err)
+		// The parse error names the address, redacted. Printing redactURL(raw)
+		// beside net/url's own error put the credential straight back, because
+		// that error quoted the address whole, signature and all.
+		return nil, fmt.Errorf("golden: not a usable container URL: %w", err)
 	}
 	if u.Scheme != "https" && u.Scheme != "http" {
 		return nil, fmt.Errorf(

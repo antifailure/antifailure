@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/antifailure/antifailure/engine/pkg/airgap"
+	"github.com/antifailure/antifailure/engine/pkg/secret"
 )
 
 // s3Store keeps goldens in an S3 bucket, or in anything that speaks the same
@@ -51,9 +52,12 @@ type s3Store struct {
 // the names the AWS tools already use, so that a machine already set up for
 // the AWS CLI needs nothing else and a manifest carries no secret.
 func newS3Store(raw string, getenv func(string) string) (Store, error) {
-	u, err := url.Parse(strings.TrimSpace(raw))
+	u, err := secret.ParseURL(strings.TrimSpace(raw))
 	if err != nil {
-		return nil, fmt.Errorf("golden: %q is not a usable bucket URL: %w", redactURL(raw), err)
+		// The parse error names the address, redacted. Printing redactURL(raw)
+		// beside net/url's own error put the credential straight back, because
+		// that error quoted the address whole, signature and all.
+		return nil, fmt.Errorf("golden: not a usable bucket URL: %w", err)
 	}
 
 	s := &s3Store{

@@ -48,6 +48,7 @@ import (
 	"github.com/antifailure/antifailure/ee/engine/cloudauth"
 	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"github.com/antifailure/antifailure/engine/pkg/extension"
+	"github.com/antifailure/antifailure/engine/pkg/secret"
 )
 
 // objectTimeout bounds one upload.
@@ -113,9 +114,12 @@ func NewObjectStore(cfg ObjectStoreConfig) (*ObjectStore, error) {
 	if raw == "" {
 		return nil, fmt.Errorf("an object store sink needs a URL")
 	}
-	u, err := url.Parse(raw)
+	u, err := secret.ParseURL(raw)
 	if err != nil {
-		return nil, fmt.Errorf("%q is not a usable object store URL: %w", redact(raw), err)
+		// The parse error names the address, redacted. Printing redact(raw)
+		// beside net/url's own error put the credential straight back, because
+		// that error quoted the address whole.
+		return nil, fmt.Errorf("not a usable object store URL: %w", err)
 	}
 
 	s := &ObjectStore{
