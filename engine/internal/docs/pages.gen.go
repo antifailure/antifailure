@@ -14954,7 +14954,30 @@ the second name and the first is the one people create.
 | ` + "`" + `command` + "`" + ` | The command that ran. |
 | ` + "`" + `environment` + "`" + ` | Whether ` + "`" + `af change` + "`" + ` selected an environment for this change. ` + "`" + `true` + "`" + ` or ` + "`" + `false` + "`" + `. |
 | ` + "`" + `selected` + "`" + ` | The checks ` + "`" + `af change` + "`" + ` selected, comma separated. |
-| ` + "`" + `handled` + "`" + ` | Whether a control plane took the report. When it is ` + "`" + `true` + "`" + ` the action leaves no comment, because the control plane maintains one. |
+| ` + "`" + `handled` + "`" + ` | Whether a control plane took the report. ` + "`" + `true` + "`" + ` only when it answered 200, and then the action leaves no comment, because the control plane maintains one. |
+
+## When the control plane says no
+
+With ` + "`" + `control-plane` + "`" + ` set, the action talks to it twice, and it treats a refusal
+and an absence of an answer as different facts, because the job runs in your
+repository and only one of them is yours to fix.
+
+- **The credential is refused**, which the control plane answers with a 4xx and
+  a sentence: a repository it does not know, a suspended organization, a commit
+  with no check waiting on it. The job is not failed, the report goes on the
+  pull request as a comment, and the last step warns with that sentence.
+- **The report is refused** after a credential was issued. The check on the
+  commit is waiting for exactly that report, so the step fails the job with the
+  control plane's sentence, and the comment still carries the report.
+- **The control plane does not answer**, a 5xx or no connection at all. The job
+  is not failed for somebody else's outage. It warns, and the report goes on the
+  pull request as a comment.
+- **No workflow identity**, which is what GitHub gives a fork's pull request on
+  purpose. Nothing is reported and nothing is failed.
+
+A re-run of the job from the Actions tab is a new attempt of the same run, and
+it is issued a credential of its own, so its verdict replaces the previous
+attempt's on the check.
 
 ## Inputs of the reusable workflow
 
@@ -26325,6 +26348,15 @@ check and the second when they re-run all of them from the checks page, so
 subscribing to only one leaves the other doing nothing at all. Each is handled
 in ` + "`" + `web/apps/api/src/github/lifecycle.ts` + "`" + `.
 
+The third Re-run button, the one in the Actions tab, sends neither of those. It
+starts another attempt of the same workflow run, which arrives as **Workflow
+run**, and that attempt then asks for a credential of its own. The control
+plane reads the attempt number GitHub signed into the run's identity and
+reopens the check for a later attempt of the run already checking the commit,
+so a re-run from either place produces a new check run with a fresh verdict.
+Before this, a re-run from the Actions tab was refused a credential and the
+check went on showing the verdict of the attempt it replaced.
+
 **Push** is still deliberately absent: nothing handles it, and an event nobody
 consumes is delivery-log noise that makes a real failed delivery harder to find.
 **Member** and **Membership** are absent for a sharper reason: the handler names
@@ -26344,7 +26376,7 @@ as it took somebody to look at the installation rather than at the App.
 1. The App's settings, **Permissions and events**, Repository permissions,
    **Checks** to Read and write, then **Save**.
 2. The same page, **Subscribe to events**, tick **Pull request**, **Workflow
-   run** and **Check run**, then **Save**. Event subscriptions take effect
+   run**, **Check run** and **Check suite**, then **Save**. Event subscriptions take effect
    without anybody accepting anything; only the permission needs step 3.
 3. For every account the App is installed on: its **Installed GitHub Apps**
    settings, the App, **Review request**, **Accept new permissions**.

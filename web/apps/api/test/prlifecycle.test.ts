@@ -93,6 +93,10 @@ function base64url(value: string): string {
 interface IdentityClaims {
   repository: string
   runId: number
+  /** Which attempt of that run. Re-running a workflow run from the Actions tab
+   *  keeps the run id and increments this, and it is the only thing in the
+   *  token that tells a re-run apart from the attempt it replaces. */
+  runAttempt?: number
   audience?: string
   issuer?: string
   expiresInSeconds?: number
@@ -111,7 +115,7 @@ function identityToken(claims: IdentityClaims, now: Date): string {
     repository: claims.repository,
     repository_owner: claims.repository.split('/')[0],
     run_id: String(claims.runId),
-    run_attempt: '1',
+    run_attempt: String(claims.runAttempt ?? 1),
     ref: 'refs/pull/1/merge',
     event_name: 'pull_request',
     job_workflow_ref: `${claims.repository}/.github/workflows/antifailure.yml@refs/heads/main`,
@@ -260,11 +264,14 @@ describe(
       headSha: string,
       runId: number,
       conclusion: string | null = null,
-      /** Which workflow, the way GitHub says it. Absent means a run this
-       *  suite has no opinion about, which is what every test before the
-       *  unclaimed ones sends. */
-      workflow: { name?: string; path?: string; event?: string } = {},
+      /** Which workflow, the way GitHub says it, and which attempt of the run.
+       *  Absent means a run this suite has no opinion about, which is what
+       *  every test before the unclaimed ones sends. GitHub carries
+       *  `run_attempt` on every workflow run, 1 on the first and higher on each
+       *  re-run of it, and a delivery that omitted it is read as the first. */
+      workflow: { name?: string; path?: string; event?: string; runAttempt?: number } = {},
     ): Record<string, unknown> {
+      const { runAttempt, ...rest } = workflow
       return {
         action,
         workflow_run: {
@@ -272,7 +279,8 @@ describe(
           head_sha: headSha,
           status: action === 'completed' ? 'completed' : 'in_progress',
           conclusion,
-          ...workflow,
+          ...(runAttempt === undefined ? {} : { run_attempt: runAttempt }),
+          ...rest,
         },
         repository: { full_name: repository, owner: { login: org.slug } },
         organization: { login: org.slug },
@@ -290,16 +298,34 @@ describe(
           env_id: string | null
           attempt: number
           reported_by: string | null
+          verdict: unknown
+          finished_at: string | null
+          deadline_at: string
         }[]
       >`
         SELECT state::text AS state, detail, check_run_id::text AS check_run_id,
-               workflow_run_id::text AS workflow_run_id, env_id, attempt, reported_by
+               workflow_run_id::text AS workflow_run_id, env_id, attempt, reported_by,
+               verdict, finished_at::text AS finished_at, deadline_at::text AS deadline_at
         FROM pr_generations WHERE head_sha = ${headSha}`
       return rows[0] ?? null
     }
 
+    /** Every check run of this name on the commit, oldest first.
+     *
+     *  More than one is the ordinary case after a re-run: a completed check run
+     *  cannot be moved back to in_progress at GitHub, so another attempt is
+     *  another check run. */
+    function checksFor(headSha: string) {
+      return api.checks.filter((c) => c.headSha === headSha && c.name === CHECK_NAME)
+    }
+
+    /** The one a person sees, which is the most recent of them. GitHub shows
+     *  the latest check run of a name and a required rule reads that one, so a
+     *  test that read the first would be reading the attempt nobody is looking
+     *  at. */
     function checkFor(headSha: string) {
-      return api.checks.find((c) => c.headSha === headSha && c.name === CHECK_NAME)
+      const runs = checksFor(headSha)
+      return runs[runs.length - 1]
     }
 
     function commentFor(number: number) {
@@ -308,19 +334,33 @@ describe(
       )
     }
 
-    /** The credential a job would hold, through the endpoint a job calls. */
-    async function callbackFor(headSha: string, runId: number): Promise<string | null> {
+    /** The exchange a job makes, with the whole answer it gets back.
+     *
+     *  The status and the sentence, not only whether a token came back. The
+     *  defect this suite grew for is a refusal the caller could not tell from a
+     *  fork: the workflow read `.token`, found nothing, and could not say
+     *  whether it had been turned away or never asked. A helper that returns
+     *  null for every non-200 cannot see that either. */
+    async function claim(
+      headSha: string,
+      runId: number,
+      runAttempt = 1,
+    ): Promise<{ status: number; token: string | null; error: string | null }> {
       const res = await h.fetch('/v1/pr/callback-token', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          authorization: `Bearer ${identityToken({ repository, runId }, h.clock.now())}`,
+          authorization: `Bearer ${identityToken({ repository, runId, runAttempt }, h.clock.now())}`,
         },
         body: JSON.stringify({ head_sha: headSha }),
       })
-      if (res.status !== 200) return null
-      const body = (await res.json()) as { token?: string }
-      return body.token ?? null
+      const body = (await res.json()) as { token?: string; error?: string }
+      return { status: res.status, token: body.token ?? null, error: body.error ?? null }
+    }
+
+    /** The credential a job would hold, through the endpoint a job calls. */
+    async function callbackFor(headSha: string, runId: number): Promise<string | null> {
+      return (await claim(headSha, runId)).token
     }
 
     async function report(
@@ -1222,6 +1262,585 @@ describe(
         assert.equal(api.workflowRunById(runId)?.reruns, 1)
       })
     }
+
+    // -----------------------------------------------------------------------
+    // ordering: the third Re-run button, the one in the Actions tab
+    //
+    // GITHUB HAS THREE RE-RUN BUTTONS AND THIS CONTROL PLANE HEARD TWO OF THEM.
+    //
+    // The two above are the buttons on a CHECK: one check, or the checks page.
+    // Both send `rerequested`, and handleRerequest reopens the generation for
+    // them. The one in the Actions tab re-runs the WORKFLOW RUN, and GitHub
+    // answers it by starting a second ATTEMPT of the same run id and delivering
+    // `workflow_run` for it. No `check_run` and no `check_suite` is sent,
+    // because no check asked for anything, so nothing reopened the generation
+    // and the second attempt's claim met a concluded row and was refused.
+    //
+    // What that cost, on this repository, on pull requests 224 through 229: the
+    // second attempt did the whole twenty minutes, asked for a credential, was
+    // refused, and the workflow read the refusal as the fork case and exited
+    // zero. The job was GREEN, the check on the commit went on reporting the
+    // attempt that had been replaced, and nothing anywhere said that the run
+    // which had just finished had verified nothing. A check that reports the
+    // result of a run it refused is worse than no check.
+    //
+    // So a re-run is a second generation for the same commit whether or not a
+    // button on a check started it, and the party that knows a re-run is
+    // happening is the run itself. It says so the same way it says which run it
+    // is: by trading a workflow identity for a credential, and that identity
+    // names the attempt.
+    // -----------------------------------------------------------------------
+
+    it('ordering: a passed attempt is re-run from the Actions tab and the re-run fails', async () => {
+      // THE REPRODUCTION, and it is the worst direction of the two: the check
+      // was green, somebody re-ran it, the re-run found a failure, and the
+      // pull request went on showing the green tick from the attempt that had
+      // been replaced.
+      const head = sha('rerun-passed-then-failed')
+      await deliver('pull_request', pullRequestPayload('opened', 90, head))
+
+      const first = await claim(head, 5900, 1)
+      assert.equal(first.status, 200)
+      await deliver('workflow_run', workflowRunPayload('in_progress', head, 5900))
+      assert.equal((await report(first.token!, head, ['pass'])).status, 200)
+      assert.equal((await generation(head))?.state, 'passed')
+      assert.equal(checkFor(head)?.conclusion, 'success')
+      const firstCheck = checkFor(head)!.id
+      const deadlineWas = (await generation(head))!.deadline_at
+
+      // Re-run, in the Actions tab. No check_run and no check_suite delivery,
+      // because GitHub sends neither for it: a second attempt of run 5900.
+      h.clock.advance(60_000)
+      const again = await claim(head, 5900, 2)
+      assert.equal(
+        again.status,
+        200,
+        `the re-run was refused a credential, so it cannot report and the check keeps the ` +
+          `replaced attempt's verdict: ${again.error}`,
+      )
+      assert.ok(again.token, 'the re-run got no credential')
+
+      const reopened = await generation(head)
+      assert.equal(reopened?.state, 'running', 'the re-run left the concluded state standing')
+      assert.equal(reopened?.attempt, 2, 'the re-run did not count as another attempt')
+      assert.equal(reopened?.detail, null, 'the re-run kept the replaced attempt’s sentence')
+      assert.equal(reopened?.verdict, null, 'the re-run kept the replaced attempt’s verdict')
+      assert.equal(reopened?.finished_at, null, 'a running attempt is recorded as finished')
+      assert.equal(reopened?.workflow_run_id, String(5900))
+      assert.match(reopened!.reported_by!, /attempt 2$/)
+      assert.ok(
+        reopened!.deadline_at > deadlineWas,
+        'the re-run inherited the deadline of the attempt it replaced, so the sweeper would time ' +
+          'it out for time the previous attempt spent',
+      )
+      // One generation row per head, which is what a repository makes required.
+      const rows = await h.admin<{ n: number }[]>`
+        SELECT count(*)::int AS n FROM pr_generations WHERE head_sha = ${head}`
+      assert.equal(rows[0]!.n, 1, 'the re-run put a second check on one commit')
+
+      // WHAT THE PULL REQUEST SAYS WHILE THE RE-RUN IS RUNNING, which is the
+      // half a state machine test cannot see. A completed check run cannot be
+      // moved back to in_progress at GitHub, so the attempt that is running now
+      // is a NEW check run, and GitHub shows the most recent one of a name.
+      assert.equal(checksFor(head).length, 2, 'the re-run has no check run of its own')
+      assert.equal(checkFor(head)?.status, 'in_progress')
+      assert.equal(checkFor(head)?.conclusion, undefined)
+      assert.notEqual(checkFor(head)!.id, firstCheck, 'the completed check run was written over')
+
+      // And the re-run's own answer is the answer.
+      assert.equal((await report(again.token!, head, ['fail'])).status, 200)
+      assert.equal((await generation(head))?.state, 'failed')
+      assert.equal(checkFor(head)?.conclusion, 'failure')
+      assert.match(commentFor(90)!.body, /attempt=2/)
+    })
+
+    it('ordering: a failed attempt is re-run from the Actions tab and the re-run passes', async () => {
+      // The direction a person actually presses the button for. A red check
+      // that can never go green without a push is a pull request nobody can
+      // land, and re-running it was silently a no-op.
+      const head = sha('rerun-failed-then-passed')
+      await deliver('pull_request', pullRequestPayload('opened', 91, head))
+      const first = await claim(head, 5901, 1)
+      assert.equal((await report(first.token!, head, ['fail'])).status, 200)
+      assert.equal(checkFor(head)?.conclusion, 'failure')
+
+      h.clock.advance(60_000)
+      const again = await claim(head, 5901, 2)
+      assert.equal(again.status, 200, `the re-run was refused: ${again.error}`)
+      assert.equal((await report(again.token!, head, ['pass'])).status, 200)
+      assert.equal((await generation(head))?.state, 'passed')
+      assert.equal(checkFor(head)?.conclusion, 'success', 'the check kept the failure it was re-run for')
+      assert.equal(checkFor(head)?.status, 'completed')
+    })
+
+    for (const concluded of [
+      { state: 'unverified', how: 'exited zero having reported nothing' },
+      { state: 'blocked', how: 'ended red before the check ran' },
+      { state: 'cancelled', how: 'was cancelled' },
+      { state: 'failed', how: 'reported a failing check' },
+      { state: 'passed', how: 'reported a passing check' },
+    ] as const) {
+      it(`ordering: the workflow run is re-run after an attempt that ${concluded.how}`, async () => {
+        // Every terminal state a first attempt can leave, because the refusal
+        // this replaces quoted the state back and so was reachable from all
+        // five, and because a re-run is the ordinary answer to four of them.
+        const head = sha(`rerun-run-${concluded.state}`)
+        const number = 92 + GENERATION_STATES.indexOf(concluded.state)
+        const runId = 5910 + GENERATION_STATES.indexOf(concluded.state)
+        await deliver('pull_request', pullRequestPayload('opened', number, head))
+
+        const first = await claim(head, runId, 1)
+        assert.ok(first.token, `the first attempt was refused a credential: ${first.error}`)
+        await deliver('workflow_run', workflowRunPayload('in_progress', head, runId))
+        if (concluded.state === 'failed' || concluded.state === 'passed') {
+          const verdict = concluded.state === 'failed' ? 'fail' : 'pass'
+          assert.equal((await report(first.token, head, [verdict])).status, 200)
+        } else {
+          const conclusion =
+            concluded.state === 'unverified'
+              ? 'success'
+              : concluded.state === 'cancelled'
+                ? 'cancelled'
+                : 'failure'
+          await deliver('workflow_run', workflowRunPayload('completed', head, runId, conclusion))
+        }
+        const done = await generation(head)
+        assert.equal(done?.state, concluded.state, 'the first attempt did not reach its state')
+        assert.equal(done?.attempt, 1)
+
+        h.clock.advance(60_000)
+        const again = await claim(head, runId, 2)
+        assert.equal(again.status, 200, `a re-run after ${concluded.state} was refused: ${again.error}`)
+        const reopened = await generation(head)
+        assert.equal(reopened?.state, 'running')
+        assert.equal(reopened?.attempt, 2)
+        assert.equal(reopened?.detail, null)
+        assert.equal(reopened?.verdict, null)
+        assert.notEqual(checkFor(head)?.status, 'completed')
+
+        assert.equal((await report(again.token!, head, ['pass'])).status, 200)
+        assert.equal((await generation(head))?.state, 'passed')
+        assert.equal(checkFor(head)?.conclusion, 'success')
+      })
+    }
+
+    it('ordering: a second run claims while the attempt that was running has not ended', async () => {
+      // A second run of the same commit arriving before the first has ended.
+      // GitHub will not start a second ATTEMPT of a run that is still going,
+      // but a second RUN on the same commit is ordinary here: a `labeled`
+      // delivery beside an `opened` one, a dispatch from the console, a
+      // workflow somebody added after the first run started.
+      //
+      // The credential moves to whoever claimed last, because the row holds one
+      // hash. So the BINDING has to move with it. It did not: the check stayed
+      // bound to the first run, whose completion then ended the generation as
+      // "nothing was reported" and withdrew the credential of the run that was
+      // at that moment about to report.
+      const head = sha('rerun-while-running')
+      await deliver('pull_request', pullRequestPayload('opened', 97, head))
+      const first = await claim(head, 5920, 1)
+      assert.ok(first.token)
+      assert.equal((await generation(head))?.workflow_run_id, '5920')
+
+      const second = await claim(head, 5921, 1)
+      assert.equal(second.status, 200, `a second run was refused while the first ran: ${second.error}`)
+      assert.equal(
+        (await generation(head))?.workflow_run_id,
+        '5921',
+        'the credential moved to the second run and the binding did not, so the first run’s ' +
+          'completion ends the check the second one is reporting on',
+      )
+
+      // The first run finishes, saying nothing. It is not the check any more.
+      await deliver('workflow_run', workflowRunPayload('completed', head, 5920, 'success'))
+      assert.equal(
+        (await generation(head))?.state,
+        'running',
+        'the run that was replaced ended the attempt that replaced it',
+      )
+      assert.equal((await report(second.token!, head, ['pass'])).status, 200)
+      assert.equal((await generation(head))?.state, 'passed')
+      assert.equal(checkFor(head)?.conclusion, 'success')
+    })
+
+    it('ordering: the re-run claims before the delivery saying the first attempt finished', async () => {
+      // The same two events the other way round, and the ordering GitHub
+      // actually produces most often: a person presses Re-run the moment the run
+      // ends, the second attempt reaches its first step in seconds, and
+      // `workflow_run` completed for the attempt it replaced is still in flight.
+      // The row therefore still says running when the re-run claims, so this
+      // does not go through the reopen at all, and the check has to come out of
+      // it saying the same thing: attempt 2, and attempt 1's completion ignored.
+      const head = sha('rerun-before-completion')
+      await deliver('pull_request', pullRequestPayload('opened', 106, head))
+      const first = await claim(head, 5997, 1)
+      assert.ok(first.token)
+      await deliver('workflow_run', workflowRunPayload('in_progress', head, 5997, null, { runAttempt: 1 }))
+
+      const again = await claim(head, 5997, 2)
+      assert.equal(again.status, 200, `the re-run was refused: ${again.error}`)
+      assert.equal((await generation(head))?.attempt, 2, 'the attempt that is running is not counted')
+      assert.match((await generation(head))!.reported_by!, /attempt 2$/)
+
+      // Attempt 1's completion, arriving now. It is over, and it has nothing to
+      // say about the attempt that replaced it.
+      await deliver('workflow_run', workflowRunPayload('completed', head, 5997, 'success', { runAttempt: 1 }))
+      assert.equal(
+        (await generation(head))?.state,
+        'running',
+        'the first attempt’s completion ended the attempt that replaced it, so the credential the ' +
+          'running attempt holds is withdrawn and its report is refused',
+      )
+      assert.equal((await report(again.token!, head, ['pass'])).status, 200)
+      assert.equal(checkFor(head)?.conclusion, 'success')
+    })
+
+    it('ordering: two re-runs of the same check, one after the other', async () => {
+      const head = sha('rerun-twice')
+      await deliver('pull_request', pullRequestPayload('opened', 98, head))
+      const first = await claim(head, 5930, 1)
+      assert.equal((await report(first.token!, head, ['fail'])).status, 200)
+
+      h.clock.advance(60_000)
+      const second = await claim(head, 5930, 2)
+      assert.equal(second.status, 200, `the first re-run was refused: ${second.error}`)
+      assert.equal((await report(second.token!, head, ['fail'])).status, 200)
+      assert.equal((await generation(head))?.attempt, 2)
+
+      h.clock.advance(60_000)
+      const third = await claim(head, 5930, 3)
+      assert.equal(third.status, 200, `the second re-run was refused: ${third.error}`)
+      assert.equal((await generation(head))?.attempt, 3)
+      assert.equal((await report(third.token!, head, ['pass'])).status, 200)
+      assert.equal((await generation(head))?.state, 'passed')
+      assert.equal(checkFor(head)?.conclusion, 'success')
+      // Three attempts, three check runs, and the one a person sees is the
+      // third. The first two stay as they concluded, which is what a check run
+      // at GitHub does: it cannot be moved back out of completed.
+      assert.equal(checksFor(head).length, 3)
+      assert.match(commentFor(98)!.body, /attempt=3/)
+    })
+
+    it('the attempt that already reported cannot claim again and wipe its own result', async () => {
+      // The other side of the reopen. A credential is good for one report, but
+      // the IDENTITY that bought it stays valid for the minutes GitHub signed
+      // it for, so a replayed identity could ask for a second credential on a
+      // commit whose answer is already recorded. Reopening on ANY claim would
+      // let that erase a verdict somebody has read and put the check back to
+      // running with nothing on the way.
+      const head = sha('rerun-same-attempt')
+      await deliver('pull_request', pullRequestPayload('opened', 99, head))
+      const token = (await claim(head, 5940, 1)).token!
+      assert.equal((await report(token, head, ['pass'])).status, 200)
+
+      const replay = await claim(head, 5940, 1)
+      assert.equal(replay.status, 409, 'the same run and attempt bought a second credential')
+      assert.equal(replay.token, null)
+      assert.match(replay.error ?? '', /already had its turn/i)
+      const still = await generation(head)
+      assert.equal(still?.state, 'passed', 'a replayed identity reopened a reported check')
+      assert.equal(still?.attempt, 1)
+      assert.ok(still?.verdict, 'a replayed identity discarded the recorded verdict')
+      assert.equal(checkFor(head)?.conclusion, 'success')
+      assert.equal(checksFor(head).length, 1, 'a refused claim still made a new check run')
+    })
+
+    it('an earlier attempt’s identity cannot reopen what a later attempt concluded', async () => {
+      // The same replay one step further out. Attempt 1's identity is still
+      // valid while attempt 2 runs and reports, so "not the attempt already
+      // recorded" is not enough: it has to be a LATER one. Otherwise a token
+      // captured from the run that was replaced can reopen the answer the run
+      // that replaced it recorded.
+      const head = sha('rerun-earlier-attempt')
+      await deliver('pull_request', pullRequestPayload('opened', 100, head))
+      const first = await claim(head, 5950, 1)
+      assert.equal((await report(first.token!, head, ['fail'])).status, 200)
+      const second = await claim(head, 5950, 2)
+      assert.equal((await report(second.token!, head, ['pass'])).status, 200)
+      assert.equal((await generation(head))?.state, 'passed')
+
+      const stale = await claim(head, 5950, 1)
+      assert.equal(stale.status, 409, 'an earlier attempt reopened a later attempt’s verdict')
+      assert.match(stale.error ?? '', /already had its turn/i)
+      assert.equal((await generation(head))?.state, 'passed')
+      assert.equal((await generation(head))?.attempt, 2)
+      assert.equal(checkFor(head)?.conclusion, 'success')
+    })
+
+    it('ordering: two claims from the same re-run arrive together, and one credential is issued', async () => {
+      // THE READ AND THE WRITE ARE TWO STATEMENTS, and a job whose first request
+      // timed out asks again, so one attempt can be inside the window between
+      // them twice. Nothing about the timing is left to chance: a transaction
+      // here holds the generation's row lock, both claims read the concluded
+      // check and queue on that lock, and only once BOTH are seen waiting in
+      // pg_stat_activity is the lock released. Under READ COMMITTED the second
+      // UPDATE then re-reads the row the first one wrote, so the comparison in
+      // its WHERE clause, and nothing else, decides what it does. Without it
+      // both are issued a credential, the attempt is reopened twice, and the
+      // first credential is one the row no longer holds.
+      const head = sha('rerun-concurrent-claims')
+      await deliver('pull_request', pullRequestPayload('opened', 303, head))
+      const first = await claim(head, 6010, 1)
+      assert.equal((await report(first.token!, head, ['pass'])).status, 200)
+      assert.equal((await generation(head))?.state, 'passed')
+
+      let racing: Promise<Awaited<ReturnType<typeof claim>>[]> | undefined
+      await h.admin.begin(async (tx) => {
+        await tx`SELECT id FROM pr_generations WHERE head_sha = ${head} FOR UPDATE`
+        racing = Promise.all([claim(head, 6010, 2), claim(head, 6010, 2)])
+        const deadline = Date.now() + 10_000
+        for (;;) {
+          const [row] = await h.admin<{ n: number }[]>`
+            SELECT count(*)::int AS n FROM pg_stat_activity
+            WHERE pid <> pg_backend_pid() AND wait_event_type = 'Lock'
+              AND query LIKE '%UPDATE pr_generations%'`
+          if (row!.n >= 2) break
+          if (Date.now() > deadline) {
+            assert.fail(
+              `only ${row!.n} of the two claims reached the write while the row was held, so ` +
+                `this ordering was never produced and nothing below would be measuring it`,
+            )
+          }
+          await new Promise((resolve) => setTimeout(resolve, 20))
+        }
+      })
+
+      const answers = await racing!
+      const statuses = answers.map((a) => a.status)
+      const issued = answers.filter((a) => a.status === 200)
+      const refused = answers.filter((a) => a.status !== 200)
+      assert.equal(issued.length, 1, `two claims for one attempt were answered ${statuses}`)
+      assert.equal(refused[0]?.status, 409)
+      assert.match(refused[0]?.error ?? '', /changed underneath this claim/)
+
+      const reopened = await generation(head)
+      assert.equal(reopened?.state, 'running')
+      assert.equal(reopened?.attempt, 2, 'one attempt was counted twice')
+      assert.equal(reopened?.verdict, null, 'the reopened check kept the replaced verdict')
+      assert.equal((await report(issued[0]!.token!, head, ['pass'])).status, 200)
+      assert.equal((await generation(head))?.state, 'passed')
+      assert.equal(checkFor(head)?.conclusion, 'success')
+      assert.equal(checksFor(head).length, 2, 'one attempt was given two check runs')
+    })
+
+    it('ordering: the replaced attempt’s completion arrives after the re-run claimed', async () => {
+      // GitHub delivers `workflow_run` completed for attempt 1 whenever it
+      // delivers it, and a redelivery can be minutes late. By then attempt 2
+      // may already be running. That delivery must not conclude the attempt
+      // that replaced it: doing so writes "nothing was reported" over a check
+      // that is running and withdraws the credential the running attempt holds.
+      const head = sha('rerun-stale-completion')
+      await deliver('pull_request', pullRequestPayload('opened', 101, head))
+      const first = await claim(head, 5960, 1)
+      assert.equal((await report(first.token!, head, ['pass'])).status, 200)
+
+      h.clock.advance(60_000)
+      const again = await claim(head, 5960, 2)
+      assert.equal(again.status, 200, `the re-run was refused: ${again.error}`)
+      assert.equal((await generation(head))?.state, 'running')
+
+      // Attempt 1, arriving now.
+      await deliver('workflow_run', workflowRunPayload('completed', head, 5960, 'success', { runAttempt: 1 }))
+      const still = await generation(head)
+      assert.equal(
+        still?.state,
+        'running',
+        'the completion of the attempt that was replaced ended the attempt running now',
+      )
+      assert.equal(still?.detail, null)
+      assert.equal((await report(again.token!, head, ['fail'])).status, 200)
+      assert.equal((await generation(head))?.state, 'failed')
+      assert.equal(checkFor(head)?.conclusion, 'failure')
+
+      // And the re-run's own completion, which IS this attempt's, is heard: it
+      // arrives after the report, so it has nothing to add.
+      await deliver('workflow_run', workflowRunPayload('completed', head, 5960, 'success', { runAttempt: 2 }))
+      assert.equal((await generation(head))?.state, 'failed')
+    })
+
+    it('ordering: a re-run that never reports is timed out on its own deadline', async () => {
+      // The callback that never arrives. The attempt is reopened with a fresh
+      // deadline, so the sweeper does not time it out for the time the previous
+      // attempt spent, and it does time it out once its own deadline passes.
+      const head = sha('rerun-never-reports')
+      await deliver('pull_request', pullRequestPayload('opened', 102, head))
+      const first = await claim(head, 5970, 1)
+      assert.equal((await report(first.token!, head, ['pass'])).status, 200)
+
+      h.clock.advance(DEFAULT_DEADLINE_MS + 60_000)
+      const again = await claim(head, 5970, 2)
+      assert.equal(again.status, 200, `the re-run was refused: ${again.error}`)
+      // The previous attempt's deadline is long past, and this one is not. The
+      // sweeper's own count is about every overdue row in the database, so the
+      // claim being made here is about THIS row: it survives a pass that
+      // happens while the deadline it inherited is already behind the clock.
+      await sweepGenerations(lifecycle())
+      assert.equal(
+        (await generation(head))?.state,
+        'running',
+        'the re-run inherited the deadline of the attempt it replaced, so the sweeper gave up on ' +
+          'it for time the previous attempt spent',
+      )
+
+      h.clock.advance(DEFAULT_DEADLINE_MS + 60_000)
+      assert.ok((await sweepGenerations(lifecycle())).timedOut >= 1)
+      const gave = await generation(head)
+      assert.equal(gave?.state, 'unverified')
+      assert.equal(gave?.detail, TIMED_OUT_DETAIL)
+      assert.equal(checkFor(head)?.conclusion, 'timed_out')
+    })
+
+    it('a check the sweeper gave up on is re-runnable, and stops saying it timed out', async () => {
+      // The other entry point into `unverified`, and not the one the loop above
+      // drives: there the run said it had finished, here nobody said anything
+      // and the deadline sweeper wrote the state. A re-run is the ordinary
+      // answer to a check that timed out, and the sentence the sweeper wrote
+      // must not outlive the attempt it was about, because `timed_out` and
+      // `action_required` are told apart by that sentence alone.
+      const head = sha('rerun-after-timeout')
+      await deliver('pull_request', pullRequestPayload('opened', 103, head))
+      assert.ok((await claim(head, 5980, 1)).token)
+      h.clock.advance(DEFAULT_DEADLINE_MS + 60_000)
+      assert.ok((await sweepGenerations(lifecycle())).timedOut >= 1)
+      assert.equal((await generation(head))?.detail, TIMED_OUT_DETAIL)
+      assert.equal(checkFor(head)?.conclusion, 'timed_out')
+
+      const again = await claim(head, 5980, 2)
+      assert.equal(again.status, 200, `a re-run after a timeout was refused: ${again.error}`)
+      const reopened = await generation(head)
+      assert.equal(reopened?.state, 'running')
+      assert.equal(
+        reopened?.detail,
+        null,
+        'the sweeper’s sentence outlived the attempt it was about, so a running check reads ' +
+          'as one that already gave up',
+      )
+      assert.notEqual(checkFor(head)?.status, 'completed')
+      assert.equal((await report(again.token!, head, ['pass'])).status, 200)
+      assert.equal(checkFor(head)?.conclusion, 'success')
+    })
+
+    it('ordering: a re-run of an older commit reports on that commit and leaves the head alone', async () => {
+      // A re-run claiming after a newer commit has its own run. The claim is
+      // for the commit the re-run is on, and the newer commit's check is
+      // somebody else's row: the answer has to land on the older commit and
+      // nothing about the head may move. The comment is the one shared surface,
+      // and it stays about the head.
+      const older = sha('rerun-older-commit')
+      const newer = sha('rerun-newer-commit')
+      await deliver('pull_request', pullRequestPayload('opened', 104, older))
+      const first = await claim(older, 5990, 1)
+      assert.equal((await report(first.token!, older, ['pass'])).status, 200)
+
+      await deliver('pull_request', pullRequestPayload('synchronize', 104, newer))
+      assert.equal((await generation(newer))?.state, 'queued')
+      const newRun = await claim(newer, 5991, 1)
+      assert.equal(newRun.status, 200)
+      assert.match(commentFor(104)!.body, new RegExp(`sha=${newer}`))
+
+      h.clock.advance(60_000)
+      const again = await claim(older, 5990, 2)
+      assert.equal(again.status, 200, `the re-run of the older commit was refused: ${again.error}`)
+      assert.equal((await report(again.token!, older, ['fail'])).status, 200)
+      assert.equal((await generation(older))?.state, 'failed')
+      assert.equal(checkFor(older)?.conclusion, 'failure')
+      // The head is untouched: its own attempt is still running and its own
+      // credential still works.
+      assert.equal((await generation(newer))?.state, 'running')
+      assert.equal((await generation(newer))?.attempt, 1)
+      assert.match(
+        commentFor(104)!.body,
+        new RegExp(`sha=${newer}`),
+        'a result for an older commit became the comment on a newer head',
+      )
+      assert.equal((await report(newRun.token!, newer, ['pass'])).status, 200)
+      assert.equal((await generation(newer))?.state, 'passed')
+    })
+
+    it('another run’s re-run cannot discard the verdict of the run that reported', async () => {
+      // The console's "start an environment" verb dispatches the same workflow
+      // file on a pull request's head, and that run holds the same shape of
+      // identity as the check's: it claims, and it never reports, because it runs
+      // `af up` rather than the check. Re-running THAT from the Actions tab is
+      // attempt 2 of a run this check never heard of, and reopening for it would
+      // mean asking for an environment silently discarded a recorded verdict and
+      // left the check running until the deadline.
+      //
+      // So a re-run reopens the check only for the run that was checking the
+      // commit. Another run wanting a verdict of its own is what the Re-run
+      // button is for: it sends `rerequested`, and that is handled above.
+      const head = sha('rerun-other-run')
+      await deliver('pull_request', pullRequestPayload('opened', 109, head))
+      const checking = await claim(head, 6001, 1)
+      assert.equal((await report(checking.token!, head, ['pass'])).status, 200)
+
+      const stranger = await claim(head, 6002, 2)
+      assert.equal(stranger.status, 409, 'a run that was never the check reopened a recorded verdict')
+      assert.match(stranger.error ?? '', /already passed/)
+      assert.doesNotMatch(stranger.error ?? '', /already had its turn/i)
+      const still = await generation(head)
+      assert.equal(still?.state, 'passed')
+      assert.equal(still?.attempt, 1)
+      assert.equal(still?.workflow_run_id, '6001')
+      assert.equal(checkFor(head)?.conclusion, 'success')
+    })
+
+    it('a re-run of a commit that never had a check is refused, and says which refusal it is', async () => {
+      // The nightly runs on a schedule against the default branch, where there
+      // is no pull request and so no check to report to. That refusal is not
+      // the re-run one and must not be worded as though a re-run would fix it,
+      // because the workflow now decides whether to fail the job on the
+      // strength of the sentence it gets back.
+      const head = sha('rerun-no-check')
+      const nothing = await claim(head, 5995, 2)
+      assert.equal(nothing.status, 409)
+      assert.match(nothing.error ?? '', /no check is waiting/i)
+      assert.doesNotMatch(nothing.error ?? '', /already had its turn/i)
+    })
+
+    it('the Re-run button and the run’s own claim are one attempt, not two', async () => {
+      // Both entry points on one press. The button sends `rerequested`, which
+      // reopens the generation and asks GitHub to re-run the run; GitHub then
+      // starts attempt 2, which claims. The claim must not count a second
+      // attempt on top of the button’s, and the check must end up reporting
+      // the attempt that ran.
+      const head = sha('rerun-button-then-claim')
+      await deliver('pull_request', pullRequestPayload('opened', 105, head))
+      api.addWorkflowRun({ id: 5996, repository, status: 'in_progress', conclusion: null, headSha: head })
+      const first = await claim(head, 5996, 1)
+      assert.equal((await report(first.token!, head, ['fail'])).status, 200)
+      api.finishWorkflowRun(5996, 'failure')
+
+      await deliver('check_run', {
+        action: 'rerequested',
+        check_run: { id: 901, head_sha: head },
+        repository: { full_name: repository, owner: { login: org.slug } },
+        organization: { login: org.slug },
+        installation: { id: installationId },
+      })
+      assert.equal((await generation(head))?.state, 'queued')
+      assert.equal((await generation(head))?.attempt, 2)
+      assert.equal(api.workflowRunById(5996)?.reruns, 1)
+      // The button reopened the check, so the attempt that is coming needs a
+      // check run of its own rather than the completed one it was re-run from:
+      // that one has concluded, and a concluded check run cannot be moved back
+      // out of completed, so writing to it would leave the failure this was
+      // re-run for on the pull request for as long as the new attempt ran.
+      assert.equal(checksFor(head).length, 2, 'the queued attempt has no check run of its own')
+      assert.equal(checkFor(head)?.status, 'queued')
+      assert.equal(
+        checksFor(head)[0]?.refusedRegressions,
+        0,
+        'something wrote to the concluded check run, which GitHub would not have moved',
+      )
+
+      const again = await claim(head, 5996, 2)
+      assert.equal(again.status, 200, `the run GitHub re-ran was refused: ${again.error}`)
+      assert.equal((await generation(head))?.attempt, 2, 'one press counted as two attempts')
+      assert.equal((await generation(head))?.state, 'running')
+      assert.equal((await report(again.token!, head, ['pass'])).status, 200)
+      assert.equal(checkFor(head)?.conclusion, 'success')
+    })
 
     // -----------------------------------------------------------------------
     // ordering: timeout

@@ -660,6 +660,12 @@ interface WorkflowRunPayload {
     path?: string
     /** What started the run: `pull_request`, `workflow_dispatch`, `push`. */
     event?: string
+    /** Which attempt of this run, 1 on the first and one higher on each re-run
+     *  of it from the Actions tab. Read tolerantly: a delivery without it is
+     *  read as saying nothing about the attempt rather than as saying "the
+     *  first", because acting on a guessed 1 would throw away the delivery of
+     *  the attempt that is actually running. */
+    run_attempt?: number
   }
   repository?: { full_name?: string }
 }
@@ -705,8 +711,10 @@ async function handleWorkflowRun(
       id: string
       state: GenerationState
       workflow_run_id: string | null
+      reported_by: string | null
     }>(sql`
-      SELECT g.id, g.state::text AS state, g.workflow_run_id::text AS workflow_run_id
+      SELECT g.id, g.state::text AS state, g.workflow_run_id::text AS workflow_run_id,
+             g.reported_by
       FROM pr_generations g JOIN pull_requests p ON p.id = g.pull_request_id
       WHERE p.repository_id = ${repo.id}::uuid AND g.head_sha = ${headSha}
       ORDER BY g.queued_at DESC LIMIT 1`)
@@ -785,6 +793,38 @@ async function handleWorkflowRun(
       detail: bound
         ? `run ${run.id} is not the run reporting on ${shortSha(headSha)}`
         : `no run has claimed ${shortSha(headSha)} yet, so run ${run.id} is not it`,
+      orgId: found.orgId,
+    }
+  }
+
+  // A DELIVERY ABOUT THE ATTEMPT THAT WAS REPLACED IS NOT ABOUT THE ATTEMPT
+  // RUNNING NOW, AND IT ARRIVES AFTER IT OFTEN ENOUGH TO MATTER.
+  //
+  // A re-run from the Actions tab keeps the run id and increments the attempt,
+  // so both attempts of one run pass the binding check above: the id is the
+  // same. GitHub delivers attempt 1's `completed` whenever it delivers it, and
+  // a redelivery can be minutes late, by which time attempt 2 may be running
+  // and holding the credential. Acting on that delivery writes "the run
+  // finished and reported nothing" over a check that is running and withdraws
+  // the credential the running attempt is about to report with, so the re-run
+  // is refused at /v1/pr/report and the check ends up saying nothing was
+  // verified about a run that verified plenty.
+  //
+  // The attempt that claimed is in `reported_by`, out of the identity token
+  // GitHub signed, and the delivery names its own. Lower means older. Both
+  // sides are read tolerantly, so a delivery or a row that does not say turns
+  // this guard off rather than guessing.
+  const claimedAttempt = attemptIn(found.generation.reported_by)
+  const deliveredAttempt =
+    typeof run.run_attempt === 'number' && Number.isSafeInteger(run.run_attempt)
+      ? run.run_attempt
+      : null
+  if (claimedAttempt !== null && deliveredAttempt !== null && deliveredAttempt < claimedAttempt) {
+    return {
+      handled: true,
+      detail:
+        `run ${run.id} attempt ${deliveredAttempt} is an earlier attempt than the one checking ` +
+        `${shortSha(headSha)}, which is attempt ${claimedAttempt}`,
       orgId: found.orgId,
     }
   }
@@ -942,6 +982,37 @@ function unreportedOutcome(conclusion: string): {
   }
 }
 
+/**
+ * How the run that claimed a commit is recorded, and how it is read back.
+ *
+ * ONE PLACE, because two now depend on the attempt inside this string: the
+ * claim, which has to tell a re-run from the attempt it replaces, and the
+ * `workflow_run` handler, which has to tell a late delivery about the attempt
+ * that was replaced from one about the attempt running now. A format written in
+ * one file and parsed in another drifts, and the drift here is silent: the
+ * parse returns null, the guard turns itself off, and everything goes on
+ * looking correct.
+ *
+ * The workflow reference comes first because it is what a reader wants, and the
+ * attempt is last because that is what makes it cheap to read back.
+ */
+export function reportedByFor(jobWorkflowRef: string, runAttempt: number): string {
+  return `${jobWorkflowRef} attempt ${runAttempt}`.slice(0, 400)
+}
+
+/** Which attempt a recorded `reported_by` names, or null when it names none.
+ *
+ *  Tolerant on purpose: this reads a column that may hold a row written by an
+ *  older version of this file, and null means "do not know", which every caller
+ *  treats as "do not act on it" rather than as an attempt number. */
+export function attemptIn(reportedBy: string | null): number | null {
+  if (!reportedBy) return null
+  const match = / attempt (\d+)$/.exec(reportedBy)
+  if (!match) return null
+  const attempt = Number(match[1])
+  return Number.isSafeInteger(attempt) && attempt > 0 ? attempt : null
+}
+
 async function markRunning(
   deps: LifecycleDeps,
   login: string,
@@ -1012,6 +1083,16 @@ async function handleRerequest(
       UPDATE pr_generations g
       SET state = 'queued', detail = NULL, verdict = NULL, env_id = NULL,
           attempt = g.attempt + 1,
+          -- A COMPLETED CHECK RUN CANNOT BE MOVED BACK OUT OF COMPLETED AT
+          -- GITHUB, so the attempt this queues needs a check run of its own and
+          -- this is where it stops inheriting the one it was re-run from. Left
+          -- pointing at that run, the next publish PATCHes a completed check
+          -- run with a status of in_progress and no conclusion, which GitHub does
+          -- not apply: the pull request would go on showing the tick from the
+          -- attempt that had been replaced for as long as the new one ran.
+          -- publishCheck creates the new one, keyed on this generation and this
+          -- attempt, and GitHub shows the most recent check run of a name.
+          check_run_id = NULL,
           started_at = NULL, finished_at = NULL,
           deadline_at = ${new Date(
             deps.clock.now().getTime() + (deps.deadlineMs ?? DEFAULT_DEADLINE_MS),
@@ -1399,10 +1480,17 @@ async function publishCheck(
 ): Promise<void> {
   const installationId = state.installationId!
   const shape = checkShapeFor(state.generation.state, input.timedOut)
+  // ONE CHECK RUN PER ATTEMPT, named so that GitHub can be asked which one is
+  // this attempt's. A check run that has concluded cannot be moved back out of
+  // completed, so a re-run's check cannot be the run whose tick is already on
+  // the pull request; it is a new one, and GitHub shows the most recent run of a
+  // name. This is also what GitHub Actions does with its own jobs on a re-run.
+  const externalId = `${state.generation.id}:attempt-${state.generation.attempt}`
   const payload = {
     name: CHECK_NAME,
     headSha: state.generation.head_sha,
     status: shape.status,
+    externalId,
     ...(shape.conclusion ? { conclusion: shape.conclusion } : {}),
     // The pull request number rather than the commit alone. A run is keyed
     // to its environment and the environment to the pull request; nothing on
@@ -1429,6 +1517,7 @@ async function publishCheck(
       state.repository,
       state.generation.head_sha,
       CHECK_NAME,
+      externalId,
     )
   }
 
@@ -1627,12 +1716,16 @@ export async function issueCallback(
     repository: string
     headSha: string
     workflowRunId: number | null
-    /** Which workflow, and which attempt of it, out of the verified identity.
-     *  Recorded HERE rather than when the report arrives, because the report
-     *  presents the credential this call issues and not the identity that
-     *  earned it: a reader of the row learns who wrote it rather than who it
-     *  claims to be. */
-    reportedBy: string
+    /** Which workflow, out of the verified identity. Recorded HERE rather than
+     *  when the report arrives, because the report presents the credential this
+     *  call issues and not the identity that earned it: a reader of the row
+     *  learns who wrote it rather than who it claims to be. */
+    jobWorkflowRef: string
+    /** Which attempt of the run, out of the same identity. GitHub increments it
+     *  for every re-run of a run and signs it, so it is the only thing that
+     *  tells a re-run apart from the attempt it replaces, and the only thing
+     *  that tells either apart from a replay of a token. */
+    runAttempt: number
   },
 ): Promise<{ token: string; generationId: string } | { refused: string }> {
   const token = randomBytes(32).toString('base64url')
@@ -1686,18 +1779,16 @@ export async function issueCallback(
         from_fork: boolean
         approved_sha: string | null
         pr_head: string
+        workflow_run_id: string | null
+        reported_by: string | null
       }>(sql`
-      SELECT g.id, g.state::text AS state, p.from_fork, p.approved_sha, p.head_sha AS pr_head
+      SELECT g.id, g.state::text AS state, p.from_fork, p.approved_sha, p.head_sha AS pr_head,
+             g.workflow_run_id::text AS workflow_run_id, g.reported_by
       FROM pr_generations g JOIN pull_requests p ON p.id = g.pull_request_id
       WHERE p.repository_id = ${repo.id}::uuid AND g.head_sha = ${claim.headSha}`)
       const generation = rows[0]
       if (!generation) {
         return { refused: `no check is waiting on ${shortSha(claim.headSha)}` }
-      }
-      if (generation.state !== 'queued' && generation.state !== 'running') {
-        return {
-          refused: `the check on ${shortSha(claim.headSha)} is already ${generation.state}`,
-        }
       }
       if (generation.from_fork && generation.approved_sha !== claim.headSha) {
         return {
@@ -1707,12 +1798,153 @@ export async function issueCallback(
         }
       }
 
+      const reportedBy = reportedByFor(claim.jobWorkflowRef, claim.runAttempt)
+
+      // A RE-RUN FROM THE ACTIONS TAB IS A SECOND ATTEMPT THAT COULD NOT REPORT,
+      // AND THE JOB WENT GREEN SAYING SO TO NOBODY.
+      //
+      // GitHub has three Re-run buttons and this control plane heard two. The
+      // two on a CHECK send `check_run` or `check_suite` rerequested, and
+      // handleRerequest above reopens the generation for both. The one in the
+      // Actions tab re-runs the WORKFLOW RUN: GitHub starts a second ATTEMPT of
+      // the same run id and delivers `workflow_run`, and sends neither
+      // rerequested event, because no check asked for anything. So nothing
+      // reopened the generation, this call found it concluded, and it answered
+      // 409 "the check on <sha> is already passed" to the one party that was at
+      // that moment checking the commit.
+      //
+      // Every re-run done on this repository on 2026-09-04 hit it: six, on pull
+      // requests 224 through 229, all six reporting `completed/success` with
+      // their report step SKIPPED, because the workflow read the refusal as the
+      // fork case. The check went on showing the verdict of the attempt that had
+      // been replaced, and four of those six re-runs were done in order to
+      // CONFIRM a fix and were each read as a confirmation. A check that reports
+      // the result of a run whose result it refused is worse than no check.
+      //
+      // The party that knows a re-run is happening is the run itself, which is
+      // the principle the `workflow_run` binding above already rests on. It says
+      // so the same way it says which run it is, by trading a workflow identity
+      // for a credential, and that identity names the attempt.
+      //
+      // NARROWLY THE SAME RUN, DELIBERATELY. A claim from a DIFFERENT run for a
+      // commit whose check has concluded is still refused, and that is not an
+      // oversight. The console's "start an environment" dispatch runs the same
+      // workflow file on a pull request's head and claims with the same shape of
+      // identity, and it never reports, because it runs `af up` rather than the
+      // check. Reopening for any run would mean asking for an environment
+      // silently discarded a recorded verdict and left the check running until
+      // the deadline. What a person wanting another opinion from a fresh run
+      // presses is Re-run, which sends rerequested and is handled above.
+      const concluded = generation.state !== 'queued' && generation.state !== 'running'
+      const sameRun =
+        claim.workflowRunId !== null && generation.workflow_run_id === String(claim.workflowRunId)
+      // `?? 1` rather than a refusal to act: a row whose reported_by this cannot
+      // parse was written by an older version of this file, where the format was
+      // the same and the first attempt was the only one recorded.
+      const claimedAttempt = attemptIn(generation.reported_by) ?? 1
+      const anotherAttempt = sameRun && claim.runAttempt > claimedAttempt
+
+      if (concluded && !anotherAttempt) {
+        // Two refusals, and they are different facts. The same run at the same
+        // attempt has had its turn: GitHub's identity token stays valid for
+        // minutes after the report has landed, so a replayed one could otherwise
+        // ask for a second credential and put a recorded verdict back to
+        // running with nothing on the way. An EARLIER attempt is the same
+        // replay one step out, from the token of the attempt that was replaced.
+        // Anything else is another run, which the paragraph above leaves alone.
+        return {
+          refused: sameRun
+            ? `this run's attempt ${claim.runAttempt} has already had its turn on ` +
+              `${shortSha(claim.headSha)}. A credential is good for one report, and a re-run of ` +
+              `the workflow run is a new attempt, which is issued its own.`
+            : `the check on ${shortSha(claim.headSha)} is already ${generation.state}`,
+        }
+      }
+
+      if (anotherAttempt) {
+        // The reset, and it DISCARDS a recorded verdict on purpose: a second
+        // attempt is running, so the previous answer is no longer the answer,
+        // which is exactly what the Re-run button already does.
+        //
+        // THE STATE IS COMPARED AND SET IN THE WHERE CLAUSE, not trusted from
+        // the read above, because the read and this write are two statements and
+        // anything holding an identity token can reach this endpoint. A job whose
+        // first request timed out asks again, so one attempt can be inside that
+        // window twice, and without this clause both requests are issued a
+        // credential while the row holds only the second. The ordering "two
+        // claims from the same re-run arrive together" in prlifecycle.test.ts
+        // holds the row lock until both claims are waiting on it, so it is this
+        // clause, not the comparison above, that the test measures. There was a
+        // second clause here refusing the run and attempt already recorded; it
+        // is gone, because the comparison above refuses that on a concluded
+        // check and on a running one a job asking twice is a job whose first
+        // request timed out, which has always been served.
+        //
+        // GREATEST rather than `attempt + 1`, because both routes to another
+        // attempt can be taken for ONE press. The Re-run button reopens the
+        // generation and asks GitHub to re-run the run, and the run GitHub then
+        // starts claims here; counting both would tell a customer their first
+        // re-run was attempt 3. GitHub's own attempt number is the one a person
+        // can see in the Actions tab, so the count follows it and never goes
+        // backwards.
+        const reopened = await db.execute<{ id: string }>(sql`
+        UPDATE pr_generations
+        SET callback_hash = ${hash},
+            callback_expires_at = ${new Date(now.getTime() + CALLBACK_TTL_MS).toISOString()}::timestamptz,
+            reported_by = ${reportedBy},
+            workflow_run_id = ${claim.workflowRunId},
+            attempt = GREATEST(attempt, ${claim.runAttempt}),
+            -- Cleared exactly when the attempt moves, because a check run
+            -- belongs to one attempt: a completed one cannot be moved back out
+            -- of completed at GitHub, so the attempt starting now needs its own
+            -- and must not adopt the one whose tick is on the pull request.
+            -- Unchanged when the count does not move, so the Re-run button's
+            -- queued check run is the one this attempt then turns to
+            -- in_progress rather than a third row.
+            check_run_id = CASE WHEN GREATEST(attempt, ${claim.runAttempt}) = attempt
+              THEN check_run_id ELSE NULL END,
+            state = 'running',
+            detail = NULL,
+            verdict = NULL,
+            env_id = NULL,
+            started_at = ${now.toISOString()},
+            finished_at = NULL,
+            deadline_at = ${new Date(
+              now.getTime() + (deps.deadlineMs ?? DEFAULT_DEADLINE_MS),
+            ).toISOString()}::timestamptz,
+            updated_at = ${now.toISOString()}
+        WHERE id = ${generation.id}::uuid
+          AND state = ${generation.state}::pr_generation_state
+        RETURNING id`)
+        if (!reopened[0]) {
+          // The check moved between the read above and this write, which is the
+          // only way this matches nothing. Worded as that rather than as a
+          // refusal of the run, because the workflow now quotes this sentence
+          // into its own failure and a run told it had had its turn when it had
+          // not would send somebody looking in the wrong place.
+          return {
+            refused:
+              `the check on ${shortSha(claim.headSha)} changed underneath this claim, so no ` +
+              `credential was issued for attempt ${claim.runAttempt}. Something else reported or ` +
+              `superseded it while this call was being served.`,
+          }
+        }
+        return { generationId: generation.id }
+      }
+
       await db.execute(sql`
       UPDATE pr_generations
       SET callback_hash = ${hash},
           callback_expires_at = ${new Date(now.getTime() + CALLBACK_TTL_MS).toISOString()}::timestamptz,
-          reported_by = ${claim.reportedBy.slice(0, 400)},
-          workflow_run_id = coalesce(workflow_run_id, ${claim.workflowRunId}),
+          reported_by = ${reportedBy},
+          -- THE RUN THAT HOLDS THE CREDENTIAL IS THE RUN THAT IS REPORTING, and
+          -- this used to coalesce the other way round, so a second run claiming
+          -- a check that was still running took the credential and left the
+          -- binding on the first. The first run's completion then ended the
+          -- generation as "reported nothing" and withdrew the credential the
+          -- second was about to report with. One row holds one hash, so the
+          -- binding follows it.
+          workflow_run_id = coalesce(${claim.workflowRunId}, workflow_run_id),
           state = CASE WHEN state = 'queued' THEN 'running' ELSE state END,
           started_at = coalesce(started_at, ${now.toISOString()}),
           updated_at = ${now.toISOString()}
