@@ -56,6 +56,10 @@ type Runtime struct {
 	clock    clock.Clock
 	ports    *dockerutil.PortAllocator
 	redactor *redact.Redactor
+	// getenv reads the environment, so a test can name a sidecar image or move
+	// a timeout without moving the process's. Nil reads the process
+	// environment.
+	getenv func(string) string
 	// readyTimeout bounds how long a service may take to answer.
 	readyTimeout time.Duration
 	// ttl is how long an environment this runtime creates may live.
@@ -123,7 +127,7 @@ func New(opts Options) (*Runtime, error) {
 		opts.PortFrom = from + PublishedPortOffset
 	}
 	return &Runtime{
-		cli: cli, clock: opts.Clock, redactor: opts.Redactor,
+		cli: cli, clock: opts.Clock, redactor: opts.Redactor, getenv: opts.Getenv,
 		ports:        dockerutil.NewPortAllocator(opts.PortFrom),
 		readyTimeout: opts.ReadyTimeout,
 		ttl:          opts.TTL,
@@ -242,11 +246,6 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 		return env, err
 	}
 	env.ProxyReady = true
-	if needsIngress(order) {
-		if err := r.ensureIngressImage(ctx); err != nil {
-			return env, err
-		}
-	}
 	// Reserved before anything starts, because a service has to be told its
 	// own public address before it runs, and the ingress that publishes it is
 	// created after the service it forwards to.
@@ -388,16 +387,6 @@ func sortByManifestOrder(running []provider.RunningService, declared []provider.
 		// in the order they were found is better than inventing one.
 		return false
 	})
-}
-
-// needsIngress reports whether any service has to be reachable from the host.
-func needsIngress(services []provider.ServiceSpec) bool {
-	for _, s := range services {
-		if s.Kind == "web" && s.Port > 0 {
-			return true
-		}
-	}
-	return false
 }
 
 // AttachDatabase connects a branch container to the environment network and

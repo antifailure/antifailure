@@ -116,11 +116,16 @@ those tools leave, so it happens for `k3d-*` and `kind-*` contexts and for
 nothing else.
 
 For any other cluster, the images have to be somewhere the nodes can pull from.
-Publish the sidecar image and name it:
+A release publishes the sidecar image to `ghcr.io/antifailure/af-proxy`, tagged
+with the digest of the sidecar source that release carries. Name it, or your
+own copy of it:
 
 ```
 export AF_PROXY_IMAGE=registry.example.com/antifailure/proxy:<tag>
 ```
+
+`docker image ls antifailure/proxy` on a machine that has run `af up` shows
+the digest this build of `af` carries.
 
 ## Preview URLs
 

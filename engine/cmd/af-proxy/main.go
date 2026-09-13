@@ -88,12 +88,26 @@ func main() {
 	configPath := flag.String("config", "/etc/antifailure/proxy.json", "path to the sidecar configuration")
 	networkGate := flag.Bool("network-gate", false, "wait for this pod's network containment before starting customer code")
 	gateControl := flag.String("gate-control", "", "actual sidecar IP and port for the network readiness control")
+	forwardListen := flag.String("forward-listen", "", "run as the ingress forwarder: accept on this address and relay to -forward-to, reading no configuration")
+	forwardTo := flag.String("forward-to", "", "the host and port every connection accepted on -forward-listen is relayed to")
 	flag.Parse()
 	if *networkGate {
 		if err := networkGateMode(*gateControl); err != nil {
 			log.Fatalf("AF-CONTAINMENT refused: %v", err)
 		}
 		fmt.Println("AF-CONTAINMENT contained")
+		return
+	}
+	// Before the configuration is read, because the forwarder is given none:
+	// it publishes a service on the host's loopback and applies no policy, and
+	// a forwarder that failed for want of a policy file would take the
+	// service's only address down with it. Either flag selects the mode, so
+	// one given without the other is refused by name rather than falling
+	// through to start a proxy nobody asked for.
+	if *forwardListen != "" || *forwardTo != "" {
+		if err := forwardMode(*forwardListen, *forwardTo); err != nil {
+			log.Fatalf("af-proxy forward: %v", err)
+		}
 		return
 	}
 

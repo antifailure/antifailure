@@ -436,38 +436,69 @@ Owed by: whoever owns the manifest schema.
 ### F12. The sidecar image has no pull path, and building it needs the network
 
 `ensureProxyImage` inspects for the image and, failing that, builds it: a
-`golang:1.25-alpine` stage running `go build` with `GOFLAGS=-mod=mod`, which
-fetches the module graph from inside the container. There is no pull, no
-prebuilt artifact and no way to seed it. The tag is content addressed off the
-sidecar sources, so every engine version pays this once per machine.
+`golang:1.25-alpine` stage running `go build` with `GOFLAGS=-mod=mod`, and the
+one network operation in that build is the pull of its base image. There is no
+pull of the sidecar itself, no prebuilt artifact and no way to seed it. The tag
+is content addressed off the sidecar sources, so every engine version pays this
+once per machine.
 
 Tonight it paid nothing and returned nothing: one progress line,
 `building the egress proxy (once per version)`, for 25 minutes and 32 seconds
 until the run was killed. There is no timeout on that step and no output from
 it, so a user has no way to tell a slow build from a hung one.
 
-The contrast is the measurement. The same sidecar, compiled on the host where
-the module cache is already warm and packaged into the same `FROM scratch`
-image under the engine's own content addressed tag, took 237.5 seconds
+The contrast is the measurement. The same sidecar, compiled on the host, which
+needs no base image, and packaged into the same `FROM scratch` image under the
+engine's own content addressed tag, took 237.5 seconds
 end to end on this machine, of which the Go build was a few seconds and the
 rest was the daemon exporting and unpacking a 10.9 MB layer under load. The
-container build did not finish in 1532. The difference is entirely the module
-fetch, and it is a fetch of this repository's own dependency graph over a
-network that was refusing TLS handshakes.
+container build did not finish in 1532. The difference is the base image
+pull, a fetch of `golang:1.25-alpine` over a network that was refusing TLS
+handshakes, which the host build had already paid.
 
 That image was seeded by hand for this session, which is disclosed here rather
 than left implicit: it is why the `db` alias experiment below could run at all,
 and it means nothing in this report is evidence about the build step.
 
-There is a second cold dependency behind the same door, and it is worse in one
-respect. `ensureIngressImage` builds `antifailure/ingress:socat-1` from
-`FROM alpine:3.20` and `RUN apk add --no-cache socat`, so it needs both a
-registry pull and a package fetch. It is skipped when no service publishes a
-port, which is the only reason the experiment below could run.
+**Corrected on 2026-09-11: the build fetches no modules.** This entry first
+blamed a fetch of the module graph, and the two sentences above now say what
+was actually fetched. The sidecar's packaged source is standard library only
+by design. `tools/proxysrc` writes a `go.mod` with no requirements and ships no
+`go.sum`, and `TestSources_ImportNothingOutsideTheStandardLibrary` refuses any
+import the offline build could not satisfy. `-mod=mod` is there so that adding a
+dependency fails loudly, not because one is fetched. The only network
+operation inside that build is the pull of the `golang:1.25-alpine` base image,
+on a network the same report says was refusing TLS handshakes. So the 25
+minutes were a stalled base image pull, and they were silent because the build
+stream was drained into two variables and nothing was shown until it ended.
+The host comparison measured a build with no base image to pull, not a warm
+module cache.
 
-Owed by: the runtime lane and whoever owns releases. This is the finding that
-turned a rehearsal into a refusal, so it is the one to fix first if the row is
-re-run.
+The fix names all three defects: a release now publishes the image and the
+engine fetches it before compiling anything, both paths are bounded and report
+the stream as it arrives, and the base image is pinned by digest, because a
+moving tag under a content addressed name let two machines hold two different
+sidecars under one identity.
+
+There was a second cold dependency behind the same door, and it was worse in
+one respect. `ensureIngressImage` built `antifailure/ingress` from
+`FROM alpine:3.20` and `RUN apk add --no-cache socat`, so publishing a port
+needed a registry pull and a package fetch, with the same unbounded silent build
+and the same inspect that read every daemon error as absence. It was skipped
+when no service publishes a port, which is the only reason the experiment below
+could run.
+
+**Closed on 2026-09-12, by removing the image rather than repairing it.** The
+sidecar binary gained a forward mode, `-forward-listen` and `-forward-to`, in the
+standard library alone: accept, dial the service per connection, copy both ways,
+and pass a half close through. The forwarder container runs the sidecar image in
+that mode. That image is obtained before any service starts, through the
+bounded, reported, two valued path above, so publishing a port now fetches and
+builds nothing of its own and no first `af up` reaches a package mirror. The
+socat image, its Dockerfile and its build are deleted.
+
+This is the finding that turned a rehearsal into a refusal, and the fix is in
+the same pull request as the sidecar's.
 
 ### F13. A domain wildcard with `mode: allow` is accepted, and would post to a real endpoint
 
