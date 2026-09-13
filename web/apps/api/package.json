@@ -6,7 +6,8 @@
   "type": "module",
   "exports": {
     ".": "./src/server.ts",
-    "./boot": "./src/boot.ts"
+    "./boot": "./src/boot.ts",
+    "./backup-cli": "./src/backup-cli.ts"
   },
   "bin": {
     "af-control-plane": "./src/main.ts",

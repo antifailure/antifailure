@@ -121,6 +121,7 @@ COPY web/packages/policy ./packages/policy
 # how a schema arrives that the running code does not understand.
 COPY deploy/docker/bootstrap.mjs ./bootstrap.mjs
 COPY deploy/docker/maintenance.mjs ./maintenance.mjs
+COPY deploy/docker/backup-cli.mjs ./backup-cli.mjs
 COPY deploy/docker/af-operator /usr/local/bin/af-operator
 RUN chmod 755 /usr/local/bin/af-operator
 # The preview identities. Refuses to run outside an environment the engine
@@ -143,6 +144,11 @@ RUN test -n "$(ls -A ./packages/db/migrations)" || (echo 'no migrations in image
 # itself -- which is far better than a blank 404 and still not something to
 # discover in production.
 RUN test -f ./console-out/index.html || (echo 'no console build in image' && exit 1)
+# The launcher the re-sealing job runs, asked which tables it would move. The
+# community image seals provider keys and nothing else.
+RUN out="$(node backup-cli.mjs sealed-tables)" \
+  && test "$(printf '%s\n' "$out" | cut -f1 | sort | tr '\n' ' ')" = "provider_keys " \
+  || (echo "the community launcher would re-seal: $out" && exit 1)
 
 # Runs as the unprivileged `node` user that the base image already provides.
 # Nothing in the container is owned by it, so nothing in the container can be

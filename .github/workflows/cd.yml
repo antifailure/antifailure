@@ -102,6 +102,10 @@ env:
   APP: afcp-app
   BOOTSTRAP_JOB: afcp-bootstrap
   MAINTENANCE_JOB: afcp-maintenance
+  # The re-sealing job, which deploy.sh moves to the tested image with the
+  # maintenance job. Created by one guarded hand apply, so a deploy before that
+  # apply finds none and says so rather than failing.
+  RESEAL_JOB: afcp-reseal
   STAGING_URL: https://app.dev.antifailure.dev
   # Production, in its own resource group with its own everything. The names
   # come from `name = "afcpprod"` in production.tfvars, and the group is
@@ -111,6 +115,7 @@ env:
   PRODUCTION_APP: afcpprod-app
   PRODUCTION_BOOTSTRAP_JOB: afcpprod-bootstrap
   PRODUCTION_MAINTENANCE_JOB: afcpprod-maintenance
+  PRODUCTION_RESEAL_JOB: afcpprod-reseal
   PRODUCTION_URL: https://app.antifailure.dev
   # The same pin as infra.yml, and it has to stay the same: a plan job and an
   # apply job on two versions would write the state back and forth between
@@ -283,8 +288,22 @@ jobs:
             test -f /app/ee/web/server/src/main.ts
             test -f /app/ee/web/node_modules/@antifailure/api/src/boot.ts
             test -f /app/ee/LICENSE.md
+            test -f /app/web/backup-cli.mjs
           '
           echo "the entry point, the cross workspace link and the enterprise license are in the image"
+          # The re-sealing job runs `node backup-cli.mjs reseal` in whatever image
+          # this is. In the enterprise image that launcher has to register the audit
+          # stream's sealed table first, or a rotation refuses to run against any
+          # organization that chose a destination. Asked of the image that is about
+          # to be deployed, not only of the build that produced it.
+          tables="$(docker run --rm --entrypoint sh -w /app/web "$img" -c 'node backup-cli.mjs sealed-tables' | cut -f1)"
+          for want in provider_keys audit_stream_destinations; do
+            if ! printf '%s\n' "$tables" | grep -qx "$want"; then
+              echo "FAIL: the image's re-sealing launcher does not list ${want}; it lists: ${tables}"
+              exit 1
+            fi
+          done
+          echo "the re-sealing launcher lists: $(printf '%s' "$tables" | tr '\n' ' ')"
 
   # ---------------------------------------------------------------------------
   # Staging. Automatic, on every merge to main.
@@ -554,6 +573,7 @@ jobs:
       - name: Deploy
         env:
           IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
+          RESEAL_JOB: ${{ env.PRODUCTION_RESEAL_JOB }}
         run: |
           deploy/cd/deploy.sh \
             "${PRODUCTION_RESOURCE_GROUP}" "${PRODUCTION_APP}" \

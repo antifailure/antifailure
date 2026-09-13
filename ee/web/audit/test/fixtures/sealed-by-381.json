@@ -1,0 +1,29 @@
+{
+  "about": "A collector credential sealed by the audit stream exactly as #381 merged it at 7fa5e171, before the sealing keyring existed. Captured by running main's own web/apps/api/src/providers/seal.ts, not re-derived; that file and destinations.ts are the same blobs at 7fa5e171 and at the commit it was captured from.",
+  "captured_from": {
+    "main_commit": "d24d9c618406edfb59a8db08411f63c3f18c0a93",
+    "seal_ts_blob": "03af14f895ef653f5b3e5afb15af0b026ffb388b",
+    "destinations_ts_blob": "536ecd76443a070ff1f8009547a67cc5d05c85e5",
+    "purpose_of_on_main": "609:  return `audit_sink:${kind}`",
+    "merged_in": "7fa5e171 (#381)",
+    "same_code_at": {
+      "7fa5e171": "seal.ts 03af14f8, destinations.ts 536ecd76, the commit #381 merged as",
+      "d24d9c61": "seal.ts 03af14f8, destinations.ts 536ecd76, where it was captured",
+      "1f606441": "seal.ts 03af14f8, destinations.ts 536ecd76"
+    },
+    "how_checked": "git rev-parse <commit>:<path> for both files at each commit, and no commit between 7fa5e171 and d24d9c61 touches either file"
+  },
+  "single_key_hex": "5a4889f430a42248961758ecfe277a6ce1b456b4073205e159b73e76267a9721",
+  "org_id": "3cfa1a4e-0c07-4958-8eed-b05e3efcefd2",
+  "kind": "webhook",
+  "purpose": "audit_sink:webhook",
+  "credential": "fixture-collector-token-sealed-by-381",
+  "row": {
+    "ciphertext_hex": "7cc597eeaabc47de57de0c365d4e22e2c5a1095613946514ee82652c35480a16737ffc938bbb5921efc0527362b87f7bb20192e719",
+    "nonce_hex": "242cad6fe54fd75b0ef35c94",
+    "key_version": "v1",
+    "fingerprint": "9c0fe8df58984b3a",
+    "last4": "-381"
+  },
+  "main_key_version_constant": "v1"
+}

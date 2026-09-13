@@ -123,6 +123,8 @@ module "control_plane" {
   signup_url                  = var.signup_url
   self_serve_signup           = var.self_serve_signup
   provider_key_secret_enabled = var.provider_key_secret_enabled
+  provider_key_secrets_name   = var.provider_key_secrets_name
+  provider_key_version        = var.provider_key_version
   github_app_id               = var.github_app_id
 
   enterprise_edition      = var.enterprise_edition

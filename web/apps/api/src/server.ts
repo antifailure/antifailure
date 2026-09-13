@@ -111,7 +111,7 @@ import {
 import { readHeldExport } from './enterprise/deletion.ts'
 import { mountConsole } from './console/index.ts'
 import type { ConsoleBuild } from './console/static.ts'
-import { PROVIDERS, type Provider } from './providers/seal.ts'
+import { MissingSealingKeyError, PROVIDERS, type Keyring, type Provider } from './providers/seal.ts'
 import { verifySignature } from './github/app.ts'
 import { forward, ProxyError } from './providers/proxy.ts'
 import { PricingError, type Price } from './providers/pricing.ts'
@@ -255,9 +255,10 @@ export interface ServerOptions {
    *  alone, which is a legitimate way to run this and is logged as such rather
    *  than answering blank 404s that read like a routing bug. */
   consoleBuild?: ConsoleBuild
-  /** The secret that seals provider keys. Null means keys cannot be stored,
-   *  which the console says out loud rather than failing on submit. */
-  sealingKey?: Buffer | null
+  /** The sealing keys, plural so that a rotation can hold the old one and the
+   *  new one at once. Null means keys cannot be stored, which the console says
+   *  out loud rather than failing on submit. */
+  keyring?: Keyring | null
   /** The GitHub App's webhook secret. Null means no App is configured, and the
    *  webhook endpoint refuses every delivery rather than accepting unsigned
    *  ones. */
@@ -2215,7 +2216,7 @@ export function createServer(options: ServerOptions) {
       // Whether a key CAN be stored at all. Reported rather than discovered on
       // a failed write, so `af provider list` on an installation with no
       // sealing secret says so instead of looking merely empty.
-      sealing: Boolean(options.sealingKey),
+      sealing: Boolean(options.keyring),
       keys: keys.map((k) => ({
         provider: k.provider,
         last4: k.last4,
@@ -2240,7 +2241,7 @@ export function createServer(options: ServerOptions) {
     if (!provider) {
       return c.json({ error: `Unknown provider. Known: ${PROVIDERS.join(', ')}.` }, 400)
     }
-    if (!options.sealingKey) {
+    if (!options.keyring) {
       return c.json(
         {
           error:
@@ -2260,7 +2261,7 @@ export function createServer(options: ServerOptions) {
     if (!key.trim()) return c.json({ error: 'The body needs a key.' }, 400)
 
     try {
-      const result = await saveKey(options.pool, clock, options.sealingKey, {
+      const result = await saveKey(options.pool, clock, options.keyring, {
         analytics,
         orgId: caller.orgId,
         provider,
@@ -2474,7 +2475,7 @@ export function createServer(options: ServerOptions) {
     if (!(PROVIDERS as string[]).includes(provider)) {
       return c.json({ error: { message: `Unknown provider ${provider}.` } }, 404)
     }
-    if (!options.sealingKey) {
+    if (!options.keyring) {
       return c.json(
         { error: { message: 'This control plane cannot hold provider keys: AF_PROVIDER_KEY_SECRET is not set.' } },
         503,
@@ -2520,7 +2521,7 @@ export function createServer(options: ServerOptions) {
         {
           pool: options.pool,
           clock,
-          sealingKey: options.sealingKey!,
+          keyring: options.keyring!,
           prices: options.modelPrices ?? {},
           ...(options.providerBases ? { bases: options.providerBases } : {}),
           ...(options.postHogSink ? { postHog: options.postHogSink } : {}),
@@ -3659,7 +3660,7 @@ export function createServer(options: ServerOptions) {
       clock,
       analytics,
       secureCookies: secure,
-      sealingKey: options.sealingKey ?? null,
+      keyring: options.keyring ?? null,
       build: options.consoleBuild ?? {
         dir: '',
         present: false,
@@ -3874,17 +3875,38 @@ export { type Clock, systemClock, FakeClock } from './clock.ts'
 // The sealing a customer supplied credential is stored under, re-exported so an
 // edition that stores another kind of customer credential uses this one rather
 // than growing a second. The enterprise audit stream seals a customer's collector
-// token here, under the same AF_PROVIDER_KEY_SECRET that already reaches every
-// deployment, with associated data that keeps the two kinds of value apart.
+// token here, under the same keyring that already reaches every deployment, with
+// associated data that keeps the two kinds of value apart.
+//
+// The KEYRING is what is exported, not a key. A caller holding one Buffer can
+// neither open a row sealed before a rotation nor seal under the version the
+// operator named, so an edition built on a single key would be the one way door
+// this module removed, reopened one package along.
 export {
   seal,
   open,
+  keyringFrom,
   sealingKeyFrom,
   fingerprintOf,
+  Keyring,
   SealError,
-  KEY_VERSION,
+  CannotOpenError,
+  MissingSealingKeyError,
+  FIRST_KEY_VERSION,
   type Sealed,
 } from './providers/seal.ts'
+
+// The re-sealing tool's registration seam, in the shape of setPermissionResolver
+// below and for its reason: an edition that seals values into a table of its own
+// describes that table here, so a rotation moves it, without the community tree
+// naming it. `reseal` itself is exported for that edition's own tests.
+export {
+  registerSealedTable,
+  sealedTables,
+  reseal,
+  ResealRefused,
+  type SealedTable,
+} from './providers/reseal.ts'
 
 // The router's request context, re-exported for the same reason the database
 // exports drizzle's sql tag: a package that imports hono itself gets a second

@@ -380,12 +380,16 @@ made when the row is saved, because resolution can change between the save and
 the delivery. The control that would close it is egress policy on the control
 plane's own network, which this deployment does not have today.
 
-**Rotating the deployment's sealing secret is a one way door.** There is no re
-sealing tool, and a stored credential that will not decrypt looks exactly like
-one that was altered. If an operator replaces that secret, every organization's
-collector credential stops opening and the stream holds its entries and reports
-the reason; saving the credential again repairs it. This is the limitation
-already recorded for a stored provider key, which the same mechanism carries.
+**The deployment's sealing secret can be rotated without your involvement.** The
+control plane holds a set of sealing keys, each stored credential records which
+one sealed it, and the operator's re-sealing run moves collector credentials and
+provider keys together, so a rotation done by the
+[rotating secrets](/docs/self-hosting/rotating-secrets) procedure changes nothing
+you can see. If your credential names a key the control plane has stopped
+holding, the stream holds its entries rather than dropping them, and the status
+names the missing key version instead of calling the credential altered. The
+operator fixes that by restoring the key. Saving the credential again also
+repairs it, because a fresh save is sealed under a key the control plane holds.
 
 ### Delivery, and what happens when your collector is down
 

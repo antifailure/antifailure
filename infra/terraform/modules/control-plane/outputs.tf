@@ -64,3 +64,32 @@ output "usable_connections" {
   value       = local.usable_connections
   description = "max_connections for this SKU less reserved_connections and superuser_reserved_connections: what a role without pg_use_reserved_connections may actually open. Zero means the SKU is not in the table in database.tf."
 }
+
+# Which sealing key variables the serving app and the re-sealing job are given,
+# read off the rendered resources rather than echoed from the variables. Names
+# only: every key reaches both through a Key Vault secret reference, so no value
+# is here to print. The one plain value is the version that seals, which is an
+# operator's label.
+#
+# It exists so a plan can be asked whether a rotation configured on the stack
+# actually arrives. The stack once declared neither of the rotation's variables,
+# its tfvars keys were ignored with a warning, and nothing the module's own tests
+# could see would have said so. tests/rotation.tftest.hcl in the control plane
+# stack reads this.
+output "sealing_key_environment" {
+  value = {
+    app = sort(distinct(flatten([
+      for c in azurerm_container_app.this.template[0].container : [
+        for e in c.env : e.name if startswith(e.name, "AF_PROVIDER_KEY_")
+      ]
+    ])))
+    reseal_job = length(azurerm_container_app_job.reseal) == 0 ? [] : sort([
+      for e in azurerm_container_app_job.reseal[0].template[0].container[0].env : e.name if startswith(e.name, "AF_PROVIDER_KEY_")
+    ])
+    sealing_version = one(flatten([
+      for c in azurerm_container_app.this.template[0].container : [
+        for e in c.env : e.value if e.name == "AF_PROVIDER_KEY_VERSION"
+      ]
+    ]))
+  }
+}

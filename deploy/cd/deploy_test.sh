@@ -96,6 +96,17 @@ case "$command" in
     if [ "$name" = maintenance ] && [ "${AF_DEPLOY_TEST_MAINTENANCE:-ok}" = fail ]; then
       exit 41
     fi
+    if [ "$name" = reseal ] && [ "${AF_DEPLOY_TEST_RESEAL:-present}" = fail ]; then
+      exit 42
+    fi
+    ;;
+  "containerapp job list"*)
+    printf 'job-list\n' >> "$log"
+    case "${AF_DEPLOY_TEST_RESEAL:-present}" in
+      absent) : ;;
+      unreadable) printf 'ERROR: the jobs could not be listed\n' >&2; exit 43 ;;
+      *) printf 'reseal\n' ;;
+    esac
     ;;
   "containerapp job show"*)
     if [ "${AF_DEPLOY_TEST_MAINTENANCE_READBACK:-current}" = stale ]; then
@@ -350,6 +361,42 @@ expect "a failed public health gate leaves maintenance alone" omits \
   "job-update maintenance" "$CASE_LOG"
 expect "a failed public health gate restores the old revision" contains \
   "revision-weight old-revision=100" "$CASE_LOG"
+
+# The re-sealing job. Named through RESEAL_JOB, created by a hand apply, and
+# moved with the maintenance job by every deploy after that.
+expect "staging names its re-sealing job" count_is \
+  'RESEAL_JOB: afcp-reseal' 1 "$ROOT/.github/workflows/cd.yml"
+expect "production names its re-sealing job for its own deploy" count_is \
+  'RESEAL_JOB: ${{ env.PRODUCTION_RESEAL_JOB }}' 1 "$ROOT/.github/workflows/cd.yml"
+
+run_deploy reseal-unnamed
+expect "a deploy with no re-sealing job named never looks for one" omits "job-list" "$CASE_LOG"
+
+run_deploy reseal-present RESEAL_JOB=reseal
+expect "a present re-sealing job leaves the release green" is_zero "$CASE_RC"
+expect "the re-sealing job receives the tested digest" has_line \
+  "job-update reseal ghcr.io/example/control-plane@sha256:tested" "$CASE_LOG"
+expect "the re-sealing job moves after public health" later_than \
+  "job-update reseal" "health https://public.example/readyz" "$CASE_LOG"
+
+run_deploy reseal-absent RESEAL_JOB=reseal AF_DEPLOY_TEST_RESEAL=absent
+expect "a re-sealing job not created yet leaves the release green" is_zero "$CASE_RC"
+expect "a re-sealing job not created yet is not updated" omits "job-update reseal" "$CASE_LOG"
+expect "a re-sealing job not created yet is named in the log" contains \
+  "reseal does not exist in group" "$CASE_OUT"
+
+run_deploy reseal-unreadable RESEAL_JOB=reseal AF_DEPLOY_TEST_RESEAL=unreadable
+expect "a job list that could not be read fails the run" is_nonzero "$CASE_RC"
+expect "a job list that could not be read says so" contains \
+  "could not be listed" "$CASE_OUT"
+
+run_deploy reseal-failed RESEAL_JOB=reseal AF_DEPLOY_TEST_RESEAL=fail
+expect "a refused re-sealing update fails the run" is_nonzero "$CASE_RC"
+expect "a refused re-sealing update names the live state" contains \
+  "but reseal is not on ghcr.io/example/control-plane@sha256:tested" "$CASE_OUT"
+
+run_deploy reseal-unhealthy RESEAL_JOB=reseal AF_DEPLOY_TEST_REVISION=fail
+expect "an unhealthy candidate leaves the re-sealing job alone" omits "job-update reseal" "$CASE_LOG"
 
 run_deploy maintenance-failed AF_DEPLOY_TEST_MAINTENANCE=fail
 expect "a refused maintenance update fails the run" is_nonzero "$CASE_RC"

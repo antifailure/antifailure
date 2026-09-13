@@ -44,6 +44,10 @@ deploy
 !deploy/docker/control-plane-enterprise.Dockerfile
 !deploy/docker/bootstrap.mjs
 !deploy/docker/maintenance.mjs
+# The re-sealing launcher this image copies to backup-cli.mjs. This file, not the
+# root .dockerignore, is the one a build of this Dockerfile reads, so a launcher
+# re-included only at the root is still missing here.
+!deploy/docker/backup-cli-enterprise.mjs
 !deploy/docker/af-operator
 !deploy/docker/personas.mjs
 # DIFFERENCE 2. ee/ is NOT excluded here, which is the entire reason this file

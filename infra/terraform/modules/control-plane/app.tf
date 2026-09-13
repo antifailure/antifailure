@@ -236,6 +236,147 @@ resource "azurerm_container_app_job" "maintenance" {
 }
 
 # ---------------------------------------------------------------------------
+# Re-sealing, on demand.
+#
+# WHY A JOB AND NOT A DOCUMENTED COMMAND. Postgres has no public endpoint, so a
+# command an operator runs on a laptop cannot reach it. Re-sealing also needs a
+# role row level security does not apply to, because it rewrites every tenant's
+# rows and a tool that silently re-sealed one tenant's and reported success would
+# be the worst outcome available here. Both of those are already true of the
+# maintenance job, so this is the same shape with a different command.
+#
+# MANUAL, not scheduled. Re-sealing is a step in a rotation somebody is
+# performing, and a cron that re-sealed on its own would move rows to whatever
+# version the environment happened to hold, which is a decision rather than
+# maintenance. Start it with:
+#
+#   az containerapp job start -n <name>-reseal -g <group>
+#
+# It is idempotent and resumable, so starting it twice is safe and starting it
+# again after it was interrupted continues from where it stopped.
+#
+# It carries BOTH key variables and the version, because opening a row needs the
+# key it was sealed under and the job is the thing that is holding two at once.
+# ---------------------------------------------------------------------------
+resource "azurerm_container_app_job" "reseal" {
+  # While ANY sealing key is configured, not only the generated v1. The end of a
+  # rotation sets provider_key_secret_enabled to false, and a job that followed
+  # that flag alone was destroyed by the very step that finishes the first
+  # rotation, leaving every later rotation with nothing to run.
+  count                        = (var.provider_key_secret_enabled || var.provider_key_secrets_name != "") ? 1 : 0
+  name                         = "${var.name}-reseal"
+  location                     = var.location
+  resource_group_name          = var.resource_group_name
+  container_app_environment_id = azurerm_container_app_environment.this.id
+
+  workload_profile_name = "Consumption"
+
+  # Longer than the maintenance job's. Re-sealing opens and rewrites one row at a
+  # time in its own transaction, and the number of rows is the number of stored
+  # customer credentials rather than a constant.
+  replica_timeout_in_seconds = 1800
+  # Zero, on purpose. A retry would re-run a job that is already idempotent and
+  # whose FAILURE is a thing to read rather than to repeat: a row that could not
+  # be opened is reported per row and will not open on a second attempt either.
+  replica_retry_limit = 0
+
+  manual_trigger_config {
+    parallelism              = 1
+    replica_completion_count = 1
+  }
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.app.id]
+  }
+
+  dynamic "secret" {
+    # provider-key-secret only while it exists. Once a rotation has removed v1
+    # there is no such secret in the vault and no key in local.secret_by_name, so
+    # an unconditional reference would fail the plan that removes it.
+    for_each = toset(concat(["migration-database-url"], var.provider_key_secret_enabled ? ["provider-key-secret"] : []))
+    content {
+      name                = secret.value
+      identity            = azurerm_user_assigned_identity.app.id
+      key_vault_secret_id = local.secret_by_name[secret.value].versionless_id
+    }
+  }
+
+  dynamic "secret" {
+    for_each = local.provider_key_secrets_id
+    content {
+      name                = secret.key
+      identity            = azurerm_user_assigned_identity.app.id
+      key_vault_secret_id = secret.value
+    }
+  }
+
+  template {
+    container {
+      name   = "reseal"
+      image  = local.image
+      cpu    = 0.5
+      memory = "1Gi"
+      # No connection string in the argument list, and that is not tidiness. A
+      # container app job's command is not run through a shell, so a value here
+      # could not be an environment reference even if we wanted one, and a
+      # connection string spelled out would be a database password visible in the
+      # revision template and in every `az containerapp job show`. The command
+      # reads AF_RESEAL_DATABASE_URL below instead.
+      #
+      # Starting it with no override applies, which is what somebody mid-rotation
+      # means by starting it. A dry run or a check is the same job started with a
+      # command override adding --dry-run or --check, so the two never drift
+      # apart the way two jobs would.
+      # The image's launcher rather than a source path, so the same command re-seals
+      # every table the image's edition seals: the enterprise image registers the
+      # audit stream's collector credentials before the tool runs.
+      command = ["node", "backup-cli.mjs", "reseal"]
+
+      env {
+        name        = "AF_RESEAL_DATABASE_URL"
+        secret_name = "migration-database-url"
+      }
+      dynamic "env" {
+        for_each = var.provider_key_secret_enabled ? [1] : []
+        content {
+          name        = "AF_PROVIDER_KEY_SECRET"
+          secret_name = "provider-key-secret"
+        }
+      }
+      dynamic "env" {
+        for_each = var.provider_key_secrets_name == "" ? [] : [1]
+        content {
+          name        = "AF_PROVIDER_KEY_SECRETS"
+          secret_name = var.provider_key_secrets_name
+        }
+      }
+      dynamic "env" {
+        for_each = var.provider_key_version == "" ? [] : [var.provider_key_version]
+        content {
+          name  = "AF_PROVIDER_KEY_VERSION"
+          value = env.value
+        }
+      }
+    }
+  }
+
+  tags = var.tags
+
+  # The image belongs to deploy/cd/deploy.sh, which moves this job to the tested
+  # image after both health gates, as it does the bootstrap job above. Without
+  # this, any apply that reaches the job would put image_tag's default back on
+  # it, and that default can be a release with no backup-cli.mjs in it at all.
+  # The command, secrets and variables stay Terraform's, which is why changing
+  # them is a guarded hand apply: see docs/self-hosting/rotating-secrets.
+  lifecycle {
+    ignore_changes = [template[0].container[0].image]
+  }
+
+  depends_on = [azurerm_role_assignment.app_reads_secrets]
+}
+
+# ---------------------------------------------------------------------------
 # The application.
 #
 # Note what is NOT in its environment: AF_MIGRATION_DATABASE_URL and
@@ -295,6 +436,7 @@ resource "azurerm_container_app" "this" {
       local.github_app_secret_ids,
       local.stripe_secret_ids,
       local.license_secret_ids,
+      local.provider_key_secrets_id,
       var.mail_from == "" ? {} : {
         "resend-api-key" = data.azurerm_key_vault_secret.resend_api_key[0].versionless_id
       },
@@ -428,6 +570,31 @@ resource "azurerm_container_app" "this" {
         content {
           name        = "AF_PROVIDER_KEY_SECRET"
           secret_name = "provider-key-secret"
+        }
+      }
+
+      # The rotation set, and the version new keys are sealed under. Both absent
+      # on an installation that has never rotated, which is the state where one
+      # key needs no version stated.
+      #
+      # These two are what make replacing the sealing secret possible at all:
+      # the app holds the old key and the new one at once, so the rows that were
+      # there keep opening while `af-control-plane-backup reseal` moves them.
+      # Removing the OLD key is the last step and the proof, which is why
+      # provider_key_secret_enabled can go false at the end of a rotation
+      # without the feature going with it.
+      dynamic "env" {
+        for_each = var.provider_key_secrets_name == "" ? [] : [1]
+        content {
+          name        = "AF_PROVIDER_KEY_SECRETS"
+          secret_name = var.provider_key_secrets_name
+        }
+      }
+      dynamic "env" {
+        for_each = var.provider_key_version == "" ? [] : [var.provider_key_version]
+        content {
+          name  = "AF_PROVIDER_KEY_VERSION"
+          value = env.value
         }
       }
 

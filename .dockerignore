@@ -31,6 +31,10 @@ deploy
 !deploy/docker/control-plane.Dockerfile
 !deploy/docker/bootstrap.mjs
 !deploy/docker/maintenance.mjs
+# The re-sealing launchers, one per image, each copied to backup-cli.mjs. Without
+# these lines the COPY finds nothing and neither image builds.
+!deploy/docker/backup-cli.mjs
+!deploy/docker/backup-cli-enterprise.mjs
 !deploy/docker/af-operator
 !deploy/docker/personas.mjs
 ee

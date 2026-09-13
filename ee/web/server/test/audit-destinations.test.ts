@@ -35,7 +35,7 @@ import type { AddressInfo } from 'node:net'
 import postgres from 'postgres'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { startControlPlane, type ControlPlane } from '@antifailure/api/boot'
-import { CSRF_HEADER, SESSION_COOKIE, csrfTokenFor, issueSession, systemClock } from '@antifailure/api'
+import { CSRF_HEADER, SESSION_COOKIE, csrfTokenFor, issueSession, sealedTables, systemClock } from '@antifailure/api'
 import { appendAudit, migrate } from '@antifailure/db'
 import { manifestKeyFor, verify, verifyWebhook, type Batch, type Fetcher } from '@antifailure-ee/audit'
 import { registerEnterprise, type Registered } from '../src/register.ts'
@@ -193,11 +193,20 @@ describe(
         AF_LICENSE_PUBLIC_KEYS: key.publicKeys,
         AF_LICENSE_KEY: licenseFor(key, 'acme-installation', ['sso', 'scim', 'audit_stream']),
         AF_ORG: 'acme-installation',
-        AF_PROVIDER_KEY_SECRET: randomBytes(32).toString('base64'),
+        // The shape an installation is in AFTER a rotation: the added key only,
+        // named as the one that seals, and no v1 key at all. Booting the whole
+        // suite this way is what proves registration reads the keyring from all
+        // three variables. An installation that has never rotated is one key under
+        // AF_PROVIDER_KEY_SECRET, which keyringFrom reads the same way and
+        // seal.test.ts covers; a registration that read only that variable would
+        // pass on it and refuse every save here with 503.
+        AF_PROVIDER_KEY_SECRETS: `v2=${randomBytes(32).toString('base64')}`,
+        AF_PROVIDER_KEY_VERSION: 'v2',
         AF_AUDIT_STREAM_INTERVAL_MS: '200',
       }
       Object.assign(process.env, env)
       delete process.env.AF_AUDIT_STREAM_SINK
+      delete process.env.AF_PROVIDER_KEY_SECRET
 
       plane = await startControlPlane({
         beforeServer: (ctx) => {
@@ -229,6 +238,10 @@ describe(
       assert.ok(registered, 'registerEnterprise never ran')
       assert.ok(registered.mounted.includes('audit-stream'), 'the configuration routes were not mounted')
       assert.ok(registered.auditStream, 'no forwarder was started, so a saved destination would receive nothing')
+      assert.ok(
+        sealedTables().some((t) => t.table === 'audit_stream_destinations'),
+        'registration did not tell the re-sealing tool about the audit stream table',
+      )
       assert.match(captured, /to each organization's own destination where it has chosen one/)
     })
 
@@ -248,6 +261,9 @@ describe(
       assert.equal(savedA.status, 200, `the owner could not save: ${String(viewA.error)}`)
       const shown = viewA.destination as { credential: { last4: string } }
       assert.equal(shown.credential.last4, secretA.slice(-4))
+      const [sealedA] = await admin<{ key_version: string }[]>`
+        SELECT key_version FROM audit_stream_destinations WHERE org_id = ${a.orgId}`
+      assert.equal(sealedA?.key_version, 'v2', 'the credential was not sealed under the version the environment named')
       const savedB = await call(b.owner, 'PUT', { kind: 'webhook', url: `https://${rb.host}/ingest`, credential: secretB })
       assert.equal(savedB.status, 200)
       await json(savedB)
