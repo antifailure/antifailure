@@ -14203,7 +14203,7 @@ this tool's, and the provider's documentation is where the current numbers are.
 title: Managed Postgres vendors
 description: Which of thirteen managed Postgres products can hold the goldens for pgurl, which cannot, and where each answer was read.
 sidebar:
-  order: 13
+  order: 15
 ---
 
 The [` + "`" + `pgurl` + "`" + `](/docs/providers/pgurl) provider copies any Postgres it can reach,
