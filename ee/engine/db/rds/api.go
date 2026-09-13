@@ -318,6 +318,11 @@ type dbInstance struct {
 	Address            string   `xml:"Endpoint>Address"`
 	Port               int      `xml:"Endpoint>Port"`
 	Tags               []tagXML `xml:"TagList>Tag"`
+	// PendingPassword is non empty while RDS holds a master password change it
+	// has accepted and not applied. RDS reports it masked, and only its presence
+	// is read: while it is there, the old credential is the one in force
+	// whatever the status says. See rotation.go.
+	PendingPassword string `xml:"PendingModifiedValues>MasterUserPassword"`
 }
 
 // dbSnapshot is one RDS DB snapshot, in the fields this provider uses.

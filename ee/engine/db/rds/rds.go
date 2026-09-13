@@ -1564,24 +1564,7 @@ func (p *Provider) waitSnapshot(ctx context.Context, name string) error {
 	}
 }
 
-// rotate sets an instance's master password to the derived one and waits for
-// the modification to land.
-//
-// It happens before anything connects, and that ordering is the point rather
-// than a detail: a restored instance carries the SOURCE's master credential
-// until this call, and an environment handed the connection string before it
-// would be holding production's database password.
-func (p *Provider) rotate(ctx context.Context, in dbInstance) (dbInstance, error) {
-	if err := p.api.rotatePassword(ctx, in.Identifier, p.passwordFor(in.Identifier)); err != nil {
-		return dbInstance{}, err
-	}
-	// Waited for rather than assumed. ModifyDBInstance with ApplyImmediately
-	// puts the instance in "modifying" and the new password is not in force
-	// until it is available again, so a provider that connected straight after
-	// this call would authenticate with a credential the instance does not yet
-	// have.
-	return p.waitInstance(ctx, in.Identifier)
-}
+// rotate is in rotation.go, with the live run that changed what it waits for.
 
 // sleep waits one poll interval or reports the context's cancellation.
 func (p *Provider) sleep(ctx context.Context) error {

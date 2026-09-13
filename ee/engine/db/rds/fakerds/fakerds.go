@@ -145,6 +145,21 @@ type Options struct {
 	// nothing cannot show the difference.
 	RestoreCopiesSnapshotTags  TagCopy
 	SnapshotCopiesInstanceTags TagCopy
+	// PasswordLag is how many describes of an instance, after ModifyDBInstance
+	// sets its master password, still find the OLD credential in force. Zero
+	// applies the password inside the call.
+	//
+	// It is what a live run against real RDS showed: ModifyDBInstance returned,
+	// the next DescribeDBInstances 0.6 seconds later still answered available,
+	// and the new password was refused with SQLSTATE 28P01. A fake that applied
+	// every modification synchronously could never show a provider that took
+	// that available as the change being done.
+	PasswordLag int
+	// PasswordLagIsInvisible applies the lagged password without ever
+	// reporting the instance as anything but available, so a provider cannot
+	// depend on seeing the change happen and has to find out from the
+	// credential itself.
+	PasswordLagIsInvisible bool
 }
 
 // TagCopy is how a copied set of tags meets the tags the request named.
@@ -184,10 +199,13 @@ func copyTags(mode TagCopy, inherited, requested map[string]string) map[string]s
 
 // Server is a running fake control plane.
 type Server struct {
-	http   *httptest.Server
-	opts   Options
-	admin  *sql.DB
-	region string
+	http  *httptest.Server
+	opts  Options
+	admin *sql.DB
+	// lagsApplied counts lagged password rotations put in force. See
+	// Options.PasswordLag.
+	lagsApplied int
+	region      string
 
 	mu        sync.Mutex
 	instances map[string]*instance
@@ -274,6 +292,11 @@ type instance struct {
 	securityGroups []string
 	iamEnabled     bool
 	public         bool
+	// pendingRole and pendingPassword are a rotation ModifyDBInstance accepted
+	// and has not applied, and passwordLag counts the describes until it is.
+	pendingRole     string
+	pendingPassword string
+	passwordLag     int
 }
 
 // fixtureAccount is the account every ARN this fake renders names. It is
@@ -843,6 +866,27 @@ func (s *Server) page(ids []string, form url.Values) ([]string, string) {
 // provider skip its own polling loop and nobody would notice until a real
 // restore took twelve minutes.
 func (s *Server) advanceInstance(in *instance) {
+	if in.passwordLag > 0 {
+		in.passwordLag -= 1
+		if in.passwordLag > 0 {
+			return
+		}
+		// Called with s.mu held. createMaster runs SQL on the admin connection,
+		// which takes no lock of this server's.
+		if err := s.createMaster(in.pendingRole, in.pendingPassword); err != nil {
+			in.status = "failed"
+			return
+		}
+		s.roles[in.pendingRole] = true
+		in.master, in.password = in.pendingRole, in.pendingPassword
+		in.pendingRole, in.pendingPassword = "", ""
+		s.lagsApplied++
+		if !s.opts.PasswordLagIsInvisible {
+			in.status = "resetting-master-credentials"
+			in.pending = 1
+		}
+		return
+	}
 	if in.stuck || in.copying || in.pending == 0 {
 		return
 	}
@@ -882,6 +926,11 @@ func (s *Server) renderInstance(in *instance) instanceXML {
 	}
 	for _, id := range in.securityGroups {
 		out.SecurityGroups = append(out.SecurityGroups, securityGroupXML{ID: id})
+	}
+	// A lagged rotation is listed as pending, the way RDS lists it, unless the
+	// fake is told to show nothing at all.
+	if in.pendingPassword != "" && !s.opts.PasswordLagIsInvisible {
+		out.PendingPassword = "****"
 	}
 	// An address only once the instance is available, which is what RDS does:
 	// an instance that is still creating has no endpoint, and a fake that
@@ -1155,40 +1204,67 @@ func (s *Server) modifyInstance(w http.ResponseWriter, form url.Values) {
 	s.mu.Unlock()
 
 	if password != "" && fault != FaultPasswordIsNotRotated {
-		// A member of the owning role rather than a superuser. Membership
-		// carries the owner's privileges on its objects, which is what the
-		// masking and the conformance suite's own writes need, and it leaves
-		// no superuser behind on a server other suites share.
-		statements := []string{
-			`DROP ROLE IF EXISTS ` + quoteIdent(role),
-			// CREATEROLE and pg_signal_backend because a real RDS master user
-			// holds both, through rds_superuser, and the provider uses them to
-			// close the logins a restore inherited and end their sessions.
-			`CREATE ROLE ` + quoteIdent(role) + ` LOGIN CREATEROLE INHERIT PASSWORD ` +
-				quoteLiteral(password) + ` IN ROLE pg_signal_backend, ` + quoteIdent(s.pgUser),
-		}
-		for _, statement := range statements {
-			if _, err := s.admin.Exec(statement); err != nil {
+		if s.opts.PasswordLag > 0 {
+			// Accepted and not in force, which is what real RDS did. The
+			// instance keeps answering available with the old credential, and
+			// advanceInstance applies the new one after the lag.
+			s.mu.Lock()
+			in.pendingRole, in.pendingPassword, in.passwordLag = role, password, s.opts.PasswordLag
+			s.mu.Unlock()
+		} else {
+			if err := s.createMaster(role, password); err != nil {
 				writeFault(w, http.StatusInternalServerError, "InternalFailure", err.Error())
 				return
 			}
+			s.mu.Lock()
+			s.roles[role] = true
+			in.master = role
+			in.password = password
+			// Modifying, and then available again. A provider that read the
+			// password as in force the moment this call returned would connect
+			// with a credential the instance does not have yet, which is what
+			// ApplyImmediately does NOT mean.
+			in.status = "modifying"
+			in.pending = 1
+			s.mu.Unlock()
 		}
-		s.mu.Lock()
-		s.roles[role] = true
-		in.master = role
-		in.password = password
-		// Modifying, and then available again. A provider that read the
-		// password as in force the moment this call returned would connect
-		// with a credential the instance does not have yet, which is what
-		// ApplyImmediately does NOT mean.
-		in.status = "modifying"
-		in.pending = 1
-		s.mu.Unlock()
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	writeXML(w, modifyInstanceResponse{Instance: s.renderInstance(in)})
+}
+
+// createMaster makes the login a rotated master password stands for.
+//
+// A member of the owning role rather than a superuser. Membership carries the
+// owner's privileges on its objects, which is what the masking and the
+// conformance suite's own writes need, and it leaves no superuser behind on a
+// server other suites share. It runs SQL only; the caller records the role
+// under the lock.
+func (s *Server) createMaster(role, password string) error {
+	statements := []string{
+		`DROP ROLE IF EXISTS ` + quoteIdent(role),
+		// CREATEROLE and pg_signal_backend because a real RDS master user
+		// holds both, through rds_superuser, and the provider uses them to
+		// close the logins a restore inherited and end their sessions.
+		`CREATE ROLE ` + quoteIdent(role) + ` LOGIN CREATEROLE INHERIT PASSWORD ` +
+			quoteLiteral(password) + ` IN ROLE pg_signal_backend, ` + quoteIdent(s.pgUser),
+	}
+	for _, statement := range statements {
+		if _, err := s.admin.Exec(statement); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// PasswordLagsApplied counts the lagged rotations this fake has put in force,
+// so a test of the lag can tell that the lag really happened.
+func (s *Server) PasswordLagsApplied() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lagsApplied
 }
 
 func (s *Server) deleteInstance(w http.ResponseWriter, form url.Values) {
@@ -1635,6 +1711,9 @@ type instanceXML struct {
 	Address            string             `xml:"Endpoint>Address,omitempty"`
 	Port               int                `xml:"Endpoint>Port,omitempty"`
 	Tags               []tagXML           `xml:"TagList>Tag"`
+	// PendingPassword is what RDS reports in PendingModifiedValues while a
+	// master password change is accepted and not applied: the value masked.
+	PendingPassword string `xml:"PendingModifiedValues>MasterUserPassword,omitempty"`
 }
 
 type snapshotXML struct {
