@@ -24,6 +24,7 @@ package policyenforce
 import (
 	"context"
 	"fmt"
+	"net"
 	"path"
 	"sort"
 	"strings"
@@ -151,7 +152,7 @@ func (h *Hook) Check(ctx context.Context, req extension.EnvironmentRequest) erro
 func (h *Hook) checkEgress(req extension.EnvironmentRequest) error {
 	denied := make(map[string]bool, len(h.policy.DeniedHosts))
 	for _, host := range h.policy.DeniedHosts {
-		denied[strings.ToLower(strings.TrimSpace(host))] = true
+		denied[denyKey(host)] = true
 	}
 
 	// Sorted, so that a repository violating the policy for two hosts is told
@@ -160,7 +161,7 @@ func (h *Hook) checkEgress(req extension.EnvironmentRequest) error {
 	sort.Strings(hosts)
 
 	for _, host := range hosts {
-		normalized := strings.ToLower(strings.TrimSpace(host))
+		normalized := denyKey(host)
 		mode := strings.ToLower(req.EgressModes[host])
 
 		// A denied host may still appear in a manifest, as long as it is
@@ -378,6 +379,23 @@ func (h *Hook) checkPlacement(req extension.EnvironmentRequest) error {
 // s3.*.amazonaws.com would have had it compared as a literal string, matched
 // nothing, and refused nothing, while reading in the console as though it
 // covered every region.
+// denyKey is a host as the deny list compares it: lowercased, with a port and
+// a trailing dot removed.
+//
+// The policy engine matches a rule's host with its port taken off, so a rule
+// for api.evil.com:443 reaches api.evil.com. Compared as written, that rule
+// was not on a list naming api.evil.com, and a denied host became reachable
+// by adding its port to the rule. A trailing dot names the same host and is
+// removed for the same reason. It applies to the list's own entries too, so
+// an administrator who writes a port or a dot there is not surprised either.
+func denyKey(host string) string {
+	h := strings.ToLower(strings.TrimSpace(host))
+	if hostOnly, _, err := net.SplitHostPort(h); err == nil {
+		h = hostOnly
+	}
+	return strings.TrimSuffix(h, ".")
+}
+
 func matchesAny(host string, denied map[string]bool) bool {
 	if denied[host] {
 		return true

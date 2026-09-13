@@ -39,3 +39,8 @@ port was a number. The egress engine refused it by printing the password as the
 port. The console's engine compiled it. All three refuse it without printing it,
 and the refusal cases now live in the corpus both engines are tested against, so
 neither can drift from the other again.
+
+An organization's egress deny list could be walked past by writing the denied
+host with its port, `api.stripe.com:443`, which the engine reaches and the list
+compared as a different host. The list now compares hosts the way the engine
+reaches them.
