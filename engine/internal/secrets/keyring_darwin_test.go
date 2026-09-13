@@ -15,7 +15,6 @@ import (
 	"syscall"
 	"testing"
 	"time"
-	"unsafe"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
@@ -284,19 +283,38 @@ func openTerminal(t *testing.T) (master, slave *os.File) {
 
 	require.NoError(t, unix.IoctlSetInt(fd, unix.TIOCPTYGRANT, 0), "grantpt")
 	require.NoError(t, unix.IoctlSetInt(fd, unix.TIOCPTYUNLK, 0), "unlockpt")
-	// x/sys has no darwin wrapper for an ioctl that fills a buffer, and its raw
-	// SYS_IOCTL is deprecated there, so this goes through the standard library's
-	// syscall package, which routes the call through libSystem on darwin.
-	var name [128]byte
-	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), uintptr(unix.TIOCPTYGNAME),
-		uintptr(unsafe.Pointer(&name[0]))); errno != 0 {
-		t.Fatalf("ptsname: %v", errno)
-	}
-	path := string(name[:bytes.IndexByte(name[:], 0)])
+
+	// The slave's name without ptsname. ptsname is the TIOCPTYGNAME ioctl, which
+	// fills a buffer, and x/sys has no darwin wrapper for such an ioctl: its raw
+	// SYS_IOCTL is deprecated there, and the standard library's syscall.Syscall
+	// is a raw trap too. The master's device minor is the pair's number, so the
+	// name comes from Fstat, which x/sys routes through libSystem, and the pairing
+	// is then proved rather than assumed.
+	var st unix.Stat_t
+	require.NoError(t, unix.Fstat(fd, &st), "fstat the terminal master")
+	path := fmt.Sprintf("/dev/ttys%03d", unix.Minor(uint64(st.Rdev)))
 
 	slave, err = os.OpenFile(path, os.O_RDWR|syscall.O_NOCTTY, 0)
 	require.NoError(t, err, "open %s", path)
 	t.Cleanup(func() { _ = slave.Close() })
+
+	// A line written to this master arrives on this slave, or the name was
+	// wrong and the test would be driving somebody else's terminal.
+	const probe = "af-pty-pair-probe\n"
+	_, err = master.Write([]byte(probe))
+	require.NoError(t, err, "write to the terminal master")
+	arrived := make(chan string, 1)
+	go func() {
+		buf := make([]byte, len(probe))
+		n, _ := slave.Read(buf)
+		arrived <- string(buf[:n])
+	}()
+	select {
+	case got := <-arrived:
+		require.Equal(t, probe, got, "%s is not the other end of this terminal", path)
+	case <-time.After(5 * time.Second):
+		t.Fatalf("nothing written to the terminal master arrived on %s, so it is not its pair", path)
+	}
 	return master, slave
 }
 
