@@ -98,7 +98,11 @@ func (p *Provider) Branch(ctx context.Context, version string, envID string) (pr
 		}
 	}
 
-	op, err := p.api.restore(ctx, goldenName, name, golden.Location, golden.SKU, golden.Properties.Network, p.now().UTC(), map[string]string{
+	at, err := p.waitForRestorePoint(ctx, golden)
+	if err != nil {
+		return provider.Branch{}, err
+	}
+	op, err := p.api.restore(ctx, goldenName, name, golden.Location, golden.SKU, golden.Properties.Network, at, map[string]string{
 		tagKey:       tagValue,
 		envTagKey:    envID,
 		sourceTagKey: normaliseServerName(p.opts.SourceServer),
@@ -146,6 +150,66 @@ func (p *Provider) Branch(ctx context.Context, version string, envID string) (pr
 		ProviderRef: name,
 		CreatedAt:   p.now().UTC(),
 	}, nil
+}
+
+// waitForRestorePoint returns the point in time a restore of srv may ask for.
+//
+// Microsoft documents that a restore time "earlier than the earliest restore
+// point available on the source server" is answered with InternalServerError,
+// and that a new server's first snapshot backup "is scheduled immediately after
+// a server is created" rather than existing at creation. A golden is a server
+// this provider created by a restore minutes before a branch is taken from it,
+// so asking for now before its first backup exists fails with an error that
+// names nothing. The one live run of the branch path failed exactly that way.
+//
+// So the server's backup.earliestRestoreDate is read, and the restore waits
+// until it is reported and not later than now, polling at PollInterval and
+// bounded by RestoreReadyTimeout. The time returned is now, which is the latest
+// restore point and the default every Azure client uses.
+func (p *Provider) waitForRestorePoint(ctx context.Context, srv *server) (time.Time, error) {
+	deadline := p.now().Add(p.opts.RestoreReadyTimeout)
+	// Bounded twice. The clock is injectable, and a clock that does not move
+	// never reaches a deadline measured with it, so the number of polls is
+	// bounded too and the wait ends whatever the clock does.
+	maxPolls := int(p.opts.RestoreReadyTimeout/p.opts.PollInterval) + 1
+	polls := 0
+	for {
+		raw := srv.Properties.Backup.EarliestRestoreDate
+		if raw != "" {
+			earliest, err := time.Parse(time.RFC3339Nano, raw)
+			if err != nil {
+				return time.Time{}, fmt.Errorf(
+					"azurepg: server %q reports backup.earliestRestoreDate %q, which is not a time: %w",
+					srv.Name, raw, err)
+			}
+			if now := p.now().UTC(); !now.Before(earliest) {
+				return now, nil
+			}
+		}
+		if !p.now().Before(deadline) || polls >= maxPolls {
+			reported := raw
+			if reported == "" {
+				reported = "nothing"
+			}
+			return time.Time{}, fmt.Errorf(
+				"azurepg: server %q has no backup to restore from after waiting %s: its "+
+					"backup.earliestRestoreDate reads %s, and Azure answers a restore time before "+
+					"that with InternalServerError. A server's first backup is taken after it is "+
+					"created, so a golden published moments ago can need a few minutes",
+				srv.Name, p.opts.RestoreReadyTimeout, reported)
+		}
+		select {
+		case <-ctx.Done():
+			return time.Time{}, ctx.Err()
+		case <-time.After(p.opts.PollInterval):
+		}
+		polls++
+		current, err := p.api.getServer(ctx, srv.Name)
+		if err != nil {
+			return time.Time{}, err
+		}
+		srv = current
+	}
 }
 
 // A retry after process loss resumes preparation before handing out a branch.

@@ -64,6 +64,12 @@ type Options struct {
 	SeedSQL string
 	// Now is the clock.
 	Now func() time.Time
+	// FirstBackupDelay is how long after a restore creates a server before that
+	// server has a backup to restore from. Azure schedules a new server's first
+	// snapshot at creation and answers a restore time before the earliest
+	// restore point with InternalServerError, so a restore taken from a server
+	// this fake created moments ago is refused until the delay has passed.
+	FirstBackupDelay time.Duration
 }
 
 // Server is the fake control plane.
@@ -90,6 +96,8 @@ type fakeServer struct {
 	FirewallRules map[string][2]string
 	Subnet        string
 	PrivateDNS    string
+	// EarliestRestore is backup.earliestRestoreDate.
+	EarliestRestore time.Time
 }
 
 // New starts the fake.
@@ -137,6 +145,11 @@ func New(opts Options) (*Server, error) {
 		StorageGB:     32,
 		// The source is reachable: a customer's production server has rules.
 		FirewallRules: map[string][2]string{"existing": {"0.0.0.0", "255.255.255.255"}},
+		// A production server has had restorable backups for longer than any
+		// clock a test injects, so the source is never the thing a restore waits
+		// for. Stamping it from this fake's clock compared two unrelated clocks
+		// and hung a test whose provider clock was fixed in the past.
+		EarliestRestore: time.Unix(0, 0).UTC(),
 	}
 	if _, err := admin.Exec(`CREATE DATABASE ` + quoteIdent(source.Database)); err != nil {
 		return nil, fmt.Errorf("fakeazurepg: creating %s: %w", source.Database, err)
