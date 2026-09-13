@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/antifailure/antifailure/engine/internal/egress"
+	"github.com/antifailure/antifailure/engine/internal/manifest"
 	"github.com/antifailure/antifailure/engine/internal/policy"
 	"github.com/antifailure/antifailure/engine/internal/report"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
@@ -116,6 +117,9 @@ type egressRuleDoc struct {
 	Methods    []string `json:"methods,omitempty"`
 	Credential string   `json:"credential,omitempty"`
 	RateLimit  string   `json:"rate_limit,omitempty"`
+	// Caution is the same sentence af net policy prints under a rule that lets
+	// requests out without naming where they go.
+	Caution string `json:"caution,omitempty"`
 }
 
 type containmentDoc struct {
@@ -162,7 +166,12 @@ type probeResultDoc struct {
 	Rule       string `json:"rule,omitempty"`
 	Reason     string `json:"reason"`
 	Credential string `json:"credential,omitempty"`
-	Error      string `json:"error,omitempty"`
+	// Caution is what af net explain prints under the reason when the rule
+	// that decided lets the request out without naming its host. An agent
+	// asking whether a Zapier hook is safe to call reads this, and allowed:
+	// true alone told it yes.
+	Caution string `json:"caution,omitempty"`
+	Error   string `json:"error,omitempty"`
 }
 
 // maxRulesReported and maxHostsReported bound the two lists that grow with the
@@ -284,6 +293,7 @@ func describePolicy(eng *policy.Engine) egressPolicyDoc {
 		doc.Rules = append(doc.Rules, egressRuleDoc{
 			Host: r.Host, Mode: string(r.Mode), Paths: r.Paths, Methods: r.Methods,
 			Credential: r.Credential, RateLimit: r.RateLimit,
+			Caution: manifest.EgressCaution(r.Host, r.Mode),
 		})
 	}
 	if doc.Rules == nil {
@@ -412,6 +422,7 @@ func runProbes(eng *policy.Engine, args map[string]any) ([]probeResultDoc, *Faul
 		out = append(out, probeResultDoc{
 			Request: req.String(), Mode: string(d.Mode), Allowed: d.Allowed(),
 			Rule: d.RuleHost, Reason: clip(d.Reason(), 400), Credential: d.Credential,
+			Caution: clip(manifest.EgressCaution(d.RuleHost, d.Mode), 400),
 		})
 	}
 	return out, nil

@@ -46,6 +46,11 @@ func ParseRequest(method, raw string) (Request, error) {
 	if u.Hostname() == "" {
 		return req, fmt.Errorf("%q names no host", raw)
 	}
+	// A pattern is not a destination, and matching its star as a literal label
+	// answers for a host no request can carry.
+	if strings.Contains(u.Hostname(), "*") {
+		return req, fmt.Errorf("%q is a pattern, and a request goes to one host", u.Hostname())
+	}
 
 	req.Host = u.Hostname()
 	req.Method = method
