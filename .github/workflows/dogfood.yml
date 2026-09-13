@@ -140,6 +140,31 @@ jobs:
           # them.
           fetch-depth: 2
 
+      # THE COMMIT THIS PULL REQUEST IS ACTUALLY MERGED INTO, taken from the
+      # checkout itself rather than from the event.
+      #
+      # github.event.pull_request.base.sha is the base GitHub recorded for the
+      # pull request, and it goes stale: main moves, the pull request is pushed
+      # to again, and the merge commit this job checks out is rebuilt on the new
+      # tip while the recorded base stays where it was. On pull request 374 the
+      # checkout was "Merge 8a639dcc into 6b3a013c" and the recorded base was
+      # 51b9ed9c, an older main. With two commits in the clone 51b9ed9c is not
+      # one of them, so af oracle refused with AF-ORC-003, "HEAD and 51b9ed9c have
+      # no merge base in this checkout", and the base checkout below had shaped
+      # the staging database from a main this change was not merged into. The
+      # merge commit's first parent is the base by construction, it is always in
+      # a two commit clone, and it is what every step here means by the base.
+      - name: The commit this pull request is merged into
+        id: merged-into
+        if: github.event_name == 'pull_request'
+        env:
+          RECORDED_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD^1)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "merged into $sha; the base GitHub recorded for this pull request is $RECORDED_BASE"
+
       # BEFORE THE WORK, NOT AFTER IT, AND THE ORDER IS THE POINT.
       #
       # This tells the control plane which of this repository's workflow runs
@@ -329,10 +354,11 @@ jobs:
       - name: Check out the base of this pull request
         if: github.event_name == 'pull_request'
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # The merge commit's first parent, already in the clone, so there is
+          # nothing to fetch. See the step that records it.
+          BASE_SHA: ${{ steps.merged-into.outputs.sha }}
         run: |
           set -euo pipefail
-          git fetch --no-tags --depth=1 origin "$BASE_SHA"
           git worktree add --detach "$RUNNER_TEMP/base" "$BASE_SHA"
           echo "base=$RUNNER_TEMP/base" >> "$GITHUB_ENV"
 
@@ -426,7 +452,7 @@ jobs:
           # manual run there is no base, the job's own commit would be compared
           # with itself, and af oracle refuses that with AF-ORC-004, so the
           # oracle is left out of those runs rather than reported as refused.
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ steps.merged-into.outputs.sha }}
         # --scenarios and --oracle-baseline because af ci runs the workflows,
         # the explorations and the load mix, and neither the manifest's ordered
         # load scenarios nor its oracle probes. The manifest declared both and

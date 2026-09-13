@@ -864,11 +864,25 @@ func fatal(format string, args ...any) {
 // ci's workflows had just signed into, explored and marked reviewed carried
 // every row they wrote. On an identical build the oracle reported 79
 // differences, 73 of them sessions, sign in tokens and operator audit entries
-// the workflows had left behind, a report nobody could read for what the
-// change did. af ci tears its own environment down, af oracle brings up a
-// clean candidate beside the baseline and leaves that candidate running, and
-// the scenarios are sent at it. Without an oracle the scenarios bring an
-// environment up for themselves.
+// the workflows had left behind. So af ci tears its own environment down and
+// af oracle brings up a clean candidate beside the baseline.
+//
+// The scenarios bring their environment up themselves, every time, and that
+// is the second thing measured wrong. The version before this one sent them at
+// whatever the oracle left running, on the assumption that af oracle always
+// leaves a candidate up. It does not when it refuses before bringing anything
+// up: on pull request 374 it refused with AF-ORC-003 on an unresolvable
+// baseline, and the scenarios then failed with AF-LOD-010, "nothing is running
+// for this branch", a second red that said nothing about the change and read
+// like one. Each step now owns its precondition, so the orderings are:
+//
+//	af ci red: neither runs, and the record says so.
+//	oracle absent: af up, scenarios, teardown.
+//	oracle passed or found something: af up reuses its candidate, scenarios,
+//	  teardown.
+//	oracle refused before bringing anything up: af up brings one up, the
+//	  scenarios run on it and answer for themselves, teardown.
+//	af up failed: the scenarios are not sent, the record says why, teardown.
 //
 // Only after a green af ci. A red one has already failed the run, and pointing
 // scenarios and an oracle at a change whose workflows failed would add minutes
@@ -881,25 +895,26 @@ func (r *runner) afterCI(run *Run, ci Step) {
 			"because af ci failed first. Neither is a pass.")
 		return
 	}
-	up := r.keep
+	brought := false
 	if r.oracleBaseline != "" {
 		argv := []string{r.af, "oracle", "--no-color", "--baseline", r.oracleBaseline}
 		if r.oracleReport != "" {
 			argv = append(argv, "--report", r.oracleReport)
 		}
-		// Whether or not it found anything, af oracle leaves its candidate
-		// running, and that is the environment the scenarios below use.
 		r.step(run, "oracle", argv...)
-		up = true
+		brought = true
 	}
 	if r.scenarios {
-		if !up {
-			r.step(run, "scenario environment", r.af, "up", "--no-color")
-			up = true
+		env := r.step(run, "scenario environment", r.af, "up", "--no-color")
+		brought = true
+		if env.ExitCode != 0 {
+			run.Findings = append(run.Findings, "The load scenarios did not run, because af up "+
+				"did not bring their environment up. That is not a pass.")
+		} else {
+			r.step(run, "scenarios", r.af, "load", "scenario", "--no-color")
 		}
-		r.step(run, "scenarios", r.af, "load", "scenario", "--no-color")
 	}
-	if up && !r.keep {
+	if brought && !r.keep {
 		r.step(run, "teardown", r.af, "down", "--no-color")
 	}
 }
