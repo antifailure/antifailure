@@ -1,4 +1,4 @@
-# fix
+# fixed
 
 Re-running the check from the Actions tab reported success having verified
 nothing.
