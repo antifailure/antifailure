@@ -98,9 +98,22 @@ func main() {
 		fmt.Print(notices)
 		return
 	}
-	if err := replace(filepath.Join(*root, *out), notices); err != nil {
+	if err := replace(outPath(*root, *out), notices); err != nil {
 		fail("%v", err)
 	}
+}
+
+// outPath is where -out writes. A relative path is the repository's, which is
+// how the gendrift ledger and the release workflow name it. An absolute path is
+// exactly where it says: filepath.Join would have cleaned "." and
+// "/tmp/notices.md" into "tmp/notices.md", so an absolute -out was written
+// under whatever directory the generator ran in, or refused because that
+// directory did not exist, after every package had already been attributed.
+func outPath(root, out string) string {
+	if filepath.IsAbs(out) {
+		return out
+	}
+	return filepath.Join(root, out)
 }
 
 // replace writes the file only once the whole of it exists.
