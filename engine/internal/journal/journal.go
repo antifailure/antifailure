@@ -68,17 +68,12 @@ const (
 	// Postgres branch and a ClickHouse branch, and a replay that could not tell
 	// them apart would hand each to the wrong one.
 	KindDatastoreBranch Kind = "datastore.branch"
-	KindGoldenVersion   Kind = "golden.version"
 	KindContainer       Kind = "container"
 	KindVolume          Kind = "volume"
 	KindNetwork         Kind = "network"
-	KindImage           Kind = "image"
-	KindZFSDataset      Kind = "zfs.dataset"
 	KindNamespace       Kind = "k8s.namespace"
 	KindDeployment      Kind = "k8s.deployment"
-	KindDNSRecord       Kind = "dns.record"
 	KindStorageObject   Kind = "storage.object"
-	KindWebhook         Kind = "webhook.registration"
 	KindSandboxObject   Kind = "sandbox.object"
 	KindRunnerProcess   Kind = "runner.process"
 )

@@ -610,16 +610,45 @@ func lastLines(s string, n int) []string {
 
 // newDownCommand builds `af down`.
 //
-// The Long text says "including" rather than opening a colon. It used to read
-// "every resource the environment created:" and then name four things, and the
-// journal records fourteen kinds. A colon after "every resource" promises the
-// whole list, so a reader could reasonably conclude the other ten kinds are
-// left behind: golden versions, images, ZFS datasets, Kubernetes namespaces
-// and deployments, DNS records, storage objects, webhook registrations,
-// sandbox objects and runner processes. All of them are torn down, because
-// teardown replays whatever the journal holds rather than a list written here.
-// This text is generated into the command reference, so the false promise
-// reached the documentation too.
+// The Long text says what teardown does rather than listing what it removes,
+// because a list written here drifts from the code. The one this comment used
+// to carry had drifted: it said the journal records fourteen kinds and that
+// every one of them, golden versions and images included, is torn down because
+// teardown replays whatever the journal holds. A replay can only remove what
+// something wrote into the journal and a deleter was registered for, and
+// nothing had ever written a golden version or an image.
+//
+// What `af down` removes, as of 2026-09-13, in the order teardown takes it
+// (env.go, teardown):
+//
+//   - the runtime's own resources, by its label sweep: on the local runtime its
+//     containers and networks, which it also journals, and on Kubernetes the
+//     namespace and the deployments in it;
+//   - the database branch, then every datastore branch, each journaled before
+//     it is made;
+//   - the rolling deploy check's environments, which the sweep cannot see;
+//   - then the journal replay, which retries only what has a registered
+//     deleter: containers, networks and volumes for the local runtime, the
+//     database branch and the datastore branches. The Kubernetes kinds have no
+//     replay deleter, so a Kubernetes record the replay reaches is reported as
+//     pending rather than retried (reconcile.go). A volume deleter exists and
+//     nothing journals a volume today.
+//
+// And what it never removes. A golden is not the environment's: a refresh
+// makes one so the next `af up` can branch it, and `af golden gc` collects
+// them. The service images a build produces and the egress proxy image are
+// journaled by nothing, so nothing removes them either.
+//
+// Three kinds are declared and written by nothing, and they are kept on
+// purpose, because code does create each of those things: storage.object for
+// the golden stores' uploads (internal/golden/store_*.go), sandbox.object for
+// the persona accounts provisioned in a provider's sandbox tenant
+// (internal/personas/api.go), and runner.process for the processes the
+// exploration and runner commands start (internal/env/explore.go,
+// cli/runner.go). Deleting a kind that has a creator and no journal entry
+// would hide exactly the resource af down cannot reclaim. Five kinds that had
+// no creator anywhere, golden.version, image, zfs.dataset, dns.record and
+// webhook.registration, were deleted.
 func newDownCommand(e *Env) *cobra.Command {
 	var branch string
 	cmd := &cobra.Command{

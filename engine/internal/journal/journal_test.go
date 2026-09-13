@@ -592,10 +592,13 @@ var errDeleteFailed = fmt.Errorf("delete failed")
 
 func TestSummary_ListsSkippedKindsSorted(t *testing.T) {
 	t.Parallel()
+	// dns.record is spelled as a string because nothing declares it: it
+	// stands for a kind an older or newer build journaled and this one has
+	// no deleter for, which is exactly what a skip is.
 	res := journal.ReplayResult{Skipped: []journal.Record{
 		{Provider: "zeta", Kind: journal.KindNamespace},
-		{Provider: "alpha", Kind: journal.KindDNSRecord},
-		{Provider: "alpha", Kind: journal.KindDNSRecord},
+		{Provider: "alpha", Kind: journal.Kind("dns.record")},
+		{Provider: "alpha", Kind: journal.Kind("dns.record")},
 	}}
 	// Sorted so that a snapshot of CLI output does not flake on map order.
 	require.Contains(t, res.Summary(), "alpha/dns.record, zeta/k8s.namespace")
