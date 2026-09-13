@@ -170,7 +170,12 @@ refused, on its first run.
 **Amazon Aurora PostgreSQL is a database provider.** A branch is an Aurora
 clone, copy on write, and no credential for the production database is ever
 read. Its branch time is expected to be minutes and has never been timed, and
-the benchmark prints that cell as unmeasured.
+the benchmark prints that cell as unmeasured. Until this release neither Aurora nor the AWS Secrets Manager
+backend could start on an EC2 instance role at all: the credential chain sent
+instance metadata's version 2 session token when listing the role and not when
+reading its credentials, so an instance requiring version 2 answered 401, and
+the failure was reported as metadata that did not answer. It was found by
+running the Aurora provider on a real EC2 instance.
 
 **Three cloud runtimes answer with a containment report instead of a name
 list.** `ecs`, `aca` and `cloudrun` each enumerate the ways out of a task or
@@ -308,7 +313,8 @@ gRPC could not run (#325). The rehearsal ran with every declared secret blank
 `af init` refusing an app beside a prebuilt image (#401), and reading any image
 containing `moto` as an AWS emulator (#390). A Kafka console, a PostgREST server and every
 store's exporter read as a second store (#405). Workflow budgets that bounded nothing (#411). The rotation runbook's check command that could not start the check (#409). The dogfood check going red for a pull request whose recorded base had fallen
-behind main (#416). `af oracle` reporting every persona
+behind main (#416). An EC2 instance role that could never supply AWS credentials
+(#419). `af oracle` reporting every persona
 as a missing row (#395). A refusal telling Heroku and Tiger Cloud users to run a
 statement they may not run (#388). A report understating its own twin (#299),
 and claiming a substitution the sidecar refuses (#342). A silent first `af up`
