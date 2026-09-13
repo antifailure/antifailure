@@ -1743,6 +1743,17 @@ jobs:
         # naming our file. The example is also embedded twice, for `af init`
         # and for the pull request the App opens, and a drifted copy is the
         # file a customer gets.
+        #
+        # It also RUNS action.yml's plan step against every dispatch a caller
+        # can send, and AF_DISPATCH hands it one more: the value GitHub itself
+        # renders for `toJSON(inputs)`, the expression the example passes.
+        # From #276 that step appended a `}` to any non-empty dispatch, so the
+        # `{}` a pull request renders reached jq as `{}}` and every customer's
+        # check failed in fourteen seconds. No workflow in this repository
+        # calls the action, so a rendering read off a real runner rather than
+        # typed into a test is the part only this job can supply.
+        env:
+          AF_DISPATCH: ${{ toJSON(inputs) }}
         run: go run ./tools/actioncheck .
 
       - name: The sidebar order is a decision rather than an accident

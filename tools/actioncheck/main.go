@@ -74,6 +74,12 @@ func main() {
 		fmt.Fprintln(os.Stderr, "actioncheck:", err)
 		os.Exit(2)
 	}
+	carried, carriedSet := os.LookupEnv("AF_DISPATCH")
+	plan, said := planProblems(root, carried, carriedSet)
+	problems = append(problems, plan...)
+	if said != "" {
+		fmt.Println("actioncheck: " + said)
+	}
 	if len(problems) > 0 {
 		for _, p := range problems {
 			fmt.Fprintln(os.Stderr, p)
@@ -97,6 +103,7 @@ type step struct {
 	ID   string            `yaml:"id"`
 	Uses string            `yaml:"uses"`
 	With map[string]string `yaml:"with"`
+	Env  map[string]string `yaml:"env"`
 	Run  string            `yaml:"run"`
 	If   string            `yaml:"if"`
 }
