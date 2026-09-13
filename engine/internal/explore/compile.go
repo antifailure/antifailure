@@ -154,6 +154,16 @@ func notes(e Exploration) []string {
 			"ended on, or rewrite it: a workflow whose expectation cannot be read is reported as " +
 			"unverified rather than as a pass.",
 	}
+	// A declared workflow has no window size, so it runs in the runner's
+	// default one. A path found on a phone can depend on a control that only
+	// exists below a breakpoint, and the compiled workflow would then look
+	// for it on a desktop and report it missing.
+	if e.Viewport.Name != "" {
+		out = append(out, fmt.Sprintf(
+			"This exploration ran on %s, and a declared workflow runs in the runner's default "+
+				"window. Replay it there before relying on it: a control that only appears at "+
+				"that size will not be found.", e.Viewport))
+	}
 	if !e.Reached {
 		out = append(out,
 			"This exploration never reached the goal, so the workflow asserts something nobody has "+

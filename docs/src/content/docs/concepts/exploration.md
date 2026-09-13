@@ -34,7 +34,8 @@ step, so you can go and look.
 database invariants, so those invariants observe writes made while exploring.
 Its JSON and pull request report retain the observations, page and move counts,
 and trace paths. No extra flag or model key is required. Set a step budget on
-each goal to bound the work. A configured goal with no browser evidence makes
+each goal to bound the work, and a `budget.duration` to bound the time. A goal
+that sets no duration stops after ten minutes. A configured goal with no browser evidence makes
 the check incomplete, not a clean exploration; observations remain advisory.
 That incomplete result takes precedence over warnings and flaky workflows,
 but never hides a real workflow, invariant or policy failure.
@@ -80,6 +81,48 @@ come from the seed too, so replaying a sign up types the same address as the
 first run, and an application is right to refuse it. Fresh data and a path
 that repeats cannot both come from one seed, and the path that repeats is what
 an exploration is for.
+
+## Pointing an exploration somewhere else
+
+The goal in the manifest is the default. Five flags point it somewhere else for
+one run and write nothing to disk, so the same goal can be explored as a less
+privileged persona, from the page in question, on a phone:
+
+```
+af explore --only upgrade-a-plan --persona viewer --start /settings/billing --viewport phone
+```
+
+| Flag | What it changes |
+| --- | --- |
+| `--persona` | Explores as a persona the manifest declares, instead of the goal's. A name the manifest does not declare is refused with AF-AGT-022, and the refusal lists the ones it does. |
+| `--start` | Begins on this path instead of the goal's `start_path`. It is a path on the running environment, beginning with a single `/`. A URL is refused, because the environment under test is the only place an exploration may go. |
+| `--viewport` | `phone` is 390 by 844 with a touch screen and a phone's user agent, `tablet` is 768 by 1024, `desktop` is 1440 by 900, and `WIDTHxHEIGHT` is any size from 320 to 3840 a side. Without it the runner opens 1280 by 800. |
+| `--budget` | A bare number such as `8` replaces the goal's step count, and a duration such as `5m` replaces its `budget.duration`. Each leaves the other alone, and the run stops at whichever runs out first. |
+| `--focus` | A sentence whose words decide which control is pressed first. It never changes the goal or what counts as reaching it, so it cannot make a run pass. |
+
+A phone is more than a narrow window. A layout that switches on a media query
+reflows for the size alone, but one that switches on touch or on the user agent
+does not, and a narrow desktop window would report the desktop layout as the
+phone's. So `phone` changes all three.
+
+A value that is not one of these is refused with AF-AGT-023 before the manifest
+is read or the environment is asked anything.
+
+Each result says how it was pointed, on the line under the goal's name:
+
+```
+as viewer from /settings/billing on phone 390x844
+```
+
+The JSON carries the same three facts as `persona`, `startPath` and `viewport`,
+reported by the runner as it actually ran rather than copied from the flags.
+The replay line carries the flags too, quoted for a shell, because a finding
+made on a phone and replayed in a desktop window walks somewhere else. A
+workflow emitted from a run on a phone says in its notes that a declared
+workflow runs in the default window.
+
+The `explore_for_friction` tool takes the same five as `persona`,
+`start_path`, `viewport`, `budget` and `focus`.
 
 ## What it will not press
 

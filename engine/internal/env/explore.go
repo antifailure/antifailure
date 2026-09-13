@@ -12,6 +12,7 @@ import (
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/explore"
+	"github.com/antifailure/antifailure/engine/internal/manifest"
 	"github.com/antifailure/antifailure/engine/internal/model"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
@@ -34,6 +35,12 @@ type ExploreOptions struct {
 	Headed bool
 	// RunnerPath overrides where the runner lives.
 	RunnerPath string
+	// Steer overrides the goal's persona, start path, budget, and adds a
+	// viewport and a focus, for this run only. The manifest is the default
+	// and is never written. An unknown persona or a value that is not a
+	// path, a viewport or a budget is refused before the environment is
+	// asked anything, with a coded error that names what would be accepted.
+	Steer explore.Steering
 }
 
 // goalDoc is what the runner reads. The field names are the runner's, not the
@@ -45,7 +52,18 @@ type goalDoc struct {
 	Seed      string `json:"seed"`
 	StartPath string `json:"startPath,omitempty"`
 	MaxSteps  int    `json:"maxSteps,omitempty"`
-	SlowMs    int    `json:"slowMs,omitempty"`
+	// MaxMs is a time budget, when the call gave one. Zero means steps alone
+	// bound the run.
+	MaxMs  int64 `json:"maxMs,omitempty"`
+	SlowMs int   `json:"slowMs,omitempty"`
+	// Viewport is the window to open, absent for the runner's default.
+	Viewport *explore.Viewport `json:"viewport,omitempty"`
+	// Focus is the sentence whose words steer which controls are pressed
+	// first. It is not the goal and the runner does not judge against it.
+	Focus string `json:"focus,omitempty"`
+	// Steered is the flags that reproduce this run, for the reproduction
+	// lines. Empty when the manifest alone decided everything.
+	Steered string `json:"steered,omitempty"`
 }
 
 // resultDocument is the half of the runner's output an exploration cares
@@ -63,6 +81,15 @@ func (o *Orchestrator) Explore(ctx context.Context, opts ExploreOptions) (*explo
 			"detail", "the manifest declares no goals under explore")
 	}
 
+	// The steering is checked before the environment is asked anything, so
+	// a typo in a persona name is answered in a millisecond with the names
+	// that would have worked, rather than after a status call and a persona
+	// provisioning pass that were about to be wasted.
+	steer, err := opts.Steer.Resolve(o.personaNames())
+	if err != nil {
+		return nil, err
+	}
+
 	status, err := o.Status(ctx)
 	if err != nil {
 		return nil, err
@@ -72,7 +99,7 @@ func (o *Orchestrator) Explore(ctx context.Context, opts ExploreOptions) (*explo
 			"detail", "nothing is running for this branch; bring it up with 'af up' first")
 	}
 
-	goals := o.goalDocs(opts)
+	goals := o.goalDocs(opts, steer)
 	if len(goals) == 0 {
 		return nil, aferrors.Coded(aferrors.AFAGT021, "goal", strings.Join(opts.Only, ", "))
 	}
@@ -151,8 +178,26 @@ func (o *Orchestrator) Goals() []schema.Goal {
 	return o.opts.Manifest.Explore.Goals
 }
 
+// personaNames is every persona the manifest declares, for the steering check.
+func (o *Orchestrator) personaNames() []string {
+	if o.opts.Manifest == nil {
+		return nil
+	}
+	var names []string
+	for _, p := range o.opts.Manifest.Personas {
+		names = append(names, p.Name)
+	}
+	return names
+}
+
 // goalDocs turns the manifest's goals into what the runner reads.
-func (o *Orchestrator) goalDocs(opts ExploreOptions) []goalDoc {
+//
+// The manifest's goal is the default and the call's steering is the override,
+// field by field: a call that names a persona and nothing else runs the
+// goal's own start path, budget and seed as that persona. Every override is
+// applied here rather than to the manifest, for the same reason the seed
+// always was: a replay must change nothing on disk.
+func (o *Orchestrator) goalDocs(opts ExploreOptions, steer explore.Resolved) []goalDoc {
 	wanted := map[string]bool{}
 	for _, n := range opts.Only {
 		wanted[n] = true
@@ -168,13 +213,42 @@ func (o *Orchestrator) goalDocs(opts ExploreOptions) []goalDoc {
 		}
 		if g.Budget != nil {
 			doc.MaxSteps = g.Budget.Steps
+			// The goal's own time budget. It is normalised to ten minutes and
+			// validated as a duration, and until the runner could read a time
+			// budget it was sent nowhere, so a goal declaring two minutes ran
+			// for as long as its steps took.
+			if d, err := manifest.ParseDuration(g.Budget.Duration); err == nil && d > 0 {
+				doc.MaxMs = d.Milliseconds()
+			}
 		}
-		// The override is applied here rather than in the manifest so that a
-		// replay changes nothing on disk: somebody pastes the command a report
-		// printed and gets the same path, with the file untouched.
+		// The seed override is applied here rather than in the manifest so
+		// that a replay changes nothing on disk: somebody pastes the command a
+		// report printed and gets the same path, with the file untouched.
 		if opts.Seed != "" {
 			doc.Seed = opts.Seed
 		}
+		if steer.Persona != "" {
+			doc.Persona = steer.Persona
+		}
+		if steer.StartPath != "" {
+			doc.StartPath = steer.StartPath
+		}
+		if steer.Viewport.Width > 0 {
+			v := steer.Viewport
+			doc.Viewport = &v
+		}
+		// A step budget from the call replaces the goal's steps, and a time
+		// budget replaces the goal's time. Each leaves the other alone,
+		// because a call asking for five minutes of a ten step goal has asked
+		// for ten steps or five minutes, whichever ends first.
+		if steer.Budget.Steps > 0 {
+			doc.MaxSteps = steer.Budget.Steps
+		}
+		if steer.Budget.Duration > 0 {
+			doc.MaxMs = steer.Budget.Duration.Milliseconds()
+		}
+		doc.Focus = steer.Focus
+		doc.Steered = steer.Flags()
 		out = append(out, doc)
 	}
 	return out

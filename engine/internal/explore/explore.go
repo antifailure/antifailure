@@ -16,6 +16,7 @@ package explore
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // Kind names one way an application costs somebody effort without failing.
@@ -127,9 +128,19 @@ func (m Move) Sentence() string {
 
 // Exploration is what one goal produced. The shape the runner writes.
 type Exploration struct {
-	Name    string `json:"name"`
-	Goal    string `json:"goal"`
-	Seed    string `json:"seed"`
+	Name string `json:"name"`
+	Goal string `json:"goal"`
+	Seed string `json:"seed"`
+	// Persona, StartPath and Viewport say what was explored, as the runner
+	// actually did it rather than as the manifest declared it. A call can
+	// steer all three, and evidence that did not say which persona stood on
+	// which page in which window would be evidence about a run nobody can
+	// name. Persona is the account signed in as, empty when nobody was.
+	Persona   string   `json:"persona"`
+	StartPath string   `json:"startPath"`
+	Viewport  Viewport `json:"viewport"`
+	// Focus is the sentence a call steered with, empty when it did not.
+	Focus   string `json:"focus,omitempty"`
 	Outcome struct {
 		Verdict      string   `json:"verdict"`
 		Cause        string   `json:"cause"`
@@ -153,6 +164,31 @@ type Exploration struct {
 		Failed     []string `json:"failed"`
 	} `json:"evidence"`
 	DurationMs int64 `json:"durationMs"`
+}
+
+// Setting is the one line saying how an exploration was pointed.
+//
+// "as viewer from /environments on phone 390x844". Printed under every
+// exploration and carried into the MCP result, because the first question
+// about a finding on a phone is whether it happens on a desktop too, and that
+// question cannot be asked of a report that never said which it was.
+func (e Exploration) Setting() string {
+	var parts []string
+	if e.Persona != "" {
+		parts = append(parts, "as "+e.Persona)
+	} else {
+		parts = append(parts, "signed out")
+	}
+	if e.StartPath != "" {
+		parts = append(parts, "from "+e.StartPath)
+	}
+	if v := e.Viewport.String(); v != "" {
+		parts = append(parts, "on "+v)
+	}
+	if e.Focus != "" {
+		parts = append(parts, fmt.Sprintf("focused on %q", e.Focus))
+	}
+	return strings.Join(parts, " ")
 }
 
 // Report is every exploration one run produced.

@@ -778,3 +778,183 @@ test('a control plane that takes its time does not make the agent walk away',
       server.close();
     }
   });
+
+/** An application that reports, as the name of its only control, what the
+ *  browser that opened it looks like: touch or a mouse, the window's width,
+ *  and whether the user agent is a phone's. The heading is the path, so the
+ *  page an exploration started on is readable from the page it stood on.
+ *
+ *  It says so through a control rather than through text because a control's
+ *  name is what an exploration's journey records, which makes the device a
+ *  fact in the result rather than something a test has to scrape. */
+function deviceReporter(): { server: Server; url: Promise<string> } {
+  const server = createServer((req, res) => {
+    const path = new URL(req.url ?? '/', 'http://localhost').pathname;
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end(`<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>${path}</title></head><body><h1>${path}</h1>
+      <button type="button" id="report">Report</button>
+      <script>
+        document.getElementById('report').textContent = [
+          'Report',
+          navigator.maxTouchPoints > 0 ? 'touch' : 'mouse',
+          String(window.innerWidth),
+          /Mobile/.test(navigator.userAgent) ? 'phone' : 'desktop',
+        ].join(' ');
+      </script></body></html>`);
+  });
+  const url = new Promise<string>((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address();
+      resolve(`http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`);
+    });
+  });
+  return { server, url };
+}
+
+const twoPersonas: Persona[] = [
+  { name: 'owner', email: 'owner@example.test', login: 'none' },
+  { name: 'viewer', email: 'viewer@example.test', login: 'none' },
+];
+
+const invoices: Goal = {
+  name: 'invoices',
+  goal: 'Download the latest invoice.',
+  seed: 'invoices',
+  maxSteps: 1,
+};
+
+test('an exploration pointed at a persona, a page and a phone is run exactly that way',
+  { timeout: 120_000 }, async () => {
+  const { server, url } = deviceReporter();
+  const baseURL = await url;
+  try {
+    const [x] = await explore({
+      baseURL,
+      artifacts: mkdtempSync(join(tmpdir(), 'af-explore-')),
+      goals: [{
+        ...invoices,
+        persona: 'viewer',
+        startPath: '/settings/billing',
+        viewport: { name: 'phone', width: 390, height: 844, mobile: true },
+        steered: '--persona viewer --start /settings/billing --viewport phone',
+      }],
+      personas: twoPersonas,
+    });
+    assert.equal(x!.outcome.cause, 'explored', JSON.stringify(x!.outcome, null, 2));
+
+    // The persona: the second one declared, not the first the runner falls
+    // back to.
+    assert.equal(x!.persona, 'viewer');
+    assert.ok(x!.steps.some((s) => /^Sign in as viewer/.test(s)), x!.steps.join(' | '));
+
+    // The page: the browser stood on it first, not on the front page.
+    assert.equal(x!.startPath, '/settings/billing');
+    assert.equal(x!.visited[0], `${baseURL}/settings/billing`);
+
+    // The phone, as the page itself saw it: a touch screen, 390 wide, and a
+    // phone's user agent. A window resized to 390 alone would say mouse and
+    // desktop, which is the half of a phone a size cannot give.
+    const click = x!.journey.find((m) => m.kind === 'click');
+    assert.equal(click?.kind === 'click' ? click.control : '', 'Report touch 390 phone');
+    assert.deepEqual(x!.viewport, { name: 'phone', width: 390, height: 844, mobile: true });
+
+    // And the replay line points the same way.
+    assert.match(x!.outcome.reproduction.join('\n'), /--seed invoices --persona viewer --start \/settings\/billing --viewport phone/);
+  } finally {
+    server.close();
+  }
+});
+
+test('the same exploration unsteered runs as the first persona, from the front page, in the default window',
+  { timeout: 120_000 }, async () => {
+  // The control for the test above. Without it, a runner that ignored every
+  // steering field and happened to open a phone would pass that test too.
+  const { server, url } = deviceReporter();
+  const baseURL = await url;
+  try {
+    const [x] = await explore({
+      baseURL,
+      artifacts: mkdtempSync(join(tmpdir(), 'af-explore-')),
+      goals: [invoices],
+      personas: twoPersonas,
+    });
+    assert.equal(x!.outcome.cause, 'explored', JSON.stringify(x!.outcome, null, 2));
+    assert.equal(x!.persona, 'owner');
+    assert.equal(x!.startPath, '/');
+    assert.equal(x!.visited[0], `${baseURL}/`);
+    const click = x!.journey.find((m) => m.kind === 'click');
+    assert.equal(click?.kind === 'click' ? click.control : '', 'Report mouse 1280 desktop');
+    assert.deepEqual(x!.viewport, { name: '', width: 1280, height: 800, mobile: false });
+    assert.doesNotMatch(x!.outcome.reproduction.join('\n'), /--viewport|--persona|--start/);
+  } finally {
+    server.close();
+  }
+});
+
+test('a viewport that is not a size is refused rather than explored on a desktop',
+  { timeout: 120_000 }, async () => {
+  const [x] = await explore({
+    baseURL: 'http://127.0.0.1:1',
+    artifacts: mkdtempSync(join(tmpdir(), 'af-explore-')),
+    goals: [{ ...invoices, viewport: { name: 'phone', width: 0, height: 844, mobile: true } }],
+    personas: nobody,
+  });
+  assert.equal(x!.outcome.verdict, 'blocked');
+  assert.equal(x!.outcome.cause, 'runner-failure');
+  assert.match(x!.missing[0]!, /not a size this runner can open/);
+  assert.equal(x!.journey.length, 0, 'nothing was explored in a window nobody asked for');
+});
+
+test('on a phone the snapshot offers what the phone layout shows, and not what it hides',
+  { timeout: 120_000 }, async () => {
+  // The same defect as the test above, from the other side. A layout hides its
+  // navigation below a breakpoint and shows a menu button instead, and an
+  // exploration pointed at a phone must be offered the phone's controls. If it
+  // were offered the desktop navigation it would press a link nobody on a phone
+  // can see, and a steered viewport would be reporting the desktop's friction.
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end(`<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>Plans</title>
+      <style>
+        .phone { display: none }
+        @media (max-width: 600px) { .phone { display: inline } .desktop { display: none } }
+      </style></head><body>
+      <nav class="desktop"><a href="/pricing">Pricing</a></nav>
+      <button class="phone" type="button" aria-label="Open the menu">&#9776;</button>
+      <h1>Plans</h1>
+      <a href="/invoices">Invoices</a>
+    </body></html>`);
+  });
+  const baseURL = await new Promise<string>((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address();
+      resolve(`http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`);
+    });
+  });
+  const offered = async (options: { viewport?: { width: number; height: number }; mobile?: boolean }) => {
+    const session = await Session.open({ artifacts: mkdtempSync(join(tmpdir(), 'af-breakpoint-')), ...options });
+    try {
+      await session.page().goto(`${baseURL}/`);
+      return (await session.snapshot()).controls;
+    } finally {
+      await session.close('breakpoint').catch(() => undefined);
+    }
+  };
+  try {
+    const phone = await offered({ viewport: { width: 390, height: 844 }, mobile: true });
+    assert.ok(phone.includes('Invoices'), `the always visible link is missing on a phone: ${phone.join(', ')}`);
+    assert.ok(phone.includes('Open the menu'), `the phone's menu button was not offered: ${phone.join(', ')}`);
+    assert.ok(!phone.includes('Pricing'), `navigation the phone layout hides was offered: ${phone.join(', ')}`);
+
+    // The control: the same page in the default window is the desktop layout.
+    const desktop = await offered({});
+    assert.ok(desktop.includes('Pricing'), `the desktop navigation is missing: ${desktop.join(', ')}`);
+    assert.ok(!desktop.includes('Open the menu'), `the phone's menu button was offered on a desktop: ${desktop.join(', ')}`);
+  } finally {
+    server.close();
+  }
+});

@@ -30,6 +30,11 @@ const (
 	AFAGT020 Code = "AF-AGT-020"
 	// No goal named {goal} is declared under explore.
 	AFAGT021 Code = "AF-AGT-021"
+	// The exploration cannot run as {persona}: the manifest declares
+	// {personas}.
+	AFAGT022 Code = "AF-AGT-022"
+	// The exploration cannot be steered that way: {detail}
+	AFAGT023 Code = "AF-AGT-023"
 
 	// Build
 	// The build for service {service} failed after {duration}.
@@ -580,6 +585,24 @@ var catalog = map[Code]Entry{
 		Area:      "AGT",
 		Message:   "No goal named {goal} is declared under explore.",
 		NextStep:  "Run 'af explain' to see the goals this manifest declares, then check the spelling.",
+		Docs:      "concepts/exploration",
+		Retryable: false,
+		ExitCode:  ExitUsage,
+	},
+	AFAGT022: {
+		Code:      AFAGT022,
+		Area:      "AGT",
+		Message:   "The exploration cannot run as {persona}: the manifest declares {personas}.",
+		NextStep:  "Pass one of the declared persona names to --persona, or add the persona to the manifest and run 'af up' so it exists.",
+		Docs:      "concepts/exploration",
+		Retryable: false,
+		ExitCode:  ExitUsage,
+	},
+	AFAGT023: {
+		Code:      AFAGT023,
+		Area:      "AGT",
+		Message:   "The exploration cannot be steered that way: {detail}",
+		NextStep:  "A start path begins with /, a viewport is phone, tablet, desktop or WIDTHxHEIGHT, and a budget is a step count or a duration such as 5m. 'af explore --help' states the sizes.",
 		Docs:      "concepts/exploration",
 		Retryable: false,
 		ExitCode:  ExitUsage,

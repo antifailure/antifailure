@@ -5,7 +5,9 @@
 // that a screen reader depends on. That is the right way round, and it is the
 // only way to write a workflow as a sentence rather than as a script.
 
-import { chromium, type Browser, type BrowserContext, type Page as PWPage } from 'playwright';
+import {
+  chromium, devices, type Browser, type BrowserContext, type Page as PWPage,
+} from 'playwright';
 import type { Request as PWRequest } from 'playwright';
 import type { Page } from './login.ts';
 import type { Snapshot } from './workflow.ts';
@@ -156,6 +158,14 @@ async function quiet(
   }
 }
 
+/** The window a session opens when nobody asked for one. */
+export const DEFAULT_VIEWPORT = { width: 1280, height: 800 } as const;
+
+/** The user agent a phone session presents. Playwright's own description of
+ *  the phone whose screen the phone viewport copies, rather than a string
+ *  typed here, so it stays one a real phone sends. */
+const PHONE_USER_AGENT = devices['iPhone 13']!.userAgent;
+
 /** Session is one browser, one context, one page, and its evidence. */
 export class Session {
   readonly #browser: Browser;
@@ -190,11 +200,20 @@ export class Session {
     readonly artifacts: string;
     readonly headless?: boolean;
     readonly viewport?: { readonly width: number; readonly height: number };
+    /** mobile opens the window as a phone rather than as a narrow desktop:
+     *  a touch screen, a phone's user agent and its pixel density. A layout
+     *  that switches on a media query reflows for a small window alone, and
+     *  one that switches on the user agent or on touch does not, so a window
+     *  size with nothing else changed finds only half of what a phone does. */
+    readonly mobile?: boolean;
   }): Promise<Session> {
     const browser = await chromium.launch({ headless: options.headless ?? true });
     const context = await browser.newContext({
       recordVideo: { dir: options.artifacts },
-      viewport: options.viewport ?? { width: 1280, height: 800 },
+      viewport: options.viewport ?? DEFAULT_VIEWPORT,
+      ...(options.mobile
+        ? { isMobile: true, hasTouch: true, deviceScaleFactor: 3, userAgent: PHONE_USER_AGENT }
+        : {}),
       // A preview environment serves its own certificate for any host the
       // policy inspects, and the browser is inside that environment.
       ignoreHTTPSErrors: true,

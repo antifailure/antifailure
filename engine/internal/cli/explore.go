@@ -21,10 +21,45 @@ type ExploreJSON struct {
 	Blocked      int                   `json:"blocked"`
 }
 
+// exploreFlags is what the command line adds to the manifest's goal.
+//
+// Kept as a struct rather than five locals so that a test can parse a flag
+// set into it and read the options it produces without building an
+// orchestrator, which needs a manifest, a state directory and a branch.
+type exploreFlags struct {
+	persona, start, viewport, budget, focus string
+}
+
+// options turns the flags into the orchestrator's options.
+//
+// The viewport and the budget are parsed here, before the orchestrator exists,
+// so that a typo in either is answered before the manifest is read. The
+// persona is checked later, by the orchestrator, because only it knows which
+// personas the manifest declares. Both refusals are the same coded errors the
+// orchestrator would return, so a caller sees one vocabulary wherever the
+// mistake was caught.
+func (f exploreFlags) options() (explore.Steering, error) {
+	steer := explore.Steering{
+		Persona: f.persona, StartPath: f.start, Viewport: f.viewport,
+		Budget: f.budget, Focus: f.focus,
+	}
+	if _, err := explore.ParseStartPath(steer.StartPath); err != nil {
+		return steer, err
+	}
+	if _, err := explore.ParseViewport(steer.Viewport); err != nil {
+		return steer, err
+	}
+	if _, err := explore.ParseBudget(steer.Budget); err != nil {
+		return steer, err
+	}
+	return steer, nil
+}
+
 func newExploreCommand(e *Env) *cobra.Command {
 	var branch, runner, seed string
 	var only []string
 	var headed, emit bool
+	var steer exploreFlags
 	cmd := &cobra.Command{
 		Use:   "explore",
 		Short: "Send agents at a goal with no declared workflow",
@@ -39,16 +74,30 @@ wanders onto, so a finding is an observation and never a red mark. Only a run
 that could not start is reported as blocked.
 
 Every choice comes from the goal's seed, so the same seed takes the same path
-and every finding arrives with the command that replays it.`),
+and every finding arrives with the command that replays it.
+
+The manifest's goal is the default and the flags below override it for one run,
+without writing anything: explore as a different persona, from a different
+page, in a different window, for a different budget. A viewport of phone is
+390x844 with a mobile user agent and a touch screen, tablet is 768x1024,
+desktop is 1440x900, and WIDTHxHEIGHT is any size between 320 and 3840 a side.
+A budget is a step count such as 8 or a duration such as 5m. A persona the
+manifest does not declare is refused, and the refusal names the ones it does.
+The report and the artifacts record the persona, the start path and the
+viewport that were actually used.`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			steering, err := steer.options()
+			if err != nil {
+				return err
+			}
 			o, err := orchestrator(e, branch, false)
 			if err != nil {
 				return err
 			}
 			e.Out.Section("Exploring")
 			report, err := o.Explore(cmd.Context(), env.ExploreOptions{
-				Only: only, Seed: seed, Headed: headed, RunnerPath: runner,
+				Only: only, Seed: seed, Headed: headed, RunnerPath: runner, Steer: steering,
 			})
 			if err != nil {
 				return err
@@ -79,6 +128,16 @@ and every finding arrives with the command that replays it.`),
 		"Print the workflow block that replays what was explored, instead of the report")
 	cmd.Flags().StringVar(&runner, "runner", "", "Path to the runner's entry point")
 	cmd.Flags().StringVar(&branch, "branch", "", "Branch to run against, defaulting to the checked out one")
+	cmd.Flags().StringVar(&steer.persona, "persona", "",
+		"Explore as this declared persona rather than the goal's")
+	cmd.Flags().StringVar(&steer.start, "start", "",
+		"Begin at this path rather than the goal's start_path, such as /settings/billing")
+	cmd.Flags().StringVar(&steer.viewport, "viewport", "",
+		"Window to explore in: phone (390x844, mobile), tablet (768x1024), desktop (1440x900), or WIDTHxHEIGHT")
+	cmd.Flags().StringVar(&steer.budget, "budget", "",
+		"Most this run may spend: a step count such as 8, or a duration such as 5m")
+	cmd.Flags().StringVar(&steer.focus, "focus", "",
+		"A sentence about what to attend to; its words decide which controls are pressed first")
 	return cmd
 }
 
@@ -92,6 +151,14 @@ func printExplorations(e *Env, report *explore.Report) {
 	for _, x := range report.Explorations {
 		symbol, style := verdictStyle(e, x.Outcome.Verdict)
 		e.Out.Status(symbol, x.Name, style)
+		// Who, where from, and in what window, before what happened. A finding
+		// on a phone is a different finding from the same one on a desktop,
+		// and the reader has to know which this was before reading it. A
+		// runner that predates the fields reports neither, and a line saying
+		// "signed out" about a run that signed in would be false.
+		if x.StartPath != "" || x.Viewport.Width > 0 {
+			e.Out.Printf("      %s\n", e.Out.S(StyleDim, x.Setting()))
+		}
 		e.Out.Printf("      %s\n", e.Out.Wrap(x.Outcome.Detail, 6))
 
 		for _, f := range (explore.Report{Explorations: []explore.Exploration{x}}).Findings() {
@@ -145,7 +212,16 @@ func emitWorkflows(e *Env, o *env.Orchestrator, report *explore.Report) error {
 			// an empty workflow would look like a result.
 			continue
 		}
-		w, n := explore.Compile(x, personaFor(o, x))
+		// The persona the runner signed in as, when it said. A steered run
+		// explored as somebody the manifest's goal did not name, and a
+		// compiled workflow naming the goal's persona would run as the wrong
+		// person. The manifest is the fallback for a runner that predates the
+		// field.
+		persona := x.Persona
+		if persona == "" {
+			persona = personaFor(o, x)
+		}
+		w, n := explore.Compile(x, persona)
 		workflows = append(workflows, w)
 		notes = append(notes, n...)
 	}
@@ -171,12 +247,8 @@ func emitWorkflows(e *Env, o *env.Orchestrator, report *explore.Report) error {
 	return nil
 }
 
-// personaFor finds which persona a goal explored as, for the compiled block.
-//
-// Read back from the manifest rather than echoed by the runner, because the
-// runner is given a persona and may fall back to the first one, and a compiled
-// workflow naming a persona the exploration did not actually use would be a
-// workflow that runs as somebody else.
+// personaFor finds which persona a goal declares, for the compiled block when
+// the runner did not say which persona it signed in as.
 func personaFor(o *env.Orchestrator, x explore.Exploration) string {
 	for _, g := range o.Goals() {
 		if g.Name == x.Name {

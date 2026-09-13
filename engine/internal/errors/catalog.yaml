@@ -884,6 +884,20 @@ errors:
     docs: concepts/exploration
     retryable: false
     exit_code: 2
+  - code: AF-AGT-022
+    area: AGT
+    message: "The exploration cannot run as {persona}: the manifest declares {personas}."
+    next_step: "Pass one of the declared persona names to --persona, or add the persona to the manifest and run 'af up' so it exists."
+    docs: concepts/exploration
+    retryable: false
+    exit_code: 2
+  - code: AF-AGT-023
+    area: AGT
+    message: "The exploration cannot be steered that way: {detail}"
+    next_step: "A start path begins with /, a viewport is phone, tablet, desktop or WIDTHxHEIGHT, and a budget is a step count or a duration such as 5m. 'af explore --help' states the sizes."
+    docs: concepts/exploration
+    retryable: false
+    exit_code: 2
 
   # Load
   - code: AF-LOD-010

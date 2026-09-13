@@ -428,6 +428,15 @@ what should happen on the pages it wanders onto. An exploration whose declared
 goals did not all produce a browser result is `INCONCLUSIVE` rather than clean.
 The goals themselves live in `antifailure.yaml` and cannot be written from a
 call; `goals` selects among them, and `seed` replays one.
+
+`persona`, `start_path`, `viewport`, `budget` and `focus` point the selected
+goals somewhere else for one run, with the meanings and limits of the
+[`af explore` flags](/docs/concepts/exploration#pointing-an-exploration-somewhere-else)
+of the same names. A value the schema admits and the engine cannot use is
+refused naming the argument, and a persona the manifest does not declare is
+refused naming the ones it does. Each exploration in the result carries the
+`persona`, `start_path` and `viewport` it actually ran with.
+
 ### `assess_environment_fidelity`
 
 How much of this environment is production's own thing and how much is a stand

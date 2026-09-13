@@ -81,6 +81,8 @@ var commandExamples = map[string]string{
 	"af explore": "" +
 		"# Agents go at a goal with no workflow written for it.\n" +
 		"af explore\n" +
+		"# The same goal as the owner, from the billing page, on a phone, in eight steps.\n" +
+		"af explore --only upgrade-a-plan --persona owner --start /settings/billing --viewport phone --budget 8\n" +
 		"af explore --emit-workflow checkout.yaml",
 	"af fidelity": "" +
 		"# An inventory of the copy against the thing it is a copy of.\n" +

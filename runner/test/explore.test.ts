@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { FakeClock } from '../src/clock.ts';
 import {
-  pursue, allKinds, destructive, signature,
+  pursue, allKinds, destructive, reproduction, signature,
   type Goal, type Kind, type Move, type Surface,
 } from '../src/explore.ts';
 import type { Snapshot } from '../src/workflow.ts';
@@ -480,4 +480,70 @@ test('a goal that was never reached names the words that never appeared', async 
   }
   // And the words that were on the page are not listed as missing.
   assert.doesNotMatch(found.detail.split('never appeared anywhere:')[1] ?? '', /workspace|paid/);
+});
+
+test('a focus decides which control is pressed first', async () => {
+  // The same page the goal test above uses, with one more control. Without a
+  // focus the goal's own word, plan, wins; the focus names invoices, and a
+  // call that named where to look is looking there first.
+  const clock = new FakeClock();
+  const site = new Site({
+    '/': {
+      title: 'Home', text: 'Home.',
+      controls: ['About us', 'Upgrade plan', 'Invoices'],
+      links: { 'About us': '/about', 'Upgrade plan': '/upgrade', Invoices: '/invoices' },
+    },
+    '/about': { title: 'About', text: 'About.' },
+    '/upgrade': { title: 'Upgrade', text: 'Choose a paid plan.' },
+    '/invoices': { title: 'Invoices', text: 'Invoices.' },
+  }, clock);
+
+  const { journey } = await pursue(goal({ maxSteps: 4, focus: 'the invoices' }), site, clock);
+  const firstClick = journey.find((m: Move) => m.kind === 'click');
+  assert.equal(firstClick?.kind === 'click' ? firstClick.control : '', 'Invoices');
+});
+
+test('a focus never decides whether the goal was reached', async () => {
+  // A page that says everything the focus says and nothing the goal does. If
+  // the focus were judged against, this run would stop here as a success, and
+  // a call could make any exploration pass by describing the page it is on.
+  const clock = new FakeClock();
+  const site = new Site({
+    '/': { title: 'Invoices', text: 'Your invoices are listed below.' },
+  }, clock);
+
+  const { explorer, steps } = await pursue(goal({ maxSteps: 3, focus: 'your invoices' }), site, clock);
+  assert.equal(explorer.reached, false, steps.join(' | '));
+});
+
+test('a time budget ends the run at whichever of the steps and the time runs out first', async () => {
+  // Four controls that each take a second. Twenty steps would press all four;
+  // two and a half seconds is spent after the third.
+  const clock = new FakeClock();
+  const site = new Site({
+    '/': { title: 'Home', text: 'Home.', controls: ['One', 'Two', 'Three', 'Four'], costMs: 1_000 },
+  }, clock);
+
+  const { taken, steps } = await pursue(goal({ maxSteps: 20, maxMs: 2_500 }), site, clock);
+  assert.equal(taken, 3, steps.join(' | '));
+  assert.ok(steps.includes('The time budget of 2500 ms ran out.'), steps.join(' | '));
+});
+
+test('a steered run replays with the same steering', () => {
+  // A finding made as a viewer on a phone that replays on the manifest's
+  // defaults walks a different path, and the finding then reads as one
+  // nobody can reproduce.
+  const steered = goal({ steered: "--persona viewer --viewport phone --start '/a?b=1&c=2'" });
+  const explored = reproduction(steered, [], 'explored');
+  assert.ok(
+    explored.includes("af explore --only upgrade --seed seed-one --persona viewer --viewport phone --start '/a?b=1&c=2'"),
+    explored.join('\n'),
+  );
+  const blocked = reproduction(steered, [], 'environment-incomplete');
+  assert.ok(
+    blocked.includes("af explore --only upgrade --persona viewer --viewport phone --start '/a?b=1&c=2'"),
+    blocked.join('\n'),
+  );
+  // And an unsteered run adds nothing, so the line stays the one people know.
+  assert.ok(reproduction(goal(), [], 'explored').includes('af explore --only upgrade --seed seed-one'));
 });

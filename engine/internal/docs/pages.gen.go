@@ -936,7 +936,8 @@ step, so you can go and look.
 database invariants, so those invariants observe writes made while exploring.
 Its JSON and pull request report retain the observations, page and move counts,
 and trace paths. No extra flag or model key is required. Set a step budget on
-each goal to bound the work. A configured goal with no browser evidence makes
+each goal to bound the work, and a ` + "`" + `budget.duration` + "`" + ` to bound the time. A goal
+that sets no duration stops after ten minutes. A configured goal with no browser evidence makes
 the check incomplete, not a clean exploration; observations remain advisory.
 That incomplete result takes precedence over warnings and flaky workflows,
 but never hides a real workflow, invariant or policy failure.
@@ -982,6 +983,48 @@ come from the seed too, so replaying a sign up types the same address as the
 first run, and an application is right to refuse it. Fresh data and a path
 that repeats cannot both come from one seed, and the path that repeats is what
 an exploration is for.
+
+## Pointing an exploration somewhere else
+
+The goal in the manifest is the default. Five flags point it somewhere else for
+one run and write nothing to disk, so the same goal can be explored as a less
+privileged persona, from the page in question, on a phone:
+
+` + "`" + "`" + "`" + `
+af explore --only upgrade-a-plan --persona viewer --start /settings/billing --viewport phone
+` + "`" + "`" + "`" + `
+
+| Flag | What it changes |
+| --- | --- |
+| ` + "`" + `--persona` + "`" + ` | Explores as a persona the manifest declares, instead of the goal's. A name the manifest does not declare is refused with AF-AGT-022, and the refusal lists the ones it does. |
+| ` + "`" + `--start` + "`" + ` | Begins on this path instead of the goal's ` + "`" + `start_path` + "`" + `. It is a path on the running environment, beginning with a single ` + "`" + `/` + "`" + `. A URL is refused, because the environment under test is the only place an exploration may go. |
+| ` + "`" + `--viewport` + "`" + ` | ` + "`" + `phone` + "`" + ` is 390 by 844 with a touch screen and a phone's user agent, ` + "`" + `tablet` + "`" + ` is 768 by 1024, ` + "`" + `desktop` + "`" + ` is 1440 by 900, and ` + "`" + `WIDTHxHEIGHT` + "`" + ` is any size from 320 to 3840 a side. Without it the runner opens 1280 by 800. |
+| ` + "`" + `--budget` + "`" + ` | A bare number such as ` + "`" + `8` + "`" + ` replaces the goal's step count, and a duration such as ` + "`" + `5m` + "`" + ` replaces its ` + "`" + `budget.duration` + "`" + `. Each leaves the other alone, and the run stops at whichever runs out first. |
+| ` + "`" + `--focus` + "`" + ` | A sentence whose words decide which control is pressed first. It never changes the goal or what counts as reaching it, so it cannot make a run pass. |
+
+A phone is more than a narrow window. A layout that switches on a media query
+reflows for the size alone, but one that switches on touch or on the user agent
+does not, and a narrow desktop window would report the desktop layout as the
+phone's. So ` + "`" + `phone` + "`" + ` changes all three.
+
+A value that is not one of these is refused with AF-AGT-023 before the manifest
+is read or the environment is asked anything.
+
+Each result says how it was pointed, on the line under the goal's name:
+
+` + "`" + "`" + "`" + `
+as viewer from /settings/billing on phone 390x844
+` + "`" + "`" + "`" + `
+
+The JSON carries the same three facts as ` + "`" + `persona` + "`" + `, ` + "`" + `startPath` + "`" + ` and ` + "`" + `viewport` + "`" + `,
+reported by the runner as it actually ran rather than copied from the flags.
+The replay line carries the flags too, quoted for a shell, because a finding
+made on a phone and replayed in a desktop window walks somewhere else. A
+workflow emitted from a run on a phone says in its notes that a declared
+workflow runs in the default window.
+
+The ` + "`" + `explore_for_friction` + "`" + ` tool takes the same five as ` + "`" + `persona` + "`" + `,
+` + "`" + `start_path` + "`" + `, ` + "`" + `viewport` + "`" + `, ` + "`" + `budget` + "`" + ` and ` + "`" + `focus` + "`" + `.
 
 ## What it will not press
 
@@ -15680,6 +15723,16 @@ that could not start is reported as blocked.
 Every choice comes from the goal's seed, so the same seed takes the same path
 and every finding arrives with the command that replays it.
 
+The manifest's goal is the default and the flags below override it for one run,
+without writing anything: explore as a different persona, from a different
+page, in a different window, for a different budget. A viewport of phone is
+390x844 with a mobile user agent and a touch screen, tablet is 768x1024,
+desktop is 1440x900, and WIDTHxHEIGHT is any size between 320 and 3840 a side.
+A budget is a step count such as 8 or a duration such as 5m. A persona the
+manifest does not declare is refused, and the refusal names the ones it does.
+The report and the artifacts record the persona, the start path and the
+viewport that were actually used.
+
 ` + "`" + "`" + "`" + `
 af explore [flags]
 ` + "`" + "`" + "`" + `
@@ -15687,17 +15740,24 @@ af explore [flags]
 ` + "`" + "`" + "`" + `
 # Agents go at a goal with no workflow written for it.
 af explore
+# The same goal as the owner, from the billing page, on a phone, in eight steps.
+af explore --only upgrade-a-plan --persona owner --start /settings/billing --viewport phone --budget 8
 af explore --emit-workflow checkout.yaml
 ` + "`" + "`" + "`" + `
 
 | Flag | Default | What it does |
 | --- | --- | --- |
 | ` + "`" + `--branch` + "`" + ` | - | Branch to run against, defaulting to the checked out one. |
+| ` + "`" + `--budget` + "`" + ` | - | Most this run may spend: a step count such as 8, or a duration such as 5m. |
 | ` + "`" + `--emit-workflow` + "`" + ` | ` + "`" + `false` + "`" + ` | Print the workflow block that replays what was explored, instead of the report. |
+| ` + "`" + `--focus` + "`" + ` | - | A sentence about what to attend to; its words decide which controls are pressed first. |
 | ` + "`" + `--headed` + "`" + ` | ` + "`" + `false` + "`" + ` | Show the browser rather than running it hidden. |
 | ` + "`" + `--only` + "`" + ` | - | Explore just these goals, by name. |
+| ` + "`" + `--persona` + "`" + ` | - | Explore as this declared persona rather than the goal's. |
 | ` + "`" + `--runner` + "`" + ` | - | Path to the runner's entry point. |
 | ` + "`" + `--seed` + "`" + ` | - | Replay with this seed rather than the one the manifest declares. |
+| ` + "`" + `--start` + "`" + ` | - | Begin at this path rather than the goal's start_path, such as /settings/billing. |
+| ` + "`" + `--viewport` + "`" + ` | - | Window to explore in: phone (390x844, mobile), tablet (768x1024), desktop (1440x900), or WIDTHxHEIGHT. |
 
 ### ` + "`" + `af fidelity` + "`" + `
 
@@ -18887,6 +18947,30 @@ No goal named {goal} is declared under explore.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/exploration](/docs/concepts/exploration) |
 
+### AF-AGT-022
+
+The exploration cannot run as {persona}: the manifest declares {personas}.
+
+**What to do.** Pass one of the declared persona names to --persona, or add the persona to the manifest and run 'af up' so it exists.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `2` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/exploration](/docs/concepts/exploration) |
+
+### AF-AGT-023
+
+The exploration cannot be steered that way: {detail}
+
+**What to do.** A start path begins with /, a viewport is phone, tablet, desktop or WIDTHxHEIGHT, and a budget is a step count or a duration such as 5m. 'af explore --help' states the sizes.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `2` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/exploration](/docs/concepts/exploration) |
+
 ## Build
 
 ### AF-BLD-001
@@ -21842,6 +21926,15 @@ what should happen on the pages it wanders onto. An exploration whose declared
 goals did not all produce a browser result is ` + "`" + `INCONCLUSIVE` + "`" + ` rather than clean.
 The goals themselves live in ` + "`" + `antifailure.yaml` + "`" + ` and cannot be written from a
 call; ` + "`" + `goals` + "`" + ` selects among them, and ` + "`" + `seed` + "`" + ` replays one.
+
+` + "`" + `persona` + "`" + `, ` + "`" + `start_path` + "`" + `, ` + "`" + `viewport` + "`" + `, ` + "`" + `budget` + "`" + ` and ` + "`" + `focus` + "`" + ` point the selected
+goals somewhere else for one run, with the meanings and limits of the
+[` + "`" + `af explore` + "`" + ` flags](/docs/concepts/exploration#pointing-an-exploration-somewhere-else)
+of the same names. A value the schema admits and the engine cannot use is
+refused naming the argument, and a persona the manifest does not declare is
+refused naming the ones it does. Each exploration in the result carries the
+` + "`" + `persona` + "`" + `, ` + "`" + `start_path` + "`" + ` and ` + "`" + `viewport` + "`" + ` it actually ran with.
+
 ### ` + "`" + `assess_environment_fidelity` + "`" + `
 
 How much of this environment is production's own thing and how much is a stand
