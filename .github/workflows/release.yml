@@ -310,15 +310,54 @@ jobs:
       # and the label has to survive the round trip. A push that produced a
       # manifest list with no linux/amd64 entry, or an authentication that
       # succeeded and wrote nothing, is green in every step above and red here.
+      #
+      # AS A STRANGER, BECAUSE THAT IS WHO THE CUSTOMER IS. The engine pulls
+      # with image.PullOptions{} in engine/internal/runtime/local/proxyobtain.go:
+      # no RegistryAuth and no PrivilegeFunc, and the daemon takes credentials
+      # only from the request header, so every customer's pull is anonymous. This
+      # runner is still logged in to ghcr.io from the push, and a package GitHub
+      # creates is PRIVATE on its first publish whatever the repository's
+      # visibility is. So the logged in version of this step passed against a
+      # package no customer could read, and every customer then fell back to
+      # compiling the sidecar, the 25 minutes this job exists to remove, with
+      # nothing anywhere going red. Logging out and pulling under an empty
+      # DOCKER_CONFIG makes this step ask the question the customer asks.
+      #
+      # The manifest is read with `docker manifest inspect` rather than buildx,
+      # because buildx is a CLI plugin that can live under DOCKER_CONFIG, and an
+      # empty one would hide the plugin rather than the credentials.
       - name: Pulling it back is what a customer's first af up does
         env:
           REF: ${{ steps.image.outputs.published }}
           LABEL: ${{ steps.image.outputs.label }}
           DIGEST: ${{ steps.image.outputs.digest }}
+          OWNER: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
+          package="${REF#ghcr.io/*/}"
+          package="${package%%:*}"
+          settings="https://github.com/orgs/${OWNER}/packages/container/${package}/settings"
+          # A package is private on its first publish and GitHub offers no API
+          # to change that, only the settings page. It is also one way: a public
+          # package cannot be made private again. So a person does it, once,
+          # and the release waits for them, because publish needs this job.
+          not_public() {
+            echo "::error::an anonymous $1 of $REF was refused, and anonymous is how every customer's af up asks."
+            echo "::error::A package is private on its first publish. Make it public once, in the web UI, at"
+            echo "::error::$settings (Danger Zone, Change visibility, Public),"
+            echo "::error::then re-run this failed sidecar job. publish needs it, so nothing is released and"
+            echo "::error::latest does not move until then. If the package is already public, the output above says why."
+            exit 1
+          }
+          docker logout ghcr.io
+          DOCKER_CONFIG="$(mktemp -d)"
+          export DOCKER_CONFIG
           docker image rm -f "$REF" >/dev/null
-          docker pull "$REF"
+          if ! docker pull "$REF" > "$RUNNER_TEMP/pull-back.log" 2>&1; then
+            cat "$RUNNER_TEMP/pull-back.log"
+            not_public pull
+          fi
+          cat "$RUNNER_TEMP/pull-back.log"
           got=$(docker image inspect -f "{{index .Config.Labels \"${LABEL}\"}}" "$REF")
           test "$got" = "$DIGEST" || {
             echo "::error::the published $REF declares ${got:-nothing}, not $DIGEST"
@@ -326,17 +365,23 @@ jobs:
           }
           # Both architectures are in the manifest list the engine will meet.
           # Read from the registry rather than from the local image, because the
-          # local one is whichever leg this runner pulled.
-          manifest=$(docker buildx imagetools inspect --raw "$REF")
+          # local one is whichever leg this runner pulled. Written to a file and
+          # then searched, never piped into grep -q, which under pipefail can
+          # fail a correct answer on the producer's SIGPIPE.
+          if ! docker manifest inspect "$REF" > "$RUNNER_TEMP/pull-back-manifest.json" 2> "$RUNNER_TEMP/pull-back-manifest.err"; then
+            cat "$RUNNER_TEMP/pull-back-manifest.err"
+            not_public "manifest read"
+          fi
+          jq -r '.manifests[]? | select(.platform.os == "linux") | .platform.architecture' \
+            "$RUNNER_TEMP/pull-back-manifest.json" > "$RUNNER_TEMP/pull-back-architectures.txt"
           for want in amd64 arm64; do
-            case "$manifest" in
-              *"\"architecture\":\"$want\""*) echo "linux/$want is published" ;;
-              *)
-                echo "::error::the published manifest list has no linux/$want entry, so every engine"
-                echo "::error::on that architecture falls back to compiling the sidecar."
-                exit 1
-                ;;
-            esac
+            if grep -qx "$want" "$RUNNER_TEMP/pull-back-architectures.txt"; then
+              echo "linux/$want is published"
+            else
+              echo "::error::the published manifest list has no linux/$want entry, so every engine"
+              echo "::error::on that architecture falls back to compiling the sidecar."
+              exit 1
+            fi
           done
           {
             echo "### The egress sidecar image"

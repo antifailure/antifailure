@@ -223,8 +223,62 @@ tag in the same command as a branch: a tag that arrives before its commit is on
 gh run watch "$(gh run list --workflow release.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
 ```
 
-Five jobs. Four of them build one platform each and only compile; the fifth is
-the only one in the repository that holds `contents: write`.
+Seven jobs. `gate` waits for CI on the tagged commit. Four build one platform
+each and only compile. `the egress sidecar image` builds and pushes
+`ghcr.io/antifailure/af-proxy` for linux/amd64 and linux/arm64, and is the only
+job holding `packages: write`. `publish` needs all five of the jobs after the
+gate, and is the only job in the repository that holds `contents: write`.
+
+### The first release that publishes the sidecar image stops, and a person makes it public
+
+A container package GitHub creates is **private on its first publish**. It
+inherits the repository's access permissions, and not its visibility, so a
+public repository does not make its first package public.
+
+That matters here more than anywhere, because the engine pulls the sidecar
+image with no credentials at all. `ImagePull` in
+`engine/internal/runtime/local/proxyobtain.go` passes no registry
+authentication, so every customer's first `af up` asks `ghcr.io` as a stranger.
+A private package answers a stranger with a refusal, the engine falls back to
+compiling the sidecar, and that compile is the 25 minutes the image exists to
+remove. Nothing a customer sees goes red.
+
+So the sidecar job's last step, *Pulling it back is what a customer's first af
+up does*, logs out of `ghcr.io` and pulls under an empty Docker configuration,
+exactly as a customer would. On the first release it will fail with an error
+saying an anonymous pull was refused. That red is correct, and the remedy is
+one time:
+
+1. Open `https://github.com/orgs/antifailure/packages/container/af-proxy/settings`.
+2. Under **Danger Zone**, choose **Change visibility**, then **Public**.
+3. Re-run the failed jobs of that `release.yml` run. The sidecar job pushes the
+   same content again, pulls it back anonymously, and `publish` runs after it.
+
+Why it cannot be a step in the workflow: GitHub documents changing a package's
+visibility only through that settings page, and offers no API for it. It is
+also irreversible, because a public package cannot be made private again,
+which is a decision for a person rather than for a job. It happens once: later
+releases push new tags into the same package, and the package stays public.
+
+Until the step passes, `publish` does not run, so no release is created and
+`releases/latest` does not move. That is the direction to fail in.
+
+### Approve production only after `publish` reads success
+
+`cd.yml` and `release.yml` start from the same tag and neither waits for the
+other. The production approval belongs to `cd.yml`, so it can be granted while
+`release.yml` is still building, or after its sidecar job has stopped on the
+visibility step above. Approve then, and the control plane in production runs
+a version that has no release, no signed checksums and no published sidecar
+image. Before approving, read the run:
+
+```sh
+gh run list --workflow release.yml --limit 1 --json databaseId,headBranch,conclusion
+gh run view <id> --json jobs --jq '.jobs[] | "\(.name) \(.conclusion)"'
+```
+
+The `publish` line must say `success`. `skipped`, `cancelled`, `failure` or an
+empty conclusion are all reasons to wait.
 
 | Stage | Green looks like | Red means |
 | --- | --- | --- |
