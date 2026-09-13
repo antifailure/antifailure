@@ -350,6 +350,20 @@ export function sealingKeyFrom(value: string | undefined, name = SEALING_KEY_ENV
 }
 
 /**
+ * The value with its trailing `=` removed, in one pass from the end.
+ *
+ * Not `/=+$/`. That pattern is polynomial on a long run of `=` that is not at the
+ * end of the string, because each starting position is tried and fails only after
+ * scanning the run, and the string it is applied to comes from the environment,
+ * where a pasted value can hold anything.
+ */
+function withoutPadding(value: string): string {
+  let end = value.length
+  while (end > 0 && value.charCodeAt(end - 1) === 61) end -= 1
+  return value.slice(0, end)
+}
+
+/**
  * Standard and URL-safe base64 both accepted, and neither silently.
  *
  * Buffer.from(x, 'base64') accepts both alphabets and, worse, ignores anything
@@ -360,8 +374,8 @@ export function sealingKeyFrom(value: string | undefined, name = SEALING_KEY_ENV
  */
 function decodeBase64(value: string): Buffer {
   const key = Buffer.from(value, 'base64')
-  const canonical = key.toString('base64').replace(/=+$/, '')
-  const given = value.replace(/=+$/, '').replace(/-/g, '+').replace(/_/g, '/')
+  const canonical = withoutPadding(key.toString('base64'))
+  const given = withoutPadding(value).replace(/-/g, '+').replace(/_/g, '/')
   if (canonical !== given) {
     throw new Error('not canonical base64')
   }

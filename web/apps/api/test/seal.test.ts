@@ -301,6 +301,20 @@ describe('reading the sealing keys from the environment', () => {
     )
   })
 
+  test('a key pasted without its padding is the same key, which is what URL-safe base64 is', () => {
+    // Node's base64url writes no trailing `=`, and neither do several vaults'
+    // copy buttons. The decoder promises both alphabets, so an unpadded value has
+    // to decode to the identical 32 bytes rather than be refused as not canonical.
+    const key = randomBytes(32)
+    const padded = key.toString('base64')
+    assert.ok(padded.endsWith('='), 'a 32 byte key encodes with one pad character')
+    for (const given of [key.toString('base64url'), padded.replace(/=$/, '')]) {
+      const keyring = keyringFrom({ AF_PROVIDER_KEY_SECRET: given })
+      assert.ok(keyring, `no keyring from ${given.length} characters`)
+      assert.ok(keyring.keyFor('v1').equals(key), 'the unpadded form decoded to different bytes')
+    }
+  })
+
   test('a truncated or padded key is refused rather than silently decoding short', () => {
     // Buffer.from(x, 'base64') drops what it does not recognise, so a value with
     // a stray character decodes to fewer bytes instead of failing. Refusing a
