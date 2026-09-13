@@ -81,13 +81,36 @@ matching words against it.
 ` + "`" + "`" + "`" + `yaml
     budget:
       steps: 40
-      usd: 0.50
       duration: 5m
 ` + "`" + "`" + "`" + `
 
+` + "`" + `steps` + "`" + ` is the most actions one attempt may take, and ` + "`" + `duration` + "`" + ` is the time
+the whole workflow may take, retries included. A workflow that declares neither
+gets 60 steps and ten minutes.
+
+For ` + "`" + `duration` + "`" + `, a workflow that reaches it is stopped where it is and ends as
+blocked with the budget named, and no further attempt starts. It is stopped mid
+step if it is waiting on a page. The result says how far in the budget was
+reached, the attempt, and the last thing the agent did:
+
 ` + "`" + "`" + "`" + `
-AF-AGT-002 Workflow sign-up exhausted its budget of 40 steps before completing.
+Stopped at its time budget of 5m, 5m into the workflow on attempt 1, after:
+Press Pay now: the form is complete.
 ` + "`" + "`" + "`" + `
+
+Blocked rather than failed, because an unfinished run is evidence about neither
+the change nor the application, so it never counts against a pull request.
+
+For ` + "`" + `steps` + "`" + `, a workflow that uses every step passes if everything it expected is
+visible on the page it reached, fails if that page answered with an HTTP error,
+and otherwise ends as blocked with the step budget named:
+
+` + "`" + "`" + "`" + `
+Stopped at its budget of 40 steps: the page it reached does not show what was
+expected.
+` + "`" + "`" + "`" + `
+
+A blocked workflow is never a partial pass.
 
 An agent that cannot find its way will keep trying. The budget is what turns
 that into a result instead of a bill, and a workflow that regularly exhausts one
@@ -936,7 +959,8 @@ step, so you can go and look.
 database invariants, so those invariants observe writes made while exploring.
 Its JSON and pull request report retain the observations, page and move counts,
 and trace paths. No extra flag or model key is required. Set a step budget on
-each goal to bound the work. A configured goal with no browser evidence makes
+each goal to bound the work, and a ` + "`" + `budget.duration` + "`" + ` to bound the time. A goal
+that sets no duration stops after ten minutes. A configured goal with no browser evidence makes
 the check incomplete, not a clean exploration; observations remain advisory.
 That incomplete result takes precedence over warnings and flaky workflows,
 but never hides a real workflow, invariant or policy failure.
@@ -982,6 +1006,48 @@ come from the seed too, so replaying a sign up types the same address as the
 first run, and an application is right to refuse it. Fresh data and a path
 that repeats cannot both come from one seed, and the path that repeats is what
 an exploration is for.
+
+## Pointing an exploration somewhere else
+
+The goal in the manifest is the default. Five flags point it somewhere else for
+one run and write nothing to disk, so the same goal can be explored as a less
+privileged persona, from the page in question, on a phone:
+
+` + "`" + "`" + "`" + `
+af explore --only upgrade-a-plan --persona viewer --start /settings/billing --viewport phone
+` + "`" + "`" + "`" + `
+
+| Flag | What it changes |
+| --- | --- |
+| ` + "`" + `--persona` + "`" + ` | Explores as a persona the manifest declares, instead of the goal's. A name the manifest does not declare is refused with AF-AGT-022, and the refusal lists the ones it does. |
+| ` + "`" + `--start` + "`" + ` | Begins on this path instead of the goal's ` + "`" + `start_path` + "`" + `. It is a path on the running environment, beginning with a single ` + "`" + `/` + "`" + `. A URL is refused, because the environment under test is the only place an exploration may go. |
+| ` + "`" + `--viewport` + "`" + ` | ` + "`" + `phone` + "`" + ` is 390 by 844 with a touch screen and a phone's user agent, ` + "`" + `tablet` + "`" + ` is 768 by 1024, ` + "`" + `desktop` + "`" + ` is 1440 by 900, and ` + "`" + `WIDTHxHEIGHT` + "`" + ` is any size from 320 to 3840 a side. Without it the runner opens 1280 by 800. |
+| ` + "`" + `--budget` + "`" + ` | A bare number such as ` + "`" + `8` + "`" + ` replaces the goal's step count, and a duration such as ` + "`" + `5m` + "`" + ` replaces its ` + "`" + `budget.duration` + "`" + `. Each leaves the other alone, and the run stops at whichever runs out first. |
+| ` + "`" + `--focus` + "`" + ` | A sentence whose words decide which control is pressed first. It never changes the goal or what counts as reaching it, so it cannot make a run pass. |
+
+A phone is more than a narrow window. A layout that switches on a media query
+reflows for the size alone, but one that switches on touch or on the user agent
+does not, and a narrow desktop window would report the desktop layout as the
+phone's. So ` + "`" + `phone` + "`" + ` changes all three.
+
+A value that is not one of these is refused with AF-AGT-023 before the manifest
+is read or the environment is asked anything.
+
+Each result says how it was pointed, on the line under the goal's name:
+
+` + "`" + "`" + "`" + `
+as viewer from /settings/billing on phone 390x844
+` + "`" + "`" + "`" + `
+
+The JSON carries the same three facts as ` + "`" + `persona` + "`" + `, ` + "`" + `startPath` + "`" + ` and ` + "`" + `viewport` + "`" + `,
+reported by the runner as it actually ran rather than copied from the flags.
+The replay line carries the flags too, quoted for a shell, because a finding
+made on a phone and replayed in a desktop window walks somewhere else. A
+workflow emitted from a run on a phone says in its notes that a declared
+workflow runs in the default window.
+
+The ` + "`" + `explore_for_friction` + "`" + ` tool takes the same five as ` + "`" + `persona` + "`" + `,
+` + "`" + `start_path` + "`" + `, ` + "`" + `viewport` + "`" + `, ` + "`" + `budget` + "`" + ` and ` + "`" + `focus` + "`" + `.
 
 ## What it will not press
 
@@ -3205,6 +3271,30 @@ A table with no primary key has its rows matched on their whole content, so an
 update reads as one row removed and one row added. Without a key there is no
 fact about which row on one side corresponds to which row on the other.
 
+A persona's rows are matched by the persona rather than by their key. Both sides
+provision the manifest's personas, each into its own database, so the owner's
+account carries a different generated key on each side. A row the two sides do
+not share by key is matched when a column holds a persona's ` + "`" + `email` + "`" + ` or ` + "`" + `phone` + "`" + `,
+or holds a UUID already matched that way, which is how a membership follows its
+account. The matched row is then compared column by column, so a persona
+provisioned under a different name, or a role a migration rewrote, is still
+reported as a changed row. A match is made only when it is the only one on both
+sides: two sessions for the owner on each side have nothing to say which is
+which, and they are reported as they would be without a persona. Integer keys
+are not followed, because a generated 5 is also every other 5 in the database.
+
+Some columns differ on every build whatever the change did. A password hashed
+under a random salt is written differently by each side, and an audit chain's
+hash over a timestamp is recomputed with each side's own clock. The comparison
+cannot tell a new salt from a broken hash, so it reports the difference, and
+when the column is named like a digest (with ` + "`" + `hash` + "`" + `, ` + "`" + `salt` + "`" + `, ` + "`" + `digest` + "`" + ` or ` + "`" + `mac` + "`" + `
+as a word of its name) and both values look like random values of the same
+length in hexadecimal or base64, it adds a hint naming the entry that would
+quiet it, such as ` + "`" + `$.password_hash` + "`" + `. It never leaves the finding out on its
+own. The entry goes in ` + "`" + `oracle.ignore.fields` + "`" + `, and it applies to that column in
+every table and to that field in every response body, so check that nothing
+else by that name matters before adding it.
+
 ## Ignoring a field
 
 ` + "`" + `oracle.ignore.fields` + "`" + ` takes the subset of JSONPath people actually write:
@@ -4750,6 +4840,7 @@ recorded with the site that made it.
 | the Supabase management API | ` + "`" + `api.supabase.com` + "`" + ` |
 | the Database Lab API | your DBLab server |
 | the Aurora control API | AWS, to create and branch an Aurora cluster |
+| the Xata control API | ` + "`" + `api.xata.tech` + "`" + ` |
 | the Cloud SQL control API | Google Cloud, to clone and branch a Cloud SQL instance |
 | the Azure PostgreSQL control API | Azure, to restore and branch a flexible server |
 | the ClickHouse HTTP interface | your ClickHouse server |
@@ -5276,12 +5367,16 @@ made when the row is saved, because resolution can change between the save and
 the delivery. The control that would close it is egress policy on the control
 plane's own network, which this deployment does not have today.
 
-**Rotating the deployment's sealing secret is a one way door.** There is no re
-sealing tool, and a stored credential that will not decrypt looks exactly like
-one that was altered. If an operator replaces that secret, every organization's
-collector credential stops opening and the stream holds its entries and reports
-the reason; saving the credential again repairs it. This is the limitation
-already recorded for a stored provider key, which the same mechanism carries.
+**The deployment's sealing secret can be rotated without your involvement.** The
+control plane holds a set of sealing keys, each stored credential records which
+one sealed it, and the operator's re-sealing run moves collector credentials and
+provider keys together, so a rotation done by the
+[rotating secrets](/docs/self-hosting/rotating-secrets) procedure changes nothing
+you can see. If your credential names a key the control plane has stopped
+holding, the stream holds its entries rather than dropping them, and the status
+names the missing key version instead of calling the credential altered. The
+operator fixes that by restoring the key. Saving the credential again also
+repairs it, because a fresh save is sealed under a key the control plane holds.
 
 ### Delivery, and what happens when your collector is down
 
@@ -11765,6 +11860,18 @@ Generate one with:
 openssl rand -base64 32
 ` + "`" + "`" + "`" + `
 
+That secret can be replaced. The control plane holds a set of sealing keys rather
+than one, each row records which key sealed it, and
+` + "`" + `af-control-plane-backup reseal` + "`" + ` moves every stored credential from an old key to
+a new one while the application keeps serving. The procedure is
+[rotating secrets](/docs/self-hosting/rotating-secrets), and its last step removes
+the old key, which is what proves the rotation finished rather than appearing to.
+
+Until 2026-09-12 this was a one way door: replacing the secret made every stored
+key stop opening, permanently and silently, because a value that will not decrypt
+looks exactly like one somebody altered. It now reports the missing key version by
+name instead, which is a configuration an operator can fix in a minute.
+
 Keep it outside the database. It is the whole point: somebody with a copy of the
 database and no copy of this secret has nothing.
 `,
@@ -12580,9 +12687,29 @@ thing, then the thing you charge for.
 
 ## Budgets
 
+` + "`" + "`" + "`" + `yaml
+    budget:
+      steps: 50
+      duration: 3m
 ` + "`" + "`" + "`" + `
-AF-AGT-002 Workflow subscribe exhausted its budget of 50 steps before
-completing.
+
+The step budget is the most actions one attempt may take. A workflow that uses
+every step passes if everything it expected is visible on the page it reached,
+fails if that page answered with an HTTP error, and otherwise ends as blocked
+with the step budget named:
+
+` + "`" + "`" + "`" + `
+Stopped at its budget of 50 steps: the page it reached does not show what was
+expected.
+` + "`" + "`" + "`" + `
+
+The time budget covers the whole workflow, retries included. A workflow that
+reaches it is stopped where it is and ends as blocked with the budget named, and
+no further attempt starts:
+
+` + "`" + "`" + "`" + `
+Stopped at its time budget of 3m, 3m into the workflow on attempt 1, after:
+Open /billing: the plans are listed there.
 ` + "`" + "`" + "`" + `
 
 Either the budget is too small for a long flow, or the flow is genuinely hard
@@ -13231,14 +13358,18 @@ synthetic source, masks and verifies its row, branches it, checks that the
 source stayed unchanged, and deletes the branch and golden. A successful live
 run is required before claiming that path has been proved on Azure.
 
-That run has been made once, on 2026-09-13, from a container inside a private
-network against a real flexible server, and half of it passed. The golden
-restore succeeded: the source was restored, the row was masked and verified
-over a ` + "`" + `verify-full` + "`" + ` connection that accepted Microsoft's certificate, and that
-took 392.4 seconds. The branch restore from that golden then failed with an
-` + "`" + `InternalServerError` + "`" + ` from Azure, so the branch, the write on it, the check
-that the source was unchanged, and the teardown were never reached on Azure.
-Until a run completes, the branch path is proved only against the fake.
+That run has completed once, on 2026-09-13, from a container inside a private
+network against a real flexible server in ` + "`" + `centralus` + "`" + `, at commit ` + "`" + `8a639dcc46f2` + "`" + `.
+The golden was restored, masked and verified over a ` + "`" + `verify-full` + "`" + ` connection
+that accepted Microsoft's certificate in 420.3 seconds. The branch took 518.3
+seconds, including the wait for the golden's first backup, a write on it did not
+reach the source, a login copied from the source was refused, the goldens were
+listed, and the branch and golden were deleted to an empty inventory.
+
+Two earlier runs failed, and each found a defect that is now fixed. The first
+branch restore asked for a point in time before the golden's first backup
+existed, which Azure answers with ` + "`" + `InternalServerError` + "`" + `. The second listed the
+branch as a second golden, because a restore carries the source server's tags.
 `,
 	"providers/cloudsql.md": `---
 title: Google Cloud SQL
@@ -13394,7 +13525,7 @@ meant to be written by people outside this repository.
 
 ` + "`" + "`" + "`" + `yaml
 database:
-  provider: docker   # or neon, supabase, dblab, pgurl, aurora, cloudsql, or azurepg
+  provider: docker   # or neon, supabase, dblab, pgurl, xata, aurora, cloudsql, or azurepg
   version: 17
 ` + "`" + "`" + "`" + `
 
@@ -13407,6 +13538,7 @@ database:
 | [` + "`" + `dblab` + "`" + `](/docs/providers/dblab) | A Database Lab Engine you run | Flat, because clones are copy on write | A Database Lab Engine, ZFS, and its verification token |
 | [` + "`" + `supabase` + "`" + `](/docs/providers/supabase) | A Supabase branch, which is a whole separate project | Grows with the database, because a Supabase branch is created empty | A Supabase project on a paid plan and an access token |
 | [` + "`" + `pgurl` + "`" + `](/docs/providers/pgurl) | A database on any Postgres server you name | Grows with the database, because a branch is a server side file copy | A reachable Postgres and a role that may create databases |
+| [` + "`" + `xata` + "`" + `](/docs/providers/xata) | A branch of a Xata project | Expected to be flat, because Xata documents its branches as copy on write snapshots. Never timed on Xata | A Xata project and an API key |
 | [` + "`" + `aurora` + "`" + `](/docs/providers/aurora) | A clone of an Amazon Aurora PostgreSQL cluster | Expected to be flat, because a clone shares the source's storage volume. Never timed on AWS | An Aurora PostgreSQL cluster, an IAM role, and the enterprise edition |
 | [` + "`" + `cloudsql` + "`" + `](/docs/providers/cloudsql) | A fast clone of a Google Cloud SQL for PostgreSQL instance | Expected to be flat, because a fast clone is created from an Instant Snapshot. Cloud SQL's other clone workflow is not flat, and the provider is built so it cannot ask for that one. Never timed on Google Cloud | A Cloud SQL instance, a service account, and the enterprise edition |
 | [` + "`" + `azurepg` + "`" + `](/docs/providers/azurepg) | A point in time restore of an Azure Database for PostgreSQL Flexible Server | Expected to grow with the database. The snapshot half is flat and the log replay half is not, so this provider does not claim copy on write. Never timed on Azure | A flexible server, a service principal, and the enterprise edition |
@@ -13433,6 +13565,13 @@ vendor is not in this list. It needs no account and no vendor at all, only a
 server it may create databases on. Branch time is not flat there, and the
 measured seconds per gigabyte are published in ` + "`" + `benchmarks/` + "`" + ` rather than
 described.
+
+` + "`" + `xata` + "`" + ` is the managed Postgres whose branching is really branching. Xata
+documents a branch as a copy on write storage snapshot that completes in seconds
+at terabyte scale, and of thirteen managed vendors it is the only one that does
+not restore a backup to make one. That is Xata's claim rather than a
+measurement made here, and [the provider page](/docs/providers/xata) says
+exactly which half the suite proves.
 
 ` + "`" + `supabase` + "`" + ` is the right choice when your application already lives there.
 Branch time is not flat, because Supabase creates a branch with no data in it
@@ -13476,11 +13615,11 @@ has not, so here is the split, in the terms the
   or Azure.** The same arrangement as ` + "`" + `aurora` + "`" + `: every line of each provider
   runs on every pull request, against a fake Cloud SQL Admin API and a fake
   Azure Resource Manager, each with a real Postgres behind it. ` + "`" + `cloudsql` + "`" + ` has
-  never met Google Cloud. ` + "`" + `azurepg` + "`" + ` has met Azure once, and only half of it
-  passed: a live run restored a golden from a real flexible server and masked
-  and verified it over ` + "`" + `verify-full` + "`" + ` against Microsoft's certificate, and the
-  branch restore from that golden failed with an internal error from Azure. No
-  branch has been created, timed or checked on Azure.
+  never met Google Cloud, because the only Google billing account available is
+  closed. ` + "`" + `azurepg` + "`" + ` has completed one private run against a real flexible
+  server on 2026-09-13: a golden restored, masked and verified over ` + "`" + `verify-full` + "`" + `, a
+  branch written to without the source changing, the goldens listed, and
+  everything torn down. One run at one row is a demonstration rather than proof.
 
 ` + "`" + `cloudsql` + "`" + ` is the one for a production on Google Cloud, and it is in the
 enterprise edition for the same reason ` + "`" + `aurora` + "`" + ` is. A branch is a Cloud SQL
@@ -13499,12 +13638,13 @@ that does NOT claim flat branch time. A branch is a point in time restore, whose
 snapshot half is flat in the size of the data and whose log replay half is not,
 so the honest number is one that grows. Microsoft gives the overall recovery as
 a few minutes up to a few hours. Its page says why claiming otherwise would be
-quoting the fast half of that. One restore this provider requested has been
-timed on Azure: creating a golden from a nearly empty source, including the
-mask and the verification, took 392.4 seconds. That is one data point at one
-size, so it says nothing about how the time grows, and the branch restore that
-followed it failed on Azure's side, so the growth is still Microsoft's
-description rather than a number anybody here measured.
+quoting the fast half of that. One complete run has been timed on Azure, in
+` + "`" + `centralus` + "`" + ` on a ` + "`" + `Standard_B1ms` + "`" + ` server with one synthetic row: the golden took
+420.3 seconds and the branch 518.3 seconds, the branch including the wait for the
+golden's first backup. That is fixed cost at one size, recorded in
+[the benchmarks](https://github.com/antifailure/antifailure/tree/main/benchmarks),
+so the growth with the size of the database is still Microsoft's description
+rather than a number anybody here measured.
 
 A provider named in the manifest and neither built into this binary nor
 registered with it is refused at startup rather than substituted. Falling back
@@ -13561,7 +13701,7 @@ the suite run a behaviour it should have skipped, which fails, which is the
 intended outcome: a capability is a promise the suite checks.
 
 Register it under a name this build does not already have. ` + "`" + `docker` + "`" + `, ` + "`" + `neon` + "`" + `,
-` + "`" + `supabase` + "`" + `, ` + "`" + `dblab` + "`" + ` and ` + "`" + `pgurl` + "`" + ` are reserved, and a registration under one of
+` + "`" + `supabase` + "`" + `, ` + "`" + `dblab` + "`" + `, ` + "`" + `pgurl` + "`" + ` and ` + "`" + `xata` + "`" + ` are reserved, and a registration under one of
 them is refused at validation rather than accepted and then never consulted.
 `,
 	"providers/datastores.md": `---
@@ -14259,6 +14399,9 @@ parent, so that making one does not take longer as the database grows.
 | Xata | copy on write branch | yes | unverified | [its page](https://github.com/xataio/xata) |
 
 The link in the last column is the page the host server answer was read from.
+Xata is the one vendor on this list with a provider of its own,
+[` + "`" + `xata` + "`" + `](/docs/providers/xata), because its branches are copy on write. The
+rest are served by ` + "`" + `pgurl` + "`" + `.
 Every quote behind every verdict, and the page for each mechanism, is in
 ` + "`" + `engine/internal/db/managed/vendors.go` + "`" + `.
 
@@ -15264,6 +15407,130 @@ fake: a fake would have agreed that a persistent branch can be deleted, that a
 database copies cleanly into another one, and that the pooled connection string
 you are given can be connected to. None of those is true.
 `,
+	"providers/xata.md": `---
+title: Xata
+description: Copy on write branches of a masked, verified golden on Xata, and what has not been measured about them.
+sidebar:
+  order: 16
+---
+
+Xata is a Postgres platform whose branches are copy on write snapshots at the
+storage layer. Its [branching page](https://xata.io/docs/core-concepts/branching)
+says a child branch "copies the parent's schema and data using a Copy-on-Write
+storage snapshot, so it completes in seconds even for terabyte-scale
+databases". Its platform is built on CloudNativePG and is
+[open source](https://github.com/xataio/xata) under Apache 2.0.
+
+Of the thirteen vendors on [Managed Postgres vendors](/docs/providers/managed-postgres),
+it is the only one whose branching is really branching. Every other one calls
+the operation a fork and restores a backup, where the clock grows with the data.
+
+` + "`" + "`" + "`" + `yaml
+database:
+  provider: xata
+  version: 17
+  project: my-organization/my-project
+  api_key_env: XATA_API_KEY
+  source_url_env: PRODUCTION_DATABASE_URL
+` + "`" + "`" + "`" + `
+
+` + "`" + `database.project` + "`" + ` is ` + "`" + `<organization>/<project>` + "`" + `, both as they appear in the
+Xata console. Both are path segments of every call the provider makes and
+neither can be discovered from the other, so a manifest with one of them is
+refused when it is validated rather than left to fail at the first refresh.
+
+` + "`" + `database.api_key_env` + "`" + ` names the variable holding an API key with the
+` + "`" + `branch:read` + "`" + `, ` + "`" + `branch:write` + "`" + ` and ` + "`" + `credentials:read` + "`" + ` scopes. The third is the
+one that returns a branch's connection string. It defaults to ` + "`" + `XATA_API_KEY` + "`" + `.
+
+` + "`" + `database.version` + "`" + ` has to be the major your project's root branch runs. A
+candidate inherits its parent's image, so a refresh asks the candidate's server
+which major it is and refuses a mismatch with ` + "`" + `AF-DB-003` + "`" + ` before anything is
+loaded.
+
+## The model
+
+A Xata project holds production on its root branch, the one with no parent. A
+golden is a copy on write branch of that root, masked and verified in place and
+then published by a rename. An environment's database is a copy on write branch
+of the golden. The provider copies nothing itself.
+
+Publishing is the rename and nothing else. The attestation does not exist until
+the candidate has been masked and scanned, which is after the branch was
+created. A refresh that fails at any earlier step deletes the candidate rather
+than leaving a branchable copy of unmasked production behind.
+
+The attestation, the rules hash and the provenance are written into a
+` + "`" + `_antifailure.golden` + "`" + ` table inside the golden itself. A branch inherits that row,
+so whoever holds an environment can read what was scanned and what was found.
+Xata's branch object has no annotation map, and its one free text field holds a
+golden version identifier and cannot hold an attestation.
+
+## What is declared, and why
+
+- **Branching: yes.** Copy on write branches are the product.
+- **Copy on write: yes.** From Xata's branching page. What that declaration is
+  worth is the next section.
+- **Reset: no.** Xata's API has no call that returns a branch to another
+  branch's state. The one restore call it documents creates a new branch from a
+  backup. A reset built as a delete and a recreate would hand back a different
+  branch on a different connection string.
+- **Subsetting: no.** A candidate holds the whole database the moment it
+  exists, so a subset could only mean deleting down.
+- **Pooled endpoints: no.** Xata does have a pooled endpoint type, selected by a
+  hostname suffix. Its credentials call takes no endpoint type and returns one
+  connection string, and the provider does not build addresses from a naming
+  convention.
+- **Provider masking: no.** The engine's rules are the single implementation of
+  masking.
+
+A refusal from Xata reaches you with Xata's own code and message. The API
+documents a precondition failure on creating a branch without saying which
+precondition, so the provider does not guess that it means a branch limit.
+` + "`" + `database.max_branches` + "`" + ` is the ceiling it enforces itself, with ` + "`" + `AF-DB-006` + "`" + `.
+
+## What has not been measured
+
+**No account was used to build this provider, and no branch was made on Xata.**
+
+` + "`" + `engine/internal/db/xata/conformance_test.go` + "`" + ` runs the whole conformance suite
+on every run against a fake Xata control plane over a real local Postgres. The
+fake speaks the paths, fields and status codes of Xata's
+[API document](https://api.xata.tech/openapi.json), refuses what that document
+refuses, and invents no rule the document does not state. That proves the
+provider's logic, its request shapes and its error mapping. It does not prove
+that Xata accepts those requests, and it cannot produce a wall clock number.
+
+It also cannot exhibit copy on write. The only way one local Postgres can hand
+back a second database holding the first one's data is to copy the files. So
+that run asserts no real service, and the copy on write behaviour answers
+**unproven** rather than timing a copy. The copy on write ledger records the
+same word, and so does the ` + "`" + `benchmarks/README.md` + "`" + ` table.
+
+The run that settles it is the same suite against the real service:
+
+` + "`" + "`" + "`" + `
+AF_XATA_API_KEY=... AF_XATA_ORG=... AF_XATA_PROJECT=... \
+  go test ./engine/internal/db/xata -run TestConformanceAgainstXata -v
+` + "`" + "`" + "`" + `
+
+That run costs one branch per golden and one per environment, each sharing
+storage with its parent, all removed by the suite's own cleanup and checked by
+its leak assertion at the end.
+
+## Cleaning up after a killed run
+
+A failing behaviour leaves its branches behind on purpose, so they can be looked
+at. Removing them is a separate command:
+
+` + "`" + "`" + "`" + `
+AF_XATA_SWEEP=1 AF_XATA_API_KEY=... AF_XATA_ORG=... AF_XATA_PROJECT=... \
+  go test ./engine/internal/db/xata -run TestSweepLeftovers -v
+` + "`" + "`" + "`" + `
+
+It removes environment branches first and goldens last, because a golden
+something came from is refused.
+`,
 	"reference/action.md": `---
 title: The GitHub Action
 description: Every input and output of antifailure/antifailure@v1, and every input of the reusable workflow that calls it.
@@ -15318,7 +15585,30 @@ the second name and the first is the one people create.
 | ` + "`" + `command` + "`" + ` | The command that ran. |
 | ` + "`" + `environment` + "`" + ` | Whether ` + "`" + `af change` + "`" + ` selected an environment for this change. ` + "`" + `true` + "`" + ` or ` + "`" + `false` + "`" + `. |
 | ` + "`" + `selected` + "`" + ` | The checks ` + "`" + `af change` + "`" + ` selected, comma separated. |
-| ` + "`" + `handled` + "`" + ` | Whether a control plane took the report. When it is ` + "`" + `true` + "`" + ` the action leaves no comment, because the control plane maintains one. |
+| ` + "`" + `handled` + "`" + ` | Whether a control plane took the report. ` + "`" + `true` + "`" + ` only when it answered 200, and then the action leaves no comment, because the control plane maintains one. |
+
+## When the control plane says no
+
+With ` + "`" + `control-plane` + "`" + ` set, the action talks to it twice, and it treats a refusal
+and an absence of an answer as different facts, because the job runs in your
+repository and only one of them is yours to fix.
+
+- **The credential is refused**, which the control plane answers with a 4xx and
+  a sentence: a repository it does not know, a suspended organization, a commit
+  with no check waiting on it. The job is not failed, the report goes on the
+  pull request as a comment, and the last step warns with that sentence.
+- **The report is refused** after a credential was issued. The check on the
+  commit is waiting for exactly that report, so the step fails the job with the
+  control plane's sentence, and the comment still carries the report.
+- **The control plane does not answer**, a 5xx or no connection at all. The job
+  is not failed for somebody else's outage. It warns, and the report goes on the
+  pull request as a comment.
+- **No workflow identity**, which is what GitHub gives a fork's pull request on
+  purpose. Nothing is reported and nothing is failed.
+
+A re-run of the job from the Actions tab is a new attempt of the same run, and
+it is issued a credential of its own, so its verdict replaces the previous
+attempt's on the check.
 
 ## Inputs of the reusable workflow
 
@@ -16044,6 +16334,16 @@ that could not start is reported as blocked.
 Every choice comes from the goal's seed, so the same seed takes the same path
 and every finding arrives with the command that replays it.
 
+The manifest's goal is the default and the flags below override it for one run,
+without writing anything: explore as a different persona, from a different
+page, in a different window, for a different budget. A viewport of phone is
+390x844 with a mobile user agent and a touch screen, tablet is 768x1024,
+desktop is 1440x900, and WIDTHxHEIGHT is any size between 320 and 3840 a side.
+A budget is a step count such as 8 or a duration such as 5m. A persona the
+manifest does not declare is refused, and the refusal names the ones it does.
+The report and the artifacts record the persona, the start path and the
+viewport that were actually used.
+
 ` + "`" + "`" + "`" + `
 af explore [flags]
 ` + "`" + "`" + "`" + `
@@ -16051,17 +16351,24 @@ af explore [flags]
 ` + "`" + "`" + "`" + `
 # Agents go at a goal with no workflow written for it.
 af explore
+# The same goal as the owner, from the billing page, on a phone, in eight steps.
+af explore --only upgrade-a-plan --persona owner --start /settings/billing --viewport phone --budget 8
 af explore --emit-workflow checkout.yaml
 ` + "`" + "`" + "`" + `
 
 | Flag | Default | What it does |
 | --- | --- | --- |
 | ` + "`" + `--branch` + "`" + ` | - | Branch to run against, defaulting to the checked out one. |
+| ` + "`" + `--budget` + "`" + ` | - | Most this run may spend: a step count such as 8, or a duration such as 5m. |
 | ` + "`" + `--emit-workflow` + "`" + ` | ` + "`" + `false` + "`" + ` | Print the workflow block that replays what was explored, instead of the report. |
+| ` + "`" + `--focus` + "`" + ` | - | A sentence about what to attend to; its words decide which controls are pressed first. |
 | ` + "`" + `--headed` + "`" + ` | ` + "`" + `false` + "`" + ` | Show the browser rather than running it hidden. |
 | ` + "`" + `--only` + "`" + ` | - | Explore just these goals, by name. |
+| ` + "`" + `--persona` + "`" + ` | - | Explore as this declared persona rather than the goal's. |
 | ` + "`" + `--runner` + "`" + ` | - | Path to the runner's entry point. |
 | ` + "`" + `--seed` + "`" + ` | - | Replay with this seed rather than the one the manifest declares. |
+| ` + "`" + `--start` + "`" + ` | - | Begin at this path rather than the goal's start_path, such as /settings/billing. |
+| ` + "`" + `--viewport` + "`" + ` | - | Window to explore in: phone (390x844, mobile), tablet (768x1024), desktop (1440x900), or WIDTHxHEIGHT. |
 
 ### ` + "`" + `af fidelity` + "`" + `
 
@@ -18226,8 +18533,11 @@ has the order for the four features whose credential Terraform must not hold.
 | ` + "`" + `AF_SITE_ORIGIN` + "`" + ` | unset | Every browser origin allowed to post to the routes a page on the marketing site calls: ` + "`" + `POST /v1/leads` + "`" + `, ` + "`" + `POST /v1/applications` + "`" + ` and ` + "`" + `POST /v1/site/events` + "`" + `. One whole origin such as ` + "`" + `https://example.com` + "`" + `, or several separated by commas, such as ` + "`" + `https://example.com,https://www.example.com` + "`" + `. A site served on both an apex and a ` + "`" + `www` + "`" + ` hostname needs both, because the browser sends the hostname the visitor is standing on and the comparison is exact. These are the only routes on the server that answer a cross-origin browser, and this is the only variable that widens them. Unset means no other origin may post, so a contact form on a separate marketing host cannot submit and reports a network error; the routes still answer ` + "`" + `curl` + "`" + ` and a page on this origin. Never a wildcard: there is no value meaning "any origin". A value carrying a path, a query or a fragment stops the process, because a browser sends only scheme, host and port and such a value could never match, which would allow nobody while looking configured. An empty entry, from a stray comma, stops it too. |
 | ` + "`" + `AF_LEAD_NOTIFY_EMAIL` + "`" + ` | unset | Where an enterprise lead is announced. Unset means leads are recorded and nobody is mailed, which the startup log says and which the form itself tells the person who filled it in. Setting it **without** a mailer, meaning ` + "`" + `AF_RESEND_API_KEY` + "`" + ` and ` + "`" + `AF_MAIL_FROM` + "`" + `, is called out at startup as its own state: that deployment believes it is announcing leads and cannot. Read the queue in either case with ` + "`" + `af-control-plane-backup leads` + "`" + `. |
 | ` + "`" + `AF_GITHUB_API_BASE` + "`" + ` | ` + "`" + `https://api.github.com` + "`" + ` | Where the GitHub API lives. For GitHub Enterprise Server, and for tests. |
-| ` + "`" + `AF_MODEL_PRICES` + "`" + ` | unset | What a model costs, as ` + "`" + `model=input/output` + "`" + ` in US dollars per million tokens, comma separated: ` + "`" + `claude-sonnet-5=3/15,gpt-4.1=2/8` + "`" + `. Adds to the built-in defaults rather than replacing them. A model with no price is **refused** rather than charged nothing, because a request that spends money and adds nothing to the total is a spend cap that does not cap spending. A malformed entry stops the process at startup rather than being skipped, since a skipped entry is a model silently falling back to another price. |
-| ` + "`" + `AF_PROVIDER_KEY_SECRET` + "`" + ` | unset | 32 bytes of base64, the secret that seals customers' Anthropic and OpenAI keys. Generate one with ` + "`" + `openssl rand -base64 32` + "`" + `. Unset means keys cannot be stored at all: saving one is refused rather than written in the clear. It must not live in the same place as the database, or a database dump carries both halves. Anything other than 32 bytes stops the process at startup rather than failing later on the one action the feature exists for. |
+| ` + "`" + `AF_MODEL_PRICES` + "`" + ` | unset | What a model costs, as ` + "`" + `model=input/output` + "`" + ` in US dollars per million tokens, comma separated: ` + "`" + `claude-sonnet-5=2/10,gpt-4.1=2/8` + "`" + `. Adds to the built-in defaults rather than replacing them. A model with no price is **refused** rather than charged nothing, because a request that spends money and adds nothing to the total is a spend cap that does not cap spending. A malformed entry stops the process at startup rather than being skipped, since a skipped entry is a model silently falling back to another price. |
+| ` + "`" + `AF_PROVIDER_KEY_SECRET` + "`" + ` | unset | 32 bytes of base64, the secret that seals customers' Anthropic and OpenAI keys, and the sealing key for version ` + "`" + `v1` + "`" + `. Generate one with ` + "`" + `openssl rand -base64 32` + "`" + `. Unset means keys cannot be stored at all: saving one is refused rather than written in the clear. It must not live in the same place as the database, or a database dump carries both halves. Anything other than 32 bytes stops the process at startup rather than failing later on the one action the feature exists for. Anything that is not canonical base64 stops it too, because Buffer decoding drops characters it does not recognise and a truncated paste would otherwise decode to a short key. On its own it is the whole configuration and no other variable here is needed. |
+| ` + "`" + `AF_PROVIDER_KEY_SECRETS` + "`" + ` | unset | More sealing keys, as ` + "`" + `v2=<32 bytes of base64>` + "`" + `, comma separated, in the same ` + "`" + `identifier=key` + "`" + ` grammar as ` + "`" + `AF_LICENSE_PUBLIC_KEYS` + "`" + ` and for the same reason: something holding exactly one key cannot rotate without invalidating everything in the field. **Merged with** ` + "`" + `AF_PROVIDER_KEY_SECRET` + "`" + ` rather than replacing it, so a rotation adds one new value and never has to read the old one back out of a vault to compose a combined string. Every key named here can OPEN a stored credential; which one new credentials are sealed under is ` + "`" + `AF_PROVIDER_KEY_VERSION` + "`" + `. Two different keys under one version stops the process, because rows filed under that version were sealed with one of them and there is no safe choice between them. A version is up to 32 characters of lower case letters, digits, dot, dash or underscore. The start-up log prints the versions held, which is the only way to confirm a new revision picked a new key up without decrypting somebody's credential. |
+| ` + "`" + `AF_PROVIDER_KEY_VERSION` + "`" + ` | the single configured version | Which sealing key version new provider keys are sealed under. Optional while exactly one key is configured, which is every installation that has not rotated. With several configured it is **required**: the process stops at startup naming the versions it holds, rather than guessing which of somebody else's keys to seal their credential with. A version nothing is configured for stops it as well. Rotating is: add the new key, set this to it, deploy, re-seal with ` + "`" + `af-control-plane-backup reseal` + "`" + `, then remove the old key. See [rotating secrets](/docs/self-hosting/rotating-secrets). |
+| ` + "`" + `AF_RESEAL_DATABASE_URL` + "`" + ` | unset | The connection string ` + "`" + `af-control-plane-backup reseal` + "`" + ` uses when ` + "`" + `--url` + "`" + ` is absent, which is how the hosted reseal job supplies it: a container app job's command is not run through a shell, so it could not be an environment reference in the argument list, and a connection string spelled out there would be a database password visible in the revision template. Read only by that command. It must be a role row level security does not apply to, because re-sealing rewrites every tenant's rows and a tool that re-sealed one tenant's and reported success would be the worst outcome available. |
 | ` + "`" + `AF_STRIPE_SECRET_KEY` + "`" + ` | unset | The Stripe API key, server side only. Needed together with the webhook secret and ` + "`" + `AF_STRIPE_PRICE_TEAM` + "`" + `, which are the three billing needs to be on; setting some and not others leaves billing **off** and prints the missing names at startup, because an operator who sets two of three believes billing works and the one they miss is usually the webhook secret, which fails only when a real customer pays. ` + "`" + `AF_STRIPE_PRICE_ENTERPRISE` + "`" + ` is **not** one of the three, and the reason is on its own row. |
 | ` + "`" + `AF_STRIPE_WEBHOOK_SECRET` + "`" + ` | unset | The signing secret for the endpoint registered at Stripe. Every delivery is verified against it, timestamp included, before its body is parsed. Unset means ` + "`" + `/webhooks/stripe` + "`" + ` answers 503 rather than accepting unsigned deliveries. |
 | ` + "`" + `AF_STRIPE_PRICE_TEAM` + "`" + ` | unset | The Stripe price the ` + "`" + `team` + "`" + ` plan is sold at. A subscription for a price that is not named here is recorded and does **not** change the plan: somebody who bought through a link nobody configured has paid, and entitling them to the free plan would take away capacity they just bought. |
@@ -19121,9 +19431,9 @@ The agent runner could not be started: {detail}
 
 ### AF-AGT-002
 
-Workflow {workflow} exhausted its budget of {budget} before completing.
+Workflow {workflow} failed: the application did not do what the workflow expected.
 
-**What to do.** Raise the budget for {workflow} in the manifest, or split it into smaller workflows.
+**What to do.** Read that workflow's steps and trace for what the page showed instead. A failure is evidence about the application, so fix the application or the expectation rather than the budget.
 
 | | |
 | --- | --- |
@@ -19250,6 +19560,42 @@ No goal named {goal} is declared under explore.
 | Exit code | ` + "`" + `2` + "`" + ` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/exploration](/docs/concepts/exploration) |
+
+### AF-AGT-022
+
+The exploration cannot run as {persona}: the manifest declares {personas}.
+
+**What to do.** Pass one of the declared persona names to --persona, or add the persona to the manifest and run 'af up' so it exists.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `2` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/exploration](/docs/concepts/exploration) |
+
+### AF-AGT-023
+
+The exploration cannot be steered that way: {detail}
+
+**What to do.** A start path begins with /, a viewport is phone, tablet, desktop or WIDTHxHEIGHT, and a budget is a step count or a duration such as 5m. 'af explore --help' states the sizes.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `2` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/exploration](/docs/concepts/exploration) |
+
+### AF-AGT-024
+
+Workflow {workflow} was stopped by its budget before it reached a verdict: {detail}
+
+**What to do.** Raise budget.steps or budget.duration for {workflow} if the flow is genuinely that long, or read its trace to see where it waited or went in circles. A workflow stopped by its budget is blocked, never a pass and never a failure of the change.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `9` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/workflows](/docs/guides/workflows) |
 
 ## Build
 
@@ -21249,7 +21595,7 @@ exported on the laptop that started it.
 
 | Key | Notes |
 | --- | --- |
-| ` + "`" + `provider` + "`" + ` | ` + "`" + `docker` + "`" + ` (default), ` + "`" + `neon` + "`" + `, ` + "`" + `supabase` + "`" + `, ` + "`" + `dblab` + "`" + `, ` + "`" + `pgurl` + "`" + `, ` + "`" + `aurora` + "`" + `, ` + "`" + `cloudsql` + "`" + `, or ` + "`" + `azurepg` + "`" + `. The last three require the enterprise cloud provider entitlement; a community build names them and refuses them. |
+| ` + "`" + `provider` + "`" + ` | ` + "`" + `docker` + "`" + ` (default), ` + "`" + `neon` + "`" + `, ` + "`" + `supabase` + "`" + `, ` + "`" + `dblab` + "`" + `, ` + "`" + `pgurl` + "`" + `, ` + "`" + `xata` + "`" + `, ` + "`" + `aurora` + "`" + `, ` + "`" + `cloudsql` + "`" + `, or ` + "`" + `azurepg` + "`" + `. For ` + "`" + `xata` + "`" + `, ` + "`" + `project` + "`" + ` is ` + "`" + `<organization>/<project>` + "`" + `. The last three require the enterprise cloud provider entitlement; a community build names them and refuses them. |
 | ` + "`" + `version` + "`" + ` | Postgres major, 14 through 18, default 17. Match it to production: a golden on a different major is an environment running a Postgres your application does not. |
 | ` + "`" + `url_env` + "`" + ` | The variable services receive the connection string in. |
 | ` + "`" + `source_url_env` + "`" + ` | Names the variable holding production's read only URL. |
@@ -22206,6 +22552,15 @@ what should happen on the pages it wanders onto. An exploration whose declared
 goals did not all produce a browser result is ` + "`" + `INCONCLUSIVE` + "`" + ` rather than clean.
 The goals themselves live in ` + "`" + `antifailure.yaml` + "`" + ` and cannot be written from a
 call; ` + "`" + `goals` + "`" + ` selects among them, and ` + "`" + `seed` + "`" + ` replays one.
+
+` + "`" + `persona` + "`" + `, ` + "`" + `start_path` + "`" + `, ` + "`" + `viewport` + "`" + `, ` + "`" + `budget` + "`" + ` and ` + "`" + `focus` + "`" + ` point the selected
+goals somewhere else for one run, with the meanings and limits of the
+[` + "`" + `af explore` + "`" + ` flags](/docs/concepts/exploration#pointing-an-exploration-somewhere-else)
+of the same names. A value the schema admits and the engine cannot use is
+refused naming the argument, and a persona the manifest does not declare is
+refused naming the ones it does. Each exploration in the result carries the
+` + "`" + `persona` + "`" + `, ` + "`" + `start_path` + "`" + ` and ` + "`" + `viewport` + "`" + ` it actually ran with.
+
 ### ` + "`" + `assess_environment_fidelity` + "`" + `
 
 How much of this environment is production's own thing and how much is a stand
@@ -22899,7 +23254,7 @@ Where the environment's Postgres comes from, and how the production copy is made
 | ` + "`" + `max_branches` + "`" + ` | integer | no | The plan's concurrent branch limit, where the provider has one it cannot read from its own API. Reaching it fails with AF-DB-006 rather than hanging. Minimum 1. |
 | ` + "`" + `migrations` + "`" + ` | [Migrations](#migrations) | no | Where the project's own SQL migrations live, for a project whose migrate command is its own script rather than a tool the rehearsal recognises. |
 | ` + "`" + `project` + "`" + ` | string | no | The account-side project a hosted provider creates branches in, such as a Neon project. Not a secret, which is why it lives here and the key that reaches it does not. |
-| ` + "`" + `provider` + "`" + ` | string | no | Which provider creates branches. docker is local and needs nothing; neon, supabase, and dblab talk to a service; pgurl is any reachable Postgres, which is where the goldens and the branches are kept as databases on a server you name. aurora clones an Amazon Aurora PostgreSQL cluster and is in the enterprise edition, so a community build names it here and refuses it when a manifest selects it. ` + "`" + `cloudsql` + "`" + ` fast clones a Google Cloud SQL for PostgreSQL instance and ` + "`" + `azurepg` + "`" + ` restores an Azure Database for PostgreSQL Flexible Server to a point in time; both are enterprise for the same reason. ` + "`" + `azurepg` + "`" + ` is the one provider here that does not branch in time flat in the size of the database, because a restore replays write ahead logs after the snapshot and that half is not flat. Defaults to ` + "`" + `docker` + "`" + `. |
+| ` + "`" + `provider` + "`" + ` | string | no | Which provider creates branches. docker is local and needs nothing; neon, supabase, dblab and xata talk to a service; pgurl is any reachable Postgres, which is where the goldens and the branches are kept as databases on a server you name. For xata, database.project is '<organization>/<project>'. aurora clones an Amazon Aurora PostgreSQL cluster and is in the enterprise edition, so a community build names it here and refuses it when a manifest selects it. ` + "`" + `cloudsql` + "`" + ` fast clones a Google Cloud SQL for PostgreSQL instance and ` + "`" + `azurepg` + "`" + ` restores an Azure Database for PostgreSQL Flexible Server to a point in time; both are enterprise for the same reason. ` + "`" + `azurepg` + "`" + ` is the one provider here that does not branch in time flat in the size of the database, because a restore replays write ahead logs after the snapshot and that half is not flat. Defaults to ` + "`" + `docker` + "`" + `. |
 | ` + "`" + `seed` + "`" + ` | string | no | Command that fills the golden with data, for a project with no production database yet. It runs once per refresh with DATABASE_URL set, and every branch is a copy of what it made, so the cost is paid once rather than per environment. Mutually exclusive with source_url_env. Max length 1024. |
 | ` + "`" + `source_url_env` + "`" + ` | string | no | Name of the environment variable holding the read only connection string of the production database. The value is read once, during a golden refresh, on the operator's machine or runner, and never stored. Max length 128, matches ` + "`" + `^[A-Za-z_][A-Za-z0-9_]*$` + "`" + `. |
 | ` + "`" + `subset` + "`" + ` | [Subset](#subset) | no | Take a production shaped slice rather than the whole database. |
@@ -23296,7 +23651,7 @@ One thing the agents do, written as a goal rather than a script. The runner deci
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| ` + "`" + `budget` + "`" + ` | object | no | Hard caps. A workflow that exhausts its budget ends as blocked with the reason, never as a partial pass. |
+| ` + "`" + `budget` + "`" + ` | object | no | What one workflow may spend. ` + "`" + `steps` + "`" + ` is the most actions one attempt may take: a workflow that uses every step passes if everything it expected is visible on the page it reached, fails if that page answered with an HTTP error, and otherwise ends as blocked with the step budget named. ` + "`" + `duration` + "`" + ` is the time the whole workflow may take, retries included: a workflow that reaches it is stopped where it is and ends as blocked with the budget named, and no further attempt starts. A blocked workflow is never a partial pass. |
 | ` + "`" + `description` + "`" + ` | string | **yes** | What a person would do, in sentences. Say the goal and what proves it happened, not the selectors. Min length 10, max length 4000. |
 | ` + "`" + `expect` + "`" + ` | list of string | no | Observations that must hold for a pass, written as sentences. These are assertions about what the user can see, not about the DOM. Max items 50. |
 | ` + "`" + `independent` + "`" + ` | boolean | no | Whether this workflow can run at the same time as others. Workflows that share an environment run one at a time unless this says otherwise, because two agents mutating the same data produce failures nobody can reproduce. Defaults to ` + "`" + `false` + "`" + `. |
@@ -26689,6 +27044,15 @@ check and the second when they re-run all of them from the checks page, so
 subscribing to only one leaves the other doing nothing at all. Each is handled
 in ` + "`" + `web/apps/api/src/github/lifecycle.ts` + "`" + `.
 
+The third Re-run button, the one in the Actions tab, sends neither of those. It
+starts another attempt of the same workflow run, which arrives as **Workflow
+run**, and that attempt then asks for a credential of its own. The control
+plane reads the attempt number GitHub signed into the run's identity and
+reopens the check for a later attempt of the run already checking the commit,
+so a re-run from either place produces a new check run with a fresh verdict.
+Before this, a re-run from the Actions tab was refused a credential and the
+check went on showing the verdict of the attempt it replaced.
+
 **Push** is still deliberately absent: nothing handles it, and an event nobody
 consumes is delivery-log noise that makes a real failed delivery harder to find.
 **Member** and **Membership** are absent for a sharper reason: the handler names
@@ -26708,7 +27072,7 @@ as it took somebody to look at the installation rather than at the App.
 1. The App's settings, **Permissions and events**, Repository permissions,
    **Checks** to Read and write, then **Save**.
 2. The same page, **Subscribe to events**, tick **Pull request**, **Workflow
-   run** and **Check run**, then **Save**. Event subscriptions take effect
+   run**, **Check run** and **Check suite**, then **Save**. Event subscriptions take effect
    without anybody accepting anything; only the permission needs step 3.
 3. For every account the App is installed on: its **Installed GitHub Apps**
    settings, the App, **Review request**, **Accept new permissions**.
@@ -27871,10 +28235,17 @@ None of these runbooks has been performed against the live deployment. Each is
 derived from the Terraform and the application code, and every step names the
 file it comes from so you can check the derivation rather than trust it.
 
-Two of them carry a warning that is not a matter of rehearsal. Rotating
-` + "`" + `provider-key-secret` + "`" + ` destroys data and cannot be undone. Rotating
+One of them carries a warning that is not a matter of rehearsal. Rotating
 ` + "`" + `github-app-webhook-secret` + "`" + ` has a window during which GitHub deliveries are
-refused. Both are described below rather than left to be discovered.
+refused, and it is described below rather than left to be discovered.
+
+` + "`" + `provider-key-secret` + "`" + ` used to carry a worse one: rotating it destroyed every
+stored provider key, permanently and silently. It no longer does. That runbook is
+the longest on this page because it is the only one where the application holds
+two values at once on purpose, and its steps are proven by
+` + "`" + `web/apps/api/test/reseal.test.ts` + "`" + ` against a real Postgres rather than derived
+from the code. The proof is the last step: the old key is removed and everything
+still opens.
 
 ## What is in the vault
 
@@ -27885,7 +28256,8 @@ put your new value back.
 | --- | --- | --- |
 | ` + "`" + `database-url` + "`" + ` | Terraform generates it | the app, and the bootstrap job |
 | ` + "`" + `migration-database-url` + "`" + ` | Terraform generates it | the bootstrap and maintenance jobs |
-| ` + "`" + `provider-key-secret` + "`" + ` | Terraform generates it | the app |
+| ` + "`" + `provider-key-secret` + "`" + ` | Terraform generates it | the app, and the reseal job |
+| ` + "`" + `provider-key-secrets` + "`" + ` | you, entirely | the app, and the reseal job |
 | ` + "`" + `github-client-id` + "`" + ` | seeded once, then you | the app |
 | ` + "`" + `github-client-secret` + "`" + ` | seeded once, then you | the app |
 | ` + "`" + `github-redirect-uri` + "`" + ` | seeded once, then you | the app |
@@ -27906,6 +28278,12 @@ the placeholder back and break sign-in.
 **Yours.** GitHub mints an App private key and shows it once, so Terraform can
 neither create it nor recreate it. The module reads both App secrets with a data
 source. Nothing here will overwrite them.
+
+` + "`" + `provider-key-secrets` + "`" + ` is the one secret on this page that does not exist until
+you create it. It holds the sealing keys a rotation adds, and Terraform only
+addresses it: the module builds its versionless id from the vault address and the
+name, so nothing that plans this stack ever reads its value. Its runbook below
+creates it.
 
 ` + "`" + `github-redirect-uri` + "`" + ` is in the vault with the others and is not a secret. It is
 a public callback address. It is listed for completeness, and rotating it is a
@@ -28060,36 +28438,392 @@ same reason as ` + "`" + `database-url` + "`" + `.
 
 ## ` + "`" + `provider-key-secret` + "`" + `
 
-**Do not rotate this one.** It is a one way door and there is no way back.
+**This can now be rotated, and before 2026-09-12 it could not.** The steps below
+add a second key, move every stored credential onto it, and then take the first
+one away. Read all of them before starting: the order is the whole procedure.
 
 **What it is.** Thirty two bytes that seal every customer's stored provider key
 under AES-256-GCM. ` + "`" + `web/apps/api/src/providers/seal.ts` + "`" + ` holds the shape. The
 sealing key never reaches Postgres, so a database dump on its own decrypts
 nothing.
 
-**What breaks if you rotate it.** Every stored provider key, permanently. A
-sealed value that will not open looks exactly like a tampered one, so the
-failure is silent in the worst way: the rows are still there and none of them
-work.
+**What used to break, and why it was silent.** Replacing the value in place made
+every stored key stop opening, permanently. Rows recorded which key version
+sealed them and nothing read that column, so the application tried every row
+against the one key it held and reported the same failure for all of them: a value
+that will not decrypt is indistinguishable from a value somebody altered. An
+operator saw authentication failures across every organization and no sentence
+saying why.
 
-There is no re-sealing tool. The rows record a ` + "`" + `keyVersion` + "`" + ` and the comment
-beside it says the version exists so a rotation can find the rows that still
-need re-sealing. Nothing reads that column for that purpose. The rotation it
-anticipates has not been built, and this page says so rather than implying the
-column is a plan.
+**What happens now instead.** The application holds a SET of sealing keys
+addressed by version, so the old key and the new one are open at the same time.
+A row names its version, is opened with the key that version names, and a row
+whose version is not held produces its own error naming the missing version. That
+error is the difference between a silent outage and a message, and it is the one
+thing to look for in the logs if any step below goes wrong.
 
-**What to do instead.** If the sealing key is compromised, the keys it sealed
-are compromised too, and re-sealing them would be protecting values that already
-need replacing. Tell each affected organization to revoke their provider key at
-the provider and store a new one. Storing a key is a normal operation for an
-owner or admin, from the console or from a terminal, and it is described in
-[provider keys](/docs/guides/provider-keys).
+**What breaks while you rotate.** Nothing, if the steps are run in this order.
+There is no window in which a stored key cannot be opened, because no key is
+removed until every row has been moved off it and that has been verified.
 
-An installation that does not want the feature can run with the secret unset.
-The app then says so in its start-up log and in the console, and refuses a save
-rather than accepting one it cannot seal.
+**One thing to decide first.** If the sealing key is rotating because it was
+COMPROMISED, re-sealing is the wrong operation: the keys it sealed are compromised
+with it, and re-sealing protects values that already need replacing. In that case
+tell each affected organization to revoke their provider key at the provider and
+store a new one, which is a normal operation for an owner or admin and is
+described in [provider keys](/docs/guides/provider-keys). Rotate the sealing
+secret afterwards, with these steps, so the new keys are sealed under a key
+nobody has seen.
 
----
+### Steps
+
+1. Generate the new key and write it to a vault secret of its own. Never into
+   ` + "`" + `provider-key-secret` + "`" + `, which Terraform owns and would put back.
+
+   ` + "`" + "`" + "`" + `sh
+   umask 077
+   printf 'v2=%s' "$(openssl rand -base64 32)" > /tmp/afseal
+   az keyvault secret set --vault-name afcp-kv-centralus \
+     --name provider-key-secrets --file /tmp/afseal --output none
+   shred -u /tmp/afseal
+   ` + "`" + "`" + "`" + `
+
+   The value is ` + "`" + `v2=<32 bytes of base64>` + "`" + `. The version label is yours; ` + "`" + `v2` + "`" + ` is
+   the obvious one after ` + "`" + `v1` + "`" + `, which is what every existing row says. Several
+   keys are comma separated, which is what a third rotation looks like.
+
+   The old key is NOT in this value, and that is deliberate. The application
+   merges ` + "`" + `AF_PROVIDER_KEY_SECRET` + "`" + `, which is version ` + "`" + `v1` + "`" + `, with
+   ` + "`" + `AF_PROVIDER_KEY_SECRETS` + "`" + `, so ` + "`" + `v1` + "`" + ` stays exactly where Terraform generated it
+   and you never read a live sealing key out of the vault to compose a combined
+   string.
+
+2. Point the deployment at it, holding both keys and still sealing under the old
+   one. In the environment's tfvars:
+
+   ` + "`" + "`" + "`" + `hcl
+   provider_key_secrets_name = "provider-key-secrets"
+   ` + "`" + "`" + "`" + `
+
+   Leave ` + "`" + `provider_key_version` + "`" + ` unset for now. This is a secret reference change
+   on the container app, so merging it deploys it: ` + "`" + `deploy/cd/apply-config.sh` + "`" + `
+   plans the tfvars targeted at the container app and applies it before
+   ` + "`" + `deploy.sh` + "`" + `.
+
+   **The re-sealing job is not inside that target, and neither cd step will ever
+   create it.** ` + "`" + `tools/configguard` + "`" + ` accepts a plan that changes
+   ` + "`" + `module.control_plane.azurerm_container_app.this` + "`" + ` and nothing else, so
+   ` + "`" + `azurerm_container_app_job.reseal` + "`" + ` is created once per environment by the hand
+   apply below. After that, ` + "`" + `deploy.sh` + "`" + ` moves the job to each release's tested
+   image, the same way it moves the maintenance job, and a deploy that runs before
+   the job exists says so and carries on.
+
+   Use the Terraform version cd uses, the one ` + "`" + `TERRAFORM_VERSION` + "`" + ` names in
+   ` + "`" + `.github/workflows/cd.yml` + "`" + ` and ` + "`" + `infra.yml` + "`" + ` pins identically. A newer Terraform
+   writing this state can leave it in a format cd's cannot read, and every deploy
+   after that stops at the configuration apply.
+
+   Run it after the deploy of this change to that environment has finished, so
+   the image it pins is one that contains ` + "`" + `backup-cli.mjs` + "`" + `. Staging, from a
+   checkout of the commit that deploy carried:
+
+   ` + "`" + "`" + "`" + `sh
+   cd infra/terraform/stacks/control-plane
+   terraform init -reconfigure -backend-config=backend.hcl
+   export TF_VAR_subscription_id="$(az account show --query id -o tsv)"
+   export TF_VAR_github_client_id=seeded-once-not-read-here
+   export TF_VAR_github_client_secret=seeded-once-not-read-here
+   img="$(az containerapp show -n afcp-app -g af-cp-centralus \
+     --query 'properties.template.containers[0].image' -o tsv)"
+   terraform plan -var-file=staging.tfvars -out=reseal.tfplan \
+     -var "image_repository=${img%@*}" -var "image_digest=${img#*@}" \
+     -target='module.control_plane.azurerm_container_app_job.reseal[0]'
+   terraform show -json reseal.tfplan | jq -r '.resource_changes[]
+     | select(.mode == "managed" and .change.actions != ["no-op"])
+     | "\(.change.actions | join(",")) \(.address)"'
+   ` + "`" + "`" + "`" + `
+
+   The last command must print exactly one line,
+   ` + "`" + `create module.control_plane.azurerm_container_app_job.reseal[0]` + "`" + `. Anything
+   else is a change this procedure has no business making: stop, and do not
+   apply. When it does print that one line:
+
+   ` + "`" + "`" + "`" + `sh
+   terraform apply reseal.tfplan
+   az containerapp job show -n afcp-reseal -g af-cp-centralus \
+     --query 'properties.template.containers[0].[image, command]' -o tsv
+   ` + "`" + "`" + "`" + `
+
+   The image must be the one ` + "`" + `img` + "`" + ` held and the command ` + "`" + `node backup-cli.mjs
+   reseal` + "`" + `. Production is the same commands with ` + "`" + `backend.production.hcl` + "`" + `,
+   ` + "`" + `production.tfvars` + "`" + `, ` + "`" + `afcpprod-app` + "`" + ` and ` + "`" + `afcpprod-reseal` + "`" + ` in
+   ` + "`" + `af-cp-prod-centralus` + "`" + `, run after the tag's production deploy has finished.
+
+   The image is pinned on the command line because the job reads
+   ` + "`" + `image_repository` + "`" + ` and ` + "`" + `image_tag` + "`" + ` from the stack's defaults, and a job created
+   from a default older than this change would run an image with no
+   ` + "`" + `backup-cli.mjs` + "`" + ` and no re-sealing tool in it. The job ignores later image
+   changes from Terraform, so only ` + "`" + `deploy.sh` + "`" + ` moves it from then on.
+
+   **Confirm the revision actually holds both keys before going further.** The
+   start-up log names the versions, which is the only way to check this without
+   decrypting somebody's credential:
+
+   ` + "`" + "`" + "`" + `sh
+   az containerapp logs show -n afcp-app -g af-cp-centralus --tail 200 \
+     | grep 'sealing key'
+   ` + "`" + "`" + "`" + `
+
+   It must say ` + "`" + `2 sealing keys (v1, v2)` + "`" + `. One key means the secret reference did
+   not arrive and step 4 would report that no row can be opened.
+
+3. Seal new keys under the new version. In the same tfvars:
+
+   ` + "`" + "`" + "`" + `hcl
+   provider_key_version = "v2"
+   ` + "`" + "`" + "`" + `
+
+   Merging this deploys it the same way. From here, a customer who saves a key
+   gets it sealed under ` + "`" + `v2` + "`" + ` and every existing row still opens under ` + "`" + `v1` + "`" + `.
+
+   This is a separate deploy from step 2 on purpose. Both revisions serve for a
+   few seconds during a traffic shift, and a key sealed under ` + "`" + `v2` + "`" + ` by the new
+   revision cannot be opened by a revision that has not got ` + "`" + `v2` + "`" + ` yet. Making the
+   set available first and switching which one seals second removes that window
+   rather than relying on it being short.
+
+4. Move every stored credential onto the new key. This is the job that did not
+   exist:
+
+   ` + "`" + "`" + "`" + `sh
+   az containerapp job start -n afcp-reseal -g af-cp-centralus
+   az containerapp job execution list -n afcp-reseal -g af-cp-centralus \
+     --query "[0].{name:name,status:properties.status}" -o tsv
+   ` + "`" + "`" + "`" + `
+
+   It opens each row with the key its own version names and writes it back under
+   ` + "`" + `v2` + "`" + `, one row per transaction, a batch at a time rather than the table at
+   once. It is idempotent and resumable, so starting it again after an
+   interruption continues from where it stopped, and starting it twice is safe.
+   It re-seals revoked rows too, which is what makes step 5 unambiguous. And it
+   covers every table sealed under these keys, not only provider keys: on the
+   enterprise edition that includes each organization's audit stream collector
+   credential, which its log reports as a table of its own. ` + "`" + `backup-cli.mjs` + "`" + ` is
+   the image's launcher, the same path in both images, and the enterprise copy
+   registers the enterprise tables before the tool starts. Pointed at a database
+   holding sealed values in a table it was not told about, the tool refuses to
+   run and names the table, rather than re-sealing everything else and letting
+   step 5 call the rotation complete.
+
+   Read its log. It prints a count per version and it prints no key material:
+
+   ` + "`" + "`" + "`" + `sh
+   az containerapp job execution show -n afcp-reseal -g af-cp-centralus \
+     --job-execution-name <name> --query properties.status
+   ` + "`" + "`" + "`" + `
+
+   Exit 3 means some rows could not be opened, and the log says which of two
+   things that is. Rows under a version nothing holds means the environment is
+   missing a key, which is step 2 not having taken. Rows that will not
+   authenticate under a version that IS held means those rows are damaged or were
+   moved between organizations, and they are a separate investigation. Nothing
+   has been lost either way: a row the job cannot open is left exactly as it was.
+
+5. **Verify before removing anything.** This is the step that separates a
+   completed rotation from one that appears complete, and it asks a different
+   question from step 4: not "what is left to do" but "does what has been done
+   actually work".
+
+   ` + "`" + "`" + "`" + `sh
+   az containerapp job start -n afcp-reseal -g af-cp-centralus \
+     --command "node backup-cli.mjs reseal --check"
+   ` + "`" + "`" + "`" + `
+
+   It opens EVERY row whatever version it is at and writes nothing. It must
+   report zero rows that could not be opened and zero rows not yet at ` + "`" + `v2` + "`" + `.
+   Without this check, "nothing left to re-seal" and "every row is at the new
+   version and none of them open" look identical.
+
+   A row still at ` + "`" + `v1` + "`" + ` here, reported as naming a key this revision does not
+   hold or simply counted as not yet at ` + "`" + `v2` + "`" + `, is not a failed job. It is a key a
+   customer saved through a revision that was still sealing under ` + "`" + `v1` + "`" + ` after
+   step 4 had finished, which no guard in the job can see because the write came
+   after it.
+   Run step 4 again and then this check again. Both are safe to repeat as often
+   as it takes.
+
+6. Remove the old key, which is the last proof that step 4 finished. In the
+   tfvars:
+
+   ` + "`" + "`" + "`" + `hcl
+   provider_key_secret_enabled = false
+   ` + "`" + "`" + "`" + `
+
+   The feature does not go with it: ` + "`" + `AF_PROVIDER_KEY_SECRETS` + "`" + ` still carries ` + "`" + `v2` + "`" + `,
+   and ` + "`" + `AF_PROVIDER_KEY_VERSION` + "`" + ` still names it. What goes is ` + "`" + `v1` + "`" + `, which nothing
+   should now need.
+
+   Merging it moves the container app, through the configuration apply. It does
+   not move the re-sealing job, which still references ` + "`" + `provider-key-secret` + "`" + `, and
+   it does not remove the generated key. Both are one more guarded hand apply,
+   the same commands as the job's creation in step 2 with this plan in place of
+   that one:
+
+   ` + "`" + "`" + "`" + `sh
+   terraform plan -var-file=staging.tfvars -out=retire-v1.tfplan \
+     -target='module.control_plane.azurerm_container_app_job.reseal[0]' \
+     -target='module.control_plane.azurerm_key_vault_secret.owned["provider-key-secret"]' \
+     -target='module.control_plane.random_bytes.provider_key_secret[0]'
+   ` + "`" + "`" + "`" + `
+
+   The ` + "`" + `jq` + "`" + ` line from step 2 must print exactly these three lines, in any order,
+   and nothing else:
+
+   ` + "`" + "`" + "`" + `text
+   update module.control_plane.azurerm_container_app_job.reseal[0]
+   delete module.control_plane.azurerm_key_vault_secret.owned["provider-key-secret"]
+   delete module.control_plane.random_bytes.provider_key_secret[0]
+   ` + "`" + "`" + "`" + `
+
+   The job survives, because it exists while any sealing key is configured, and
+   loses its reference to ` + "`" + `v1` + "`" + `. The pull request that sets the flag shows the two
+   destroys on its ` + "`" + `plan` + "`" + ` check, and ` + "`" + `tools/planguard/destroys-acknowledged.tsv` + "`" + `
+   needs a row for each in that same pull request, naming this rotation.
+
+   This destroys ` + "`" + `random_bytes.provider_key_secret` + "`" + ` and the vault secret it
+   wrote, so do not run it on a report you have not read. Key Vault soft delete
+   keeps the destroyed secret for the vault's retention period, so a mistake here
+   is recoverable within it, and outside it is not.
+
+7. Run step 5 once more, against the revision that no longer holds ` + "`" + `v1` + "`" + `. It must
+   say the same thing. If it now reports rows under version ` + "`" + `v1` + "`" + `, put
+   ` + "`" + `provider_key_secret_enabled` + "`" + ` back to ` + "`" + `true` + "`" + `, deploy, and go back to step 4:
+   nothing is lost while the old key still exists in the vault.
+
+**How to verify, end to end.** A customer request that spends the key is the only
+complete proof, because it exercises the same ` + "`" + `borrowKey` + "`" + ` path the rotation
+changed. Anything that calls ` + "`" + `/byok/anthropic/v1/messages` + "`" + ` will do. Short of
+that, the console's Provider keys page still showing the same fingerprint and
+last four for every organization is a good check that this moved the ciphertext
+and not the value inside it: the fingerprint is of the plaintext, so re-sealing
+cannot change it and a changed one would mean something opened the wrong row.
+
+**Afterwards.** Every subsequent rotation is the same procedure with the version
+numbers moved on: put ` + "`" + `v3=<new>` + "`" + ` alongside ` + "`" + `v2` + "`" + ` in ` + "`" + `provider-key-secrets` + "`" + `, set
+` + "`" + `provider_key_version = "v3"` + "`" + `, re-seal, check, and drop ` + "`" + `v2` + "`" + ` from the secret's
+value. ` + "`" + `provider_key_secret_enabled` + "`" + ` stays false from the first rotation onward;
+it is only ever the ` + "`" + `v1` + "`" + ` Terraform generated. The re-sealing job is still there,
+because it exists while ` + "`" + `provider_key_secrets_name` + "`" + ` names a secret, and changing
+the value of that secret is a vault write rather than a Terraform change, so later
+rotations need no hand apply at all.
+
+**On a self-hosted installation** with no Key Vault, the same three variables are
+set however that deployment sets environment variables, and the tool is the same
+one:
+
+` + "`" + "`" + "`" + `sh
+AF_PROVIDER_KEY_SECRET=<the old key> \
+AF_PROVIDER_KEY_SECRETS=v2=<the new key> \
+AF_PROVIDER_KEY_VERSION=v2 \
+AF_RESEAL_DATABASE_URL=postgres://owner:...@db:5432/antifailure \
+  node apps/api/src/backup-cli.ts reseal
+` + "`" + "`" + "`" + `
+
+From a source checkout of the enterprise edition, run
+` + "`" + `node ee/web/server/src/backup-cli.ts reseal` + "`" + ` instead, which registers the audit
+stream's table first; the community path refuses once any organization has
+chosen an audit stream destination.
+
+The connection string is read from the environment rather than taken as an
+argument, because an argument is visible in ` + "`" + `ps` + "`" + ` to every user on the machine and
+lands in shell history. ` + "`" + `--url` + "`" + ` exists for a terminal where that does not matter.
+
+**On the Helm chart** the same rotation is three values under ` + "`" + `providerKeys` + "`" + `, and
+each one maps to a step above. Step 2 is adding ` + "`" + `providerKeys.secrets` + "`" + ` as
+` + "`" + `v2=<the new key>` + "`" + ` beside the existing ` + "`" + `providerKeys.secret` + "`" + `, then ` + "`" + `helm upgrade` + "`" + `.
+Step 3 is ` + "`" + `providerKeys.version: v2` + "`" + ` and another upgrade. Step 6 is removing
+` + "`" + `providerKeys.secret` + "`" + ` once step 5 is clean. With ` + "`" + `providerKeys.existingSecret` + "`" + `,
+put ` + "`" + `AF_PROVIDER_KEY_SECRETS` + "`" + ` into that Secret instead; both sealing key
+references are optional there, so the Secret may drop ` + "`" + `AF_PROVIDER_KEY_SECRET` + "`" + `
+at step 6 without the pods refusing to start.
+
+Step 4 is a Job you run once, not a value. The chart deliberately does not
+give the serving pods the migration connection, which is the credential this
+tool uses, so the Job reads it from the chart's database Secret the way the
+maintenance CronJob does. For a release named ` + "`" + `cp` + "`" + ` with the chart creating its
+own Secrets:
+
+` + "`" + "`" + "`" + `yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cp-reseal
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: reseal
+          # The image the release is running: kubectl get deploy
+          # cp-antifailure-control-plane -o jsonpath='{..image}'
+          image: ghcr.io/antifailure/control-plane:<version>
+          command: ["node", "backup-cli.mjs", "reseal"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: AF_RESEAL_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cp-antifailure-control-plane-database
+                  key: AF_MIGRATION_DATABASE_URL
+            - name: AF_PROVIDER_KEY_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: cp-antifailure-control-plane-provider-keys
+                  key: AF_PROVIDER_KEY_SECRET
+                  optional: true
+            - name: AF_PROVIDER_KEY_SECRETS
+              valueFrom:
+                secretKeyRef:
+                  name: cp-antifailure-control-plane-provider-keys
+                  key: AF_PROVIDER_KEY_SECRETS
+                  optional: true
+            - name: AF_PROVIDER_KEY_VERSION
+              value: v2
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+` + "`" + "`" + "`" + `
+
+` + "`" + "`" + "`" + `sh
+kubectl apply -f reseal-job.yaml
+kubectl wait --for=condition=complete --timeout=30m job/cp-reseal
+kubectl logs job/cp-reseal
+` + "`" + "`" + "`" + `
+
+With ` + "`" + `database.existingSecret` + "`" + ` or ` + "`" + `providerKeys.existingSecret` + "`" + `, use those
+Secret names instead. For step 5, delete the Job and apply it again with
+` + "`" + `command: ["node", "backup-cli.mjs", "reseal", "--check"]` + "`" + `. The
+chart's NetworkPolicy only restricts traffic into the control plane's own pods,
+so it does not stand between this Job and Postgres.
+
+**An installation that does not want the feature** can run with no sealing secret
+at all. The app says so in its start-up log and in the console, and refuses a
+save rather than accepting one it cannot seal.
 
 ## ` + "`" + `github-client-id` + "`" + `, ` + "`" + `github-client-secret` + "`" + `
 
