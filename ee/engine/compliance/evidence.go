@@ -372,8 +372,12 @@ type Attestation struct {
 	Report    AttestationReport `json:"report"`
 	Golden    string            `json:"golden"`
 	RulesHash string            `json:"rules_hash"`
-	PublicKey string            `json:"public_key"`
-	Signature string            `json:"signature"`
+	// Provenance says which project the golden was made for. The engine has
+	// signed it since 2026-09-01, and until this field existed here every real
+	// attestation re-encoded without it and failed its signature.
+	Provenance string `json:"provenance,omitempty"`
+	PublicKey  string `json:"public_key"`
+	Signature  string `json:"signature"`
 
 	// SignatureValid is the result of checking the signature against the key
 	// the document itself carries. Whether that key is trusted is a separate
@@ -390,8 +394,14 @@ type Attestation struct {
 }
 
 // AttestationReport is what the scan found.
+//
+// Every field the engine's verify.Report signs, in the engine's order, with
+// the engine's tags. Engine, Unread and Unruled were added to the engine after
+// this mirror was written and were missing here, so each real attestation that
+// carried one re-encoded without it and failed its signature.
 type AttestationReport struct {
 	Scanner     string               `json:"scanner"`
+	Engine      string               `json:"engine,omitempty"`
 	StartedAt   time.Time            `json:"started_at"`
 	FinishedAt  time.Time            `json:"finished_at"`
 	Tables      int                  `json:"tables"`
@@ -400,6 +410,19 @@ type AttestationReport struct {
 	SampleSize  int                  `json:"sample_size"`
 	Findings    []AttestationFinding `json:"findings"`
 	Skipped     []string             `json:"skipped,omitempty"`
+	Unread      []AttestationUnread  `json:"unread,omitempty"`
+	Unruled     []string             `json:"unruled,omitempty"`
+}
+
+// AttestationUnread is one column the scan could not read as text, mirroring
+// the engine's verify.UnreadColumn.
+type AttestationUnread struct {
+	Schema string `json:"schema"`
+	Table  string `json:"table"`
+	Column string `json:"column"`
+	Type   string `json:"type"`
+	Reason string `json:"reason"`
+	Ruled  bool   `json:"ruled"`
 }
 
 // AttestationFinding is one column the scan found real data in.
@@ -436,12 +459,17 @@ func ParseAttestation(raw []byte) (Attestation, error) {
 // tag, and reordering it silently breaks every verification.
 //
 // That is a fragile coupling and pretending otherwise would be worse than
-// having it. Two things make it safe rather than hopeful. The types cannot be
-// shared, because a separate module cannot import engine/internal. And there is
-// a test that takes an attestation produced by the engine's own signer and runs
-// it through this, so a change to either side is caught by a failing test
-// rather than by a compliance report quietly reporting every attestation as
-// forged.
+// having it. The types cannot be shared, because a separate module cannot
+// import engine/internal. This comment used to say a test fed this an
+// attestation from the engine's own signer, and the only fixtures were two
+// written on 2026-08-26; the engine then signed four more fields, this mirror
+// learned none of them, and every real attestation failed here while those
+// tests passed. What holds it now: engine/internal/verify signs
+// testdata/attestation-signed.json with a fixed key and every field of the
+// signed shape set, and fails when that shape changes without the file, and
+// TestAnAttestationTheEngineSignsTodayVerifies and
+// TestEveryFieldTheEngineSignsIsMirroredInOrder in this package must verify
+// and re-encode that same file.
 func (a Attestation) verify() (bool, string) {
 	pub, err := base64.StdEncoding.DecodeString(a.PublicKey)
 	if err != nil || len(pub) != ed25519.PublicKeySize {
@@ -455,14 +483,15 @@ func (a Attestation) verify() (bool, string) {
 	unsigned := a
 	unsigned.Signature = ""
 	body, err := json.Marshal(struct {
-		Report    AttestationReport `json:"report"`
-		Golden    string            `json:"golden"`
-		RulesHash string            `json:"rules_hash"`
-		PublicKey string            `json:"public_key"`
-		Signature string            `json:"signature"`
+		Report     AttestationReport `json:"report"`
+		Golden     string            `json:"golden"`
+		RulesHash  string            `json:"rules_hash"`
+		Provenance string            `json:"provenance,omitempty"`
+		PublicKey  string            `json:"public_key"`
+		Signature  string            `json:"signature"`
 	}{
 		Report: unsigned.Report, Golden: unsigned.Golden, RulesHash: unsigned.RulesHash,
-		PublicKey: unsigned.PublicKey, Signature: "",
+		Provenance: unsigned.Provenance, PublicKey: unsigned.PublicKey, Signature: "",
 	})
 	if err != nil {
 		return false, "the attestation could not be re-encoded"
