@@ -1749,9 +1749,11 @@ jobs:
         # renders for `toJSON(inputs)`, the expression the example passes.
         # From #276 that step appended a `}` to any non-empty dispatch, so the
         # `{}` a pull request renders reached jq as `{}}` and every customer's
-        # check failed in fourteen seconds. No workflow in this repository
-        # calls the action, so a rendering read off a real runner rather than
-        # typed into a test is the part only this job can supply.
+        # check failed in fourteen seconds. The job named `the action runs the
+        # way a customer's workflow runs it` runs the action whole, but with
+        # dispatch values it spells itself, so a rendering read off a real
+        # runner rather than typed into a test is the part only this job can
+        # supply.
         env:
           AF_DISPATCH: ${{ toJSON(inputs) }}
         run: go run ./tools/actioncheck .
@@ -2217,3 +2219,504 @@ jobs:
           else
             go run ./tools/prmerge -check-attribution "$range"
           fi
+
+  action:
+    name: the action runs the way a customer's workflow runs it
+    # WHY THIS JOB EXISTS. action.yml is what every customer's pull request runs,
+    # through `antifailure/antifailure@v1`, and nothing in this repository ran it.
+    # tools/actioncheck reads it for shape and executes two of its step scripts
+    # by lifting them out of the file, and dogfood.yml runs the product against
+    # this repository with its own steps rather than through the action. So the
+    # first line of the first step was covered by nothing at all, and it was
+    # wrong from b5fbcbb7a (#276) onwards:
+    #
+    #   dispatch="${AF_DISPATCH:-{}}"
+    #
+    # The expansion ends at the first `}`, so the second is a literal appended to
+    # whatever the input holds, and only an empty input escapes it. The input's
+    # default is `{}` and check.yml hands on `toJSON(inputs)`, which is `{}` on a
+    # pull request, so a customer who left the input out and a customer who went
+    # through check.yml both gave jq `{}}`, jq refused it with "Unmatched '}' at
+    # line 1, column 3", and the step ended under `set -e` before `af` was
+    # installed. On 2026-09-13 the demo repository's run 34741145486 died exactly
+    # that way on v1.3.5, and its run 34741273951 reached `af` only because the
+    # workflow had been changed to pass an empty string.
+    #
+    # So this runs the action WHOLE, by `uses: ./`, once per shape of input a
+    # customer or the hosted control plane actually sends, starting with the
+    # three spellings of a pull request: the input left out, `{}`, and an empty
+    # string. It asserts on what can be observed from outside the action: its
+    # outputs, the exact arguments it handed `af`, and the requests it made of
+    # the control plane. A step condition, a step output read three steps later,
+    # and hashFiles deciding whether a report is sent are all wiring that only a
+    # runner evaluates, and a script lifted out of the file cannot see any of it.
+    #
+    # EVERY CASE REACHES A VERDICT. Each `uses:` step is `continue-on-error`, and
+    # every step here, the action and the assertion alike, runs unless the job
+    # was cancelled. The assertion reads the step's `outcome` itself, so one
+    # broken case cannot hide the ones after it: a job stops at its first
+    # failure, and the steps it skipped read exactly like the steps that passed.
+    # The condition on the action steps is not decoration. Without it, run
+    # 34764356993 ran the first case, its assertion failed as it should, the job
+    # was marked failed, and the default `success()` then skipped the other nine
+    # actions, so nine assertions judged a step that never ran. The assertions
+    # also run every check before exiting, so a failed case still empties the
+    # records the next case is judged on.
+    #
+    # WHAT IS REAL AND WHAT STANDS IN. The install step is real: it fetches
+    # install.sh from antifailure.dev and installs a published release, which
+    # is what a customer's job does, and the release binary is checked below.
+    # `AF_BIN_DIR` sends that binary to its own directory, and
+    # tools/actioncheck/uses/af, first on the PATH, records every call instead.
+    # A real `af ci` needs a database, a container runtime and twenty minutes to
+    # answer a question about the product, and this job's question is about the
+    # shell around it. tools/actioncheck/uses/plane.py stands in for GitHub's
+    # identity endpoint and for the control plane, so no identity token and no
+    # credential of any kind is involved, and a pull request from a fork runs
+    # the same cases as one from a branch.
+    #
+    # It has no recipe in `just gate`, and that is the nature of the thing
+    # rather than an omission: `uses:` is evaluated by a GitHub runner and by
+    # nothing a laptop runs. Every run step below is plumbing and assertion, and
+    # tools/gatecheck pairs none of it with a gate.
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      EXPECT: tools/actioncheck/uses/expect.sh
+      PLANE: http://127.0.0.1:8787
+      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      # The harmless value case 11 passes as a secret. Named apart from the
+      # variable it is exported under, so the pairing loop cannot find that name
+      # already set and skip the pair. It is never printed: the assertions
+      # compare its sha256 and its length.
+      PAIR_VALUE: stand-in-value-for-the-secret-pairing-loop
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: The stand ins, first on the PATH and listening
+        run: |
+          set -euo pipefail
+          # Where the action puts `af` on the PATH, and it is added AFTER the
+          # installer's own line, so it comes first. The release goes to
+          # AF_BIN_DIR on every case below and never lands here.
+          install -D -m 0755 tools/actioncheck/uses/af "$HOME/.antifailure/bin/af"
+          nohup python3 tools/actioncheck/uses/plane.py 8787 "$RUNNER_TEMP/af-plane" \
+            > "$RUNNER_TEMP/af-plane.log" 2>&1 &
+          # A POST to a route that does not exist answers 404 and is not
+          # recorded, so waiting for the server adds nothing to what it saw.
+          for _ in $(seq 1 50); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$PLANE/ready" || true)
+            if [ "$code" = "404" ]; then echo "the stand in control plane is listening"; exit 0; fi
+            sleep 0.2
+          done
+          echo "::error::the stand in control plane never answered"
+          cat "$RUNNER_TEMP/af-plane.log"
+          exit 1
+
+      - id: release
+        name: The release the pinned cases install
+        # The first case installs whatever is latest, as a customer's default
+        # does. The rest name the same release through the version input, which
+        # covers that input and asks GitHub's API once rather than eleven times
+        # without a token.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "the pinned cases install $tag"
+
+      # 1. A pull request that leaves the dispatch input out, so the action's
+      # own default of `{}` is what the plan step reads. A control plane takes
+      # the report, and the report goes to a path of the caller's choosing.
+      - id: omitted
+        name: The action, on a pull request that leaves the dispatch input out
+        if: ${{ !cancelled() }}
+        uses: ./
+        continue-on-error: true
+        with:
+          control-plane: http://127.0.0.1:8787/accept
+          report: rehearsal.md
+        env:
+          AF_BIN_DIR: ${{ runner.temp }}/af-release/bin
+          ACTIONS_ID_TOKEN_REQUEST_URL: http://127.0.0.1:8787/identity?api-version=2.0
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: stand-in-request-token
+
+      - name: With the input left out, af ci ran and its report reached the control plane
+        if: ${{ !cancelled() }}
+        env:
+          OUTCOME: ${{ steps.omitted.outcome }}
+          COMMAND: ${{ steps.omitted.outputs.command }}
+          ENVIRONMENT: ${{ steps.omitted.outputs.environment }}
+          SELECTED: ${{ steps.omitted.outputs.selected }}
+          HANDLED: ${{ steps.omitted.outputs.handled }}
+        run: |
+          set -uo pipefail
+          status=0
+          check() { bash "$EXPECT" "$@" || status=1; }
+          check equal "the outcome" success "$OUTCOME"
+          check equal "the command output" ci "$COMMAND"
+          check equal "the environment output" true "$ENVIRONMENT"
+          check equal "the selected output" workflows,load "$SELECTED"
+          check equal "the handled output" true "$HANDLED"
+          check file rehearsal.md
+          check file report.json
+          check plane omitted \
+            '{"audience": "antifailure-control-plane", "bearer": true, "request": "identity"}' \
+            '{"head_sha": "'"$HEAD_SHA"'", "identity": true, "plane": "accept", "request": "claim"}' \
+            '{"credential": true, "head_sha": "'"$HEAD_SHA"'", "markdown": true, "plane": "accept", "request": "report", "verdict": "PASS"}'
+          check calls omitted \
+            "af runner install" \
+            "af change --write rehearsal.md" \
+            "af ci --report rehearsal.md --report-json report.json"
+          exit "$status"
+
+      # 2. A pull request exactly as check.yml calls the action: dispatch is
+      # `toJSON(inputs)`, which is `{}`.
+      - id: braces
+        name: The action, as check.yml calls it on a pull request, with {}
+        if: ${{ !cancelled() }}
+        uses: ./
+        continue-on-error: true
+        with:
+          dispatch: '{}'
+          control-plane: http://127.0.0.1:8787/accept
+          version: ${{ steps.release.outputs.tag }}
+        env:
+          AF_BIN_DIR: ${{ runner.temp }}/af-release/bin
+          ACTIONS_ID_TOKEN_REQUEST_URL: http://127.0.0.1:8787/identity?api-version=2.0
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: stand-in-request-token
+
+      - name: With {}, af ci ran and its report reached the control plane
+        if: ${{ !cancelled() }}
+        env:
+          OUTCOME: ${{ steps.braces.outcome }}
+          COMMAND: ${{ steps.braces.outputs.command }}
+          HANDLED: ${{ steps.braces.outputs.handled }}
+        run: |
+          set -uo pipefail
+          status=0
+          check() { bash "$EXPECT" "$@" || status=1; }
+          check equal "the outcome" success "$OUTCOME"
+          check equal "the command output" ci "$COMMAND"
+          check equal "the handled output" true "$HANDLED"
+          check file report.json
+          check plane braces \
+            '{"audience": "antifailure-control-plane", "bearer": true, "request": "identity"}' \
+            '{"head_sha": "'"$HEAD_SHA"'", "identity": true, "plane": "accept", "request": "claim"}' \
+            '{"credential": true, "head_sha": "'"$HEAD_SHA"'", "markdown": true, "plane": "accept", "request": "report", "verdict": "PASS"}'
+          check calls braces \
+            "af runner install" \
+            "af change --write report.md" \
+            "af ci --report report.md --report-json report.json"
+          exit "$status"
+
+      # 3. A pull request that passes an empty string, the one spelling the
+      # brace default never touched, with no control plane: the self hosted
+      # and no account path.
+      - id: empty
+        name: The action, on a pull request that passes an empty dispatch
+        if: ${{ !cancelled() }}
+        uses: ./
+        continue-on-error: true
+        with:
+          dispatch: ''
+          version: ${{ steps.release.outputs.tag }}
+        env:
+          AF_BIN_DIR: ${{ runner.temp }}/af-release/bin
+
+      - name: With an empty dispatch, af ci ran and no control plane was called
+        if: ${{ !cancelled() }}
+        env:
+          OUTCOME: ${{ steps.empty.outcome }}
+          COMMAND: ${{ steps.empty.outputs.command }}
+          HANDLED: ${{ steps.empty.outputs.handled }}
+          AF_BIN_DIR: ${{ runner.temp }}/af-release/bin
+        run: |
+          set -uo pipefail
+          status=0
+          check() { bash "$EXPECT" "$@" || status=1; }
+          check equal "the outcome" success "$OUTCOME"
+          check equal "the command output" ci "$COMMAND"
+          check equal "the handled output" "" "$HANDLED"
+          # The stand in answered, and not the release. If the PATH order ever
+          # changes, these cases run a real `af` and every call record is empty,
+          # which is red rather than quietly different. This case checks it
+          # because it is the one that reaches `af` whichever side of the brace
+          # default the action is on.
+          check equal "the af the action ran" "$HOME/.antifailure/bin/af" "$(command -v af || true)"
+          if ! "$AF_BIN_DIR/af" version; then
+            echo "::error::the release the install step fetched does not run from $AF_BIN_DIR"
+            status=1
+          fi
+          check file report.json
+          check plane empty
+          check calls empty \
+            "af runner install" \
+            "af change --write report.md" \
+            "af ci --report report.md --report-json report.json"
+          exit "$status"
+
+      # 4. A pull request whose report the control plane refuses. That is the one
+      # answer the action fails a build over, so the step must fail, and the
+      # record shows it failed at the report and not before it.
+      - id: refused
+        name: The action, on a pull request whose report is refused
+        if: ${{ !cancelled() }}
+        uses: ./
+        continue-on-error: true
+        with:
+          dispatch: '{}'
+          control-plane: http://127.0.0.1:8787/refuse
+          version: ${{ steps.release.outputs.tag }}
+        env:
+          AF_BIN_DIR: ${{ runner.temp }}/af-release/bin
+          ACTIONS_ID_TOKEN_REQUEST_URL: http://127.0.0.1:8787/identity?api-version=2.0
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: stand-in-request-token
+
+      - name: A refused report failed the action, at the report
+        if: ${{ !cancelled() }}
+        env:
+          OUTCOME: ${{ steps.refused.outcome }}
+          COMMAND: ${{ steps.refused.outputs.command }}
+          HANDLED: ${{ steps.refused.outputs.handled }}
+        run: |
+          set -uo pipefail
+          status=0
+          check() { bash "$EXPECT" "$@" || status=1; }
+          check equal "the outcome" failure "$OUTCOME"
+          check equal "the command output" ci "$COMMAND"
+          check equal "the handled output" "" "$HANDLED"
+          check plane refused \
+            '{"audience": "antifailure-control-plane", "bearer": true, "request": "identity"}' \
+            '{"head_sha": "'"$HEAD_SHA"'", "identity": true, "plane": "refuse", "request": "claim"}' \
+            '{"credential": true, "head_sha": "'"$HEAD_SHA"'", "markdown": true, "plane": "refuse", "request": "report", "verdict": "PASS"}'
+          check calls refused \
+            "af runner install" \
+            "af change --write report.md" \
+            "af ci --report report.md --report-json report.json"
+          exit "$status"
+
+      # 5. The console's "Run a scenario", with all seven keys the control plane
+      # sends, the empty ones included.
+      - id: scenario
+        name: The action, dispatched to run a scenario
+        if: ${{ !cancelled() }}
+        uses: ./
+        continue-on-error: true
+        with:
+          dispatch: '{"command":"scenario","workflows":"checkout,signup","duration":"","scale":"","seed":"7","concurrency":"3","run_id":""}'
+          version: ${{ steps.release.outputs.tag }}
+        env:
+          AF_BIN_DIR: ${{ runner.temp }}/af-release/bin
+
+      - name: A scenario dispatch named each workflow and nothing else
+        if: ${{ !cancelled() }}
+        env:
+          OUTCOME: ${{ steps.scenario.outcome }}
+          COMMAND: ${{ steps.scenario.outputs.command }}
+        run: |
+          set -uo pipefail
+          status=0
+          check() { bash "$EXPECT" "$@" || status=1; }
+          check equal "the outcome" success "$OUTCOME"
+          check equal "the command output" scenario "$COMMAND"
+          check calls scenario \
+            "af change --write report.md" \
+            "af load scenario --only checkout --only signup --seed 7 --concurrency 3"
+          exit "$status"
+
+      # 6. Load, which passes every value positionally, so an empty one must
+      # arrive as an empty argument rather than shifting the rest.
+      - id: load
+        name: The action, dispatched to send load
+        if: ${{ !cancelled() }}
+        uses: ./
+        continue-on-error: true
+        with:
+          dispatch: '{"command":"load","workflows":"browse","duration":"60s","scale":"2","seed":"","concurrency":"","run_id":"run-42"}'
+          version: ${{ steps.release.outputs.tag }}
+        env:
+          AF_BIN_DIR: ${{ runner.temp }}/af-release/bin
+
+      - name: A load dispatch passed every value in its place
+        if: ${{ !cancelled() }}
+        env:
+          OUTCOME: ${{ steps.load.outcome }}
+          COMMAND: ${{ steps.load.outputs.command }}
+        run: |
+          set -uo pipefail
+          status=0
+          check() { bash "$EXPECT" "$@" || status=1; }
+          check equal "the outcome" success "$OUTCOME"
+          check equal "the command output" load "$COMMAND"
+          check file workload-result.json
+          check calls load \
+            "af change --write report.md" \
+            "af workload run --kind load --select browse --duration 60s --scale 2 --seed '' --concurrency '' --run-id run-42 --result workload-result.json"
+          exit "$status"
+
+      # 7. The dispatch wins over the command input, and exploring installs the
+      # runner because it drives a browser.
+      - id: explore
+        name: The action, dispatched to explore over a command input
+        if: ${{ !cancelled() }}
+        uses: ./
+        continue-on-error: true
+        with:
+          command: up
+          dispatch: '{"command":"explore","workflows":"checkout","seed":"11"}'
+          version: ${{ steps.release.outputs.tag }}
+        env:
+          AF_BIN_DIR: ${{ runner.temp }}/af-release/bin
+
+      - name: The dispatch won over the command input
+        if: ${{ !cancelled() }}
+        env:
+          OUTCOME: ${{ steps.explore.outcome }}
+          COMMAND: ${{ steps.explore.outputs.command }}
+        run: |
+          set -uo pipefail
+          status=0
+          check() { bash "$EXPECT" "$@" || status=1; }
+          check equal "the outcome" success "$OUTCOME"
+          check equal "the command output" explore "$COMMAND"
+          check calls explore \
+            "af runner install" \
+            "af change --write report.md" \
+            "af explore --only checkout --seed 11"
+          exit "$status"
+
+      # 8. `null`, which is what `toJSON` makes of an absent object, falls back
+      # to the command input, and `runner: never` is obeyed.
+      - id: null-dispatch
+        name: The action, with a null dispatch
+        if: ${{ !cancelled() }}
+        uses: ./
+        continue-on-error: true
+        with:
+          command: down
+          dispatch: 'null'
+          runner: never
+          version: ${{ steps.release.outputs.tag }}
+        env:
+          AF_BIN_DIR: ${{ runner.temp }}/af-release/bin
+
+      - name: A null dispatch ran the command input
+        if: ${{ !cancelled() }}
+        env:
+          OUTCOME: ${{ steps.null-dispatch.outcome }}
+          COMMAND: ${{ steps.null-dispatch.outputs.command }}
+        run: |
+          set -uo pipefail
+          status=0
+          check() { bash "$EXPECT" "$@" || status=1; }
+          check equal "the outcome" success "$OUTCOME"
+          check equal "the command output" down "$COMMAND"
+          check calls null-dispatch \
+            "af change --write report.md" \
+            "af workload teardown --result teardown-result.json"
+          exit "$status"
+
+      # 9. An empty dispatch beside a command input, with `runner: always` on a
+      # command that would not otherwise install it.
+      - id: command-input
+        name: The action, with an empty dispatch and a command input
+        if: ${{ !cancelled() }}
+        uses: ./
+        continue-on-error: true
+        with:
+          command: up
+          dispatch: ''
+          runner: always
+          version: ${{ steps.release.outputs.tag }}
+        env:
+          AF_BIN_DIR: ${{ runner.temp }}/af-release/bin
+
+      - name: An empty dispatch ran the command input
+        if: ${{ !cancelled() }}
+        env:
+          OUTCOME: ${{ steps.command-input.outcome }}
+          COMMAND: ${{ steps.command-input.outputs.command }}
+        run: |
+          set -uo pipefail
+          status=0
+          check() { bash "$EXPECT" "$@" || status=1; }
+          check equal "the outcome" success "$OUTCOME"
+          check equal "the command output" up "$COMMAND"
+          check calls command-input \
+            "af runner install" \
+            "af change --write report.md" \
+            "af up"
+          exit "$status"
+
+      # 10. A command the action does not know is refused before anything is
+      # installed or run. The empty command output is what pins the failure to
+      # the plan step: a plan that accepted it would have written it.
+      - id: unknown
+        name: The action, dispatched a command it does not know
+        if: ${{ !cancelled() }}
+        uses: ./
+        continue-on-error: true
+        with:
+          dispatch: '{"command":"deploy"}'
+          version: ${{ steps.release.outputs.tag }}
+        env:
+          AF_BIN_DIR: ${{ runner.temp }}/af-release/bin
+
+      - name: An unknown command was refused and ran nothing
+        if: ${{ !cancelled() }}
+        env:
+          OUTCOME: ${{ steps.unknown.outcome }}
+          COMMAND: ${{ steps.unknown.outputs.command }}
+        run: |
+          set -uo pipefail
+          status=0
+          check() { bash "$EXPECT" "$@" || status=1; }
+          check equal "the outcome" failure "$OUTCOME"
+          check equal "the command output" "" "$COMMAND"
+          check calls unknown
+          exit "$status"
+
+      # 11. One secret selected by name, the way check.yml hands the action the
+      # secrets a manifest names: AF_SECRET_1_NAME carries the name and
+      # AF_SECRET_1 the value. The step that runs the check must export the value
+      # under that name and unset both slot variables before `af` runs, and the
+      # steps before it must not see the export. Asserted on the name, a sha256
+      # and a length, never on the value.
+      - id: secret-pair
+        name: The action, on a pull request that passes one secret by name
+        if: ${{ !cancelled() }}
+        uses: ./
+        continue-on-error: true
+        with:
+          dispatch: '{}'
+          version: ${{ steps.release.outputs.tag }}
+        env:
+          AF_BIN_DIR: ${{ runner.temp }}/af-release/bin
+          AF_SECRET_1_NAME: AF_STAND_IN_SECRET
+          AF_SECRET_1: ${{ env.PAIR_VALUE }}
+
+      - name: The secret reached af ci under its name, and only there
+        if: ${{ !cancelled() }}
+        env:
+          OUTCOME: ${{ steps.secret-pair.outcome }}
+          COMMAND: ${{ steps.secret-pair.outputs.command }}
+        run: |
+          set -uo pipefail
+          status=0
+          check() { bash "$EXPECT" "$@" || status=1; }
+          digest=$(printf '%s' "$PAIR_VALUE" | sha256sum | cut -d' ' -f1)
+          length=${#PAIR_VALUE}
+          check equal "the outcome" success "$OUTCOME"
+          check equal "the command output" ci "$COMMAND"
+          check secrets secret-pair \
+            "runner install stand_ins=none slots_left=AF_SECRET_1,AF_SECRET_1_NAME" \
+            "change --write stand_ins=none slots_left=AF_SECRET_1,AF_SECRET_1_NAME" \
+            "ci --report stand_ins=AF_STAND_IN_SECRET:sha256=${digest}:length=${length} slots_left=none"
+          check calls secret-pair \
+            "af runner install" \
+            "af change --write report.md" \
+            "af ci --report report.md --report-json report.json"
+          exit "$status"
