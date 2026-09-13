@@ -216,7 +216,10 @@ that settles it against a real account is on the provider's page.
 `af explore` can be aimed at a persona, a start page, a phone viewport, a budget
 and a focus for one run. An agent given the MCP server can now search and read
 the documentation this build ships. `af init` proposes a stance for every store
-beside the primary and writes an image nobody builds as its own service.
+beside the primary and writes an image nobody builds as its own service. It also stopped reading a store's companions as the store: a
+Kafka web console, a PostgREST server and each store's exporter and admin
+console had been reported as a second copy of that store and removed from the
+services.
 
 ### Instruments that could not say no
 
@@ -267,7 +270,8 @@ and `resources.memory` ignored by both runtimes (#305). An application speaking
 gRPC could not run (#325). The rehearsal ran with every declared secret blank
 (#392). Two services given the first value of a shared variable name (#387).
 `af init` refusing an app beside a prebuilt image (#401), and reading any image
-containing `moto` as an AWS emulator (#390). `af oracle` reporting every persona
+containing `moto` as an AWS emulator (#390). A Kafka console, a PostgREST server and every
+store's exporter read as a second store (#405). `af oracle` reporting every persona
 as a missing row (#395). A refusal telling Heroku and Tiger Cloud users to run a
 statement they may not run (#388). A report understating its own twin (#299),
 and claiming a substitution the sidecar refuses (#342). A silent first `af up`
