@@ -391,7 +391,24 @@ func (a *ComposeAnalyzer) Analyze(_ context.Context, r *Repo) ([]Finding, error)
 		if !ok {
 			continue
 		}
-		for _, svc := range parseCompose(body) {
+		services := parseCompose(body)
+
+		// The services this file hands to the environment instead of the
+		// manifest: emulators and stores. A dependency on one of them is
+		// satisfied by the environment and must not reach depends_on, where it
+		// would name a service the manifest never declares. It is decided by
+		// what the service runs, because the name says nothing: Confluent's
+		// compose files call their broker "broker".
+		declared := map[string]bool{}
+		provided := map[string]bool{}
+		for _, svc := range services {
+			declared[svc.name] = true
+			if cloud, _ := emulatorCloud(svc.image); cloud != "" || infraKind(svc.image) != "" {
+				provided[svc.name] = true
+			}
+		}
+
+		for _, svc := range services {
 			name := sanitizeServiceName(svc.name)
 
 			// A cloud emulator in compose is not a service to build either,
@@ -491,7 +508,9 @@ func (a *ComposeAnalyzer) Analyze(_ context.Context, r *Repo) ([]Finding, error)
 				})
 			}
 			for _, dep := range svc.dependsOn {
-				if infraKind(dep) != "" || isInfraName(dep) {
+				// A name this file does not declare cannot be looked up, so
+				// only there does the conventional name still decide.
+				if provided[dep] || (!declared[dep] && isInfraName(dep)) {
 					continue
 				}
 				out = append(out, Finding{
@@ -686,41 +705,54 @@ func envPair(item string) (name, value string) {
 	return "", ""
 }
 
-// infraKind recognises an image as infrastructure rather than application code.
-func infraKind(image string) string {
-	l := strings.ToLower(image)
-	if l == "" {
-		return ""
-	}
-	// Strip a registry prefix and a tag so that ghcr.io/x/postgres:16 matches.
-	base := imageBase(l)
-
-	switch {
-	case strings.Contains(base, "postgres"), strings.Contains(base, "pgvector"),
-		strings.Contains(base, "timescale"), strings.Contains(base, "supabase"):
-		return "postgres"
-	case base == "redis", strings.Contains(base, "redis"), strings.Contains(base, "valkey"):
-		return "redis"
-	case strings.Contains(base, "mysql"), strings.Contains(base, "mariadb"):
-		return "mysql"
-	case strings.Contains(base, "mongo"):
-		return "mongodb"
-	case strings.Contains(base, "rabbitmq"):
-		return "rabbitmq"
-	case strings.Contains(base, "elasticsearch"), strings.Contains(base, "opensearch"):
-		return "elasticsearch"
-	case strings.Contains(base, "minio"):
-		return "objectstore"
-	case strings.Contains(base, "clickhouse"):
-		return "clickhouse"
+// infraImages maps the repository name of every published image detection
+// treats as a store the environment provides to the kind of store it is.
+//
+// It is a list rather than a substring match because the images that stand
+// beside a store are named after it. provectuslabs/kafka-ui, a web console,
+// matched "kafka"; postgrest/postgrest, an API server, matched "postgres"; and
+// each store's exporter, admin console and REST proxy did the same. A wrong
+// answer here removes a real service from the manifest and writes a store in
+// its place, so a name belongs in this list only when it is the store itself.
+// Every name was checked against the registry that publishes it.
+var infraImages = map[string]string{
+	// postgres, supabase/postgres, bitnami/postgresql, postgis/postgis,
+	// pgvector/pgvector and ankane/pgvector, and timescale's two images.
+	"postgres": "postgres", "postgresql": "postgres", "postgis": "postgres",
+	"pgvector": "postgres", "timescaledb": "postgres", "timescaledb-ha": "postgres",
+	// redis, bitnami/redis, redis/redis-stack and its server-only image,
+	// valkey/valkey and bitnami/valkey.
+	"redis": "redis", "redis-stack": "redis", "redis-stack-server": "redis", "valkey": "redis",
+	// mysql, mysql/mysql-server, mariadb, and bitnami's two.
+	"mysql": "mysql", "mysql-server": "mysql", "mariadb": "mysql",
+	// mongo, bitnami/mongodb, mongodb/mongodb-community-server.
+	"mongo": "mongodb", "mongodb": "mongodb", "mongodb-community-server": "mongodb",
+	"rabbitmq": "rabbitmq",
+	// elasticsearch, docker.elastic.co's copy, opensearchproject/opensearch.
+	"elasticsearch": "elasticsearch", "opensearch": "elasticsearch",
+	// quay.io/minio/minio, the former minio/minio, bitnami/minio.
+	"minio": "objectstore",
+	// clickhouse/clickhouse-server, yandex/clickhouse-server, bitnami/clickhouse.
+	"clickhouse": "clickhouse", "clickhouse-server": "clickhouse",
 	// Kafka was not recognised at all, which is why a compose file running one
 	// produced no finding of any kind rather than a classification that was
-	// then dropped. cp-kafka is Confluent's image and redpanda is the
-	// protocol compatible one, so both answer to the same stance.
-	case strings.Contains(base, "kafka"), strings.Contains(base, "redpanda"):
-		return "kafka"
+	// then dropped. bitnami/kafka, wurstmeister/kafka and apache/kafka share
+	// a name; apache/kafka-native is the GraalVM build; cp-kafka, cp-server,
+	// cp-enterprise-kafka and confluent-local are Confluent's brokers; and
+	// redpandadata/redpanda is the protocol compatible one, so all of them
+	// answer to the same stance.
+	"kafka": "kafka", "kafka-native": "kafka", "cp-kafka": "kafka", "cp-server": "kafka",
+	"cp-enterprise-kafka": "kafka", "confluent-local": "kafka", "redpanda": "kafka",
+}
+
+// infraKind recognises an image as infrastructure rather than application
+// code, by its repository name: the last path segment, without the registry,
+// the tag or the digest, so ghcr.io/x/postgres:16 is postgres.
+func infraKind(image string) string {
+	if image == "" {
+		return ""
 	}
-	return ""
+	return infraImages[imageBase(image)]
 }
 
 // emulatorCloud recognises an image as a cloud emulator and names the cloud it
