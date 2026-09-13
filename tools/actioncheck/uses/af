@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# A stand in for `af`, for the job in ci.yml that runs action.yml whole.
+#
+# The job installs the real release and then puts this first on the PATH, so
+# every `af` the action runs lands here instead. It records the arguments the
+# action built, one call per line, and writes the files and step outputs the
+# real commands write, so the steps after it take the branches a real run
+# takes. What it deliberately does not do is check anything: the subject is the
+# action's own shell, and a real `af ci` needs a database, a container runtime
+# and twenty minutes to say something about a different question.
+#
+# Every argument is written with %q, so an empty one reads as '' and cannot
+# disappear into the spacing. `--seed ''` and `--seed` are different calls.
+set -euo pipefail
+
+temp="${RUNNER_TEMP:?RUNNER_TEMP is not set, so there is nowhere to record this call}"
+line="af"
+if [ "$#" -gt 0 ]; then
+  line="$line$(printf ' %q' "$@")"
+fi
+printf '%s\n' "$line" >> "$temp/af-calls"
+
+# WHAT THE SECRET PAIRING LOOP HANDED THIS CALL, WITHOUT THE VALUE.
+#
+# The step that runs the check exports each AF_SECRET_<n>_NAME and AF_SECRET_<n>
+# pair under the name and unsets both halves. A case passes a pair whose name
+# starts AF_STAND_IN_, and this records, per call, which such variables arrived,
+# by sha256 and length only, and which slot variables are still set. The record
+# is printed into a public build log, and a harmless value is still a value.
+# Nothing is written for a call that saw neither, so every other case leaves this
+# record empty.
+digest() {
+  if command -v sha256sum > /dev/null 2>&1; then
+    printf '%s' "$1" | sha256sum | cut -d' ' -f1
+  else
+    printf '%s' "$1" | shasum -a 256 | cut -d' ' -f1
+  fi
+}
+stand_ins=""
+for name in $(compgen -e | grep -E '^AF_STAND_IN_' | sort || true); do
+  value="${!name}"
+  stand_ins="${stand_ins:+$stand_ins,}$name:sha256=$(digest "$value"):length=${#value}"
+done
+slots=$(compgen -e | grep -E '^AF_SECRET_[0-9]+(_NAME)?$' | sort | paste -sd, - || true)
+if [ -n "$stand_ins" ] || [ -n "$slots" ]; then
+  printf '%s stand_ins=%s slots_left=%s\n' "${1:-} ${2:-}" "${stand_ins:-none}" "${slots:-none}" >> "$temp/af-secrets"
+fi
+
+# The value after a flag, or empty.
+flag() {
+  local want="$1"
+  shift
+  while [ "$#" -gt 0 ]; do
+    if [ "$1" = "$want" ] && [ "$#" -gt 1 ]; then
+      printf '%s' "$2"
+      return 0
+    fi
+    shift
+  done
+}
+
+case "${1:-} ${2:-}" in
+  "change --write"*)
+    report=$(flag --write "$@")
+    printf '<!-- antifailure:report -->\nWhat this change touches, from the stand in.\n' > "$report"
+    # What `af change` writes, by name. See writeChangeOutputs in
+    # engine/internal/cli/change.go. `comment=false` so that the step leaving
+    # a comment on the pull request is skipped: this job's token cannot write
+    # one, and whether it should is the manifest's decision, not the shell's.
+    {
+      echo "environment=true"
+      echo "selected=workflows,load"
+      echo "source_url_env="
+      echo "secrets="
+      echo "comment=false"
+    } >> "${GITHUB_OUTPUT:?GITHUB_OUTPUT is not set, so af change has nowhere to write its plan}"
+    ;;
+  "ci "*)
+    printf 'The report, from the stand in.\n' >> "$(flag --report "$@")"
+    printf '{"verdict":"PASS"}\n' > "$(flag --report-json "$@")"
+    ;;
+  "workload run")
+    printf '{"stand_in":true}\n' > "$(flag --result "$@")"
+    ;;
+esac
