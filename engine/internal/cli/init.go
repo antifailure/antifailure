@@ -60,9 +60,8 @@ from the wrong one either fails on a missing path or, with COPY . ., succeeds
 and produces an image assembled from the wrong directory.
 
 --answer settles a question, and also overrides a value detection read with
-confidence, which is how you separate two services a repository really does
-have on one port. An id naming nothing is refused with the ids that would have
-worked rather than dropped in silence.`),
+confidence, such as a port an EXPOSE line named. An id naming nothing is
+refused with the ids that would have worked rather than dropped in silence.`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runInit(cmd.Context(), env, initOptions{
@@ -475,11 +474,9 @@ func resolveQuestions(env *Env, res *detect.Result, opts initOptions, assumed ma
 // question, and refuses one that reaches nothing.
 //
 // Detection only asks about what it is unsure of, so a value it read with
-// confidence has no question and used to be unreachable from the command line.
-// That made AF-DET-005 a dead end of the same shape as the ones this change
-// exists to close: two Dockerfiles in different directories both exposing 3000
-// is a real repository, the draft is correctly refused, and the remedy the
-// refusal named did nothing at all because there was no question to answer.
+// confidence has no question and used to be unreachable from the command line:
+// a port read straight out of an EXPOSE line could not be changed by --answer,
+// and the answer was dropped with no word about it.
 func applyRemainingAnswers(res *detect.Result, opts initOptions) error {
 	answered := map[string]bool{}
 	for _, q := range res.Questions {
@@ -537,7 +534,7 @@ func ask(env *Env, q detect.Question) (string, error) {
 // It reports whether the answer reached anything. A caller that passed an id
 // naming no service has to hear about it: an --answer silently discarded is
 // the same dead end as an error naming a remedy that does nothing, one layer
-// further in, and AF-DET-005 tells people to reach for this flag.
+// further in.
 func applyAnswer(m *schema.Manifest, id, answer string) bool {
 	if answer == "" {
 		return false
