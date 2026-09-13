@@ -214,6 +214,18 @@ A table with no primary key has its rows matched on their whole content, so an
 update reads as one row removed and one row added. Without a key there is no
 fact about which row on one side corresponds to which row on the other.
 
+A persona's rows are matched by the persona rather than by their key. Both sides
+provision the manifest's personas, each into its own database, so the owner's
+account carries a different generated key on each side. A row the two sides do
+not share by key is matched when a column holds a persona's `email` or `phone`,
+or holds a UUID already matched that way, which is how a membership follows its
+account. The matched row is then compared column by column, so a persona
+provisioned under a different name, or a role a migration rewrote, is still
+reported as a changed row. A match is made only when it is the only one on both
+sides: two sessions for the owner on each side have nothing to say which is
+which, and they are reported as they would be without a persona. Integer keys
+are not followed, because a generated 5 is also every other 5 in the database.
+
 ## Ignoring a field
 
 `oracle.ignore.fields` takes the subset of JSONPath people actually write:

@@ -502,3 +502,100 @@ func TestCaptureReadsWhatIsThere(t *testing.T) {
 	require.Empty(t, snap.Notes)
 	require.Equal(t, fmt.Sprintf("%d", 2), fmt.Sprintf("%d", len(snap.Tables)))
 }
+
+// The accounts a rehearsal provisions on each side, with the keys each side's
+// database generates for them. The golden customer is shared by key, because
+// both sides branched it; the owner is written separately on each side.
+const personaSchema = `
+CREATE TABLE users (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  email      text NOT NULL UNIQUE,
+  name       text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE members (
+  id      uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES users (id),
+  role    text NOT NULL
+);
+CREATE TABLE sessions (
+  id      uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES users (id)
+);
+INSERT INTO users (email, name) VALUES ('golden@example.test', 'Golden Customer');
+`
+
+func provisionOwner(t *testing.T, c *pgx.Conn, name string) {
+	t.Helper()
+	exec(t, c, `WITH u AS (INSERT INTO users (email, name) VALUES ('owner@example.test', '`+name+`') RETURNING id)
+INSERT INTO members (user_id, role) SELECT id, 'owner' FROM u`)
+}
+
+// An identical build that provisioned the same persona on both sides reports
+// nothing about it, however differently the two databases keyed its rows.
+func TestAPersonaProvisionedOnBothSidesIsMatchedByWhoItIs(t *testing.T) {
+	b, c := twoBranches(t, personaSchema)
+	provisionOwner(t, b, "Preview Owner")
+	provisionOwner(t, c, "Preview Owner")
+	base := capture(t, b, oracle.DatabaseOptions{})
+	cand := capture(t, c, oracle.DatabaseOptions{})
+
+	// The fixture has to produce the failure, or the assertion below proves
+	// nothing: matched by key alone, the owner's two rows pair with nothing.
+	unmatched := oracle.Compare(oracle.Input{BaselineAfter: base, CandidateAfter: cand})
+	require.NotEmpty(t, unmatched.Findings, "the two sides generated the same keys, so this fixture tests nothing")
+
+	// Declared in a different case from the row, which is how a manifest and a
+	// seed script routinely disagree.
+	res := oracle.Compare(oracle.Input{
+		Database:      oracle.DatabaseOptions{Personas: []string{"Owner@Example.test"}},
+		BaselineAfter: base, CandidateAfter: cand,
+	})
+	require.Emptyf(t, res.Findings, "%+v", res.Findings)
+	require.Equal(t, 3, res.Database.TablesCompared)
+}
+
+// Matching by persona does not hide a real difference in the persona's data:
+// the candidate provisioned the owner under another name, and that is one
+// changed row naming the column.
+func TestAPersonaMatchedByWhoItIsStillReportsAChangedColumn(t *testing.T) {
+	b, c := twoBranches(t, personaSchema)
+	provisionOwner(t, b, "Preview Owner")
+	provisionOwner(t, c, "Preview Owner Renamed")
+
+	res := oracle.Compare(oracle.Input{
+		Database:       oracle.DatabaseOptions{Personas: []string{"owner@example.test"}},
+		BaselineAfter:  capture(t, b, oracle.DatabaseOptions{}),
+		CandidateAfter: capture(t, c, oracle.DatabaseOptions{}),
+	})
+	require.Lenf(t, res.Findings, 1, "%+v", res.Findings)
+	f := res.Findings[0]
+	require.Equal(t, oracle.KindRowChanged, f.Kind)
+	require.Equal(t, "public.users", f.Where)
+	require.Equal(t, "1 column differs: name", f.Detail)
+	require.Contains(t, f.Candidate, "Preview Owner Renamed")
+}
+
+// Two rows for one persona on each side have nothing to say which is which, so
+// they are not matched, and the comparison reports them as it always did
+// rather than inventing a correspondence.
+func TestTwoRowsForOnePersonaAreNotPairedByGuesswork(t *testing.T) {
+	b, c := twoBranches(t, personaSchema)
+	for _, side := range []*pgx.Conn{b, c} {
+		provisionOwner(t, side, "Preview Owner")
+		exec(t, side, `INSERT INTO sessions (user_id) SELECT id FROM users WHERE email = 'owner@example.test'`)
+		exec(t, side, `INSERT INTO sessions (user_id) SELECT id FROM users WHERE email = 'owner@example.test'`)
+	}
+
+	res := oracle.Compare(oracle.Input{
+		Database:       oracle.DatabaseOptions{Personas: []string{"owner@example.test"}},
+		BaselineAfter:  capture(t, b, oracle.DatabaseOptions{}),
+		CandidateAfter: capture(t, c, oracle.DatabaseOptions{}),
+	})
+	kinds := map[oracle.Kind]int{}
+	for _, f := range res.Findings {
+		require.Equal(t, "public.sessions", f.Where, "only the ambiguous sessions may differ: %+v", f)
+		kinds[f.Kind]++
+	}
+	require.Equal(t, map[oracle.Kind]int{oracle.KindRowMissing: 2, oracle.KindRowExtra: 2}, kinds)
+}

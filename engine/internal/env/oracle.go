@@ -153,6 +153,7 @@ func (o *Orchestrator) Oracle(ctx context.Context, opts OracleOptions) (*OracleR
 		Config:   comparisonConfig(cfg),
 		Database: databaseOptions(cfg),
 	}
+	in.Database.Personas = personaIdentities(o.opts.Manifest.Personas)
 
 	// Before any request, so a row that already differs is attributed to the
 	// two sets of migrations rather than to the two versions of the code.
@@ -507,4 +508,20 @@ func plural(n int, one, many string) string {
 		return "1 " + one
 	}
 	return strconv.Itoa(n) + " " + many
+}
+
+// personaIdentities is what names each persona in a row: its address and its
+// phone number, whichever it declares. Both sides of a comparison provision
+// these same personas, so a row holding one of them is that persona's on
+// either side, whatever key its database generated.
+func personaIdentities(list []schema.Persona) []string {
+	var out []string
+	for _, p := range list {
+		for _, id := range []string{p.Email, p.Phone} {
+			if strings.TrimSpace(id) != "" {
+				out = append(out, id)
+			}
+		}
+	}
+	return out
 }

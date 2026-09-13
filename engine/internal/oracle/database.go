@@ -72,6 +72,11 @@ type DatabaseOptions struct {
 	Exclude []string
 	// MaxRows is the per table bound. Zero means DefaultMaxRowsPerTable.
 	MaxRows int
+	// Personas are the identities, an address or a phone number, of the
+	// personas both sides provisioned. A row the two sides do not share by key
+	// and which names one of them is matched by that persona rather than by
+	// the key each database generated. See pairPersonaRows.
+	Personas []string
 }
 
 // MaxRowsOrDefault is the bound in force.
@@ -435,6 +440,7 @@ func compareSnapshots(
 	cfg Config, opts DatabaseOptions, collect *collector, base, cand *Snapshot,
 ) ([]Finding, *DatabaseSummary) {
 	summary := &DatabaseSummary{MaxRows: opts.MaxRowsOrDefault()}
+	cand = pairPersonaRows(opts.Personas, base, cand)
 	var findings []Finding
 
 	byName := func(s *Snapshot) map[string]*Table {
