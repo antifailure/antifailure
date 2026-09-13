@@ -17,8 +17,8 @@
       "code": "AF-AGT-002",
       "area": "AGT",
       "areaName": "Agents",
-      "message": "Workflow {workflow} exhausted its budget of {budget} before completing.",
-      "resolution": "Raise the budget for {workflow} in the manifest, or split it into smaller workflows.",
+      "message": "Workflow {workflow} failed: the application did not do what the workflow expected.",
+      "resolution": "Read that workflow's steps and trace for what the page showed instead. A failure is evidence about the application, so fix the application or the expectation rather than the budget.",
       "docs": "https://antifailure.dev/docs/guides/workflows",
       "retryable": false,
       "exitCode": 8,
@@ -154,6 +154,17 @@
       "docs": "https://antifailure.dev/docs/concepts/exploration",
       "retryable": false,
       "exitCode": 2,
+      "planned": false
+    },
+    {
+      "code": "AF-AGT-024",
+      "area": "AGT",
+      "areaName": "Agents",
+      "message": "Workflow {workflow} was stopped by its budget before it reached a verdict: {detail}",
+      "resolution": "Raise budget.steps or budget.duration for {workflow} if the flow is genuinely that long, or read its trace to see where it waited or went in circles. A workflow stopped by its budget is blocked, never a pass and never a failure of the change.",
+      "docs": "https://antifailure.dev/docs/guides/workflows",
+      "retryable": false,
+      "exitCode": 9,
       "planned": false
     },
     {

@@ -212,6 +212,14 @@ func firstViolated(report *env.TestReport) string {
 // exit 8 between them would have made the distinction unreadable exactly where
 // it is needed.
 func nothingVerified(r *env.TestReport) error {
+	// A workflow stopped by its budget is a reason nothing was verified, and it
+	// is the one reason whose fix is in the manifest the reader is holding, so
+	// it gets its own code naming the budget rather than the general one.
+	for _, res := range r.Results {
+		if res.Outcome.Cause == budgetExhausted {
+			return aferrors.Coded(aferrors.AFAGT024, "workflow", res.Workflow, "detail", res.Outcome.Detail)
+		}
+	}
 	detail := fmt.Sprintf(
 		"%d blocked and %d unverified, and none passed, failed or was flaky",
 		r.Blocked, r.Unverified)
@@ -221,17 +229,21 @@ func nothingVerified(r *env.TestReport) error {
 	return aferrors.Coded(aferrors.AFAGT007, "detail", detail)
 }
 
+// budgetExhausted is the runner's cause for a workflow its budget stopped.
+const budgetExhausted = "budget-exhausted"
+
 // failure turns a failed run into the error that names its cause.
 //
-// A run can fail two ways now, and saying "workflow X exhausted its budget"
-// when every workflow passed and the data is broken sends somebody to read a
-// trace that shows nothing wrong. The workflows are named first because a
+// A run can fail two ways now, and naming a workflow when every workflow
+// passed and the data is broken sends somebody to read a trace that shows
+// nothing wrong. AF-AGT-002 used to say every failed workflow had "exhausted
+// its budget of its attempts", so a plain failure read as a budget problem and
+// sent people to raise a number that was never the cause. The workflows are named first because a
 // broken flow usually explains a broken invariant, and not the other way
 // round.
 func failure(report *env.TestReport) error {
 	if report.Failed > 0 {
-		return aferrors.Coded(aferrors.AFAGT002,
-			"workflow", firstFailing(report), "budget", "its attempts")
+		return aferrors.Coded(aferrors.AFAGT002, "workflow", firstFailing(report))
 	}
 	name := firstViolated(report)
 	detail := "the statement returned rows"

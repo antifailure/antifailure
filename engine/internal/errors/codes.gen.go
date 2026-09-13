@@ -7,8 +7,8 @@ const (
 	// Agents
 	// The agent runner could not be started: {detail}
 	AFAGT001 Code = "AF-AGT-001"
-	// Workflow {workflow} exhausted its budget of {budget} before
-	// completing.
+	// Workflow {workflow} failed: the application did not do what the
+	// workflow expected.
 	AFAGT002 Code = "AF-AGT-002"
 	// The agent runner produced no readable output: {detail}
 	AFAGT003 Code = "AF-AGT-003"
@@ -35,6 +35,9 @@ const (
 	AFAGT022 Code = "AF-AGT-022"
 	// The exploration cannot be steered that way: {detail}
 	AFAGT023 Code = "AF-AGT-023"
+	// Workflow {workflow} was stopped by its budget before it reached a
+	// verdict: {detail}
+	AFAGT024 Code = "AF-AGT-024"
 
 	// Build
 	// The build for service {service} failed after {duration}.
@@ -493,8 +496,8 @@ var catalog = map[Code]Entry{
 	AFAGT002: {
 		Code:      AFAGT002,
 		Area:      "AGT",
-		Message:   "Workflow {workflow} exhausted its budget of {budget} before completing.",
-		NextStep:  "Raise the budget for {workflow} in the manifest, or split it into smaller workflows.",
+		Message:   "Workflow {workflow} failed: the application did not do what the workflow expected.",
+		NextStep:  "Read that workflow's steps and trace for what the page showed instead. A failure is evidence about the application, so fix the application or the expectation rather than the budget.",
 		Docs:      "guides/workflows",
 		Retryable: false,
 		ExitCode:  ExitTestFailure,
@@ -606,6 +609,15 @@ var catalog = map[Code]Entry{
 		Docs:      "concepts/exploration",
 		Retryable: false,
 		ExitCode:  ExitUsage,
+	},
+	AFAGT024: {
+		Code:      AFAGT024,
+		Area:      "AGT",
+		Message:   "Workflow {workflow} was stopped by its budget before it reached a verdict: {detail}",
+		NextStep:  "Raise budget.steps or budget.duration for {workflow} if the flow is genuinely that long, or read its trace to see where it waited or went in circles. A workflow stopped by its budget is blocked, never a pass and never a failure of the change.",
+		Docs:      "guides/workflows",
+		Retryable: false,
+		ExitCode:  ExitInterruptedClean,
 	},
 	AFBLD001: {
 		Code:      AFBLD001,

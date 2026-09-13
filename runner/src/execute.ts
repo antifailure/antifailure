@@ -81,15 +81,48 @@ async function runOne(job: Job, workflow: Workflow): Promise<WorkflowResult> {
   let evidence: WorkflowResult['evidence'] = { console: [], failed: [] };
 
   const total = job.attempts ?? 2;
+  // The time budget covers the whole workflow, retries included, because it is
+  // what the manifest says this workflow may cost somebody waiting on it. A
+  // retry that started after the budget was spent would be spending time the
+  // manifest never granted.
+  const deadline = workflow.maxMs === undefined ? undefined : started + workflow.maxMs;
   for (let attempt = 1; attempt <= total; attempt++) {
+    if (deadline !== undefined && Date.now() >= deadline) break;
     const at = Date.now();
     let session: Session | undefined;
+    let opening: Promise<Session> | undefined;
+    let interrupted = false;
+    const taken: string[] = [];
     try {
-      session = await Session.open({
-        artifacts: job.artifacts,
-        ...(job.headless === undefined ? {} : { headless: job.headless }),
-      });
-      const { cause, detail, taken } = await attemptOnce(job, workflow, session, attempt);
+      const attemptRun = (async () => {
+        opening = Session.open({
+          artifacts: job.artifacts,
+          ...(job.headless === undefined ? {} : { headless: job.headless }),
+        });
+        session = await opening;
+        return attemptOnce(job, workflow, session, attempt, taken);
+      })();
+      // Raced rather than checked between steps, because a check between
+      // steps is not a cap: one page that never answers holds the workflow for
+      // the browser's own thirty second timeout, and a sign in waiting on an
+      // inbox holds it for longer. The losing attempt is left to fail when the
+      // session closes under it below.
+      const settled = deadline === undefined
+        ? await attemptRun
+        : await withinBudget(attemptRun, deadline - Date.now());
+      if (settled === BUDGET_SPENT) {
+        interrupted = true;
+        attemptRun.catch(() => undefined);
+        attempts.push({
+          cause: 'budget-exhausted',
+          detail: budgetDetail(workflow.maxMs!, Date.now() - started, attempt, taken),
+          durationMs: Date.now() - at,
+        });
+        steps.length = 0;
+        steps.push(...taken);
+        break;
+      }
+      const { cause, detail } = settled;
       attempts.push({ cause, detail, durationMs: Date.now() - at });
       steps.length = 0;
       steps.push(...taken);
@@ -110,7 +143,17 @@ async function runOne(job: Job, workflow: Workflow): Promise<WorkflowResult> {
       });
     } finally {
       if (session) {
-        evidence = await session.close(`${workflow.name}-${attempt}`).catch(() => evidence);
+        evidence = await session.close(`${workflow.name}-${attempt}`, { interrupted })
+          .catch(() => evidence);
+      } else if (interrupted && opening) {
+        // The budget ran out while the browser was still starting. The launch
+        // goes on finishing after the race is over, and a browser nobody closes
+        // keeps this process alive forever, so a workflow stopped at its budget
+        // became a runner that never exited. Wait for the launch and close what
+        // it produced.
+        await opening
+          .then((late) => late.close(`${workflow.name}-${attempt}`, { interrupted: true }))
+          .catch(() => undefined);
       }
     }
   }
@@ -134,9 +177,8 @@ interface AttemptResult {
 }
 
 async function attemptOnce(
-  job: Job, workflow: Workflow, session: Session, attempt: number,
+  job: Job, workflow: Workflow, session: Session, attempt: number, taken: string[],
 ): Promise<AttemptResult> {
-  const taken: string[] = [];
   const page = session.page();
 
   const chosen = sessionsFor(workflow, job.personas);
@@ -221,11 +263,74 @@ async function attemptOnce(
   }
 
   const snapshot = await session.snapshot();
-  return finalJudgement(
-    workflow, snapshot,
-    `The workflow took ${limit} steps without reaching what it was asked to reach.`,
-    taken,
-  );
+  return stepsExhausted(workflow, snapshot, limit, taken);
+}
+
+/** stepsExhausted is the verdict when a workflow has used every step.
+ *
+ * The page it reached is still judged, because a workflow whose page shows
+ * everything it expected did reach it, and that is a pass however many steps
+ * it took. A page that answered with an HTTP error is still the application
+ * failing. Anything else is the budget running out before a verdict, which is
+ * blocked with the budget named: reporting it as an unmet expectation made a
+ * workflow that simply ran out of steps read as a failure of the change. */
+export function stepsExhausted(
+  workflow: Workflow, snapshot: Snapshot, limit: number, taken: readonly string[],
+): AttemptResult {
+  const why = `Stopped at its budget of ${limit} ${limit === 1 ? 'step' : 'steps'}: ` +
+    'the page it reached does not show what was expected.';
+  const judged = finalJudgement(workflow, snapshot, why, taken);
+  if (judged.cause === 'succeeded' || judged.cause === 'application-error') return judged;
+  return { cause: 'budget-exhausted', detail: judged.detail, taken };
+}
+
+/** BUDGET_SPENT is what withinBudget settles to when the time ran out first. */
+const BUDGET_SPENT = Symbol('budget spent');
+
+/** withinBudget settles to the work's result, or to BUDGET_SPENT when the
+ *  remaining time runs out first. The timer is always cleared, so a workflow
+ *  that finished in time leaves nothing holding the process open. */
+export async function withinBudget<T>(
+  work: Promise<T>, remainingMs: number,
+): Promise<T | typeof BUDGET_SPENT> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const spent = new Promise<typeof BUDGET_SPENT>((resolve) => {
+    timer = setTimeout(() => resolve(BUDGET_SPENT), Math.max(0, remainingMs));
+  });
+  try {
+    return await Promise.race([work, spent]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export { BUDGET_SPENT };
+
+/** budgetDetail says which budget stopped a workflow and when.
+ *
+ *  The budget, how far in the workflow was, which attempt, and the last thing
+ *  it did, because the next question about a workflow that ran out of time is
+ *  always whether it was stuck or merely slow, and the last step answers it. */
+export function budgetDetail(
+  maxMs: number, elapsedMs: number, attempt: number, taken: readonly string[],
+): string {
+  const last = taken[taken.length - 1];
+  return `Stopped at its time budget of ${duration(maxMs)}, ${duration(elapsedMs)} into the ` +
+    `workflow on attempt ${attempt}, ` +
+    (last ? `after: ${last}.` : 'before it took a single step.') +
+    ' A workflow that runs out of time is blocked rather than judged, because an unfinished run ' +
+    'is evidence about neither the change nor the application. Raise budget.duration if the ' +
+    'flow is genuinely this long, or read the trace to see where it waited.';
+}
+
+/** duration renders milliseconds the way the manifest writes a budget. */
+export function duration(ms: number): string {
+  if (ms < 1_000) return `${Math.round(ms)}ms`;
+  const seconds = ms / 1_000;
+  if (seconds < 60) return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = Math.round(seconds - minutes * 60);
+  return rest === 0 ? `${minutes}m` : `${minutes}m${rest}s`;
 }
 
 /** sessionsFor resolves which personas a workflow signs in as, in order.
