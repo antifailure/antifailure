@@ -13928,7 +13928,7 @@ them is refused at validation rather than accepted and then never consulted.
 title: Datastore providers
 description: Every store an environment holds other than the primary Postgres, the stance each one declares, and why there is no default.
 sidebar:
-  order: 11
+  order: 12
 ---
 
 A datastore is a store the environment holds that is not the primary Postgres:
@@ -14395,7 +14395,7 @@ ignored.
 title: Emulators
 description: How a third party API is answered inside an environment, why Antifailure writes none of them, and what a declaration has to carry.
 sidebar:
-  order: 13
+  order: 14
 ---
 
 An emulator is a third party API answered inside the environment: an S3, a
@@ -14492,7 +14492,7 @@ registration can shadow nothing.
 title: Provider limits
 description: What happens when a provider runs out of branches, and what to do about it.
 sidebar:
-  order: 14
+  order: 15
 ---
 
 Every hosted provider has a ceiling on how many databases exist at once, and it
@@ -14563,7 +14563,7 @@ this tool's, and the provider's documentation is where the current numbers are.
 title: Managed Postgres vendors
 description: Which of thirteen managed Postgres products can hold the goldens for pgurl, which cannot, and where each answer was read.
 sidebar:
-  order: 15
+  order: 16
 ---
 
 The [` + "`" + `pgurl` + "`" + `](/docs/providers/pgurl) provider copies any Postgres it can reach,
@@ -15129,7 +15129,7 @@ does not have.
 title: Runtimes
 description: Where an environment's containers actually run, what each runtime declares it can do, and why a runtime says no rather than reporting an address that does not resolve.
 sidebar:
-  order: 12
+  order: 13
 ---
 
 A runtime is where an environment's containers actually run. Everything above
@@ -15215,7 +15215,7 @@ the built in runtimes are looked up first.
 title: Golden stores
 description: Where a golden's dump and its attestation live, the four stores that ship, and exactly what is proved about the services that speak the S3 API.
 sidebar:
-  order: 10
+  order: 11
 ---
 
 A golden store is where a golden's dump and its attestation live when they
