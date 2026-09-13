@@ -914,7 +914,7 @@ func TestTheScenariosAndTheOracleRunAfterCIAndDecideTheVerdict(t *testing.T) {
 	withOracle := []string{
 		"doctor", "ci --no-color",
 		"oracle --no-color --baseline abc123 --report REPORT",
-		"load scenario --no-color", "down --no-color",
+		"up --no-color", "load scenario --no-color", "down --no-color",
 	}
 	for _, tc := range []struct {
 		name      string
@@ -922,14 +922,25 @@ func TestTheScenariosAndTheOracleRunAfterCIAndDecideTheVerdict(t *testing.T) {
 		codes     map[string]int
 		wantGreen bool
 		wantCalls []string
+		// wantFinding is a phrase the record must carry, empty when none.
+		wantFinding string
 	}{
-		{"everything held", "abc123", nil, true, withOracle},
-		{"a scenario assertion did not hold", "abc123", map[string]int{"load scenario": 8}, false, withOracle},
-		{"the oracle found a difference at the threshold", "abc123", map[string]int{"oracle": 1}, false, withOracle},
-		{"af ci failed first", "abc123", map[string]int{"ci": 1}, false, []string{"doctor", "ci --no-color"}},
+		{"everything held", "abc123", nil, true, withOracle, ""},
+		{"a scenario assertion did not hold", "abc123", map[string]int{"load scenario": 8}, false, withOracle, ""},
+		{"the oracle found a difference at the threshold", "abc123", map[string]int{"oracle": 1}, false, withOracle, ""},
+		// Pull request 374: af oracle refused before it brought anything up,
+		// so the scenarios bring their own environment up rather than failing
+		// against one that was never there.
+		{"the oracle refused before it brought anything up", "abc123", map[string]int{"oracle": 3}, false, withOracle, ""},
+		{"af ci failed first", "abc123", map[string]int{"ci": 1}, false, []string{"doctor", "ci --no-color"},
+			"because af ci failed first"},
 		{"scenarios with no oracle bring their own environment up", "", nil, true, []string{
 			"doctor", "ci --no-color", "up --no-color", "load scenario --no-color", "down --no-color",
-		}},
+		}, ""},
+		{"their environment would not come up", "abc123", map[string]int{"up": 1}, false, []string{
+			"doctor", "ci --no-color", "oracle --no-color --baseline abc123 --report REPORT",
+			"up --no-color", "down --no-color",
+		}, "because af up did not bring their environment up"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -955,15 +966,15 @@ func TestTheScenariosAndTheOracleRunAfterCIAndDecideTheVerdict(t *testing.T) {
 			if run.Green != tc.wantGreen {
 				t.Errorf("green = %v, want %v; findings: %v", run.Green, tc.wantGreen, run.Findings)
 			}
-			if tc.codes["ci"] != 0 {
+			if tc.wantFinding != "" {
 				said := false
 				for _, f := range run.Findings {
-					if strings.Contains(f, "did not run") && strings.Contains(f, "Neither is a pass") {
+					if strings.Contains(f, tc.wantFinding) && strings.Contains(f, "not") {
 						said = true
 					}
 				}
 				if !said {
-					t.Errorf("a run whose scenarios and oracle never ran does not say so: %v", run.Findings)
+					t.Errorf("the record does not say %q: %v", tc.wantFinding, run.Findings)
 				}
 			}
 		})
@@ -977,6 +988,8 @@ func TestThePullRequestJobSendsTheScenariosAndRunsTheOracle(t *testing.T) {
 		Jobs map[string]struct {
 			Timeout int `yaml:"timeout-minutes"`
 			Steps   []struct {
+				Name string            `yaml:"name"`
+				ID   string            `yaml:"id"`
 				Uses string            `yaml:"uses"`
 				With map[string]any    `yaml:"with"`
 				Run  string            `yaml:"run"`
@@ -1011,8 +1024,37 @@ func TestThePullRequestJobSendsTheScenariosAndRunsTheOracle(t *testing.T) {
 		if !strings.Contains(s.Run, "--oracle-baseline") {
 			t.Errorf("job %q runs the pull request check without --oracle-baseline, so the oracle never runs", name)
 		}
-		if !strings.Contains(s.Env["BASE_SHA"], "github.event.pull_request.base.sha") {
-			t.Errorf("job %q does not take the oracle's baseline from the pull request's base: %q", name, s.Env["BASE_SHA"])
+		// The base is the merge commit's first parent, recorded by a step of
+		// its own. github.event.pull_request.base.sha goes stale when main
+		// moves, and on pull request 374 it named a commit a two commit clone
+		// does not hold, so the oracle refused with AF-ORC-003.
+		if strings.Contains(s.Env["BASE_SHA"], "pull_request.base.sha") {
+			t.Errorf("job %q takes the oracle's baseline from the recorded base, which goes stale: %q", name, s.Env["BASE_SHA"])
+		}
+		ref := regexp.MustCompile(`steps\.([A-Za-z0-9_-]+)\.outputs\.sha`).FindStringSubmatch(s.Env["BASE_SHA"])
+		if ref == nil {
+			t.Errorf("job %q does not take the oracle's baseline from a step's recorded sha: %q", name, s.Env["BASE_SHA"])
+		} else {
+			recorder := -1
+			for i, step := range job.Steps {
+				if step.ID == ref[1] {
+					recorder = i
+				}
+			}
+			switch {
+			case recorder < 0:
+				t.Errorf("job %q names step %q for the baseline and has no step with that id", name, ref[1])
+			case recorder > harness:
+				t.Errorf("job %q records the baseline after the step that uses it", name)
+			case !strings.Contains(job.Steps[recorder].Run, "git rev-parse HEAD^1"):
+				t.Errorf("job %q records the baseline without reading the merge commit's first parent: %q", name, job.Steps[recorder].Run)
+			}
+			for _, step := range job.Steps {
+				if step.Name == "Check out the base of this pull request" && step.Env["BASE_SHA"] != s.Env["BASE_SHA"] {
+					t.Errorf("job %q shapes the staging database from %q and compares against %q, two different bases",
+						name, step.Env["BASE_SHA"], s.Env["BASE_SHA"])
+				}
+			}
 		}
 
 		depth := 0
