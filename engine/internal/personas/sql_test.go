@@ -64,6 +64,8 @@ CREATE TABLE auth.identities (
   id              uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   CONSTRAINT identities_provider_id_provider_unique UNIQUE (provider_id, provider)
 );
+-- Supabase's migration 20221027105023_add_identities_user_id_idx.
+CREATE INDEX identities_user_id_idx ON auth.identities USING btree (user_id);
 
 CREATE TABLE auth.mfa_factors (
   id            uuid NOT NULL PRIMARY KEY,
@@ -75,6 +77,8 @@ CREATE TABLE auth.mfa_factors (
   updated_at    timestamptz NOT NULL,
   secret        text
 );
+-- Supabase's migration 20230914180801_add_mfa_factors_user_id_idx.
+CREATE INDEX mfa_factors_user_id_idx ON auth.mfa_factors (user_id);
 
 CREATE TABLE auth.sessions (
   id         uuid NOT NULL PRIMARY KEY,
