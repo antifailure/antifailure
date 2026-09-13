@@ -112,7 +112,10 @@ value outside a published list is refused at parse time. A sandbox credential
 that two services would resolve differently is refused with `AF-SEC-007`.
 `resources.cpu` and `resources.memory` were accepted and ignored; they are now
 applied, and a request no node can satisfy is refused with `AF-RUN-047` before
-anything is created.
+anything is created. A host written with a user and password in
+front of it, such as `deploy:<password>@registry.example.com`, is now refused in
+`build.allow_hosts` and in egress rules without printing the password, and a
+port in a host has to be a number from 1 to 65535.
 
 **A workflow's declared budget now stops it.** `budget.steps` and
 `budget.duration` were accepted, normalised and refused when malformed, and then
@@ -185,6 +188,25 @@ an environment, and every verdict says it was computed from a configuration
 never applied to a real account. Antifailure runs on EKS and not on raw ECS.
 
 ### Security
+
+**A connection string with one wrong character in it printed its own
+password.** An address the standard library cannot parse is described by
+quoting it, and an HTTP request passes that error back unchanged, so a Vault
+address with a stray letter in its port, a `DATABASE_URL` whose password held an
+unescaped slash, or a signed storage URL with a typo put the credential into the
+error, and from there into a terminal, a CI log or an agent's transcript. Hiding
+the address in that error was not enough, because the rest of the error quotes
+pieces of the address too. The address is now redacted before anything
+describes it, everywhere an address that can carry a credential is parsed and
+the failure can be seen, including the cloud credential client and secret
+stores, the audit sinks, all four golden stores, the database variables, the
+telemetry endpoint and `af net explain`.
+
+**An organization's egress deny list could be walked past by adding a port.** A
+rule for `api.stripe.com:443` in allow mode reached a denied `api.stripe.com`,
+and a `*.stripe.com` entry on the list missed it as well. The list now compares
+hosts the way the engine reaches them: lowercased, with the port and any
+trailing dot removed.
 
 **A wildcard allow rule reached somebody's live automation with a clean ALLOW.**
 Every place a rule is explained now says how far a rule naming no single host
@@ -343,7 +365,8 @@ refusing its own rule (#355). The enterprise image proof asking the wrong server
 whether it was ready (#351). The site smoke installing a browser nothing launched
 (#329). A schema gate measuring nothing and reporting red (#358).
 
-**Security.** A wildcard allow and `egress.default: sandbox` reaching every host
+**Security.** A mistyped address printing its own password, a credential
+written into a host, and a deny list walked past with a port (#418). A wildcard allow and `egress.default: sandbox` reaching every host
 (#383). A port opened for one host exposed to another (#326). Kubernetes
 containment run with customer tools (#373). Google Cloud and Azure credentials
 invisible to the detector (#302), and a private key in this repository's own
