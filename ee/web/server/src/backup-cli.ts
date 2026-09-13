@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // The control plane's operator command line, as the enterprise edition runs it.
 //
+// Not MIT. Covered by the Antifailure Enterprise License; see ee/LICENSE.md.
+//
 // It is the community command line with one thing done first: every table the
 // enterprise edition seals values into is registered with the re-sealing tool.
 // Without that, `reseal` in an enterprise deployment would not know the audit

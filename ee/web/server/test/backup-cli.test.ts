@@ -1,5 +1,7 @@
 // The enterprise command line, run as a process, against the community one.
 //
+// Not MIT. Covered by the Antifailure Enterprise License; see ee/LICENSE.md.
+//
 // What this proves is the edition seam at the one place a rotation meets it: the
 // operator's command line. The enterprise edition registers its sealed table
 // through a hook the community edition exposes, and that registration is worth
