@@ -135,6 +135,37 @@ only tenant left to fall back to is the production one, and a persona created
 there is a real user of your real product with a password Antifailure
 generated. It is the one setting that has to come from a person.
 
+### A hosted persona's credentials
+
+A hosted provider keeps one account per address, so every environment that
+reaches the tenant uses the same account. Its password and second factor are
+derived from the tenant's admin token, the one `token_env` names, so every
+environment arrives at the same values and one environment's `af up` does not
+lock another out. Two rules follow from that.
+
+- Environments that share a tenant share its admin token. Two environments
+  that reach one tenant with different tokens, such as two Auth0 machine to
+  machine clients, derive different passwords and overwrite each other's on
+  every `af up`.
+- Rotating the admin token changes every persona's password. The next `af up`
+  finds each account and sets the new one, so there is nothing to do by hand.
+
+An empty admin token is refused with AF-DB-025 rather than used.
+
+### What `af down` leaves in the tenant
+
+`af down` does not delete a hosted persona, because the account does not belong
+to one environment: another environment reaching the same tenant may be signed
+in with it. So one account per persona address stays in the tenant after the
+last environment is gone. To remove it, delete the user with that address in the
+provider's dashboard or through its admin API, and the next `af up` creates it
+again:
+
+- Clerk: Users in the development instance, or `DELETE /v1/users/{id}`.
+- Auth0: User Management, then Users, or `DELETE /api/v2/users/{id}`.
+- WorkOS: User Management, then Users, or `DELETE /user_management/users/{id}`.
+- Supabase: Authentication, then Users, or `DELETE /auth/v1/admin/users/{id}`.
+
 ## An application that owns its users
 
 With no `auth` block the engine looks for a users table and reads its columns.

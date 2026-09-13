@@ -608,6 +608,17 @@
       "planned": false
     },
     {
+      "code": "AF-DB-025",
+      "area": "DB",
+      "areaName": "Database",
+      "message": "Personas cannot be provisioned in {provider} because the admin token it was given is empty.",
+      "resolution": "Set the variable auth.token_env names to the tenant's admin token. A hosted persona's password is derived from that token, so an empty one is refused rather than used as a key.",
+      "docs": "https://antifailure.dev/docs/guides/personas",
+      "retryable": false,
+      "exitCode": 4,
+      "planned": false
+    },
+    {
       "code": "AF-DB-030",
       "area": "DB",
       "areaName": "Database",

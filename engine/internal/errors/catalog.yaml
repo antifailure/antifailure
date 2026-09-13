@@ -309,6 +309,13 @@ errors:
     docs: guides/personas
     retryable: false
     exit_code: 4
+  - code: AF-DB-025
+    area: DB
+    message: "Personas cannot be provisioned in {provider} because the admin token it was given is empty."
+    next_step: "Set the variable auth.token_env names to the tenant's admin token. A hosted persona's password is derived from that token, so an empty one is refused rather than used as a key."
+    docs: guides/personas
+    retryable: false
+    exit_code: 4
   - code: AF-DB-022
     area: DB
     message: "No table that looks like a users table was found, so there is nowhere to create the personas that sign in."

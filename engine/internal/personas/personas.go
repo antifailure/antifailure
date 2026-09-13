@@ -35,6 +35,7 @@ package personas
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base32"
 	"encoding/hex"
@@ -45,6 +46,8 @@ import (
 
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
+
+	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 )
 
 // Account is a persona that exists, and what is needed to sign in as it.
@@ -124,6 +127,56 @@ type Deriver struct {
 	// policy shapes the generated password, for an application whose rules
 	// are stricter than the default.
 	policy PasswordPolicy
+	// hosted is set for an account in a hosted provider's tenant, which every
+	// environment reaching the tenant shares, and key, kind and project are what
+	// its credentials are derived from instead of the environment.
+	hosted  bool
+	key     secrets.Value
+	kind    string
+	project string
+}
+
+// hostedDomain and hostedTOTPDomain keep a hosted persona's credentials apart
+// from every other value derived with the same key. Versioned, so that a change
+// to what the message contains is a new domain rather than a silent change.
+const (
+	hostedDomain     = "antifailure/persona/hosted/v2"
+	hostedTOTPDomain = "antifailure/persona/hosted/totp/v2"
+)
+
+// NewHostedDeriver returns the Deriver for personas that live in a hosted
+// provider's tenant.
+//
+// Such an account is shared. The provider holds one account per address, and
+// every environment that reaches the tenant finds and updates that same
+// account. A credential derived per environment therefore changed on every af
+// up, and the environment that ran last locked every other one out.
+//
+// It also has to be secret, and the derivation it replaces was not: it was
+// computed only from values that are not secret, so its output was not secret
+// either, which matters most for a tenant whose sign in page anybody can reach.
+// So this one is keyed with the tenant's admin credential. Every environment
+// that reaches the tenant already holds it, and it already grants far more than
+// a persona's password, so deriving from it grants nothing new. The adapter kind
+// is part of the message, so two providers whose credentials happen to be equal
+// do not share a derivation. An empty credential is refused rather than used,
+// because an empty key is no key.
+func NewHostedDeriver(token secrets.Value, kind, project string, policy PasswordPolicy) (*Deriver, error) {
+	if token.Reveal() == "" {
+		return nil, aferrors.Coded(aferrors.AFDB025, "provider", kind)
+	}
+	return &Deriver{policy: policy, hosted: true, key: token, kind: kind, project: project}, nil
+}
+
+// DeriverFor returns the Deriver an adapter's accounts need. A hosted provider's
+// accounts are shared by every environment, so their credentials are keyed and
+// the same everywhere. Every other adapter writes the account into the
+// environment's own branch, so its credentials stay per environment.
+func DeriverFor(a Adapter, envID, project string, policy PasswordPolicy) (*Deriver, error) {
+	if api, ok := a.(*APIAdapter); ok {
+		return NewHostedDeriver(api.token, api.hosted.Name(), project, policy)
+	}
+	return NewDeriver(envID, policy), nil
 }
 
 // NewDeriver returns a Deriver for an environment.
@@ -150,6 +203,9 @@ func (d *Deriver) For(p schema.Persona) Credentials {
 // accident: upper, lower, digit and a symbol, over twenty characters. An
 // application with stricter rules gets them through the policy.
 func (d *Deriver) password(persona string) string {
+	if d.hosted {
+		return d.policy.apply("Af-" + hex.EncodeToString(d.keyed(hostedDomain, persona)[:12]) + "!1")
+	}
 	sum := derive("antifailure/persona/v1", d.envID, persona)
 	return d.policy.apply("Af-" + hex.EncodeToString(sum[:8]) + "!1")
 }
@@ -160,8 +216,18 @@ func (d *Deriver) password(persona string) string {
 // encoded without padding because that is the form every authenticator app
 // and every otpauth URL uses.
 func (d *Deriver) totpSecret(persona string) string {
+	if d.hosted {
+		return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(d.keyed(hostedTOTPDomain, persona)[:20])
+	}
 	sum := derive("antifailure/persona/totp/v1", d.envID, persona)
 	return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(sum[:20])
+}
+
+// keyed derives a hosted persona's value for one domain.
+func (d *Deriver) keyed(domain, persona string) []byte {
+	mac := hmac.New(sha256.New, []byte(d.key.Reveal()))
+	_, _ = mac.Write([]byte(domain + "\x00" + d.kind + "\x00" + d.project + "\x00" + persona))
+	return mac.Sum(nil)
 }
 
 // derive is the one place the derivation is defined, so a change to it is a
