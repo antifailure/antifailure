@@ -307,7 +307,8 @@ gRPC could not run (#325). The rehearsal ran with every declared secret blank
 (#392). Two services given the first value of a shared variable name (#387).
 `af init` refusing an app beside a prebuilt image (#401), and reading any image
 containing `moto` as an AWS emulator (#390). A Kafka console, a PostgREST server and every
-store's exporter read as a second store (#405). Workflow budgets that bounded nothing (#411). The rotation runbook's check command that could not start the check (#409). `af oracle` reporting every persona
+store's exporter read as a second store (#405). Workflow budgets that bounded nothing (#411). The rotation runbook's check command that could not start the check (#409). The dogfood check going red for a pull request whose recorded base had fallen
+behind main (#416). `af oracle` reporting every persona
 as a missing row (#395). A refusal telling Heroku and Tiger Cloud users to run a
 statement they may not run (#388). A report understating its own twin (#299),
 and claiming a substitution the sidecar refuses (#342). A silent first `af up`
