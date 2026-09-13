@@ -101,11 +101,11 @@ has not, so here is the split, in the terms the
   or Azure.** The same arrangement as `aurora`: every line of each provider
   runs on every pull request, against a fake Cloud SQL Admin API and a fake
   Azure Resource Manager, each with a real Postgres behind it. `cloudsql` has
-  never met Google Cloud. `azurepg` has met Azure once, and only half of it
-  passed: a live run restored a golden from a real flexible server and masked
-  and verified it over `verify-full` against Microsoft's certificate, and the
-  branch restore from that golden failed with an internal error from Azure. No
-  branch has been created, timed or checked on Azure.
+  never met Google Cloud, because the only Google billing account available is
+  closed. `azurepg` has completed one private run against a real flexible
+  server on 2026-09-13: a golden restored, masked and verified over `verify-full`, a
+  branch written to without the source changing, the goldens listed, and
+  everything torn down. One run at one row is a demonstration rather than proof.
 
 `cloudsql` is the one for a production on Google Cloud, and it is in the
 enterprise edition for the same reason `aurora` is. A branch is a Cloud SQL
@@ -124,12 +124,13 @@ that does NOT claim flat branch time. A branch is a point in time restore, whose
 snapshot half is flat in the size of the data and whose log replay half is not,
 so the honest number is one that grows. Microsoft gives the overall recovery as
 a few minutes up to a few hours. Its page says why claiming otherwise would be
-quoting the fast half of that. One restore this provider requested has been
-timed on Azure: creating a golden from a nearly empty source, including the
-mask and the verification, took 392.4 seconds. That is one data point at one
-size, so it says nothing about how the time grows, and the branch restore that
-followed it failed on Azure's side, so the growth is still Microsoft's
-description rather than a number anybody here measured.
+quoting the fast half of that. One complete run has been timed on Azure, in
+`centralus` on a `Standard_B1ms` server with one synthetic row: the golden took
+420.3 seconds and the branch 518.3 seconds, the branch including the wait for the
+golden's first backup. That is fixed cost at one size, recorded in
+[the benchmarks](https://github.com/antifailure/antifailure/tree/main/benchmarks),
+so the growth with the size of the database is still Microsoft's description
+rather than a number anybody here measured.
 
 A provider named in the manifest and neither built into this binary nor
 registered with it is refused at startup rather than substituted. Falling back
