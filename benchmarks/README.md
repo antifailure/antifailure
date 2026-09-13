@@ -38,6 +38,7 @@ that is real for nothing.
 | `cloudsql` | unproven | not measured yet, L2.4 | | | |
 | `azure-pg` | unproven | not measured yet, L2.5 | | | |
 | `alloydb` | unproven | not measured yet, L2.6 | | | |
+| `xata` | unproven | not measured yet, no account | | | |
 
 A row with no number is a row that has not been measured. It is left visible on
 purpose: a table that only listed the providers somebody had got around to

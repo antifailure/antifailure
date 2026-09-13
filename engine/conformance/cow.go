@@ -3,10 +3,10 @@ package conformance
 // Copy on write is the distinguishing commercial claim of every cloud database
 // in this category, and until this file existed nothing could refuse it.
 //
-// Caps.CopyOnWrite said "a branch shares storage with its golden, and
-// therefore branch time is independent of database size", five providers
-// declared a value for it, and the database suite never read the field. The
-// datastore suite beside it read the field twice and both reads were about
+// Caps.CopyOnWrite said "a branch shares storage with its golden, and therefore
+// branch time is independent of database size", every provider that existed
+// then declared a value for it, and the database suite never read the field.
+// The datastore suite beside it read the field twice and both reads were about
 // self consistency: copy on write without branching, copy on write without a
 // golden. Neither asks whether the claim is TRUE. So a provider could declare
 // CopyOnWrite alongside Branching and Golden, copy every byte on every branch,

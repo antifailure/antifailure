@@ -85,6 +85,7 @@ const (
 	SiteSupabase        Site = "the Supabase management API"
 	SiteDBLab           Site = "the Database Lab API"
 	SiteAurora          Site = "the Aurora control API"
+	SiteXata            Site = "the Xata control API"
 	SiteClickHouse      Site = "the ClickHouse HTTP interface"
 	SiteServiceProbe    Site = "the service readiness probe"
 	SiteWebhookDelivery Site = "the webhook delivery"

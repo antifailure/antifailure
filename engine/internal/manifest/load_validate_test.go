@@ -185,6 +185,25 @@ func TestParse_RefusesAProjectForTheProviderThatHasNone(t *testing.T) {
 		"\ndatabase:\n  provider: neon\n  project: my-project\n").Database)
 }
 
+func TestParse_RefusesAXataProjectWithoutBothHalves(t *testing.T) {
+	t.Parallel()
+	// Xata addresses a project by an organization and a project identifier,
+	// both path segments of every call the provider makes, and neither can be
+	// discovered from the other. A manifest holding one of them would validate,
+	// commit, and fail at the first refresh with a 404 about a path nobody
+	// wrote, so it is refused here instead.
+	for _, project := range []string{"my-project", "my-org/", "/my-project", "a/b/c"} {
+		body := minimal + "\ndatabase:\n  provider: xata\n  project: " + project + "\n"
+		msg := messages(problems(t, mustFail(t, body)))
+		require.Contains(t, msg, "The xata provider addresses a project by organization and project",
+			"database.project %q is not <organization>/<project>", project)
+	}
+
+	require.NotNil(t, mustParse(t, minimal+
+		"\ndatabase:\n  provider: xata\n  project: my-org/my-project\n").Database,
+		"and a project naming both halves is accepted")
+}
+
 func TestNormalize_LeavesQueryCountIncreaseAloneWhenNobodySetIt(t *testing.T) {
 	t.Parallel()
 	// The normalizer used to fill it in, which meant every manifest carried a

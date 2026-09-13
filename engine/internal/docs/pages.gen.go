@@ -4817,6 +4817,7 @@ recorded with the site that made it.
 | the Supabase management API | ` + "`" + `api.supabase.com` + "`" + ` |
 | the Database Lab API | your DBLab server |
 | the Aurora control API | AWS, to create and branch an Aurora cluster |
+| the Xata control API | ` + "`" + `api.xata.tech` + "`" + ` |
 | the ClickHouse HTTP interface | your ClickHouse server |
 | the service readiness probe | the environment, over loopback |
 | the webhook delivery | a service in the environment |
@@ -13148,7 +13149,7 @@ meant to be written by people outside this repository.
 
 ` + "`" + "`" + "`" + `yaml
 database:
-  provider: docker   # or neon, supabase, dblab, pgurl, or aurora
+  provider: docker   # or neon, supabase, dblab, pgurl, xata, or aurora
   version: 17
 ` + "`" + "`" + "`" + `
 
@@ -13161,6 +13162,7 @@ database:
 | [` + "`" + `dblab` + "`" + `](/docs/providers/dblab) | A Database Lab Engine you run | Flat, because clones are copy on write | A Database Lab Engine, ZFS, and its verification token |
 | [` + "`" + `supabase` + "`" + `](/docs/providers/supabase) | A Supabase branch, which is a whole separate project | Grows with the database, because a Supabase branch is created empty | A Supabase project on a paid plan and an access token |
 | [` + "`" + `pgurl` + "`" + `](/docs/providers/pgurl) | A database on any Postgres server you name | Grows with the database, because a branch is a server side file copy | A reachable Postgres and a role that may create databases |
+| [` + "`" + `xata` + "`" + `](/docs/providers/xata) | A branch of a Xata project | Expected to be flat, because Xata documents its branches as copy on write snapshots. Never timed on Xata | A Xata project and an API key |
 | [` + "`" + `aurora` + "`" + `](/docs/providers/aurora) | A clone of an Amazon Aurora PostgreSQL cluster | Expected to be flat, because a clone shares the source's storage volume. Never timed on AWS | An Aurora PostgreSQL cluster, an IAM role, and the enterprise edition |
 
 ` + "`" + `docker` + "`" + ` is the default and needs nothing. Its branch time is flat, measured
@@ -13185,6 +13187,13 @@ vendor is not in this list. It needs no account and no vendor at all, only a
 server it may create databases on. Branch time is not flat there, and the
 measured seconds per gigabyte are published in ` + "`" + `benchmarks/` + "`" + ` rather than
 described.
+
+` + "`" + `xata` + "`" + ` is the managed Postgres whose branching is really branching. Xata
+documents a branch as a copy on write storage snapshot that completes in seconds
+at terabyte scale, and of thirteen managed vendors it is the only one that does
+not restore a backup to make one. That is Xata's claim rather than a
+measurement made here, and [the provider page](/docs/providers/xata) says
+exactly which half the suite proves.
 
 ` + "`" + `supabase` + "`" + ` is the right choice when your application already lives there.
 Branch time is not flat, because Supabase creates a branch with no data in it
@@ -13280,7 +13289,7 @@ the suite run a behaviour it should have skipped, which fails, which is the
 intended outcome: a capability is a promise the suite checks.
 
 Register it under a name this build does not already have. ` + "`" + `docker` + "`" + `, ` + "`" + `neon` + "`" + `,
-` + "`" + `supabase` + "`" + `, ` + "`" + `dblab` + "`" + ` and ` + "`" + `pgurl` + "`" + ` are reserved, and a registration under one of
+` + "`" + `supabase` + "`" + `, ` + "`" + `dblab` + "`" + `, ` + "`" + `pgurl` + "`" + ` and ` + "`" + `xata` + "`" + ` are reserved, and a registration under one of
 them is refused at validation rather than accepted and then never consulted.
 `,
 	"providers/datastores.md": `---
@@ -13978,6 +13987,9 @@ parent, so that making one does not take longer as the database grows.
 | Xata | copy on write branch | yes | unverified | [its page](https://github.com/xataio/xata) |
 
 The link in the last column is the page the host server answer was read from.
+Xata is the one vendor on this list with a provider of its own,
+[` + "`" + `xata` + "`" + `](/docs/providers/xata), because its branches are copy on write. The
+rest are served by ` + "`" + `pgurl` + "`" + `.
 Every quote behind every verdict, and the page for each mechanism, is in
 ` + "`" + `engine/internal/db/managed/vendors.go` + "`" + `.
 
@@ -14982,6 +14994,130 @@ Supabase Management API, on a project created for the purpose. Not against a
 fake: a fake would have agreed that a persistent branch can be deleted, that a
 database copies cleanly into another one, and that the pooled connection string
 you are given can be connected to. None of those is true.
+`,
+	"providers/xata.md": `---
+title: Xata
+description: Copy on write branches of a masked, verified golden on Xata, and what has not been measured about them.
+sidebar:
+  order: 14
+---
+
+Xata is a Postgres platform whose branches are copy on write snapshots at the
+storage layer. Its [branching page](https://xata.io/docs/core-concepts/branching)
+says a child branch "copies the parent's schema and data using a Copy-on-Write
+storage snapshot, so it completes in seconds even for terabyte-scale
+databases". Its platform is built on CloudNativePG and is
+[open source](https://github.com/xataio/xata) under Apache 2.0.
+
+Of the thirteen vendors on [Managed Postgres vendors](/docs/providers/managed-postgres),
+it is the only one whose branching is really branching. Every other one calls
+the operation a fork and restores a backup, where the clock grows with the data.
+
+` + "`" + "`" + "`" + `yaml
+database:
+  provider: xata
+  version: 17
+  project: my-organization/my-project
+  api_key_env: XATA_API_KEY
+  source_url_env: PRODUCTION_DATABASE_URL
+` + "`" + "`" + "`" + `
+
+` + "`" + `database.project` + "`" + ` is ` + "`" + `<organization>/<project>` + "`" + `, both as they appear in the
+Xata console. Both are path segments of every call the provider makes and
+neither can be discovered from the other, so a manifest with one of them is
+refused when it is validated rather than left to fail at the first refresh.
+
+` + "`" + `database.api_key_env` + "`" + ` names the variable holding an API key with the
+` + "`" + `branch:read` + "`" + `, ` + "`" + `branch:write` + "`" + ` and ` + "`" + `credentials:read` + "`" + ` scopes. The third is the
+one that returns a branch's connection string. It defaults to ` + "`" + `XATA_API_KEY` + "`" + `.
+
+` + "`" + `database.version` + "`" + ` has to be the major your project's root branch runs. A
+candidate inherits its parent's image, so a refresh asks the candidate's server
+which major it is and refuses a mismatch with ` + "`" + `AF-DB-003` + "`" + ` before anything is
+loaded.
+
+## The model
+
+A Xata project holds production on its root branch, the one with no parent. A
+golden is a copy on write branch of that root, masked and verified in place and
+then published by a rename. An environment's database is a copy on write branch
+of the golden. The provider copies nothing itself.
+
+Publishing is the rename and nothing else. The attestation does not exist until
+the candidate has been masked and scanned, which is after the branch was
+created. A refresh that fails at any earlier step deletes the candidate rather
+than leaving a branchable copy of unmasked production behind.
+
+The attestation, the rules hash and the provenance are written into a
+` + "`" + `_antifailure.golden` + "`" + ` table inside the golden itself. A branch inherits that row,
+so whoever holds an environment can read what was scanned and what was found.
+Xata's branch object has no annotation map, and its one free text field holds a
+golden version identifier and cannot hold an attestation.
+
+## What is declared, and why
+
+- **Branching: yes.** Copy on write branches are the product.
+- **Copy on write: yes.** From Xata's branching page. What that declaration is
+  worth is the next section.
+- **Reset: no.** Xata's API has no call that returns a branch to another
+  branch's state. The one restore call it documents creates a new branch from a
+  backup. A reset built as a delete and a recreate would hand back a different
+  branch on a different connection string.
+- **Subsetting: no.** A candidate holds the whole database the moment it
+  exists, so a subset could only mean deleting down.
+- **Pooled endpoints: no.** Xata does have a pooled endpoint type, selected by a
+  hostname suffix. Its credentials call takes no endpoint type and returns one
+  connection string, and the provider does not build addresses from a naming
+  convention.
+- **Provider masking: no.** The engine's rules are the single implementation of
+  masking.
+
+A refusal from Xata reaches you with Xata's own code and message. The API
+documents a precondition failure on creating a branch without saying which
+precondition, so the provider does not guess that it means a branch limit.
+` + "`" + `database.max_branches` + "`" + ` is the ceiling it enforces itself, with ` + "`" + `AF-DB-006` + "`" + `.
+
+## What has not been measured
+
+**No account was used to build this provider, and no branch was made on Xata.**
+
+` + "`" + `engine/internal/db/xata/conformance_test.go` + "`" + ` runs the whole conformance suite
+on every run against a fake Xata control plane over a real local Postgres. The
+fake speaks the paths, fields and status codes of Xata's
+[API document](https://api.xata.tech/openapi.json), refuses what that document
+refuses, and invents no rule the document does not state. That proves the
+provider's logic, its request shapes and its error mapping. It does not prove
+that Xata accepts those requests, and it cannot produce a wall clock number.
+
+It also cannot exhibit copy on write. The only way one local Postgres can hand
+back a second database holding the first one's data is to copy the files. So
+that run asserts no real service, and the copy on write behaviour answers
+**unproven** rather than timing a copy. The copy on write ledger records the
+same word, and so does the ` + "`" + `benchmarks/README.md` + "`" + ` table.
+
+The run that settles it is the same suite against the real service:
+
+` + "`" + "`" + "`" + `
+AF_XATA_API_KEY=... AF_XATA_ORG=... AF_XATA_PROJECT=... \
+  go test ./engine/internal/db/xata -run TestConformanceAgainstXata -v
+` + "`" + "`" + "`" + `
+
+That run costs one branch per golden and one per environment, each sharing
+storage with its parent, all removed by the suite's own cleanup and checked by
+its leak assertion at the end.
+
+## Cleaning up after a killed run
+
+A failing behaviour leaves its branches behind on purpose, so they can be looked
+at. Removing them is a separate command:
+
+` + "`" + "`" + "`" + `
+AF_XATA_SWEEP=1 AF_XATA_API_KEY=... AF_XATA_ORG=... AF_XATA_PROJECT=... \
+  go test ./engine/internal/db/xata -run TestSweepLeftovers -v
+` + "`" + "`" + "`" + `
+
+It removes environment branches first and goldens last, because a golden
+something came from is refused.
 `,
 	"reference/action.md": `---
 title: The GitHub Action
@@ -21035,7 +21171,7 @@ exported on the laptop that started it.
 
 | Key | Notes |
 | --- | --- |
-| ` + "`" + `provider` + "`" + ` | ` + "`" + `docker` + "`" + ` (default), ` + "`" + `neon` + "`" + `, ` + "`" + `supabase` + "`" + `, ` + "`" + `dblab` + "`" + `, ` + "`" + `pgurl` + "`" + `, or ` + "`" + `aurora` + "`" + `. ` + "`" + `aurora` + "`" + ` is in the enterprise edition; a community build names it and refuses it. |
+| ` + "`" + `provider` + "`" + ` | ` + "`" + `docker` + "`" + ` (default), ` + "`" + `neon` + "`" + `, ` + "`" + `supabase` + "`" + `, ` + "`" + `dblab` + "`" + `, ` + "`" + `pgurl` + "`" + `, ` + "`" + `xata` + "`" + `, or ` + "`" + `aurora` + "`" + `. For ` + "`" + `xata` + "`" + `, ` + "`" + `project` + "`" + ` is ` + "`" + `<organization>/<project>` + "`" + `. ` + "`" + `aurora` + "`" + ` is in the enterprise edition; a community build names it and refuses it. |
 | ` + "`" + `version` + "`" + ` | Postgres major, 14 through 18, default 17. Match it to production: a golden on a different major is an environment running a Postgres your application does not. |
 | ` + "`" + `url_env` + "`" + ` | The variable services receive the connection string in. |
 | ` + "`" + `source_url_env` + "`" + ` | Names the variable holding production's read only URL. |
@@ -22694,7 +22830,7 @@ Where the environment's Postgres comes from, and how the production copy is made
 | ` + "`" + `max_branches` + "`" + ` | integer | no | The plan's concurrent branch limit, where the provider has one it cannot read from its own API. Reaching it fails with AF-DB-006 rather than hanging. Minimum 1. |
 | ` + "`" + `migrations` + "`" + ` | [Migrations](#migrations) | no | Where the project's own SQL migrations live, for a project whose migrate command is its own script rather than a tool the rehearsal recognises. |
 | ` + "`" + `project` + "`" + ` | string | no | The account-side project a hosted provider creates branches in, such as a Neon project. Not a secret, which is why it lives here and the key that reaches it does not. |
-| ` + "`" + `provider` + "`" + ` | string | no | Which provider creates branches. docker is local and needs nothing; neon, supabase, and dblab talk to a service; pgurl is any reachable Postgres, which is where the goldens and the branches are kept as databases on a server you name. aurora clones an Amazon Aurora PostgreSQL cluster and is in the enterprise edition, so a community build names it here and refuses it when a manifest selects it. Defaults to ` + "`" + `docker` + "`" + `. |
+| ` + "`" + `provider` + "`" + ` | string | no | Which provider creates branches. docker is local and needs nothing; neon, supabase, dblab and xata talk to a service; pgurl is any reachable Postgres, which is where the goldens and the branches are kept as databases on a server you name. For xata, database.project is '<organization>/<project>'. aurora clones an Amazon Aurora PostgreSQL cluster and is in the enterprise edition, so a community build names it here and refuses it when a manifest selects it. Defaults to ` + "`" + `docker` + "`" + `. |
 | ` + "`" + `seed` + "`" + ` | string | no | Command that fills the golden with data, for a project with no production database yet. It runs once per refresh with DATABASE_URL set, and every branch is a copy of what it made, so the cost is paid once rather than per environment. Mutually exclusive with source_url_env. Max length 1024. |
 | ` + "`" + `source_url_env` + "`" + ` | string | no | Name of the environment variable holding the read only connection string of the production database. The value is read once, during a golden refresh, on the operator's machine or runner, and never stored. Max length 128, matches ` + "`" + `^[A-Za-z_][A-Za-z0-9_]*$` + "`" + `. |
 | ` + "`" + `subset` + "`" + ` | [Subset](#subset) | no | Take a production shaped slice rather than the whole database. |

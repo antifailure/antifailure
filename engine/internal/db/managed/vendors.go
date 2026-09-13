@@ -557,10 +557,10 @@ var registry = []Vendor{
 			Reason: "the self hosted platform gives you the CloudNativePG cluster and therefore the role, and no published statement covers the hosted service's role",
 			Citation: Citation{
 				URL:       "https://github.com/xataio/xata",
-				Retrieved: "2026-09-08",
-				Quote: "A cloud native platform for self hosting multiple Postgres " +
-					"instances on Kubernetes, with fast branching using Copy on Write at " +
-					"the storage level, built on CloudNativePG and OpenEBS.",
+				Retrieved: "2026-09-12",
+				Quote: "Open source, cloud native, Postgres platform with copy on write " +
+					"branching and scale to zero, built on CloudNativePG, with fast branching " +
+					"using copy on write at the storage level.",
 			},
 		},
 		SourceURL: Verdict{
