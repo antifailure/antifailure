@@ -151,6 +151,21 @@ on its settings page, then re-run the failed job. `Cutting a release` now says t
 approve the production deployment only after the release's `publish` job reads
 success.
 
+**On a Mac, `af login` could not sign anyone in, and `af model set` could store
+a broken key, since v1.3.0.** In a terminal both hung at "password data for new
+item:" and stored nothing, because the keychain write fed the value to the
+`security` command's password prompt on stdin, and `security` reads a prompted
+password from the terminal whenever there is one. Without a terminal the write
+kept only the first 128 bytes and reported success, so `af login` said "Signed
+in" and every later command failed with `AF-SEC-006`, and an OpenAI project key
+(`sk-proj-`) stored by `af model set` was refused by the provider on every call.
+Anthropic keys are shorter than 128 bytes and were stored whole. The write now
+goes through `security`'s interactive command stream, and every write is read
+back and compared, so a value the keychain did not keep exactly is an error
+rather than a success. **To recover, upgrade and run the same command again:**
+`af login` for a credential, `af model set` for a key. The new write replaces the
+damaged entry, so nothing needs deleting first.
+
 ### Enterprise: what was sold now exists
 
 **Single sign-on and directory provisioning could not be reached by any
@@ -372,7 +387,7 @@ gRPC could not run (#325). The rehearsal ran with every declared secret blank
 containing `moto` as an AWS emulator (#390). A Kafka console, a PostgREST server and every
 store's exporter read as a second store (#405). Workflow budgets that bounded nothing (#411). The rotation runbook's check command that could not start the check (#409). The dogfood check going red for a pull request whose recorded base had fallen
 behind main (#416). An EC2 instance role that could never supply AWS credentials
-(#419). A release check that the sidecar image could be fetched, run while still logged in (#423). `af oracle` reporting every persona
+(#419). A release check that the sidecar image could be fetched, run while still logged in (#423). `af login` hanging at the Mac keychain prompt, and a credential or key cut to 128 bytes (#420). `af oracle` reporting every persona
 as a missing row (#395). A refusal telling Heroku and Tiger Cloud users to run a
 statement they may not run (#388). A report understating its own twin (#299),
 and claiming a substitution the sidecar refuses (#342). A silent first `af up`
