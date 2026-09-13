@@ -30,3 +30,14 @@ func TestNetExplainRefusesAURLWithNoHostWithoutItsToken(t *testing.T) {
 	require.Contains(t, err.Error(), "names no host")
 	require.NotContains(t, err.Error(), "Nh2Tok")
 }
+
+// #383 refuses a star pattern used as a request host, and the refusal quoted
+// the request it refused in its request field, user information and query
+// included.
+func TestNetExplainRefusesAPatternHostWithoutTheCredentialInItsURL(t *testing.T) {
+	_, err := parseRequest("GET", "https://me:Ns6Pass@*.zapier.com/hooks?key=Nq9Tok")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "is a pattern", "the refusal this test is about did not fire")
+	require.NotContains(t, err.Error(), "Ns6Pass")
+	require.NotContains(t, err.Error(), "Nq9Tok")
+}

@@ -431,7 +431,7 @@ func parseRequest(method, raw string) (policy.Request, error) {
 	// the strictness above exists to prevent.
 	if strings.Contains(u.Hostname(), "*") {
 		return req, aferrors.Coded(aferrors.AFNET002,
-			"request", method+" "+raw, "detail",
+			"request", method+" "+secret.RedactURL(raw), "detail",
 			fmt.Sprintf("%q is a pattern, and a request goes to one host. Ask about a host the pattern matches", u.Hostname()))
 	}
 

@@ -22,3 +22,13 @@ func TestParseRequestRefusesAURLWithNoHostWithoutItsToken(t *testing.T) {
 	require.Contains(t, err.Error(), "names no host")
 	require.NotContains(t, err.Error(), "Ph3Tok")
 }
+
+// #383's pattern refusal quotes the host alone, which net/url has already
+// separated from the user information and the query. This holds it there.
+func TestParseRequestRefusesAPatternHostWithoutTheCredentialInItsURL(t *testing.T) {
+	_, err := ParseRequest("GET", "https://me:Ps4Pass@*.zapier.com/hooks?key=Pq7Tok")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "is a pattern", "the refusal this test is about did not fire")
+	require.NotContains(t, err.Error(), "Ps4Pass")
+	require.NotContains(t, err.Error(), "Pq7Tok")
+}
