@@ -65,7 +65,7 @@ configured() {
     return 1
   fi
   for want in $REQUIRED_ENV; do
-    printf '%s\n' "$names" | grep -Fxq "$want" || missing="${missing} ${want}"
+    grep -Fxq "$want" <<<"$names" || missing="${missing} ${want}"
   done
   if [ -n "$missing" ]; then
     say "THE ENTERPRISE EDITION IS NOT CONFIGURED ON $app."
