@@ -805,9 +805,8 @@ from the wrong one either fails on a missing path or, with COPY . ., succeeds
 and produces an image assembled from the wrong directory.
 
 --answer settles a question, and also overrides a value detection read with
-confidence, which is how you separate two services a repository really does
-have on one port. An id naming nothing is refused with the ids that would have
-worked rather than dropped in silence.
+confidence, such as a port an EXPOSE line named. An id naming nothing is
+refused with the ids that would have worked rather than dropped in silence.
 
 ```
 af init [flags]

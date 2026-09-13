@@ -16775,9 +16775,8 @@ from the wrong one either fails on a missing path or, with COPY . ., succeeds
 and produces an image assembled from the wrong directory.
 
 --answer settles a question, and also overrides a value detection read with
-confidence, which is how you separate two services a repository really does
-have on one port. An id naming nothing is refused with the ids that would have
-worked rather than dropped in silence.
+confidence, such as a port an EXPOSE line named. An id naming nothing is
+refused with the ids that would have worked rather than dropped in silence.
 
 ` + "`" + "`" + "`" + `
 af init [flags]
@@ -20255,7 +20254,7 @@ Detection could not decide {question}, and there is no default to fall back on.
 
 Detection produced a draft that is not a valid manifest, so nothing was written and {path} does not exist: {detail}
 
-**What to do.** Re-run with --answer to override what detection read, for example --answer service.<name>.port=<port>. If nothing in the repository is wrong, this is a defect in Antifailure and worth reporting with the detail above.
+**What to do.** The detail names the field that was refused and why. Correct that value in the file detection read it from, then run af init again. If nothing in the repository is wrong, this is a defect in Antifailure and worth reporting with the detail above.
 
 | | |
 | --- | --- |

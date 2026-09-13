@@ -1127,7 +1127,7 @@ var catalog = map[Code]Entry{
 		Code:      AFDET005,
 		Area:      "DET",
 		Message:   "Detection produced a draft that is not a valid manifest, so nothing was written and {path} does not exist: {detail}",
-		NextStep:  "Re-run with --answer to override what detection read, for example --answer service.<name>.port=<port>. If nothing in the repository is wrong, this is a defect in Antifailure and worth reporting with the detail above.",
+		NextStep:  "The detail names the field that was refused and why. Correct that value in the file detection read it from, then run af init again. If nothing in the repository is wrong, this is a defect in Antifailure and worth reporting with the detail above.",
 		Docs:      "concepts/detection",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
