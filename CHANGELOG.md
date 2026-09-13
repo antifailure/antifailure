@@ -204,6 +204,15 @@ report now states the share of production's requests a run sends.
 **Two services needing different values for one variable both received the
 first.** Secrets now resolve per service, and `scope: service` says so directly.
 
+**Xata is a database provider.** It is the one managed Postgres vendor whose
+branches are copy on write snapshots rather than restores from a backup.
+`database.provider: xata` with `database.project` makes a golden a branch of the
+project, masked and verified in place, and every environment a branch of that
+golden. Copy on write is declared because Xata's own branching documentation says
+so, and it is recorded as unproven: the conformance suite runs against a fake
+Xata control plane over one real Postgres, which can only copy, and the command
+that settles it against a real account is on the provider's page.
+
 `af explore` can be aimed at a persona, a start page, a phone viewport, a budget
 and a focus for one run. An agent given the MCP server can now search and read
 the documentation this build ships. `af init` proposes a stance for every store
@@ -229,7 +238,7 @@ point that mounts single sign-on and provisioning (#324, #339). The engine audit
 stream to syslog, webhook and object store (#309). The control plane audit log
 forwarded to Splunk, Event Hubs or a webhook (#372), and per organization
 destinations for hosted customers (#381). Air gapped mode (#312). Multi runtime
-placement (#328). The Aurora PostgreSQL provider (#314). Containment reports for
+placement (#328). The Aurora PostgreSQL provider (#314). The Xata provider (#398). Containment reports for
 ECS (#335), Azure Container Apps (#316) and Cloud Run (#322). The `emulate`
 egress mode (#306), the AWS surface (#320), Azurite (#319) and six Google Cloud
 emulators (#318). The `gcs` golden store and the `cloud_database` and
