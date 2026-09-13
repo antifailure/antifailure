@@ -22,7 +22,7 @@ package conformance
 // surface may print. The Because line is what tells the two apart, and it is why
 // the ledger records prose rather than a boolean.
 //
-// This is deliberately uncomfortable reading. Six of the eight providers that
+// This is deliberately uncomfortable reading. Five of the six providers that
 // declare copy on write in this repository have no proved verdict, and writing
 // that down is the point: before this file a declaration nobody had measured
 // looked exactly like a provider that had been, because nothing anywhere
