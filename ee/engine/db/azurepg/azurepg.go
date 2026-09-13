@@ -464,6 +464,33 @@ func sortVersionsNewestFirst(in []provider.GoldenVersion) {
 }
 
 // isOurs reports whether a server carries this provider's ownership tag.
+// goldenOnlyTagKeys are the tags only a golden carries. A branch restored from
+// a golden inherits them, so preparation removes them from the branch.
+var goldenOnlyTagKeys = []string{goldenTagKey, versionTagKey, createdTagKey}
+
+// kindTagKey records what a server is, set explicitly at every step that makes
+// one, in the same shape as the Aurora provider's antifailure:kind tag
+// (ee/engine/db/aurora/aurora.go). A golden's restore is a candidate, publishing
+// rewrites it to golden, and a branch's restore and its preparation set branch.
+//
+// Explicit rather than inferred from which other tags are present, because an
+// Azure restore carries the source server's tags onto the new server: a branch
+// restored from a golden inherits the golden's identity, and the live run on
+// 2026-09-13 listed that branch as a second golden.
+const kindTagKey = "antifailure-kind"
+
+const (
+	kindCandidate = "candidate"
+	kindGolden    = "golden"
+	kindBranch    = "branch"
+)
+
+// isGolden reports whether a server is a published golden.
+func isGolden(s *server) bool { return s.Tags[kindTagKey] == kindGolden }
+
+// isBranch reports whether a server is a branch.
+func isBranch(s *server) bool { return s.Tags[kindTagKey] == kindBranch }
+
 func (p *Provider) isOurs(s *server) bool {
 	if s == nil {
 		return false

@@ -240,7 +240,15 @@ func (s *Server) restore(w http.ResponseWriter, r *http.Request, name string) {
 		writeErr(w, http.StatusInternalServerError, "InternalServerError", err.Error())
 		return
 	}
+	// A restore carries the source server's tags onto the new server, and the
+	// request's own tags are applied over them. The live run on 2026-09-13
+	// showed it: a branch restored from a golden came back carrying the
+	// golden's identifying tags. A fake that started from the request alone
+	// could never show a provider that forgot to remove them.
 	tags := map[string]string{}
+	for k, v := range src.Tags {
+		tags[k] = v
+	}
 	for k, v := range body.Tags {
 		tags[k] = v
 	}

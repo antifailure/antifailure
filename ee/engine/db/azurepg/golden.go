@@ -54,6 +54,7 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 		tagKey:       tagValue,
 		goldenTagKey: version,
 		sourceTagKey: source,
+		kindTagKey:   kindCandidate,
 	})
 	if err != nil && op == nil {
 		return provider.GoldenVersion{}, fmt.Errorf(
@@ -129,6 +130,7 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 	metadata[sourceTagKey] = source
 	metadata[goldenTagKey] = version
 	metadata[createdTagKey] = created.Format(time.RFC3339Nano)
+	metadata[kindTagKey] = kindGolden
 	op, err = p.api.patchServer(ctx, name, map[string]any{"tags": metadata})
 	if err != nil {
 		return provider.GoldenVersion{}, fmt.Errorf("azurepg: tagging golden %q: %w", name, err)
@@ -263,7 +265,7 @@ func (p *Provider) ListGoldens(ctx context.Context) ([]provider.GoldenVersion, e
 		if !p.isOurs(s) {
 			continue
 		}
-		if s.Tags[goldenTagKey] == "" {
+		if !isGolden(s) {
 			continue
 		}
 		version := s.Tags[versionTagKey]
@@ -341,7 +343,7 @@ func (p *Provider) branchesFrom(ctx context.Context, version string) ([]string, 
 	var out []string
 	for i := range servers {
 		s := &servers[i]
-		if !p.isOurs(s) || s.Tags[goldenTagKey] != "" {
+		if !p.isOurs(s) || !isBranch(s) {
 			continue
 		}
 		if s.Tags[fromTagKey] == version {

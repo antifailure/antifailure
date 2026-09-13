@@ -48,7 +48,7 @@ func (p *Provider) Branch(ctx context.Context, version string, envID string) (pr
 		if !p.isOurs(existing) {
 			return provider.Branch{}, fmt.Errorf("azurepg: server %q: %w", name, ErrNotOurs)
 		}
-		if existing.Tags[envTagKey] != envID || existing.Tags[fromTagKey] != version || existing.Tags[goldenTagKey] != "" {
+		if existing.Tags[envTagKey] != envID || existing.Tags[fromTagKey] != version || isGolden(existing) {
 			return provider.Branch{}, fmt.Errorf("azurepg: existing server does not match the requested environment and golden")
 		}
 		if err := p.finishBranch(ctx, existing); err != nil {
@@ -109,6 +109,9 @@ func (p *Provider) Branch(ctx context.Context, version string, envID string) (pr
 		// The golden this branch came from, so DestroyGolden can refuse to
 		// remove one that is still referenced.
 		fromTagKey: version,
+		// Set explicitly, because the restore carries the golden's own kind
+		// onto the branch.
+		kindTagKey: kindBranch,
 	})
 	if err != nil && op == nil {
 		return provider.Branch{EnvID: envID, From: version, ProviderRef: name}, fmt.Errorf(
@@ -258,6 +261,12 @@ func (p *Provider) finishBranch(ctx context.Context, srv *server) error {
 	for key, value := range srv.Tags {
 		tags[key] = value
 	}
+	// A restore carries the golden's own tags onto the branch. Left in place
+	// they make the branch read as a golden to every listing.
+	for _, key := range goldenOnlyTagKeys {
+		delete(tags, key)
+	}
+	tags[kindTagKey] = kindBranch
 	tags[preparedTagKey] = p.preparationReceipt(srv)
 	op, err := p.api.patchServer(ctx, srv.Name, map[string]any{"tags": tags})
 	if err != nil {
@@ -357,7 +366,7 @@ func (p *Provider) Inventory(ctx context.Context) ([]provider.Resource, error) {
 			continue
 		}
 		kind := "branch"
-		if s.Tags[goldenTagKey] != "" {
+		if isGolden(s) {
 			kind = "golden"
 		}
 		out = append(out, provider.Resource{
