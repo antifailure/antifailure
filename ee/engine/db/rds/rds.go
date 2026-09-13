@@ -316,6 +316,8 @@ type Provider struct {
 	// Postgres; the shipped value is customerLogins.
 	loginCatalog func(context.Context, *sql.DB) ([]string, error)
 	closed       atomic.Bool
+	// progress is where a long wait reports itself. See progress.go.
+	progress atomic.Pointer[func(string)]
 	// The trust bundle file this process wrote for its own connections.
 	trustMu             sync.Mutex
 	trustDir, trustPath string
@@ -1460,8 +1462,11 @@ func (p *Provider) Health(ctx context.Context, b provider.Branch) (provider.Heal
 
 // waitInstance polls until an instance is available.
 func (p *Provider) waitInstance(ctx context.Context, name string) (dbInstance, error) {
-	deadline := p.now().Add(p.readyTimeout)
+	started := p.now()
+	deadline := started.Add(p.readyTimeout)
 	last := ""
+	waiting := false
+	var lastReported time.Time
 	for {
 		in, found, err := p.api.describeInstance(ctx, name)
 		if err != nil {
@@ -1471,6 +1476,10 @@ func (p *Provider) waitInstance(ctx context.Context, name string) (dbInstance, e
 			last = in.Status
 			switch in.Status {
 			case "available":
+				if waiting {
+					p.report(fmt.Sprintf("RDS reports the instance %s available after %s",
+						name, p.now().Sub(started).Round(time.Second)))
+				}
 				return in, nil
 			case "failed", "incompatible-restore", "incompatible-parameters", "inaccessible-encryption-credentials":
 				// Terminal. Waiting for the timeout would turn a refusal that
@@ -1489,6 +1498,19 @@ func (p *Provider) waitInstance(ctx context.Context, name string) (dbInstance, e
 					"larger database; set a longer timeout if this account restores "+
 					"something large", name, or(last, "absent"), p.readyTimeout)
 		}
+		switch {
+		case !waiting:
+			waiting = true
+			lastReported = p.now()
+			p.report(fmt.Sprintf("waiting for RDS to bring up the instance %s, now %s; a restore "+
+				"provisions an instance and hydrates its volume from the snapshot, so this takes "+
+				"minutes and longer for a larger database, up to %s",
+				name, or(last, "not yet listed"), p.readyTimeout))
+		case p.now().Sub(lastReported) >= waitHeartbeat:
+			lastReported = p.now()
+			p.report(fmt.Sprintf("still waiting for the instance %s after %s, now %s",
+				name, p.now().Sub(started).Round(time.Second), or(last, "not yet listed")))
+		}
 		if err := p.sleep(ctx); err != nil {
 			return dbInstance{}, err
 		}
@@ -1497,8 +1519,11 @@ func (p *Provider) waitInstance(ctx context.Context, name string) (dbInstance, e
 
 // waitSnapshot polls until a snapshot is available.
 func (p *Provider) waitSnapshot(ctx context.Context, name string) error {
-	deadline := p.now().Add(p.readyTimeout)
+	started := p.now()
+	deadline := started.Add(p.readyTimeout)
 	last := ""
+	waiting := false
+	var lastReported time.Time
 	for {
 		s, found, err := p.api.describeSnapshot(ctx, name)
 		if err != nil {
@@ -1508,6 +1533,10 @@ func (p *Provider) waitSnapshot(ctx context.Context, name string) error {
 			last = s.Status
 			switch s.Status {
 			case "available":
+				if waiting {
+					p.report(fmt.Sprintf("RDS reports the snapshot %s available after %s",
+						name, p.now().Sub(started).Round(time.Second)))
+				}
 				return nil
 			case "failed":
 				return fmt.Errorf("the snapshot %s failed, so nothing can be restored from it", name)
@@ -1516,6 +1545,18 @@ func (p *Provider) waitSnapshot(ctx context.Context, name string) error {
 		if !p.now().Before(deadline) {
 			return fmt.Errorf(
 				"the snapshot %s was still %q after %s", name, or(last, "absent"), p.readyTimeout)
+		}
+		switch {
+		case !waiting:
+			waiting = true
+			lastReported = p.now()
+			p.report(fmt.Sprintf("waiting for RDS to finish the snapshot %s, now %s; a snapshot "+
+				"copies the volume, so this grows with the database, up to %s",
+				name, or(last, "not yet listed"), p.readyTimeout))
+		case p.now().Sub(lastReported) >= waitHeartbeat:
+			lastReported = p.now()
+			p.report(fmt.Sprintf("still waiting for the snapshot %s after %s, now %s",
+				name, p.now().Sub(started).Round(time.Second), or(last, "not yet listed")))
 		}
 		if err := p.sleep(ctx); err != nil {
 			return err
