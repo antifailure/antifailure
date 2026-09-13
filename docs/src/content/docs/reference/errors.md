@@ -728,7 +728,7 @@ The Postgres server named by {variable}, at {host}, could not be reached: {detai
 
 The role {role} on {host} may not create databases.
 
-**What to do.** The pgurl provider makes one database per golden and one per environment, so the role named by {variable} needs CREATEDB. Run: ALTER ROLE {role} CREATEDB.
+**What to do.** The pgurl provider makes one database per golden and one per environment, so the role named by {variable} needs CREATEDB. Run: ALTER ROLE {role} CREATEDB, as a role that may grant it. A managed Postgres that gives you no such role cannot hold the goldens: keep it as database.source_url_env, which needs read access only, and point {variable} at a Postgres you administer.
 
 | | |
 | --- | --- |
@@ -747,6 +747,18 @@ The database {database} on {host} was not created by Antifailure and will not be
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [providers/pgurl](/docs/providers/pgurl) |
+
+### AF-DB-037
+
+The role {role} on {host} may not create databases, and {vendor} does not let you grant it.
+
+**What to do.** On {vendor} the fix AF-DB-035 gives is not available: {reason}. Keep {vendor} as database.source_url_env, which needs read access only, and point {variable} at a Postgres you administer, which is where the goldens and the branches are made. The verdict was read from {citation}.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [providers/managed-postgres](/docs/providers/managed-postgres) |
 
 ## Detection
 
