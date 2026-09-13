@@ -25,6 +25,22 @@ out loud and says why.
 
 ### For operators, before you upgrade
 
+**The GitHub Action failed every pull request check, and v1.4.0 is the release
+that ends it.** Since the action was first published, in v1.3.0, its first step
+read the dispatch input with `${AF_DISPATCH:-{}}`, which a shell reads as a
+default of `{` followed by a literal `}`. Any dispatch that was not empty gained
+a closing brace. The documented workflow passes `toJSON(inputs)`, which is `{}`
+on a pull request, and a workflow that leaves the input out gets its declared
+default, which is also `{}`. Both reached `jq` as `{}}`, and the check failed
+about fourteen seconds in, before `af` ran, with `jq: parse error: Unmatched '}'
+at line 1, column 3`. That includes the workflows `af init` and the GitHub App
+write, which pass `toJSON(inputs)` as well. Only a workflow passing the input as
+an explicitly empty string got through. The step now reads the input unchanged
+and treats an empty or `null` dispatch as none, and `tools/actioncheck` runs it
+against every dispatch a caller can send. **A workflow pinned to
+`antifailure/antifailure@v1` receives the fix when this release moves the `v1`
+tag. Nothing needs changing in your workflow.**
+
 **The hosted control plane now runs the enterprise edition.** Continuous
 deployment built and deployed the community image to both hosted environments
 for the whole life of the workflow. The hosted enterprise plan sells single
@@ -277,7 +293,8 @@ copy on write conformance verdict gained `UNPROVEN` (#343). This repository's ow
 manifest rehearses the pages a customer crosses on the first day (#389). Four
 legal pages were removed from the site, in a commit that carried no pull request number.
 
-**Fixed.** The hosted control plane deployed the community image (#386). Hosted
+**Fixed.** The GitHub Action failing every pull request check at its dispatch step
+(#417). The hosted control plane deployed the community image (#386). Hosted
 model budgets charged at superseded Anthropic prices (#404). Single sign-on,
 provisioning and support access enforced by nothing, and two licence features
 that could be sold and did not exist (#323). Four entitlement rows that named
