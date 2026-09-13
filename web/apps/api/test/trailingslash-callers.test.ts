@@ -12,7 +12,15 @@ describe('the places that trim a configured address', () => {
   })
   test('the generated workflow defaults to the address without its trailing slashes', () => {
     const file = renderWorkflow('https://app.test///')
-    assert.ok(file.includes('https://app.test'), file)
-    assert.ok(!file.includes('https://app.test/'), `a trailing slash reached the workflow:\n${file}`)
+    // The address is READ OUT of the workflow and compared exactly, rather than
+    // asked for with `includes`. A containment check is satisfied by any URL
+    // that merely carries these characters, https://app.test.evil.com among
+    // them, which is what CodeQL names as incomplete URL substring
+    // sanitization, and it was also weaker than this test means to be: it could
+    // not tell `https://app.test` from `https://app.test///` without a second
+    // negative assertion about a string that is a prefix of the first one.
+    const fallback = file.match(/\$\{\{ vars\.[A-Z0-9_]+ \|\| '([^']*)' \}\}/)
+    assert.ok(fallback, `the workflow carries no quoted default:\n${file}`)
+    assert.equal(fallback[1], 'https://app.test')
   })
 })
