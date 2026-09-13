@@ -12,6 +12,7 @@ import (
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/load"
+	"github.com/antifailure/antifailure/engine/internal/manifest"
 	"github.com/antifailure/antifailure/engine/internal/personas"
 	"github.com/antifailure/antifailure/engine/internal/runnerpath"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
@@ -164,6 +165,12 @@ type workflowDoc struct {
 	Personas  []string `json:"personas,omitempty"`
 	Expect    []string `json:"expect"`
 	StartPath string   `json:"startPath,omitempty"`
+	// MaxSteps and MaxMs are the workflow's declared budget. Both were
+	// normalised and validated and then sent nowhere, so every workflow ran to
+	// the runner's own forty steps and for as long as that took, whatever the
+	// manifest said. Zero means the runner's default for that half.
+	MaxSteps int   `json:"maxSteps,omitempty"`
+	MaxMs    int64 `json:"maxMs,omitempty"`
 }
 
 type personaDoc struct {
@@ -584,10 +591,17 @@ func (o *Orchestrator) workflowDocs(only []string) []workflowDoc {
 		if len(wanted) > 0 && !wanted[w.Name] {
 			continue
 		}
-		out = append(out, workflowDoc{
+		doc := workflowDoc{
 			Name: w.Name, Description: w.Description, Persona: w.Persona,
 			Personas: w.Personas, Expect: w.Expect, StartPath: w.StartPath,
-		})
+		}
+		if w.Budget != nil {
+			doc.MaxSteps = w.Budget.Steps
+			if d, err := manifest.ParseDuration(w.Budget.Duration); err == nil && d > 0 {
+				doc.MaxMs = d.Milliseconds()
+			}
+		}
+		out = append(out, doc)
 	}
 	return out
 }

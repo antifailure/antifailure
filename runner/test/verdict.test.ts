@@ -123,3 +123,112 @@ test('every cause maps to a verdict', () => {
     assert.ok(['pass', 'fail', 'flaky', 'blocked', 'unverified'].includes(verdictFor(c)), c);
   }
 });
+
+test('running out of the declared time is blocked, and it does not count against the application', () => {
+  // An unfinished workflow is evidence about neither the change nor the
+  // application, which is the schema's own promise: a workflow that exhausts
+  // its budget ends as blocked with the reason, never as a partial pass.
+  // The mapping on its own, because classify returns blocked for this cause
+  // from its blocking set without consulting the map, and a map that said fail
+  // would then mislead every other reader of verdictFor.
+  assert.equal(verdictFor('budget-exhausted'), 'blocked');
+  const outcome = classify([attempt('budget-exhausted', 'Stopped at its time budget of 2s')]);
+  assert.equal(outcome.verdict, 'blocked');
+  assert.equal(outcome.cause, 'budget-exhausted');
+  assert.equal(countsAgainstTheApplication(outcome.verdict), false);
+});
+
+test('a retry stopped by its budget after an unreadable page is blocked with the budget, not unverified', () => {
+  // The budget is the last attempt here, so the map decides. The orderings
+  // below are the ones where the blocking set decides instead.
+  const outcome = classify([
+    attempt('page-unreadable', 'Nothing on the page confirms it'),
+    attempt('budget-exhausted', 'Stopped at its time budget of 2s'),
+  ]);
+  assert.equal(outcome.verdict, 'blocked');
+  assert.equal(outcome.cause, 'budget-exhausted');
+});
+
+
+test('a step budget that ran out before a retry keeps the result blocked, naming the budget', () => {
+  // A step budget is per attempt, so running out of steps does not end the
+  // retry loop, and budget-exhausted can come first. It belongs in the blocking
+  // set like every other blocked cause. Without it, a retry that then proved
+  // nothing turned the result unverified, and told the reader to set a model
+  // key when the first attempt had simply run out of steps.
+  const thenUnreadable = classify([
+    attempt('budget-exhausted', 'Stopped at its budget of 5 steps'),
+    attempt('page-unreadable', 'Nothing on the page confirms it'),
+  ]);
+  assert.equal(thenUnreadable.verdict, 'blocked');
+  assert.equal(thenUnreadable.cause, 'budget-exhausted');
+
+  // And a retry whose browser then failed must not replace the budget as the
+  // reason: the first blocking attempt is the one reported.
+  const thenCrashed = classify([
+    attempt('budget-exhausted', 'Stopped at its budget of 5 steps'),
+    attempt('runner-failure', 'The browser did not start'),
+  ]);
+  assert.equal(thenCrashed.cause, 'budget-exhausted');
+});
+
+// One workflow with retries, ordering by ordering. A time budget spans every
+// attempt and ends the retry loop once spent. A step budget is per attempt, so
+// running out of steps is followed by another attempt with a fresh budget.
+// Each test below is one row of that table, and says why the verdict is what it
+// is, because rows 3 and 4 are decisions and not consequences.
+
+test('ordering 1: steps spent on attempt 1, then a pass, is a pass', () => {
+  // A retry that reached what it was asked to reach did reach it. Running out
+  // of steps is not a failure of the application, so it does not make the
+  // result flaky, the same as a browser that crashed before a retry that passed.
+  const outcome = classify([attempt('budget-exhausted', 'Stopped at its budget of 5 steps'), attempt('succeeded')]);
+  assert.equal(outcome.verdict, 'pass');
+  assert.equal(outcome.cause, 'succeeded');
+});
+
+test('ordering 2: steps spent on every attempt is blocked, naming the budget', () => {
+  const outcome = classify([
+    attempt('budget-exhausted', 'Stopped at its budget of 5 steps'),
+    attempt('budget-exhausted', 'Stopped at its budget of 5 steps, again'),
+  ]);
+  assert.equal(outcome.verdict, 'blocked');
+  assert.equal(outcome.cause, 'budget-exhausted');
+  assert.match(outcome.detail, /budget of 5 steps/);
+});
+
+test('ordering 3: steps spent on attempt 1, then a real HTTP error page, is a failure', () => {
+  // Decided deliberately: fail. The retry saw the application answer with an
+  // error, and that is evidence about the application whatever the attempt
+  // before it did. A budget running out is never allowed to outrank evidence.
+  const outcome = classify([
+    attempt('budget-exhausted', 'Stopped at its budget of 5 steps'),
+    attempt('application-error', 'The page at /billing answered HTTP 500'),
+  ]);
+  assert.equal(outcome.verdict, 'fail');
+  assert.equal(outcome.cause, 'application-error');
+});
+
+test('ordering 4: a real failure, then steps spent on the last attempt, is the failure', () => {
+  // Decided deliberately: fail, reporting the first attempt's failure. The
+  // last attempt running out of steps must not hide what the first one saw:
+  // blocked would tell a pull request that nothing was learned when the
+  // application had already been seen doing the wrong thing.
+  const outcome = classify([
+    attempt('expectation-not-met', 'The page shows an error rather than what was expected'),
+    attempt('budget-exhausted', 'Stopped at its budget of 5 steps'),
+  ]);
+  assert.equal(outcome.verdict, 'fail');
+  assert.equal(outcome.cause, 'expectation-not-met');
+  assert.match(outcome.detail, /shows an error/);
+});
+
+test('ordering 5: a real failure, then the time budget running out during the retry, is the failure', () => {
+  // The same decision as ordering 4, for the budget that ends the loop.
+  const outcome = classify([
+    attempt('application-error', 'The page at /billing answered HTTP 500'),
+    attempt('budget-exhausted', 'Stopped at its time budget of 6s, 6s into the workflow on attempt 2'),
+  ]);
+  assert.equal(outcome.verdict, 'fail');
+  assert.equal(outcome.cause, 'application-error');
+});

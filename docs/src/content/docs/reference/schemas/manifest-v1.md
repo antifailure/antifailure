@@ -507,7 +507,7 @@ One thing the agents do, written as a goal rather than a script. The runner deci
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `budget` | object | no | Hard caps. A workflow that exhausts its budget ends as blocked with the reason, never as a partial pass. |
+| `budget` | object | no | What one workflow may spend. `steps` is the most actions one attempt may take: a workflow that uses every step passes if everything it expected is visible on the page it reached, fails if that page answered with an HTTP error, and otherwise ends as blocked with the step budget named. `duration` is the time the whole workflow may take, retries included: a workflow that reaches it is stopped where it is and ends as blocked with the budget named, and no further attempt starts. A blocked workflow is never a partial pass. |
 | `description` | string | **yes** | What a person would do, in sentences. Say the goal and what proves it happened, not the selectors. Min length 10, max length 4000. |
 | `expect` | list of string | no | Observations that must hold for a pass, written as sentences. These are assertions about what the user can see, not about the DOM. Max items 50. |
 | `independent` | boolean | no | Whether this workflow can run at the same time as others. Workflows that share an environment run one at a time unless this says otherwise, because two agents mutating the same data produce failures nobody can reproduce. Defaults to `false`. |

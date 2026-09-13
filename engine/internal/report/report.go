@@ -158,9 +158,13 @@ func (e *Exploration) markdown() string {
 type Workflow struct {
 	Name    string
 	Verdict string
-	Detail  string
-	Steps   []string
-	Trace   string
+	// Cause is the runner's reason for the verdict. Carried because blocked is
+	// several different facts, and the one a manifest can fix, a workflow its
+	// budget stopped, has to be told apart from a runner that never started.
+	Cause  string
+	Detail string
+	Steps  []string
+	Trace  string
 }
 
 // Invariant is what the data said after the workflows ran.

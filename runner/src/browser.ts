@@ -158,6 +158,9 @@ async function quiet(
   }
 }
 
+/** How long an interrupted session waits for its last screenshot. */
+const INTERRUPTED_SCREENSHOT_MS = 1_000;
+
 /** The window a session opens when nobody asked for one. */
 export const DEFAULT_VIEWPORT = { width: 1280, height: 800 } as const;
 
@@ -505,13 +508,22 @@ export class Session {
    * second call must return what the first found rather than an empty record
    * gathered from a page that is already gone.
    */
-  async close(name: string): Promise<Evidence> {
+  async close(name: string, options: { readonly interrupted?: boolean } = {}): Promise<Evidence> {
     if (this.#closed) return this.#closed;
     const evidence: { video?: string; trace?: string; screenshot?: string } = {};
     const safe = name.replace(/[^a-z0-9._-]/gi, '-');
 
+    // An interrupted session is one a budget stopped mid navigation, and a
+    // full page screenshot waits for that navigation to finish. Unbounded, it
+    // held a workflow stopped at its two second budget open until the slow
+    // page finally answered at eight, so the budget capped the verdict and not
+    // the time. Bounded, the screenshot is skipped when it cannot be taken and
+    // the trace, which is the thing to open, is still kept.
     const screenshot = `${this.#artifacts}/${safe}.png`;
-    await this.#page.screenshot({ path: screenshot, fullPage: true }).then(
+    await this.#page.screenshot({
+      path: screenshot, fullPage: true,
+      ...(options.interrupted ? { timeout: INTERRUPTED_SCREENSHOT_MS } : {}),
+    }).then(
       () => { evidence.screenshot = screenshot; },
       () => undefined,
     );

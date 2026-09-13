@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { finalJudgement, sessionsFor } from '../src/execute.ts';
+import {
+  BUDGET_SPENT, budgetDetail, finalJudgement, sessionsFor, withinBudget,
+} from '../src/execute.ts';
 import type { Persona } from '../src/login.ts';
 import type { Snapshot, Workflow } from '../src/workflow.ts';
 
@@ -102,4 +104,22 @@ test('a page with no status yet (nothing has navigated) falls through to the tex
     readOrders, { ...emptySnapshot, status: undefined, text: 'No customers yet.' },
     'Nothing moved the workflow forward.', []);
   assert.equal(result.cause, 'page-unreadable');
+});
+
+test('a budget detail names the budget, how far in, the attempt and the last step', () => {
+  // The next question about a workflow that ran out of time is whether it was
+  // stuck or merely slow, and the last step taken is what answers it.
+  assert.match(
+    budgetDetail(2_000, 2_500, 1, ['Open http://127.0.0.1/', 'Press Pay now: the form is complete']),
+    /^Stopped at its time budget of 2s, 2\.5s into the workflow on attempt 1, after: Press Pay now: the form is complete\./,
+  );
+  assert.match(
+    budgetDetail(600_000, 600_000, 2, []),
+    /^Stopped at its time budget of 10m, 10m into the workflow on attempt 2, before it took a single step\./,
+  );
+});
+
+test('withinBudget settles to the work when it finishes in time, and to the spent marker when it does not', async () => {
+  assert.equal(await withinBudget(Promise.resolve('done'), 1_000), 'done');
+  assert.equal(await withinBudget(new Promise<string>(() => undefined), 20), BUDGET_SPENT);
 });

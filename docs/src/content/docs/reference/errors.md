@@ -46,9 +46,9 @@ The agent runner could not be started: {detail}
 
 ### AF-AGT-002
 
-Workflow {workflow} exhausted its budget of {budget} before completing.
+Workflow {workflow} failed: the application did not do what the workflow expected.
 
-**What to do.** Raise the budget for {workflow} in the manifest, or split it into smaller workflows.
+**What to do.** Read that workflow's steps and trace for what the page showed instead. A failure is evidence about the application, so fix the application or the expectation rather than the budget.
 
 | | |
 | --- | --- |
@@ -199,6 +199,18 @@ The exploration cannot be steered that way: {detail}
 | Exit code | `2` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/exploration](/docs/concepts/exploration) |
+
+### AF-AGT-024
+
+Workflow {workflow} was stopped by its budget before it reached a verdict: {detail}
+
+**What to do.** Raise budget.steps or budget.duration for {workflow} if the flow is genuinely that long, or read its trace to see where it waited or went in circles. A workflow stopped by its budget is blocked, never a pass and never a failure of the change.
+
+| | |
+| --- | --- |
+| Exit code | `9` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/workflows](/docs/guides/workflows) |
 
 ## Build
 

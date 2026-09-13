@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
@@ -7,10 +8,10 @@ import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Session } from '../src/browser.ts';
-import { run } from '../src/execute.ts';
+import { run, type WorkflowResult } from '../src/execute.ts';
 import { explore, type Goal } from '../src/explore.ts';
 import { exitCodeFor } from '../src/verdict.ts';
-import type { Workflow } from '../src/workflow.ts';
+import type { Planner, Workflow } from '../src/workflow.ts';
 import type { Persona } from '../src/login.ts';
 
 /** A tiny application with a real sign up form, served over HTTP.
@@ -955,6 +956,225 @@ test('on a phone the snapshot offers what the phone layout shows, and not what i
     assert.ok(desktop.includes('Pricing'), `the desktop navigation is missing: ${desktop.join(', ')}`);
     assert.ok(!desktop.includes('Open the menu'), `the phone's menu button was offered on a desktop: ${desktop.join(', ')}`);
   } finally {
+    server.close();
+  }
+});
+
+/** An application whose every page says the account exists, after a delay.
+ *
+ *  The delay is the whole subject. Held with a timer rather than a busy page,
+ *  so the browser is genuinely waiting on the network the way it waits on a
+ *  slow deploy, and closeAllConnections ends the wait when a test is done. */
+function slowWelcome(delayMs: number): { server: Server; url: Promise<string> } {
+  const server = createServer((_req, res) => {
+    const reply = () => {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(`<html><body><h1>Welcome</h1>
+        <p>Your account is created and you are signed in.</p></body></html>`);
+    };
+    if (delayMs > 0) setTimeout(reply, delayMs); else reply();
+  });
+  const url = new Promise<string>((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address();
+      resolve(`http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`);
+    });
+  });
+  return { server, url };
+}
+
+test('a workflow slower than its declared time budget is blocked, names the budget, and is not retried',
+  { timeout: 120_000 }, async () => {
+  // Before this, budget.duration reached nothing and a page that never
+  // answered held a workflow for the browser's own thirty second timeout on
+  // every attempt, then judged whatever was on the screen.
+  const { server, url } = slowWelcome(8_000);
+  const baseURL = await url;
+  try {
+    const started = Date.now();
+    const [result] = await run({
+      baseURL, artifacts: mkdtempSync(join(tmpdir(), 'af-budget-')), attempts: 2,
+      workflows: [{ ...signUp, name: 'slow-welcome', maxMs: 2_000 }],
+      personas: nobody,
+    });
+    const elapsed = Date.now() - started;
+    assert.equal(result!.outcome.verdict, 'blocked', JSON.stringify(result!.outcome, null, 2));
+    assert.equal(result!.outcome.cause, 'budget-exhausted');
+    assert.match(result!.outcome.detail, /time budget of 2s/);
+    assert.equal(result!.outcome.attempts.length, 1, 'a second attempt started after the budget was spent');
+    assert.ok(elapsed < 8_000, `the budget did not cap the workflow: it ran for ${elapsed} ms`);
+  } finally {
+    server.closeAllConnections();
+    server.close();
+  }
+});
+
+test('a workflow inside its declared time budget passes as it always did', { timeout: 120_000 }, async () => {
+  // The control for the test above: the same page answered at once, under a
+  // budget it fits, is a pass rather than a workflow the cap interrupted.
+  const { server, url } = slowWelcome(0);
+  const baseURL = await url;
+  try {
+    const [result] = await run({
+      baseURL, artifacts: mkdtempSync(join(tmpdir(), 'af-budget-')), attempts: 1,
+      workflows: [{ ...signUp, name: 'quick-welcome', maxMs: 20_000 }],
+      personas: nobody,
+    });
+    assert.equal(result!.outcome.verdict, 'pass', JSON.stringify(result!.outcome, null, 2));
+  } finally {
+    server.close();
+  }
+});
+
+/** A planner that opens the same page forever, so the only thing that can end
+ *  an attempt is the step budget, and every step is one countable line. */
+function reopening(url: string): Planner {
+  return { next: async () => ({ kind: 'goto', url, why: 'again' }) };
+}
+
+/** runSteps drives a workflow with a declared step budget through the planner
+ *  above and returns the result and how many steps it actually took. */
+async function runSteps(
+  page: string, maxSteps: number, attempts = 1,
+): Promise<{ result: WorkflowResult; taken: number }> {
+  const { server, url } = slowWelcome(0);
+  const baseURL = await url;
+  try {
+    const [result] = await run({
+      baseURL, artifacts: mkdtempSync(join(tmpdir(), 'af-steps-')), attempts,
+      workflows: [{
+        name: 'steps', description: 'Reopen the page until the budget ends.',
+        expect: [page], maxSteps,
+      }],
+      personas: nobody,
+      planner: reopening(`${baseURL}/`),
+    });
+    return { result: result!, taken: result!.steps.filter((s) => s.endsWith(': again')).length };
+  } finally {
+    server.close();
+  }
+}
+
+test('a declared step budget of 5 stops at 5, not at the runner\'s own 40', { timeout: 120_000 }, async () => {
+  const { result, taken } = await runSteps('The invoice was downloaded.', 5);
+  assert.equal(taken, 5, result.steps.join(' | '));
+  // Running out of steps with an expectation missing is not a pass and not a
+  // plain failure: nothing contradicted the expectation, the budget ran out.
+  assert.equal(result.outcome.verdict, 'blocked', JSON.stringify(result.outcome, null, 2));
+  assert.equal(result.outcome.cause, 'budget-exhausted');
+  assert.match(result.outcome.detail, /^Stopped at its budget of 5 steps: the page it reached does not show what was expected\./);
+});
+
+test('a declared step budget of 60 is not silently capped at the runner\'s 40', { timeout: 240_000 }, async () => {
+  const { result, taken } = await runSteps('The invoice was downloaded.', 60);
+  assert.equal(taken, 60, `the workflow took ${taken} steps`);
+  assert.match(result.outcome.detail, /budget of 60 steps/);
+});
+
+test('a workflow that uses every step and shows everything it expected passes', { timeout: 120_000 }, async () => {
+  // The page says the account exists on every visit, so when the steps run out
+  // the workflow did reach what it was asked to reach, and it passed.
+  const { result, taken } = await runSteps('The account is created and the session is signed in.', 2);
+  assert.ok(taken <= 2, result.steps.join(' | '));
+  assert.equal(result.outcome.verdict, 'pass', JSON.stringify(result.outcome, null, 2));
+});
+
+/** browsersBelow is every Chromium process descended from pid. */
+function browsersBelow(pid: number): number[] {
+  let children: number[] = [];
+  try {
+    children = execFileSync('pgrep', ['-P', String(pid)], { encoding: 'utf8' })
+      .split('\n').map((l) => Number(l.trim())).filter((n) => n > 0);
+  } catch {
+    // pgrep exits 1 when there are none.
+  }
+  return children.flatMap((c) => {
+    let command = '';
+    try { command = execFileSync('ps', ['-o', 'command=', '-p', String(c)], { encoding: 'utf8' }); } catch { /* gone */ }
+    return [...(/chrom/i.test(command) ? [c] : []), ...browsersBelow(c)];
+  });
+}
+
+test('a budget spent while the browser is still starting leaves no browser running', { timeout: 120_000 }, async () => {
+  // The attempt is raced against the time budget, and the race can end while
+  // Chromium is still launching. The launch finished after the race with
+  // nothing left to close the browser it produced, so a workflow stopped at
+  // its budget left a browser and its video recorder running for the rest of
+  // the run. Checked in this process rather than through main.ts, because
+  // main.ts exits, and Playwright closes its browsers when the process exits,
+  // which hides the leak from anything that only watches the process end.
+  const { server, url } = slowWelcome(8_000);
+  const baseURL = await url;
+  try {
+    const [result] = await run({
+      baseURL, artifacts: mkdtempSync(join(tmpdir(), 'af-late-launch-')), attempts: 1,
+      workflows: [{ ...signUp, name: 'late-launch', maxMs: 50 }],
+      personas: nobody,
+    });
+    assert.equal(result!.outcome.cause, 'budget-exhausted', JSON.stringify(result!.outcome, null, 2));
+    let left = browsersBelow(process.pid);
+    for (let i = 0; i < 50 && left.length > 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      left = browsersBelow(process.pid);
+    }
+    assert.deepEqual(left, [], 'a browser launched for a workflow its budget stopped is still running');
+  } finally {
+    server.closeAllConnections();
+    server.close();
+  }
+});
+
+test('ordering 2, run for real: a step budget is retried, and spent on every attempt it is blocked', { timeout: 120_000 }, async () => {
+  // A step budget is per attempt, so running out of steps does not end the
+  // retry loop the way a spent time budget does. Both attempts run, and only
+  // then is the workflow blocked with the budget named.
+  const { result } = await runSteps('The invoice was downloaded.', 2, 2);
+  assert.equal(result.outcome.attempts.length, 2, JSON.stringify(result.outcome, null, 2));
+  assert.equal(result.outcome.verdict, 'blocked');
+  assert.equal(result.outcome.cause, 'budget-exhausted');
+  assert.match(result.outcome.detail, /budget of 2 steps/);
+});
+
+test('ordering 5, run for real: a real failure, then the time budget running out on the retry, is a failure', { timeout: 120_000 }, async () => {
+  // The first attempt's three requests are answered with HTTP 500, which is
+  // the application failing. Every later request waits eight seconds, so the
+  // retry is still waiting when the six second budget runs out. The failure
+  // the first attempt saw must not be hidden by the budget on the second.
+  let served = 0;
+  const server = createServer((_req, res) => {
+    served++;
+    if (served <= 3) {
+      res.writeHead(500, { 'content-type': 'text/html' });
+      res.end('<html><body><h1>Internal error</h1></body></html>');
+      return;
+    }
+    setTimeout(() => {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end('<html><body><h1>Welcome</h1></body></html>');
+    }, 8_000);
+  });
+  const baseURL = await new Promise<string>((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address();
+      resolve(`http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`);
+    });
+  });
+  try {
+    const [result] = await run({
+      baseURL, artifacts: mkdtempSync(join(tmpdir(), 'af-ordering-5-')), attempts: 2,
+      workflows: [{
+        name: 'fail-then-slow', description: 'Reopen the page until the budget ends.',
+        expect: ['The invoice was downloaded.'], maxSteps: 2, maxMs: 6_000,
+      }],
+      personas: nobody,
+      planner: reopening(`${baseURL}/`),
+    });
+    const causes = result!.outcome.attempts.map((a) => a.cause);
+    assert.deepEqual(causes, ['application-error', 'budget-exhausted'], JSON.stringify(result!.outcome, null, 2));
+    assert.equal(result!.outcome.verdict, 'fail');
+    assert.equal(result!.outcome.cause, 'application-error');
+  } finally {
+    server.closeAllConnections();
     server.close();
   }
 });

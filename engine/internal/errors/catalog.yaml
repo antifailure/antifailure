@@ -802,8 +802,8 @@ errors:
     exit_code: 3
   - code: AF-AGT-002
     area: AGT
-    message: "Workflow {workflow} exhausted its budget of {budget} before completing."
-    next_step: "Raise the budget for {workflow} in the manifest, or split it into smaller workflows."
+    message: "Workflow {workflow} failed: the application did not do what the workflow expected."
+    next_step: "Read that workflow's steps and trace for what the page showed instead. A failure is evidence about the application, so fix the application or the expectation rather than the budget."
     docs: guides/workflows
     retryable: false
     exit_code: 8
@@ -849,6 +849,13 @@ errors:
     docs: guides/webhooks
     retryable: true
     exit_code: 1
+  - code: AF-AGT-024
+    area: AGT
+    message: "Workflow {workflow} was stopped by its budget before it reached a verdict: {detail}"
+    next_step: "Raise budget.steps or budget.duration for {workflow} if the flow is genuinely that long, or read its trace to see where it waited or went in circles. A workflow stopped by its budget is blocked, never a pass and never a failure of the change."
+    docs: guides/workflows
+    retryable: false
+    exit_code: 9
   - code: AF-AGT-010
     area: AGT
     message: "Invariant {invariant} did not finish within {timeout}."

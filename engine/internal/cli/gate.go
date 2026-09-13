@@ -88,6 +88,10 @@ func egressFinding(e *report.Egress, p report.Policy) *report.Finding {
 // So the manifest's own count is carried on the run and the two are told
 // apart by it rather than by the absence of results, which is evidence for
 // neither.
+// budgetStoppedTitle is the title of the finding a budget-stopped workflow
+// produces, and what gateError recognises it by.
+const budgetStoppedTitle = "A workflow was stopped by its budget before it reached a verdict."
+
 func workflowsUnverifiedFinding(run report.Run, p report.Policy) *report.Finding {
 	if p.WorkflowsUnverified == report.LevelIgnore {
 		return nil
@@ -101,6 +105,23 @@ func workflowsUnverifiedFinding(run report.Run, p report.Policy) *report.Finding
 	fix := "Read the workflow rows for what stopped each one. If the project has no " +
 		"workflows yet, set policy.workflows_unverified to warn so the choice is " +
 		"recorded rather than assumed."
+	// A workflow its own budget stopped is a reason nothing was verified that
+	// the reader can fix in the manifest, so it is named, with the budget, ahead
+	// of the general sentence, and it exits with the budget's own code.
+	for _, w := range run.Workflows {
+		if w.Cause == budgetExhausted {
+			return &report.Finding{
+				Rule: ruleWorkflowsUnverified, Level: p.WorkflowsUnverified,
+				Count: len(run.Workflows), Where: w.Name,
+				Title:  budgetStoppedTitle,
+				Detail: w.Detail,
+				Fix: "Raise budget.steps or budget.duration for " + w.Name + " if the flow is " +
+					"genuinely that long, or read its trace to see where it waited or went in " +
+					"circles. A workflow stopped by its budget is blocked, never a pass and " +
+					"never a failure of the change.",
+			}
+		}
+	}
 	if len(run.Workflows) == 0 {
 		title = "No workflows ran, so nothing about the application was checked."
 		switch {
@@ -210,6 +231,9 @@ func gateError(f report.Finding) error {
 	case ruleLoadRegression:
 		return aferrors.Coded(aferrors.AFLOD011, "count", strconv.Itoa(f.Count))
 	case ruleWorkflowsUnverified:
+		if f.Title == budgetStoppedTitle {
+			return aferrors.Coded(aferrors.AFAGT024, "workflow", f.Where, "detail", f.Detail)
+		}
 		return aferrors.Coded(aferrors.AFAGT007, "detail", f.Detail)
 	default:
 		// Every migration finding, including the seventeen lint rules, which have

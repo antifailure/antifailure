@@ -144,9 +144,29 @@ thing, then the thing you charge for.
 
 ## Budgets
 
+```yaml
+    budget:
+      steps: 50
+      duration: 3m
 ```
-AF-AGT-002 Workflow subscribe exhausted its budget of 50 steps before
-completing.
+
+The step budget is the most actions one attempt may take. A workflow that uses
+every step passes if everything it expected is visible on the page it reached,
+fails if that page answered with an HTTP error, and otherwise ends as blocked
+with the step budget named:
+
+```
+Stopped at its budget of 50 steps: the page it reached does not show what was
+expected.
+```
+
+The time budget covers the whole workflow, retries included. A workflow that
+reaches it is stopped where it is and ends as blocked with the budget named, and
+no further attempt starts:
+
+```
+Stopped at its time budget of 3m, 3m into the workflow on attempt 1, after:
+Open /billing: the plans are listed there.
 ```
 
 Either the budget is too small for a long flow, or the flow is genuinely hard

@@ -70,13 +70,36 @@ matching words against it.
 ```yaml
     budget:
       steps: 40
-      usd: 0.50
       duration: 5m
 ```
 
+`steps` is the most actions one attempt may take, and `duration` is the time
+the whole workflow may take, retries included. A workflow that declares neither
+gets 60 steps and ten minutes.
+
+For `duration`, a workflow that reaches it is stopped where it is and ends as
+blocked with the budget named, and no further attempt starts. It is stopped mid
+step if it is waiting on a page. The result says how far in the budget was
+reached, the attempt, and the last thing the agent did:
+
 ```
-AF-AGT-002 Workflow sign-up exhausted its budget of 40 steps before completing.
+Stopped at its time budget of 5m, 5m into the workflow on attempt 1, after:
+Press Pay now: the form is complete.
 ```
+
+Blocked rather than failed, because an unfinished run is evidence about neither
+the change nor the application, so it never counts against a pull request.
+
+For `steps`, a workflow that uses every step passes if everything it expected is
+visible on the page it reached, fails if that page answered with an HTTP error,
+and otherwise ends as blocked with the step budget named:
+
+```
+Stopped at its budget of 40 steps: the page it reached does not show what was
+expected.
+```
+
+A blocked workflow is never a partial pass.
 
 An agent that cannot find its way will keep trying. The budget is what turns
 that into a result instead of a bill, and a workflow that regularly exhausts one

@@ -47,6 +47,13 @@ export type Cause =
   /** An exploration ran to the end of its budget and observed the
    *  application. Findings, if there were any, are attached to it. */
   | 'explored'
+  /** A workflow was stopped by a budget its manifest declared before it
+   *  reached a verdict: the time the whole workflow may take, the steps one
+   *  attempt may take when the page it reached did not show what was expected,
+   *  or what its model calls may cost. Blocked rather than failed or passed,
+   *  because an unfinished run is evidence about neither the change nor the
+   *  application. The detail names which budget stopped it. */
+  | 'budget-exhausted'
   /** It worked. */
   | 'succeeded';
 
@@ -73,6 +80,7 @@ const VERDICT_FOR_CAUSE: Record<Cause, Verdict> = {
   'environment-incomplete': 'blocked',
   'synthesized-response': 'unverified',
   'page-unreadable': 'unverified',
+  'budget-exhausted': 'blocked',
 };
 
 /** One attempt at a workflow. */
@@ -125,7 +133,8 @@ export function classify(attempts: readonly Attempt[]): Outcome {
   // A blocked or unverified attempt is about the environment rather than the
   // application, and it does not become a pass because a retry got luckier.
   const blocking = attempts.find(
-    (a) => a.cause === 'runner-failure' || a.cause === 'environment-incomplete',
+    (a) => a.cause === 'runner-failure' || a.cause === 'environment-incomplete'
+      || a.cause === 'budget-exhausted',
   );
   // Either reason a workflow proved nothing. Both are unverified and neither
   // becomes a pass because a retry got luckier, which is the same argument

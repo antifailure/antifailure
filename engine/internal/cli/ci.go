@@ -390,8 +390,7 @@ func ciExit(run report.Run) error {
 	}
 	for _, w := range run.Workflows {
 		if w.Verdict == report.VerdictFail {
-			return silent(aferrors.Coded(aferrors.AFAGT002,
-				"workflow", "a workflow", "budget", "its attempts"))
+			return silent(aferrors.Coded(aferrors.AFAGT002, "workflow", w.Name))
 		}
 	}
 	if worst, ok := run.Worst(); ok && worst.Level == report.LevelFail {
@@ -400,8 +399,7 @@ func ciExit(run report.Run) error {
 	// Unreachable while Verdict only says fail for these three, and a return
 	// rather than a panic because being wrong about that must not crash a
 	// check that has already written its report.
-	return silent(aferrors.Coded(aferrors.AFAGT002,
-		"workflow", "a workflow", "budget", "its attempts"))
+	return silent(aferrors.Coded(aferrors.AFAGT002, "workflow", "a workflow"))
 }
 
 // verifyMasking reads the environment's own branch back.
@@ -478,7 +476,7 @@ func reportWorkflows(results []env.WorkflowResult) []report.Workflow {
 	out := make([]report.Workflow, 0, len(results))
 	for _, r := range results {
 		out = append(out, report.Workflow{
-			Name: r.Workflow, Verdict: r.Outcome.Verdict, Detail: r.Outcome.Detail,
+			Name: r.Workflow, Verdict: r.Outcome.Verdict, Cause: r.Outcome.Cause, Detail: r.Outcome.Detail,
 			Steps: r.Outcome.Reproduction, Trace: r.Evidence.Trace,
 		})
 	}

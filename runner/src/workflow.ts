@@ -31,7 +31,13 @@ export interface Workflow {
   readonly expect: readonly string[];
   /** startPath is where to begin. Empty starts at the root. */
   readonly startPath?: string;
+  /** maxSteps is the most actions one attempt may take. Absent means the
+   *  runner's default. */
   readonly maxSteps?: number;
+  /** maxMs is the time the whole workflow may take, retries included, from
+   *  the manifest's budget.duration. Absent means no time cap. A workflow that
+   *  reaches it is blocked with the budget named, never judged. */
+  readonly maxMs?: number;
   /** answers are what to type into fields this workflow names, keyed by any
    *  part of a field's accessible name and matched case insensitively.
    *
