@@ -19,11 +19,11 @@
 
 import { test, describe, before, after, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { randomBytes } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { adminUrl, available, startApi, seedOrg, dropOrg, testAnalytics, type ApiHarness, type Org } from './harness.ts'
 import { borrowKey, saveKey, setBudget } from '../src/providers/store.ts'
-import { reseal, ResealRefused, SEALED_TABLES, describe as describeReseal } from '../src/providers/reseal.ts'
-import { Keyring, MissingSealingKeyError, seal } from '../src/providers/seal.ts'
+import { registerSealedTable, reseal, ResealRefused, sealedTables, describe as describeReseal } from '../src/providers/reseal.ts'
+import { Keyring, MissingSealingKeyError, open, seal } from '../src/providers/seal.ts'
 
 // Assembled rather than written out, for the reason seal.test.ts gives:
 // tools/scanrepo refuses a repository carrying anything its detector reads as a
@@ -62,6 +62,7 @@ describe('rotating the sealing key', { skip: (await available()) ? false : 'no P
   beforeEach(async () => {
     await api.admin`DELETE FROM provider_keys`
     await api.admin`DELETE FROM provider_budgets`
+    await api.admin`DELETE FROM audit_stream_destinations`
   })
 
   const actor = { actorUserId: null, actorLabel: 'a rotation test', analytics: testAnalytics() }
@@ -575,22 +576,102 @@ describe('rotating the sealing key', { skip: (await available()) ? false : 'no P
     assert.equal(report.remaining, 0)
   })
 
-  test('every table the sealing module writes to is covered by the tool', async () => {
-    // The gap this catches is a second sealed column added elsewhere and never
-    // added here, which a rotation would silently leave behind. Read from the
-    // database rather than from a list: any table with all four sealed columns
-    // has to be in SEALED_TABLES.
-    const rows = await api.admin<{ table_name: string }[]>`
-      SELECT table_name FROM information_schema.columns
-      WHERE table_schema = 'public' AND column_name IN ('ciphertext', 'nonce', 'key_version', 'fingerprint')
-      GROUP BY table_name HAVING count(DISTINCT column_name) = 4`
-    const covered = new Set(SEALED_TABLES.map((t) => t.table))
-    const missing = rows.map((r) => r.table_name).filter((t) => !covered.has(t)).sort()
-    assert.deepEqual(
-      missing,
-      [],
-      `these tables hold sealed values and the re-sealing tool does not know about them:\n  ` +
-        `${missing.join('\n  ')}\nAdd them to SEALED_TABLES in src/providers/reseal.ts.`,
-    )
+  // -------------------------------------------------------------------------
+  // The edition seam: tables another edition seals into
+  // -------------------------------------------------------------------------
+
+  test('a sealed table no edition registered refuses the run by name when it holds a row, and nothing is written', async () => {
+    // The community migrations create the enterprise audit stream's table, so it
+    // exists here, and this process never registered it. A row in it sealed under
+    // these keys is exactly what a community command line pointed at an enterprise
+    // database finds. Re-sealing the rest would leave it behind, and the check
+    // after it would report a finished rotation.
+    await seedUnderV1()
+    const sealed = seal(v1, 'a-collector-token-nobody-registered', { orgId: other.orgId, provider: 'audit_sink:webhook' })
+    await api.admin`
+      INSERT INTO audit_stream_destinations
+        (org_id, kind, url, ciphertext, nonce, key_version, fingerprint, last4)
+      VALUES (${other.orgId}, 'webhook', 'https://collector.example/ingest', ${sealed.ciphertext},
+              ${sealed.nonce}, ${sealed.keyVersion}, ${sealed.fingerprint}, ${sealed.last4})`
+    assert.ok(!sealedTables().some((t) => t.table === 'audit_stream_destinations'))
+
+    for (const mode of ['apply', 'dry run', 'check'] as const) {
+      await assert.rejects(
+        () => reseal({ adminUrl, keyring: both, to: 'v2', mode }),
+        (err: unknown) =>
+          err instanceof ResealRefused &&
+          /audit_stream_destinations/.test(err.message) &&
+          /backup-cli\.mjs reseal/.test(err.message),
+        `mode ${mode} did not refuse`,
+      )
+    }
+    assert.deepEqual(await versions(), { v1: 3 }, 'a refused run wrote to provider keys')
+    const [left] = await api.admin<{ key_version: string }[]>`
+      SELECT key_version FROM audit_stream_destinations WHERE org_id = ${other.orgId}`
+    assert.equal(left!.key_version, 'v1')
+  })
+
+  test('with no enterprise rows, the community tool runs as it always did', async () => {
+    await seedUnderV1()
+    const [present] = await api.admin<{ n: string }[]>`SELECT count(*)::text AS n FROM audit_stream_destinations`
+    assert.equal(present!.n, '0')
+    assert.ok(sealedTables().some((t) => t.table === 'provider_keys'))
+    const report = await reseal({ adminUrl, keyring: both, to: 'v2' })
+    assert.deepEqual(report.problems, [])
+    assert.equal(report.resealed, 3)
+    assert.deepEqual(await versions(), { v2: 3 })
+  })
+
+  test('a table registered through the hook is re-sealed under its own binding', async () => {
+    // A probe table of this test's own rather than the enterprise one, so the
+    // registration it leaves in this process cannot change what the refusal test
+    // above measures, in whichever order they run. Dropped at the end, after
+    // which the tool reports it absent rather than failing.
+    await api.admin`DROP TABLE IF EXISTS reseal_hook_probe`
+    await api.admin`
+      CREATE TABLE reseal_hook_probe (
+        probe_id uuid PRIMARY KEY, org_id uuid NOT NULL, purpose text NOT NULL,
+        ciphertext bytea NOT NULL, nonce bytea NOT NULL, key_version text NOT NULL, fingerprint text NOT NULL)`
+    try {
+      registerSealedTable({
+        table: 'reseal_hook_probe', keyColumn: 'probe_id', orgColumn: 'org_id', boundColumn: 'purpose',
+        boundPrefix: 'probe:', revokedColumn: null, what: 'a probe value',
+      })
+      const probeId = randomUUID()
+      const value = 'a-value-sealed-into-a-registered-table'
+      const sealed = seal(v1, value, { orgId: org.orgId, provider: 'probe:alpha' })
+      await api.admin`
+        INSERT INTO reseal_hook_probe (probe_id, org_id, purpose, ciphertext, nonce, key_version, fingerprint)
+        VALUES (${probeId}, ${org.orgId}, 'alpha', ${sealed.ciphertext}, ${sealed.nonce}, ${sealed.keyVersion}, ${sealed.fingerprint})`
+
+      const report = await reseal({ adminUrl, keyring: both, to: 'v2' })
+      const probe = report.tables.find((t) => t.table === 'reseal_hook_probe')
+      assert.ok(probe?.present, 'the registered table was not visited')
+      assert.equal(probe.resealed, 1)
+      assert.deepEqual(probe.problems, [])
+      const [row] = await api.admin<{ ciphertext: Buffer; nonce: Buffer; key_version: string }[]>`
+        SELECT ciphertext, nonce, key_version FROM reseal_hook_probe WHERE probe_id = ${probeId}`
+      assert.equal(row!.key_version, 'v2')
+      assert.equal(
+        open(v2, { ciphertext: row!.ciphertext, nonce: row!.nonce, keyVersion: row!.key_version },
+          { orgId: org.orgId, provider: 'probe:alpha' }),
+        value,
+      )
+    } finally {
+      await api.admin`DROP TABLE IF EXISTS reseal_hook_probe`
+    }
+  })
+
+  test('the hook refuses what it cannot honour, and a repeated registration changes nothing', () => {
+    const spec = {
+      table: 'reseal_hook_refusals', keyColumn: 'id', orgColumn: 'org_id', boundColumn: 'kind',
+      boundPrefix: 'x:', revokedColumn: null, what: 'a refusal probe',
+    }
+    registerSealedTable(spec)
+    registerSealedTable({ ...spec })
+    assert.equal(sealedTables().filter((t) => t.table === spec.table).length, 1)
+    assert.throws(() => registerSealedTable({ ...spec, boundPrefix: 'y:' }), /different description/)
+    assert.throws(() => registerSealedTable({ ...spec, table: 'provider_keys' }), /sealed by this edition already/)
+    assert.throws(() => registerSealedTable({ ...spec, table: 'x"; DROP TABLE provider_keys; --' }), /not a table or column name/)
   })
 })

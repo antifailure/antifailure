@@ -291,10 +291,57 @@ nobody has seen.
    Leave `provider_key_version` unset for now. This is a secret reference change
    on the container app, so merging it deploys it: `deploy/cd/apply-config.sh`
    plans the tfvars targeted at the container app and applies it before
-   `deploy.sh`. The `azurerm_container_app_job.reseal` resource in the same
-   change is NOT inside that target, so it needs one hand apply, which is the
-   `terraform apply` in
-   [the control plane runbook](/docs/self-hosting/control-plane).
+   `deploy.sh`.
+
+   **The re-sealing job is not inside that target, and neither cd step will ever
+   create it.** `tools/configguard` accepts a plan that changes
+   `module.control_plane.azurerm_container_app.this` and nothing else, so
+   `azurerm_container_app_job.reseal` is created once per environment by the hand
+   apply below. After that, `deploy.sh` moves the job to each release's tested
+   image, the same way it moves the maintenance job, and a deploy that runs before
+   the job exists says so and carries on.
+
+   Run it after the deploy of this change to that environment has finished, so
+   the image it pins is one that contains `backup-cli.mjs`. Staging, from a
+   checkout of the commit that deploy carried:
+
+   ```sh
+   cd infra/terraform/stacks/control-plane
+   terraform init -reconfigure -backend-config=backend.hcl
+   export TF_VAR_subscription_id="$(az account show --query id -o tsv)"
+   export TF_VAR_github_client_id=seeded-once-not-read-here
+   export TF_VAR_github_client_secret=seeded-once-not-read-here
+   img="$(az containerapp show -n afcp-app -g af-cp-centralus \
+     --query 'properties.template.containers[0].image' -o tsv)"
+   terraform plan -var-file=staging.tfvars -out=reseal.tfplan \
+     -var "image_repository=${img%@*}" -var "image_digest=${img#*@}" \
+     -target='module.control_plane.azurerm_container_app_job.reseal[0]'
+   terraform show -json reseal.tfplan | jq -r '.resource_changes[]
+     | select(.mode == "managed" and .change.actions != ["no-op"])
+     | "\(.change.actions | join(",")) \(.address)"'
+   ```
+
+   The last command must print exactly one line,
+   `create module.control_plane.azurerm_container_app_job.reseal[0]`. Anything
+   else is a change this procedure has no business making: stop, and do not
+   apply. When it does print that one line:
+
+   ```sh
+   terraform apply reseal.tfplan
+   az containerapp job show -n afcp-reseal -g af-cp-centralus \
+     --query 'properties.template.containers[0].[image, command]' -o tsv
+   ```
+
+   The image must be the one `img` held and the command `node backup-cli.mjs
+   reseal`. Production is the same commands with `backend.production.hcl`,
+   `production.tfvars`, `afcpprod-app` and `afcpprod-reseal` in
+   `af-cp-prod-centralus`, run after the tag's production deploy has finished.
+
+   The image is pinned on the command line because the job reads
+   `image_repository` and `image_tag` from the stack's defaults, and a job created
+   from a default older than this change would run an image with no
+   `backup-cli.mjs` and no re-sealing tool in it. The job ignores later image
+   changes from Terraform, so only `deploy.sh` moves it from then on.
 
    **Confirm the revision actually holds both keys before going further.** The
    start-up log names the versions, which is the only way to check this without
@@ -336,7 +383,15 @@ nobody has seen.
    `v2`, one row per transaction, a batch at a time rather than the table at
    once. It is idempotent and resumable, so starting it again after an
    interruption continues from where it stopped, and starting it twice is safe.
-   It re-seals revoked rows too, which is what makes step 5 unambiguous.
+   It re-seals revoked rows too, which is what makes step 5 unambiguous. And it
+   covers every table sealed under these keys, not only provider keys: on the
+   enterprise edition that includes each organization's audit stream collector
+   credential, which its log reports as a table of its own. `backup-cli.mjs` is
+   the image's launcher, the same path in both images, and the enterprise copy
+   registers the enterprise tables before the tool starts. Pointed at a database
+   holding sealed values in a table it was not told about, the tool refuses to
+   run and names the table, rather than re-sealing everything else and letting
+   step 5 call the rotation complete.
 
    Read its log. It prints a count per version and it prints no key material:
 
@@ -359,7 +414,7 @@ nobody has seen.
 
    ```sh
    az containerapp job start -n afcp-reseal -g af-cp-centralus \
-     --command "node apps/api/src/backup-cli.ts reseal --check"
+     --command "node backup-cli.mjs reseal --check"
    ```
 
    It opens EVERY row whatever version it is at and writes nothing. It must
@@ -386,6 +441,33 @@ nobody has seen.
    and `AF_PROVIDER_KEY_VERSION` still names it. What goes is `v1`, which nothing
    should now need.
 
+   Merging it moves the container app, through the configuration apply. It does
+   not move the re-sealing job, which still references `provider-key-secret`, and
+   it does not remove the generated key. Both are one more guarded hand apply,
+   the same commands as the job's creation in step 2 with this plan in place of
+   that one:
+
+   ```sh
+   terraform plan -var-file=staging.tfvars -out=retire-v1.tfplan \
+     -target='module.control_plane.azurerm_container_app_job.reseal[0]' \
+     -target='module.control_plane.azurerm_key_vault_secret.owned["provider-key-secret"]' \
+     -target='module.control_plane.random_bytes.provider_key_secret[0]'
+   ```
+
+   The `jq` line from step 2 must print exactly these three lines, in any order,
+   and nothing else:
+
+   ```text
+   update module.control_plane.azurerm_container_app_job.reseal[0]
+   delete module.control_plane.azurerm_key_vault_secret.owned["provider-key-secret"]
+   delete module.control_plane.random_bytes.provider_key_secret[0]
+   ```
+
+   The job survives, because it exists while any sealing key is configured, and
+   loses its reference to `v1`. The pull request that sets the flag shows the two
+   destroys on its `plan` check, and `tools/planguard/destroys-acknowledged.tsv`
+   needs a row for each in that same pull request, naming this rotation.
+
    This destroys `random_bytes.provider_key_secret` and the vault secret it
    wrote, so do not run it on a report you have not read. Key Vault soft delete
    keeps the destroyed secret for the vault's retention period, so a mistake here
@@ -408,7 +490,10 @@ cannot change it and a changed one would mean something opened the wrong row.
 numbers moved on: put `v3=<new>` alongside `v2` in `provider-key-secrets`, set
 `provider_key_version = "v3"`, re-seal, check, and drop `v2` from the secret's
 value. `provider_key_secret_enabled` stays false from the first rotation onward;
-it is only ever the `v1` Terraform generated.
+it is only ever the `v1` Terraform generated. The re-sealing job is still there,
+because it exists while `provider_key_secrets_name` names a secret, and changing
+the value of that secret is a vault write rather than a Terraform change, so later
+rotations need no hand apply at all.
 
 **On a self-hosted installation** with no Key Vault, the same three variables are
 set however that deployment sets environment variables, and the tool is the same
@@ -421,6 +506,11 @@ AF_PROVIDER_KEY_VERSION=v2 \
 AF_RESEAL_DATABASE_URL=postgres://owner:...@db:5432/antifailure \
   node apps/api/src/backup-cli.ts reseal
 ```
+
+From a source checkout of the enterprise edition, run
+`node ee/web/server/src/backup-cli.ts reseal` instead, which registers the audit
+stream's table first; the community path refuses once any organization has
+chosen an audit stream destination.
 
 The connection string is read from the environment rather than taken as an
 argument, because an argument is visible in `ps` to every user on the machine and
@@ -463,7 +553,7 @@ spec:
           # The image the release is running: kubectl get deploy
           # cp-antifailure-control-plane -o jsonpath='{..image}'
           image: ghcr.io/antifailure/control-plane:<version>
-          command: ["node", "apps/api/src/backup-cli.ts", "reseal"]
+          command: ["node", "backup-cli.mjs", "reseal"]
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -505,7 +595,7 @@ kubectl logs job/cp-reseal
 
 With `database.existingSecret` or `providerKeys.existingSecret`, use those
 Secret names instead. For step 5, delete the Job and apply it again with
-`command: ["node", "apps/api/src/backup-cli.ts", "reseal", "--check"]`. The
+`command: ["node", "backup-cli.mjs", "reseal", "--check"]`. The
 chart's NetworkPolicy only restricts traffic into the control plane's own pods,
 so it does not stand between this Job and Postgres.
 

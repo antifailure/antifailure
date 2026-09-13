@@ -55,3 +55,14 @@ to run before the old key is removed. The Terraform holds the new key as a secre
 it addresses rather than reads, so nothing planning the stack needs vault read
 access, and a manual container app job runs the tool inside the virtual network,
 which is the only place Postgres can be reached from.
+
+The enterprise audit stream seals each organization's collector credential under
+the same secret, and it read only `AF_PROVIDER_KEY_SECRET` and opened every row
+without reading its version. So an enterprise installation could not hold the
+added key during a rotation, and would have refused every organization's
+destination the moment one began. It now reads the same three variables, opens
+each credential under the version it records, reports a missing key version as
+that rather than as an altered credential, and the re-sealing run moves those
+credentials together with provider keys. `docs/enterprise/audit-stream.md` said
+rotating the secret was a one way door with no re-sealing tool, and no longer
+does.

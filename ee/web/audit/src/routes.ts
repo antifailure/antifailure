@@ -45,6 +45,7 @@ import {
   type Context,
   type EndpointLimit,
   type Extension,
+  type Keyring,
   type ResolvedSession,
 } from '@antifailure/api'
 import type { Pool } from '@antifailure/db'
@@ -73,11 +74,12 @@ export const PATH = '/enterprise/audit-stream'
 export interface AuditStreamRoutesOptions {
   pool: Pool
   clock: Clock
-  /** The key credentials are sealed under, or null when AF_PROVIDER_KEY_SECRET
-   *  is unset. Null mounts the routes anyway: reading answers, and saving
-   *  refuses with 503 naming the variable, because a 404 would be
-   *  indistinguishable from a build that never had the feature. */
-  sealingKey: Buffer | null
+  /** The sealing keyring credentials are sealed under, or null when neither
+   *  AF_PROVIDER_KEY_SECRET nor AF_PROVIDER_KEY_SECRETS is set. Null mounts the
+   *  routes anyway: reading answers, and saving refuses with 503 naming the
+   *  variables, because a 404 would be indistinguishable from a build that never
+   *  had the feature. */
+  keyring: Keyring | null
   /** Whether one organization is entitled to audit streaming right now. */
   permitted: (orgId: string, now: Date) => Promise<boolean>
   log?: (line: string) => void
@@ -207,7 +209,7 @@ const show: Handler = async (c, options, session) => {
     read(options.pool, session.orgId),
     delivery(options.pool, session.orgId),
   ])
-  return c.json(view(destination, state, options.sealingKey !== null))
+  return c.json(view(destination, state, options.keyring !== null))
 }
 
 async function body(c: Context): Promise<Record<string, unknown> | null> {
@@ -226,12 +228,13 @@ function optionalText(value: unknown): string | null {
 }
 
 const put: Handler = async (c, options, session) => {
-  if (!options.sealingKey) {
+  if (!options.keyring) {
     return c.json(
       {
         error:
-          'This control plane cannot store a collector credential, because AF_PROVIDER_KEY_SECRET ' +
-          'is not set. An operator has to set it before any organization can choose a destination.',
+          'This control plane cannot store a collector credential, because no sealing key is ' +
+          'configured: neither AF_PROVIDER_KEY_SECRET nor AF_PROVIDER_KEY_SECRETS is set. An operator ' +
+          'has to set one before any organization can choose a destination.',
       },
       503,
     )
@@ -260,7 +263,7 @@ const put: Handler = async (c, options, session) => {
 
   const saved = await save(
     options.pool,
-    options.sealingKey,
+    options.keyring,
     {
       orgId: session.orgId,
       kind,
@@ -297,7 +300,7 @@ const patch: Handler = async (c, options, session) => {
   )
   if (!saved) return c.json({ error: 'This organization has no destination to switch.' }, 404)
   const state = await delivery(options.pool, session.orgId)
-  return c.json(view(saved, state, options.sealingKey !== null))
+  return c.json(view(saved, state, options.keyring !== null))
 }
 
 const del: Handler = async (c, options, session) => {

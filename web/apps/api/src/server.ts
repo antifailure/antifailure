@@ -3871,17 +3871,38 @@ export { type Clock, systemClock, FakeClock } from './clock.ts'
 // The sealing a customer supplied credential is stored under, re-exported so an
 // edition that stores another kind of customer credential uses this one rather
 // than growing a second. The enterprise audit stream seals a customer's collector
-// token here, under the same AF_PROVIDER_KEY_SECRET that already reaches every
-// deployment, with associated data that keeps the two kinds of value apart.
+// token here, under the same keyring that already reaches every deployment, with
+// associated data that keeps the two kinds of value apart.
+//
+// The KEYRING is what is exported, not a key. A caller holding one Buffer can
+// neither open a row sealed before a rotation nor seal under the version the
+// operator named, so an edition built on a single key would be the one way door
+// this module removed, reopened one package along.
 export {
   seal,
   open,
+  keyringFrom,
   sealingKeyFrom,
   fingerprintOf,
+  Keyring,
   SealError,
-  KEY_VERSION,
+  CannotOpenError,
+  MissingSealingKeyError,
+  FIRST_KEY_VERSION,
   type Sealed,
 } from './providers/seal.ts'
+
+// The re-sealing tool's registration seam, in the shape of setPermissionResolver
+// below and for its reason: an edition that seals values into a table of its own
+// describes that table here, so a rotation moves it, without the community tree
+// naming it. `reseal` itself is exported for that edition's own tests.
+export {
+  registerSealedTable,
+  sealedTables,
+  reseal,
+  ResealRefused,
+  type SealedTable,
+} from './providers/reseal.ts'
 
 // The router's request context, re-exported for the same reason the database
 // exports drizzle's sql tag: a package that imports hono itself gets a second

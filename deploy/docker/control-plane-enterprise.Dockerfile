@@ -174,6 +174,7 @@ COPY web/packages/policy ./packages/policy
 # only a convenience: moving it would break the import.
 COPY deploy/docker/bootstrap.mjs ./bootstrap.mjs
 COPY deploy/docker/maintenance.mjs ./maintenance.mjs
+COPY deploy/docker/backup-cli-enterprise.mjs ./backup-cli.mjs
 COPY deploy/docker/personas.mjs ./personas.mjs
 
 # The operator command, on PATH. The wrapper finds the API in either image's
@@ -219,6 +220,14 @@ RUN test -f /app/ee/web/node_modules/@antifailure/api/src/boot.ts \
   || (echo 'the enterprise workspace cannot reach the community API through its link' && exit 1)
 RUN test -f /app/ee/web/server/src/main.ts \
   || (echo 'the enterprise entry point is not in the image, which is the whole point of it' && exit 1)
+# The launcher the re-sealing job runs, asked which tables it would move. An
+# enterprise image whose registration did not run would list provider keys
+# alone, and a rotation would then refuse to run against any database holding
+# an audit stream destination.
+RUN out="$(node backup-cli.mjs sealed-tables)" \
+  && printf '%s\n' "$out" | cut -f1 | grep -qx audit_stream_destinations \
+  && printf '%s\n' "$out" | cut -f1 | grep -qx provider_keys \
+  || (echo "the enterprise launcher would re-seal only: $out" && exit 1)
 
 USER node
 

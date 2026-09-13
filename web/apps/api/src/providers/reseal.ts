@@ -69,8 +69,9 @@ export class ResealRefused extends Error {}
  * is built from.
  *
  * A list rather than one hard coded table, because the sealing module is not
- * specific to provider keys and the second caller is already being written: an
- * enterprise audit sink stores a customer's own credential the same way. A
+ * specific to provider keys and it has a second caller: the enterprise audit
+ * stream stores each organization's collector credential the same way. That
+ * table is registered by the enterprise edition, see registerSealedTable. A
  * rotation that re-sealed one table and silently left the other is the failure
  * this shape exists to prevent, and adding a row here is the whole of what a new
  * sealed column costs.
@@ -82,23 +83,92 @@ export class ResealRefused extends Error {}
  */
 export interface SealedTable {
   table: string
+  /** The row's unique uuid column, which the cursor walks and the guarded
+   *  UPDATE names. `id` for provider keys; the audit stream keeps one
+   *  destination per organization, so its key IS the organization. */
+  keyColumn: string
   /** The organization column. First component of the associated data. */
   orgColumn: string
   /** The column holding the second component of the associated data. For
    *  provider keys that is the provider name. */
   boundColumn: string
+  /** Text the writer puts in front of that column's value when it seals, or ''
+   *  when it uses the value as it is. Described as data here rather than imported
+   *  from the writer, so the community tool names an enterprise table's binding
+   *  without depending on enterprise code. A wrong prefix is not a quiet bug: the
+   *  associated data differs, so every row in the table reports `cannot open`. */
+  boundPrefix: string
+  /** The column that marks a row revoked, or null when the table has none, in
+   *  which case every row is live. */
+  revokedColumn: string | null
   /** What one row is, for a report line an operator reads. */
   what: string
 }
 
-export const SEALED_TABLES: readonly SealedTable[] = [
+/** The tables this edition seals into itself. Every other table is registered by
+ *  the edition that writes it, through `registerSealedTable`. */
+const BUILT_IN_SEALED_TABLES: readonly SealedTable[] = [
   {
     table: 'provider_keys',
+    keyColumn: 'id',
     orgColumn: 'org_id',
     boundColumn: 'provider',
+    boundPrefix: '',
+    revokedColumn: 'revoked_at',
     what: "a customer's provider key",
   },
 ]
+
+const registeredSealedTables = new Map<string, SealedTable>()
+
+/** A Postgres identifier this file will splice through sql.identifier. Bounded,
+ *  because a registration is code from another package and a table name with a
+ *  quote in it is not a table this tool should be guessing about. */
+const IDENTIFIER = /^[a-z_][a-z0-9_]{0,62}$/
+
+/**
+ * Registers a table another edition seals values into, so a re-sealing run in
+ * this process moves it too. The community edition registers nothing.
+ *
+ * THE SEAM IS A REGISTRATION, NOT AN IMPORT, for the reason setPermissionResolver
+ * gives: the community tree may not depend on the enterprise one, so the edition
+ * that owns a sealed table describes it here instead of this file naming it. The
+ * enterprise audit stream is the one caller, from its own registration.
+ *
+ * Registering the same description twice is a no-op, because both the serving
+ * process and the command line register on start and neither should have to
+ * know whether the other already did. A DIFFERENT description of a table already
+ * known is refused: two ways of building one table's associated data cannot both
+ * be right, and choosing one would re-seal half the rows under the wrong binding.
+ */
+export function registerSealedTable(spec: SealedTable): void {
+  for (const [field, value] of [
+    ['table', spec.table], ['keyColumn', spec.keyColumn], ['orgColumn', spec.orgColumn],
+    ['boundColumn', spec.boundColumn], ['revokedColumn', spec.revokedColumn ?? 'none'],
+  ] as const) {
+    if (!IDENTIFIER.test(value)) {
+      throw new ResealRefused(`a sealed table registration names ${field} ${JSON.stringify(value)}, which is not a table or column name`)
+    }
+  }
+  if (BUILT_IN_SEALED_TABLES.some((t) => t.table === spec.table)) {
+    throw new ResealRefused(`${spec.table} is sealed by this edition already and cannot be registered again`)
+  }
+  const already = registeredSealedTables.get(spec.table)
+  if (already) {
+    if (JSON.stringify(already) === JSON.stringify(spec)) return
+    throw new ResealRefused(
+      `${spec.table} is already registered with a different description, and a table has one way its ` +
+        `values were sealed`,
+    )
+  }
+  registeredSealedTables.set(spec.table, { ...spec })
+}
+
+/** Every table a re-sealing run in this process moves: this edition's, then each
+ *  registered one, in registration order. */
+export function sealedTables(): readonly SealedTable[] {
+  return [...BUILT_IN_SEALED_TABLES, ...registeredSealedTables.values()]
+}
 
 /** Why one row was not re-sealed. Three reasons, and they need different
  *  responses from whoever reads the report. */
@@ -254,7 +324,23 @@ export async function reseal(options: ResealOptions): Promise<ResealReport> {
   const pool = createPool({ url: options.adminUrl, max: 1, rowSecurity: false })
   const tables: TableReport[] = []
   try {
-    for (const spec of SEALED_TABLES) {
+    // Before anything is read or written. A table holding sealed values that no
+    // loaded edition described would be left behind by an apply and skipped by a
+    // check, and a check that skips a table is the one that says a rotation is
+    // complete while that table still needs the old key.
+    const unknown = await unregisteredSealedTables(pool)
+    if (unknown.length > 0) {
+      throw new ResealRefused(
+        `${unknown.join(', ')} ${unknown.length === 1 ? 'holds' : 'hold'} values sealed under these keys, ` +
+          `and this process has no description of how ${unknown.length === 1 ? 'it was' : 'they were'} sealed, ` +
+          `so re-sealing would leave ${unknown.length === 1 ? 'it' : 'them'} behind and a check would call the ` +
+          `rotation complete while ${unknown.length === 1 ? 'it still needs' : 'they still need'} the old key. ` +
+          `${unknown.length === 1 ? 'It belongs' : 'They belong'} to an edition this process did not load. Run ` +
+          `the tool through the image's launcher, node backup-cli.mjs reseal, which loads every table its ` +
+          `edition seals. Nothing has been read or written.`,
+      )
+    }
+    for (const spec of sealedTables()) {
       tables.push(await oneTable(pool, spec, {
         mode, to, keyring: options.keyring, batchSize, includeRevoked, log,
         ...(options.onBeforeWrite ? { onBeforeWrite: options.onBeforeWrite } : {}),
@@ -285,6 +371,34 @@ export async function reseal(options: ResealOptions): Promise<ResealReport> {
     remaining,
     seconds: (Date.now() - started) / 1000,
   }
+}
+
+/** Tables carrying all four sealed columns that no loaded edition described, and
+ *  that hold at least one row. Read from the catalogue rather than from a list,
+ *  because a list is exactly what a new sealed table is missing from. An empty
+ *  one is not refused: the enterprise tables exist in every database, because the
+ *  community migrations create them, and a community installation never writes
+ *  to them. */
+async function unregisteredSealedTables(pool: Pool): Promise<string[]> {
+  const known = new Set(sealedTables().map((t) => t.table))
+  const candidates = await pool.withoutTenant((db) =>
+    db.execute<{ table_name: string }>(sql`
+      SELECT table_name FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND column_name IN ('ciphertext', 'nonce', 'key_version', 'fingerprint')
+      GROUP BY table_name HAVING count(DISTINCT column_name) = 4`),
+  )
+  const holding: string[] = []
+  for (const { table_name } of candidates) {
+    if (known.has(table_name)) continue
+    const rows = await pool.withoutTenant((db) =>
+      db.execute<{ present: boolean }>(
+        sql`SELECT EXISTS (SELECT 1 FROM ${sql.identifier(table_name)}) AS present`,
+      ),
+    )
+    if (rows[0]?.present === true) holding.push(table_name)
+  }
+  return holding.sort()
 }
 
 interface Pass {
@@ -362,16 +476,19 @@ async function readBatch(pool: Pool, spec: SealedTable, pass: Pass, cursor: stri
   // matching the version predicate, so without it the tool would read the same
   // rows forever having written none of them.
   const notCurrent = pass.mode === 'check' ? sql`TRUE` : sql`key_version <> ${pass.to}`
-  const live = pass.includeRevoked ? sql`TRUE` : sql`revoked_at IS NULL`
+  const live = pass.includeRevoked || spec.revokedColumn === null
+    ? sql`TRUE`
+    : sql`${sql.identifier(spec.revokedColumn)} IS NULL`
+  const key = sql.identifier(spec.keyColumn)
   return pool.withoutTenant((db) =>
     db.execute<SealedRow>(sql`
-      SELECT id::text AS id,
+      SELECT ${key}::text AS id,
              ${sql.identifier(spec.orgColumn)}::text AS org,
              ${sql.identifier(spec.boundColumn)}::text AS bound,
              ciphertext, nonce, key_version, fingerprint
       FROM ${sql.identifier(spec.table)}
-      WHERE ${notCurrent} AND ${live} AND id > ${cursor}::uuid
-      ORDER BY id
+      WHERE ${notCurrent} AND ${live} AND ${key} > ${cursor}::uuid
+      ORDER BY ${key}
       LIMIT ${pass.batchSize}`),
   )
 }
@@ -383,7 +500,7 @@ async function oneRow(
   row: SealedRow,
   report: TableReport,
 ): Promise<void> {
-  const bound = { orgId: row.org, provider: row.bound }
+  const bound = { orgId: row.org, provider: `${spec.boundPrefix}${row.bound}` }
   const sealed = {
     ciphertext: row.ciphertext,
     nonce: row.nonce,
@@ -429,10 +546,10 @@ async function oneRow(
     db.execute<{ id: string }>(sql`
       UPDATE ${sql.identifier(spec.table)}
       SET ciphertext = ${next.ciphertext}, nonce = ${next.nonce}, key_version = ${next.keyVersion}
-      WHERE id = ${row.id}::uuid
+      WHERE ${sql.identifier(spec.keyColumn)} = ${row.id}::uuid
         AND key_version = ${row.key_version}
         AND ciphertext = ${row.ciphertext}
-      RETURNING id::text AS id`),
+      RETURNING ${sql.identifier(spec.keyColumn)}::text AS id`),
   )
   if (updated.length === 0) {
     report.changedUnderUs += 1

@@ -7,7 +7,7 @@
 // case. main.ts is the process; this is the decision, and the decision is what
 // is worth proving.
 
-import { registerExtension, setSignInPolicy, type Clock } from '@antifailure/api'
+import { registerExtension, setSignInPolicy, type Clock, type Keyring } from '@antifailure/api'
 import type { Pool } from '@antifailure/db'
 import { ssoExtension, signInPolicy, keyFromEnv } from '@antifailure-ee/sso'
 import { scimExtension } from '@antifailure-ee/scim'
@@ -17,7 +17,8 @@ import {
   auditStreamExtension,
   fromEnvironment,
   scheduleFromEnvironment,
-  sealingKeyFrom,
+  keyringFrom,
+  registerSealedDestinations,
   sinkFor,
   startForwarder,
   SealError,
@@ -210,8 +211,11 @@ export function registerEnterprise(options: RegisterOptions): Registered {
     gate,
   )
 
-  const sealingKey = auditSealingKey(options)
-  const audit = gated(auditStreamRoutes(options, gate, sealingKey), 'audit_stream', gate)
+  const keyring = auditKeyring(options)
+  // The audit stream seals into a table of its own. Registered here so any
+  // re-sealing run in this process moves it; the command line registers it too.
+  registerSealedDestinations()
+  const audit = gated(auditStreamRoutes(options, gate, keyring), 'audit_stream', gate)
 
   registerExtension(sso)
   registerExtension(scim)
@@ -221,15 +225,19 @@ export function registerEnterprise(options: RegisterOptions): Registered {
   return {
     claims,
     mounted: [sso.name, scim.name, audit.name],
-    auditStream: startAuditStream(options, gate, sealingKey),
+    auditStream: startAuditStream(options, gate, keyring),
   }
 }
 
 /**
- * The key an organization's collector credential is sealed under, or null.
+ * The keys an organization's collector credential is sealed under, or null.
  *
- * AF_PROVIDER_KEY_SECRET, the variable the community control plane already
- * seals a customer's provider key under, and deliberately not a new one: it
+ * The same sealing keyring the community control plane seals a customer's
+ * provider key under, read from the same three variables, AF_PROVIDER_KEY_SECRET,
+ * AF_PROVIDER_KEY_SECRETS and AF_PROVIDER_KEY_VERSION, and deliberately not a new
+ * one. Reading only the first, as this did, would leave an enterprise installation
+ * mid-rotation unable to open any credential sealed under the added key, and the
+ * operator's re-sealing run moves both kinds of credential together: it
  * already reaches every hosted deployment from Key Vault, so a customer
  * destination needs no configuration an operator does not already have. See
  * ee/web/audit/src/destinations.ts for the whole argument.
@@ -241,16 +249,17 @@ export function registerEnterprise(options: RegisterOptions): Registered {
  * and starting anyway would mean a control plane that fails on the first save
  * somebody attempts rather than at the deploy that broke it.
  */
-function auditSealingKey(options: RegisterOptions): Buffer | null {
+function auditKeyring(options: RegisterOptions): Keyring | null {
   try {
-    const key = sealingKeyFrom(options.env.AF_PROVIDER_KEY_SECRET)
-    if (!key) {
+    const keyring = keyringFrom(options.env)
+    if (!keyring) {
       options.log(
-        'AF_PROVIDER_KEY_SECRET is not set, so no organization can choose its own audit stream ' +
-          'destination. The installation sink, if one is configured, is unaffected.',
+        'no sealing key is configured, neither AF_PROVIDER_KEY_SECRET nor AF_PROVIDER_KEY_SECRETS, ' +
+          'so no organization can choose its own audit stream destination. The installation ' +
+          'sink, if one is configured, is unaffected.',
       )
     }
-    return key
+    return keyring
   } catch (err) {
     if (err instanceof SealError) {
       options.log(`the audit stream sealing key was refused: ${err.message}`)
@@ -271,12 +280,12 @@ function auditSealingKey(options: RegisterOptions): Buffer | null {
 function auditStreamRoutes(
   options: RegisterOptions,
   gate: { claims: Claims | null; org: string; now: () => Date; revoked: ReadonlySet<string> },
-  sealingKey: Buffer | null,
+  keyring: Keyring | null,
 ) {
   return auditStreamExtension({
     pool: options.pool,
     clock: options.clock,
-    sealingKey,
+    keyring,
     log: options.log,
     permitted: async (orgId, now) => {
       if (!statusNow(gate).enabled('audit_stream')) return false
@@ -305,7 +314,7 @@ function auditStreamRoutes(
 function startAuditStream(
   options: RegisterOptions,
   gate: { claims: Claims | null; org: string; now: () => Date; revoked: ReadonlySet<string> },
-  sealingKey: Buffer | null,
+  keyring: Keyring | null,
 ): ForwarderHandle | null {
   const fetcher: Fetcher = options.fetch ?? ((url, init) => fetch(url, init))
   let config
@@ -325,7 +334,7 @@ function startAuditStream(
     throw err
   }
 
-  if (!config && !sealingKey) {
+  if (!config && !keyring) {
     // Said out loud, in the state that forwards nothing, for the reason
     // readLicense says its own line out loud: an installation that forwards and
     // one that does not produced identical logs, and the first person to
@@ -350,7 +359,7 @@ function startAuditStream(
     clock: options.clock,
     sink: config?.sink ?? null,
     key: config?.key,
-    destinations: sealingKey ? (db, orgId) => sinkFor(db, sealingKey, fetcher, orgId) : null,
+    destinations: keyring ? (db, orgId) => sinkFor(db, keyring, fetcher, orgId) : null,
     batchSize: schedule.batchSize,
     deliveryBatchSize: schedule.deliveryBatchSize,
     log: options.log,
@@ -378,8 +387,8 @@ function startAuditStream(
   options.log(
     'audit stream: forwarding ' +
       (config ? `to ${config.sink.name()} for every organization without its own destination` : '') +
-      (config && sealingKey ? ', and ' : '') +
-      (sealingKey ? "to each organization's own destination where it has chosen one" : '') +
+      (config && keyring ? ', and ' : '') +
+      (keyring ? "to each organization's own destination where it has chosen one" : '') +
       `, every ${String(schedule.intervalMs)}ms, ${String(schedule.batchSize)} entries a pass ` +
       `and ${String(schedule.deliveryBatchSize)} a delivery`,
   )

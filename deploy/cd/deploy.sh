@@ -62,6 +62,11 @@
 # stated in docs/plan/notes/cd.md rather than pretended away here.
 #
 #   deploy.sh <resource-group> <app> <bootstrap-job> <maintenance-job> <image> <commit> <base-url>
+#
+# RESEAL_JOB, when set, names the re-sealing container app job, which moves to
+# the tested image with the maintenance job. It is created by a guarded hand
+# apply rather than by Terraform's configuration apply, so a deploy that runs
+# before that apply finds no such job, says so, and carries on.
 
 set -euo pipefail
 
@@ -72,6 +77,7 @@ MAINTENANCE_JOB="${4:?maintenance job}"
 IMAGE="${5:?image reference, digest-pinned}"
 COMMIT="${6:?commit being deployed}"
 BASE_URL="${7:?public origin}"
+RESEAL_JOB="${RESEAL_JOB:-}"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -613,8 +619,45 @@ if "$HERE/health-gate.sh" "$BASE_URL" "$COMMIT" 40 3; then
     echo "::error title=Maintenance image stayed behind::$APP is healthy on $COMMIT, but $MAINTENANCE_JOB is not on $IMAGE. The application remains on the healthy revision."
   fi
 
+  # The re-sealing job, for the maintenance job's reason and at its point: after
+  # both health gates, so a failed release never becomes the image that rewrites
+  # every stored credential. Terraform ignores this job's image, so nothing else
+  # moves it. Absent is a notice rather than a failure, because the job only
+  # exists once the hand apply in docs/self-hosting/rotating-secrets has run; a
+  # list that could not be READ is a failure, because it cannot say which.
+  reseal_updated=true
+  if [ -z "$RESEAL_JOB" ]; then
+    say "no re-sealing job named, so none moved"
+  else
+    reseal_present="$(az containerapp job list -g "$RG" --query "[?name=='$RESEAL_JOB'].name" -o tsv)" \
+      || reseal_present="__could_not_list__"
+    if [ "$reseal_present" = "__could_not_list__" ]; then
+      reseal_updated=false
+      echo "::error title=Re-sealing job could not be read::the container app jobs in $RG could not be listed, so whether $RESEAL_JOB exists and which image it runs are unknown."
+    elif [ -z "$reseal_present" ]; then
+      echo "::notice title=No re-sealing job yet::$RESEAL_JOB does not exist in $RG. The guarded hand apply in docs/self-hosting/rotating-secrets creates it once, and every deploy after that moves it."
+    else
+      say "updating re-sealing job $RESEAL_JOB to the tested image"
+      if az containerapp job update -n "$RESEAL_JOB" -g "$RG" --image "$IMAGE" -o none; then
+        reseal_image="$(az containerapp job show -n "$RESEAL_JOB" -g "$RG" \
+          --query "properties.template.containers[0].image" -o tsv 2>/dev/null || true)"
+        if [ "$reseal_image" = "$IMAGE" ]; then
+          say "re-sealing job now uses $IMAGE"
+        else
+          reseal_updated=false
+          echo "re-sealing image read back as ${reseal_image:-nothing}; expected $IMAGE"
+        fi
+      else
+        reseal_updated=false
+      fi
+      if [ "$reseal_updated" != true ]; then
+        echo "::error title=Re-sealing image stayed behind::$APP is healthy on $COMMIT, but $RESEAL_JOB is not on $IMAGE. The application remains on the healthy revision."
+      fi
+    fi
+  fi
+
   assert_connection_budget
-  if [ "$maintenance_updated" != true ]; then
+  if [ "$maintenance_updated" != true ] || [ "$reseal_updated" != true ]; then
     exit 1
   fi
   exit 0

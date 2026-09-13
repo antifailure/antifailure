@@ -27,7 +27,7 @@ import {
   OperatorBootstrapRefused,
 } from './admin/bootstrap.ts'
 import { listLeads, handleLead, LeadsRefused } from './enterprise/leadstore.ts'
-import { describe as describeReseal, reseal, ResealRefused } from './providers/reseal.ts'
+import { describe as describeReseal, reseal, ResealRefused, sealedTables } from './providers/reseal.ts'
 import { keyringFrom, SealError, SEALING_KEYS_ENV, SEALING_KEY_ENV, SEALING_VERSION_ENV } from './providers/seal.ts'
 
 function usage(): never {
@@ -97,6 +97,13 @@ function usage(): never {
             rather than becoming a pile, and --as names the operator account
             claiming it, because a record that named nobody would be a record of
             nothing.
+
+  sealed-tables
+            Lists the tables a re-seal in THIS process would move, one per line
+            as the table name, a tab, and what a row in it is, and touches no
+            database. The enterprise command line lists the audit stream's
+            table as well as provider keys; the community one lists provider
+            keys alone. Both images check their launcher against it when built.
 
   reseal    [--url <admin connection string>, or AF_RESEAL_DATABASE_URL]
             [--to <version>] [--batch <n>] [--dry-run] [--check] [--live-only]
@@ -315,6 +322,15 @@ try {
       console.log('')
       console.log(`  af-control-plane-backup break-glass --url <admin> --org ${result.slug} \\`)
       console.log('    --github-login <your login> --role owner --reason "first owner"')
+      break
+    }
+
+    case 'sealed-tables': {
+      // Which tables a re-sealing run in THIS process would move, touching no
+      // database. The images' launchers are asserted against it at build time,
+      // because an edition whose registration never ran looks identical to one
+      // that has nothing to register until the old key is removed.
+      for (const t of sealedTables()) console.log(`${t.table}\t${t.what}`)
       break
     }
 

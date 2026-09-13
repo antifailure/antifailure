@@ -259,7 +259,11 @@ resource "azurerm_container_app_job" "maintenance" {
 # key it was sealed under and the job is the thing that is holding two at once.
 # ---------------------------------------------------------------------------
 resource "azurerm_container_app_job" "reseal" {
-  count                        = var.provider_key_secret_enabled ? 1 : 0
+  # While ANY sealing key is configured, not only the generated v1. The end of a
+  # rotation sets provider_key_secret_enabled to false, and a job that followed
+  # that flag alone was destroyed by the very step that finishes the first
+  # rotation, leaving every later rotation with nothing to run.
+  count                        = (var.provider_key_secret_enabled || var.provider_key_secrets_name != "") ? 1 : 0
   name                         = "${var.name}-reseal"
   location                     = var.location
   resource_group_name          = var.resource_group_name
@@ -287,7 +291,10 @@ resource "azurerm_container_app_job" "reseal" {
   }
 
   dynamic "secret" {
-    for_each = toset(["migration-database-url", "provider-key-secret"])
+    # provider-key-secret only while it exists. Once a rotation has removed v1
+    # there is no such secret in the vault and no key in local.secret_by_name, so
+    # an unconditional reference would fail the plan that removes it.
+    for_each = toset(concat(["migration-database-url"], var.provider_key_secret_enabled ? ["provider-key-secret"] : []))
     content {
       name                = secret.value
       identity            = azurerm_user_assigned_identity.app.id
@@ -321,15 +328,21 @@ resource "azurerm_container_app_job" "reseal" {
       # means by starting it. A dry run or a check is the same job started with a
       # command override adding --dry-run or --check, so the two never drift
       # apart the way two jobs would.
-      command = ["node", "apps/api/src/backup-cli.ts", "reseal"]
+      # The image's launcher rather than a source path, so the same command re-seals
+      # every table the image's edition seals: the enterprise image registers the
+      # audit stream's collector credentials before the tool runs.
+      command = ["node", "backup-cli.mjs", "reseal"]
 
       env {
         name        = "AF_RESEAL_DATABASE_URL"
         secret_name = "migration-database-url"
       }
-      env {
-        name        = "AF_PROVIDER_KEY_SECRET"
-        secret_name = "provider-key-secret"
+      dynamic "env" {
+        for_each = var.provider_key_secret_enabled ? [1] : []
+        content {
+          name        = "AF_PROVIDER_KEY_SECRET"
+          secret_name = "provider-key-secret"
+        }
       }
       dynamic "env" {
         for_each = var.provider_key_secrets_name == "" ? [] : [1]
@@ -349,6 +362,16 @@ resource "azurerm_container_app_job" "reseal" {
   }
 
   tags = var.tags
+
+  # The image belongs to deploy/cd/deploy.sh, which moves this job to the tested
+  # image after both health gates, as it does the bootstrap job above. Without
+  # this, any apply that reaches the job would put image_tag's default back on
+  # it, and that default can be a release with no backup-cli.mjs in it at all.
+  # The command, secrets and variables stay Terraform's, which is why changing
+  # them is a guarded hand apply: see docs/self-hosting/rotating-secrets.
+  lifecycle {
+    ignore_changes = [template[0].container[0].image]
+  }
 
   depends_on = [azurerm_role_assignment.app_reads_secrets]
 }

@@ -38,8 +38,9 @@
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomBytes, randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { appendAudit, sql } from '@antifailure/db'
-import { fingerprintOf } from '@antifailure/api'
+import { fingerprintOf, Keyring, keyringFrom, reseal } from '@antifailure/api'
 import {
   DestinationRefused,
   Forwarder,
@@ -47,6 +48,7 @@ import {
   manifestKeyFor,
   readDelivery,
   readDestination,
+  registerSealedDestinations,
   saveDestination,
   setDestinationEnabled,
   sinkFor,
@@ -60,6 +62,7 @@ import {
 import {
   RecordingSink,
   TestClock,
+  adminUrl,
   available,
   dropTenant,
   seedTenant,
@@ -70,8 +73,12 @@ import {
 
 const hasDatabase = await available()
 
-/** The sealing key this run's credentials are sealed under. */
-const SEALING = randomBytes(32)
+/** The sealing key this run's credentials are sealed under, as version v1, and the
+ *  key a rotation adds as v2. */
+const SEALING_BYTES = randomBytes(32)
+const NEXT_BYTES = randomBytes(32)
+const SEALING = Keyring.of(SEALING_BYTES)
+const MID_ROTATION = Keyring.from([['v1', SEALING_BYTES], ['v2', NEXT_BYTES]], 'v2')
 
 /** One request as the collector saw it. */
 interface Seen {
@@ -196,7 +203,7 @@ describe(
       options: {
         permitted?: (orgId: string, now: Date) => Promise<boolean>
         sink?: RecordingSink
-        sealing?: Buffer
+        sealing?: Keyring
         deliveryBatchSize?: number
         onResolve?: (orgId: string) => void
       } = {},
@@ -607,13 +614,122 @@ describe(
       const held = await h.write(org.orgId, 'across.a.rotation')
 
       const collector = new Collector()
-      const rotated = await forwarder(collector, { sealing: randomBytes(32) }).pass()
+      const rotated = await forwarder(collector, { sealing: Keyring.of(randomBytes(32)) }).pass()
       assert.ok(rotated.refused >= 1)
       assert.equal(collector.at(at).length, 0)
       assert.equal((await readDelivery(h.pool, org.orgId))!.deliveredSeq, 0, 'a credential that would not open advanced the position')
 
       await forwarder(collector).pass()
       assert.ok(collector.entriesAt(at, 'webhook').some((e) => e.seq === held), 'the held entry was lost')
+    })
+
+    it('mid rotation: a destination sealed under v1 still delivers while v2 is the key new credentials are sealed under', async () => {
+      // The row decides which key opens it. Opening with whichever key this
+      // process seals under works until the first rotation and then refuses every
+      // organization's destination at once, which is the failure the version in
+      // each row exists to prevent.
+      const org = await tenant()
+      const at = host('mid-rotation')
+      await configure(org, 'webhook', at, credential())
+      const held = await h.write(org.orgId, 'during.a.rotation')
+      const collector = new Collector()
+      const pass = await forwarder(collector, { sealing: MID_ROTATION }).pass()
+      assert.equal(pass.refused, 0)
+      assert.ok(collector.entriesAt(at, 'webhook').some((e) => e.seq === held), 'the entry did not arrive mid rotation')
+    })
+
+    it('a key version this process does not hold: refused by that version, the credential called intact, and the entries wait', async () => {
+      const org = await tenant()
+      const at = host('missing-version')
+      await configure(org, 'webhook', at, credential())
+      const held = await h.write(org.orgId, 'waiting.for.a.key')
+      const collector = new Collector()
+      const missing = await forwarder(collector, { sealing: Keyring.of(NEXT_BYTES, 'v2') }).pass()
+      assert.ok(missing.refused >= 1)
+      assert.equal(collector.at(at).length, 0)
+      const delivery = await readDelivery(h.pool, org.orgId)
+      assert.equal(delivery!.deliveredSeq, 0, 'a credential that would not open advanced the position')
+      assert.match(delivery!.lastError ?? '', /"v1"/, delivery!.lastError ?? 'no error recorded')
+      assert.match(delivery!.lastError ?? '', /intact/)
+      assert.doesNotMatch(delivery!.lastError ?? '', /altered/)
+
+      await forwarder(collector, { sealing: MID_ROTATION }).pass()
+      assert.ok(collector.entriesAt(at, 'webhook').some((e) => e.seq === held), 'the held entry was lost')
+    })
+
+    it('saved mid rotation: the row records the version it was sealed under, and opens under that version alone', async () => {
+      const org = await tenant()
+      const at = host('saved-v2')
+      await saveDestination(h.pool, MID_ROTATION, {
+        orgId: org.orgId, kind: 'webhook', url: urlFor('webhook', at), credential: credential(),
+        actorUserId: null, actorLabel: 'the suite', origin: 'web',
+      }, new Date())
+      const [row] = await h.admin<{ key_version: string }[]>`
+        SELECT key_version FROM audit_stream_destinations WHERE org_id = ${org.orgId}`
+      assert.equal(row!.key_version, 'v2')
+      const held = await h.write(org.orgId, 'after.v1.is.gone')
+      const collector = new Collector()
+      const pass = await forwarder(collector, { sealing: Keyring.of(NEXT_BYTES, 'v2') }).pass()
+      assert.equal(pass.refused, 0)
+      assert.ok(collector.entriesAt(at, 'webhook').some((e) => e.seq === held), 'a v2 row did not open under v2 alone')
+    })
+
+    it('sealed by #381 before the keyring existed: opens and delivers as deployed, then re-seals under the keyring version', async () => {
+      // A captured row, not a re-derived one: fixtures/sealed-by-381.json was
+      // written by main's own seal.ts at the commit it names, with a single key and
+      // main's purposeOf. #381 is on main and staging runs it before this change
+      // deploys, so destinations in exactly this form will exist when it does.
+      const f = JSON.parse(readFileSync(new URL('./fixtures/sealed-by-381.json', import.meta.url), 'utf8')) as {
+        single_key_hex: string; org_id: string; kind: Kind; purpose: string; credential: string
+        row: { ciphertext_hex: string; nonce_hex: string; key_version: string; fingerprint: string; last4: string }
+      }
+      const singleKey = Buffer.from(f.single_key_hex, 'hex')
+
+      // The organization id is inside the associated data, so the row only opens
+      // for the organization it was sealed for: seed that exact id.
+      await dropTenant(h, f.org_id)
+      await h.admin`
+        INSERT INTO organizations (id, slug, name, plan)
+        VALUES (${f.org_id}, 'audit-fixture-381', 'Fixture', 'enterprise')`
+      seeded.push(f.org_id)
+      await h.setCursor(await h.maxSeq())
+      const at = host('sealed-by-381')
+      const [head] = await h.admin<{ seq: string }[]>`
+        SELECT coalesce(max(seq), 0)::text AS seq FROM audit_entries WHERE org_id = ${f.org_id}`
+      await h.admin`
+        INSERT INTO audit_stream_destinations
+          (org_id, kind, url, ciphertext, nonce, key_version, fingerprint, last4, from_seq)
+        VALUES (${f.org_id}, ${f.kind}, ${urlFor(f.kind, at)}, ${Buffer.from(f.row.ciphertext_hex, 'hex')},
+                ${Buffer.from(f.row.nonce_hex, 'hex')}, ${f.row.key_version}, ${f.row.fingerprint},
+                ${f.row.last4}, ${Number(head!.seq)})`
+
+      // The configuration the deployment had when #381 sealed it: one key in
+      // AF_PROVIDER_KEY_SECRET, read the way the enterprise server reads it.
+      const asDeployed = keyringFrom({ AF_PROVIDER_KEY_SECRET: singleKey.toString('base64') })
+      assert.ok(asDeployed, 'a single AF_PROVIDER_KEY_SECRET produced no keyring')
+      const before = await h.write(f.org_id, 'before.the.rotation')
+      const collector = new Collector()
+      const first = await forwarder(collector, { sealing: asDeployed }).pass()
+      assert.equal(first.refused, 0, 'a destination #381 sealed did not open under the configuration it was sealed with')
+      assert.ok(collector.entriesAt(at, f.kind).some((e) => e.seq === before), 'the entry did not arrive before the rotation')
+
+      // The rotation, through the community tool with the enterprise table registered.
+      registerSealedDestinations()
+      const rotating = Keyring.from([['v1', singleKey], ['v2', NEXT_BYTES]], 'v2')
+      const report = await reseal({ adminUrl, keyring: rotating, to: 'v2' })
+      const table = report.tables.find((t) => t.table === 'audit_stream_destinations')
+      assert.ok(table?.present, 'the re-sealing run did not visit the audit stream table')
+      assert.deepEqual(report.problems.filter((p) => p.id === f.org_id), [], 'the captured row was not re-sealed cleanly')
+      const [row] = await h.admin<{ key_version: string; fingerprint: string }[]>`
+        SELECT key_version, fingerprint FROM audit_stream_destinations WHERE org_id = ${f.org_id}`
+      assert.equal(row!.key_version, 'v2')
+      assert.equal(row!.fingerprint, f.row.fingerprint, 're-sealing changed the value rather than the key')
+
+      // And the old key gone: v2 alone opens it and delivers.
+      const after = await h.write(f.org_id, 'after.the.old.key.is.gone')
+      const second = await forwarder(collector, { sealing: Keyring.of(NEXT_BYTES, 'v2') }).pass()
+      assert.equal(second.refused, 0, 'the re-sealed row did not open under v2 alone')
+      assert.ok(collector.entriesAt(at, f.kind).some((e) => e.seq === after), 'the entry after the rotation did not arrive')
     })
 
     it('stored sealed: the row holds no plaintext, and the screen read carries no ciphertext', async () => {

@@ -102,6 +102,10 @@ env:
   APP: afcp-app
   BOOTSTRAP_JOB: afcp-bootstrap
   MAINTENANCE_JOB: afcp-maintenance
+  # The re-sealing job, which deploy.sh moves to the tested image with the
+  # maintenance job. Created by one guarded hand apply, so a deploy before that
+  # apply finds none and says so rather than failing.
+  RESEAL_JOB: afcp-reseal
   STAGING_URL: https://app.dev.antifailure.dev
   # Production, in its own resource group with its own everything. The names
   # come from `name = "afcpprod"` in production.tfvars, and the group is
@@ -111,6 +115,7 @@ env:
   PRODUCTION_APP: afcpprod-app
   PRODUCTION_BOOTSTRAP_JOB: afcpprod-bootstrap
   PRODUCTION_MAINTENANCE_JOB: afcpprod-maintenance
+  PRODUCTION_RESEAL_JOB: afcpprod-reseal
   PRODUCTION_URL: https://app.antifailure.dev
   # The same pin as infra.yml, and it has to stay the same: a plan job and an
   # apply job on two versions would write the state back and forth between
@@ -554,6 +559,7 @@ jobs:
       - name: Deploy
         env:
           IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
+          RESEAL_JOB: ${{ env.PRODUCTION_RESEAL_JOB }}
         run: |
           deploy/cd/deploy.sh \
             "${PRODUCTION_RESOURCE_GROUP}" "${PRODUCTION_APP}" \

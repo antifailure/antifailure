@@ -41,8 +41,9 @@
 //
 // `web/apps/api/src/providers/seal.ts`, unchanged and imported rather than
 // copied. It is the control plane's existing answer for a customer supplied
-// credential: AES-256-GCM, the sealing key read from AF_PROVIDER_KEY_SECRET and
-// never present in Postgres, and associated data binding each ciphertext to what
+// credential: AES-256-GCM, under the sealing keyring the community control plane
+// reads from AF_PROVIDER_KEY_SECRET and AF_PROVIDER_KEY_SECRETS, never present in
+// Postgres, and associated data binding each ciphertext to what
 // it was sealed for so a row copied between tenants does not open.
 //
 // The second component of that binding is a purpose string rather than a
@@ -67,7 +68,17 @@
 
 import { sql, type Db, type Pool } from '@antifailure/db'
 import { appendAudit } from '@antifailure/db'
-import { open, seal, sealingKeyFrom, SealError, type Sealed } from '@antifailure/api'
+import {
+  keyringFrom,
+  MissingSealingKeyError,
+  open,
+  registerSealedTable,
+  seal,
+  SealError,
+  type Keyring,
+  type Sealed,
+  type SealedTable,
+} from '@antifailure/api'
 import {
   EventHubsSink,
   SplunkSink,
@@ -76,7 +87,7 @@ import {
 } from './sinks.ts'
 import { manifestKeyFor, type Sink } from './sink.ts'
 
-export { sealingKeyFrom, SealError }
+export { keyringFrom, SealError }
 
 /** The collector protocols a customer may name.
  *
@@ -419,7 +430,7 @@ export interface SaveInput {
  */
 export async function save(
   pool: Pool,
-  sealingKey: Buffer,
+  keyring: Keyring,
   input: SaveInput,
   now: Date,
 ): Promise<Destination> {
@@ -448,7 +459,7 @@ export async function save(
 
   let sealed: Sealed
   try {
-    sealed = seal(sealingKey, credential, { orgId: input.orgId, provider: purposeOf(input.kind) })
+    sealed = seal(keyring, credential, { orgId: input.orgId, provider: purposeOf(input.kind) })
   } catch (err) {
     // Never the cause verbatim: `seal` refuses an empty plaintext and could in
     // principle raise from the cipher, and neither message is worth risking
@@ -606,7 +617,42 @@ async function headSeq(db: Db, orgId: string): Promise<number> {
  *  text column, and the `audit_sink:` prefix is what keeps it distinct from a
  *  provider key sealed for the same organization under the same key. */
 function purposeOf(kind: Kind): string {
-  return `audit_sink:${kind}`
+  return `${PURPOSE_PREFIX}${kind}`
+}
+
+/** The text in front of the kind in a destination credential's associated data.
+ *  One constant because two readers depend on it: purposeOf above, and the
+ *  re-sealing tool, which rebuilds the same binding from the kind column. */
+export const PURPOSE_PREFIX = 'audit_sink:'
+
+/**
+ * How this table's values were sealed, for the community re-sealing tool.
+ *
+ * The key column is the organization, because the table keeps one destination
+ * per organization. There is no revoked column: deleting a destination deletes
+ * the row. The bound column is the kind, behind PURPOSE_PREFIX, which is exactly
+ * what purposeOf builds, so a rotation re-seals each credential under the same
+ * binding it was sealed under.
+ */
+export const SEALED_DESTINATIONS: SealedTable = {
+  table: 'audit_stream_destinations',
+  keyColumn: 'org_id',
+  orgColumn: 'org_id',
+  boundColumn: 'kind',
+  boundPrefix: PURPOSE_PREFIX,
+  revokedColumn: null,
+  what: "an organization's audit stream collector credential",
+}
+
+/**
+ * Tells the community re-sealing tool this table exists. Called by the enterprise
+ * control plane's registration and by the enterprise command line before it runs
+ * anything, which is what makes `node backup-cli.mjs reseal` in the enterprise
+ * image move these credentials together with provider keys. Without it the tool
+ * refuses to run against a database holding any, rather than skipping them.
+ */
+export function registerSealedDestinations(): void {
+  registerSealedTable(SEALED_DESTINATIONS)
 }
 
 // ---------------------------------------------------------------------------
@@ -653,14 +699,14 @@ export type Route =
  */
 export async function sinkFor(
   db: Db,
-  sealingKey: Buffer,
+  keyring: Keyring,
   fetcher: Fetcher,
   orgId: string,
 ): Promise<Route> {
   const rows = await db.execute<
-    Row & { ciphertext: Buffer; nonce: Buffer }
+    Row & { ciphertext: Buffer; nonce: Buffer; sealed_key_version: string }
   >(sql`
-    SELECT ${SCREEN_COLUMNS}, ciphertext, nonce
+    SELECT ${SCREEN_COLUMNS}, ciphertext, nonce, key_version AS sealed_key_version
     FROM audit_stream_destinations WHERE org_id = ${orgId}`)
   const row = rows[0]
   if (!row) return { state: 'none' }
@@ -679,12 +725,32 @@ export async function sinkFor(
 
   let credential: string
   try {
+    // The row's own version, never the one this process seals under. The version
+    // is in the associated data, so a row sealed under v1 does not open with the
+    // v2 key or the v2 binding, and opening every row with the current key would
+    // refuse every destination the moment an operator started a rotation.
     credential = open(
-      sealingKey,
-      { ciphertext: Buffer.from(row.ciphertext), nonce: Buffer.from(row.nonce) },
+      keyring,
+      {
+        ciphertext: Buffer.from(row.ciphertext),
+        nonce: Buffer.from(row.nonce),
+        keyVersion: row.sealed_key_version,
+      },
       { orgId, provider: purposeOf(destination.kind) },
     )
   } catch (err) {
+    if (err instanceof MissingSealingKeyError) {
+      // A configuration rather than a damaged credential, and said as one. The
+      // entries are held either way; what differs is who can fix it, and the
+      // status an administrator reads should not send them to re-enter a token
+      // that is fine.
+      return {
+        state: 'refused',
+        reason:
+          `${err.message} Your credential is intact. Saving it again also repairs this, because ` +
+          'a fresh save is sealed under a key this control plane holds.',
+      }
+    }
     return {
       state: 'refused',
       reason:
