@@ -87,6 +87,7 @@ const (
 	SiteAurora          Site = "the Aurora control API"
 	SiteCloudSQL        Site = "the Cloud SQL control API"
 	SiteAzurePostgres   Site = "the Azure PostgreSQL control API"
+	SiteXata            Site = "the Xata control API"
 	SiteClickHouse      Site = "the ClickHouse HTTP interface"
 	SiteServiceProbe    Site = "the service readiness probe"
 	SiteWebhookDelivery Site = "the webhook delivery"

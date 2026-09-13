@@ -148,6 +148,20 @@ var CopyOnWriteLedger = map[string]LedgerEntry{
 			"fake's byte counter to move, so the reason is a test rather than a comment.",
 		Evidence: "ee/engine/db/azurepg/conformance_test.go",
 	},
+	"xata": {
+		Declared: true,
+		Verdict:  Unproven,
+		Because: "the instrument is fired on every run of this provider's suite and cannot " +
+			"decide, which is the aurora case rather than the neon one. The suite drives a " +
+			"fake Xata control plane over one local Postgres, where the only way to hand " +
+			"back a branch carrying the golden's data is CREATE DATABASE ... TEMPLATE, so " +
+			"the stopwatch would time Postgres copying files whatever Xata's storage " +
+			"snapshot would have done. TestTheFakeControlPlaneReallyCopies reads the fake's " +
+			"own byte counter across one branch and requires it to move. The declaration " +
+			"is Xata's published claim, from its branching page, and settling it needs a " +
+			"run of TestConformanceAgainstXata with an account.",
+		Evidence: "engine/internal/db/xata/conformance_test.go",
+	},
 	"supabase": {
 		Declared: false,
 		Verdict:  Unproven,

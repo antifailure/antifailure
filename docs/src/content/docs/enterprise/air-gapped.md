@@ -87,6 +87,7 @@ recorded with the site that made it.
 | the Aurora control API | AWS, to create and branch an Aurora cluster |
 | the Cloud SQL control API | Google Cloud, to clone and branch a Cloud SQL instance |
 | the Azure PostgreSQL control API | Azure, to restore and branch a flexible server |
+| the Xata control API | `api.xata.tech` |
 | the ClickHouse HTTP interface | your ClickHouse server |
 | the service readiness probe | the environment, over loopback |
 | the webhook delivery | a service in the environment |

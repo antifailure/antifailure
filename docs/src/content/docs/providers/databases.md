@@ -11,7 +11,7 @@ meant to be written by people outside this repository.
 
 ```yaml
 database:
-  provider: docker   # or neon, supabase, dblab, pgurl, aurora, cloudsql, or azurepg
+  provider: docker   # or neon, supabase, dblab, pgurl, xata, aurora, cloudsql, or azurepg
   version: 17
 ```
 
@@ -24,6 +24,7 @@ database:
 | [`dblab`](/docs/providers/dblab) | A Database Lab Engine you run | Flat, because clones are copy on write | A Database Lab Engine, ZFS, and its verification token |
 | [`supabase`](/docs/providers/supabase) | A Supabase branch, which is a whole separate project | Grows with the database, because a Supabase branch is created empty | A Supabase project on a paid plan and an access token |
 | [`pgurl`](/docs/providers/pgurl) | A database on any Postgres server you name | Grows with the database, because a branch is a server side file copy | A reachable Postgres and a role that may create databases |
+| [`xata`](/docs/providers/xata) | A branch of a Xata project | Expected to be flat, because Xata documents its branches as copy on write snapshots. Never timed on Xata | A Xata project and an API key |
 | [`aurora`](/docs/providers/aurora) | A clone of an Amazon Aurora PostgreSQL cluster | Expected to be flat, because a clone shares the source's storage volume. Never timed on AWS | An Aurora PostgreSQL cluster, an IAM role, and the enterprise edition |
 | [`cloudsql`](/docs/providers/cloudsql) | A fast clone of a Google Cloud SQL for PostgreSQL instance | Expected to be flat, because a fast clone is created from an Instant Snapshot. Cloud SQL's other clone workflow is not flat, and the provider is built so it cannot ask for that one. Never timed on Google Cloud | A Cloud SQL instance, a service account, and the enterprise edition |
 | [`azurepg`](/docs/providers/azurepg) | A point in time restore of an Azure Database for PostgreSQL Flexible Server | Expected to grow with the database. The snapshot half is flat and the log replay half is not, so this provider does not claim copy on write. Never timed on Azure | A flexible server, a service principal, and the enterprise edition |
@@ -50,6 +51,13 @@ vendor is not in this list. It needs no account and no vendor at all, only a
 server it may create databases on. Branch time is not flat there, and the
 measured seconds per gigabyte are published in `benchmarks/` rather than
 described.
+
+`xata` is the managed Postgres whose branching is really branching. Xata
+documents a branch as a copy on write storage snapshot that completes in seconds
+at terabyte scale, and of thirteen managed vendors it is the only one that does
+not restore a backup to make one. That is Xata's claim rather than a
+measurement made here, and [the provider page](/docs/providers/xata) says
+exactly which half the suite proves.
 
 `supabase` is the right choice when your application already lives there.
 Branch time is not flat, because Supabase creates a branch with no data in it
@@ -178,5 +186,5 @@ the suite run a behaviour it should have skipped, which fails, which is the
 intended outcome: a capability is a promise the suite checks.
 
 Register it under a name this build does not already have. `docker`, `neon`,
-`supabase`, `dblab` and `pgurl` are reserved, and a registration under one of
+`supabase`, `dblab`, `pgurl` and `xata` are reserved, and a registration under one of
 them is refused at validation rather than accepted and then never consulted.

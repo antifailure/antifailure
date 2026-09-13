@@ -167,6 +167,11 @@ const (
 	// than by an account. It is the provider for every server nobody wrote a
 	// provider for.
 	DBPgURL DBProvider = "pgurl"
+	// DBXata is Xata, whose branches are copy on write snapshots at the
+	// storage layer. database.project holds "<organization>/<project>",
+	// because both identifiers are path segments of every call the provider
+	// makes and neither can be discovered from the other.
+	DBXata DBProvider = "xata"
 )
 
 // Database says where the environment's Postgres comes from.

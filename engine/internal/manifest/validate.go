@@ -568,6 +568,22 @@ func (v *validator) database(m *schema.Manifest) {
 			"Remove database.project. Name the server that holds the goldens and the branches "+
 				"with database.api_key_env, which is the variable holding its connection string.")
 	}
+	if d.Provider == schema.DBXata {
+		// Refused rather than accepted and failed later. Xata addresses a
+		// project by an organization AND a project identifier, both of them
+		// path segments of every call the provider makes, and neither can be
+		// discovered from the other. A manifest holding only one of them is a
+		// manifest that validates, commits, and fails at the first refresh
+		// with a 404 about a path nobody wrote.
+		org, project, ok := strings.Cut(d.Project, "/")
+		if !ok || org == "" || project == "" || strings.Contains(project, "/") {
+			v.add("database.project",
+				"The xata provider addresses a project by organization and project, and this "+
+					"manifest does not give exactly both.",
+				"Set database.project to '<organization>/<project>', both as they appear in the "+
+					"Xata console.")
+		}
+	}
 	if _, ok := confine(d.MaskingRules); !ok {
 		v.add("database.masking_rules",
 			fmt.Sprintf("The masking rules path %q resolves outside the repository.", d.MaskingRules), "")

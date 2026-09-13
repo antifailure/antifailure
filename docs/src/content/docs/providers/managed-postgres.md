@@ -58,6 +58,9 @@ parent, so that making one does not take longer as the database grows.
 | Xata | copy on write branch | yes | unverified | [its page](https://github.com/xataio/xata) |
 
 The link in the last column is the page the host server answer was read from.
+Xata is the one vendor on this list with a provider of its own,
+[`xata`](/docs/providers/xata), because its branches are copy on write. The
+rest are served by `pgurl`.
 Every quote behind every verdict, and the page for each mechanism, is in
 `engine/internal/db/managed/vendors.go`.
 
