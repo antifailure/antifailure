@@ -31,3 +31,11 @@ host the manifest refuses in `build.allow_hosts` or an egress rule, and a start
 path `af explore` refuses. The audit webhook also kept the URL it was given rather than
 the one it checked, so a URL pasted with a trailing newline was accepted and
 then failed on every delivery.
+
+A host written with a user and password in front of it,
+`deploy:<password>@registry.example.com`, is now refused everywhere a host is
+read. The manifest accepted it, because the port check never asked whether the
+port was a number. The egress engine refused it by printing the password as the
+port. The console's engine compiled it. All three refuse it without printing it,
+and the refusal cases now live in the corpus both engines are tested against, so
+neither can drift from the other again.
