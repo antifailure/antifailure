@@ -72,7 +72,34 @@ type Options struct {
 	SeedSQL string
 	// Now is the clock.
 	Now func() time.Time
+	// LabelInheritance decides what a clone does with its source's user
+	// labels. The zero value keeps the historical behaviour of this fake, a
+	// clone that starts with no labels at all.
+	//
+	// It exists because whether Google Cloud SQL copies user labels onto a
+	// clone has NOT been established, and the Azure provider shipped the
+	// defect this guards against: a restore carried its golden's identifying
+	// tags, so a branch listed as a second golden. The provider has to be
+	// correct under every answer, so the fake can give each one.
+	LabelInheritance LabelInheritance
 }
+
+// LabelInheritance is how a clone treats the labels of the instance it was
+// cloned from.
+type LabelInheritance string
+
+const (
+	// LabelsNotInherited starts a clone with no user labels. The default.
+	LabelsNotInherited LabelInheritance = ""
+	// InheritedLabelsYield copies the source's labels onto the clone, and a
+	// later label write replaces them like any other label. Request wins.
+	InheritedLabelsYield LabelInheritance = "request-wins"
+	// InheritedLabelsWin copies the source's labels onto the clone, and a
+	// later label write cannot change or remove any key the clone inherited.
+	// Inherited wins. It is the adversarial answer: a provider whose label
+	// write is silently ignored must refuse rather than trust it.
+	InheritedLabelsWin LabelInheritance = "inherited-wins"
+)
 
 // Server is the fake control plane.
 type Server struct {
@@ -118,6 +145,10 @@ type fakeInstance struct {
 	Role          string
 	ExtraUsers    map[string]*fakeUser
 	DatabaseFlags map[string]string
+	// InheritedLabels are the labels this instance copied from its clone
+	// source, recorded only under InheritedLabelsWin, where a label write
+	// cannot change them.
+	InheritedLabels map[string]string
 }
 
 type fakeUser struct {
@@ -143,6 +174,11 @@ func New(opts Options) (*Server, error) {
 	}
 	if opts.Prefix == "" {
 		return nil, fmt.Errorf("fakecloudsql: Prefix is required; the test Postgres is shared")
+	}
+	switch opts.LabelInheritance {
+	case LabelsNotInherited, InheritedLabelsYield, InheritedLabelsWin:
+	default:
+		return nil, fmt.Errorf("fakecloudsql: unknown LabelInheritance %q", opts.LabelInheritance)
 	}
 	admin, err := sql.Open("pgx", opts.AdminURL)
 	if err != nil {

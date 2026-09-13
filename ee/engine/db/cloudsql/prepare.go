@@ -190,7 +190,7 @@ func (p *Provider) requirePrepared(in *instance, version, envID string) error {
 	if !p.owns(in) || in.Name != p.instanceName(branchPrefix, envID) ||
 		in.Settings.UserLabels[envLabelKey] != envID ||
 		in.Settings.UserLabels[fromLabelKey] != shortVersion(version) ||
-		in.Settings.UserLabels[goldenLabelKey] != "" ||
+		kindOf(in) != kindBranch || len(goldenOnlyLabelsSet(in.Settings.UserLabels)) > 0 ||
 		in.State != "RUNNABLE" || version == "" || envID == "" ||
 		!hmac.Equal([]byte(in.Settings.UserLabels[preparedLabelKey]), []byte(p.preparedToken(in.Name, version, envID))) {
 		return fmt.Errorf("cloudsql: instance %q has no completed preparation for this environment and golden; reconcile or remove the unfinished branch before retrying", in.Name)

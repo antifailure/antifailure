@@ -184,7 +184,100 @@ const goldenLabelKey = "antifailure-golden"
 const fromLabelKey = "antifailure-from"
 
 // versionLabelKey carries the authoritative golden version, base32 encoded.
+//
+// A branch carries it too, naming the golden it came from, so its presence
+// says nothing about whether an instance is a golden. kindLabelKey says that.
 const versionLabelKey = "af-version-0"
+
+// kindLabelKey records what an instance IS: a golden still being built, a
+// published golden, or a branch.
+//
+// An explicit label rather than an inference from which other labels happen to
+// be present, and the inference is exactly what failed on Azure: a branch is a
+// restore of a golden there, the restore carried the golden's identifying tags,
+// and the branch was listed as a second golden while the check that stops
+// DestroyGolden removing a referenced golden skipped it. Whether Cloud SQL
+// copies user labels onto a clone has NOT been established, so this provider
+// must not depend on the answer. Aurora's tagKind is the same shape.
+//
+// The label alone is not trusted either. A clone may inherit its golden's
+// kind, and a label write may not take, so a published golden must also carry
+// the one attribute a clone cannot inherit, the instance name derived from its
+// version. See isPublishedGolden.
+const kindLabelKey = "antifailure-kind"
+
+// The values kindLabelKey takes. All three are valid label values.
+const (
+	kindCandidate = "candidate"
+	kindGolden    = "golden"
+	kindBranch    = "branch"
+)
+
+// kindOf is the instance's recorded kind, or the empty string.
+func kindOf(in *instance) string { return in.Settings.UserLabels[kindLabelKey] }
+
+// isPublishedGolden reports whether an instance is a published golden this
+// provider owns: kind golden, a decodable version, and the name that version
+// derives. The name is what a clone cannot inherit, so a branch or a clone
+// left by a killed worker that copied every label of its golden still fails.
+func (p *Provider) isPublishedGolden(in *instance) bool {
+	if !p.owns(in) || kindOf(in) != kindGolden {
+		return false
+	}
+	version, ok := decodeValue(in.Settings.UserLabels[versionLabelKey])
+	return ok && version != "" && in.Name == p.instanceName(goldenPrefix, version)
+}
+
+// isGoldenSide reports whether an instance is a golden, published or still
+// being built. A candidate has no version label yet, so its name is checked by
+// prefix rather than exactly.
+func (p *Provider) isGoldenSide(in *instance) bool {
+	if !p.owns(in) {
+		return false
+	}
+	switch kindOf(in) {
+	case kindGolden, kindCandidate:
+		return strings.HasPrefix(in.Name, "af-"+goldenPrefix+"-")
+	}
+	return false
+}
+
+// isBranchInstance reports whether an owned instance counts as a branch.
+//
+// Everything owned that is not provably a golden counts, including an
+// instance whose labels say golden and whose name does not. That is the fail
+// closed direction for every caller: the branch limit counts one too many
+// rather than one too few, and DestroyGolden refuses rather than removing a
+// golden something was cloned from.
+func (p *Provider) isBranchInstance(in *instance) bool {
+	return p.owns(in) && !p.isGoldenSide(in)
+}
+
+// isGoldenOnlyLabel reports whether a label key belongs on a golden and never
+// on a branch: the golden marker and the chunked metadata.
+func isGoldenOnlyLabel(key string) bool {
+	if key == goldenLabelKey {
+		return true
+	}
+	for _, prefix := range []string{rulesLabelPrefix, provenanceLabelPrefix, attestationLabelPrefix} {
+		if strings.HasPrefix(key, prefix+"-") {
+			return true
+		}
+	}
+	return false
+}
+
+// goldenOnlyLabelsSet names the golden only labels that carry a value, sorted.
+func goldenOnlyLabelsSet(labels map[string]string) []string {
+	var out []string
+	for key, value := range labels {
+		if value != "" && isGoldenOnlyLabel(key) {
+			out = append(out, key)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
 
 // shortVersion is the marker value for goldenLabelKey.
 //
