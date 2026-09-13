@@ -138,6 +138,19 @@ reads the daemon's API version and fails its Docker check below that floor,
 naming the version it found, instead of leaving an older daemon to fail partway
 through an environment.
 
+**A release is not published until its sidecar image can be pulled without
+logging in.** GitHub creates a package private on its first publish, and the
+release's check that the published egress sidecar could be fetched ran while
+still logged in to `ghcr.io` from the push, so it passed against a package no
+customer could read. Every first `af up` would then have compiled the sidecar
+instead of fetching it, and nothing would have gone red. The pull back now runs
+logged out under an empty Docker configuration, the same as a customer, and so
+does the read of the manifest list. If you cut releases yourself, a private
+package now fails the release with the one time remedy: make the package public
+on its settings page, then re-run the failed job. `Cutting a release` now says to
+approve the production deployment only after the release's `publish` job reads
+success.
+
 ### Enterprise: what was sold now exists
 
 **Single sign-on and directory provisioning could not be reached by any
@@ -359,7 +372,7 @@ gRPC could not run (#325). The rehearsal ran with every declared secret blank
 containing `moto` as an AWS emulator (#390). A Kafka console, a PostgREST server and every
 store's exporter read as a second store (#405). Workflow budgets that bounded nothing (#411). The rotation runbook's check command that could not start the check (#409). The dogfood check going red for a pull request whose recorded base had fallen
 behind main (#416). An EC2 instance role that could never supply AWS credentials
-(#419). `af oracle` reporting every persona
+(#419). A release check that the sidecar image could be fetched, run while still logged in (#423). `af oracle` reporting every persona
 as a missing row (#395). A refusal telling Heroku and Tiger Cloud users to run a
 statement they may not run (#388). A report understating its own twin (#299),
 and claiming a substitution the sidecar refuses (#342). A silent first `af up`
