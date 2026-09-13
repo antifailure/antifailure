@@ -23,8 +23,7 @@ import (
 )
 
 // validate applies every semantic rule the JSON Schema cannot express: cross
-// references between sections, path confinement, port collisions, dependency
-// cycles, and the rules that keep a read only statement read only.
+// references between sections, path confinement, dependency cycles, and the rules that keep a read only statement read only.
 //
 // Problems are collected rather than returned one at a time, because fixing a
 // manifest by rerunning the command eight times is an experience a validator
@@ -106,7 +105,6 @@ func (v *validator) services(m *schema.Manifest) {
 	}
 
 	names := map[string]int{}
-	ports := map[int]string{}
 	for i := range m.Services {
 		s := &m.Services[i]
 		base := fmt.Sprintf("services[%d]", i)
@@ -161,15 +159,6 @@ func (v *validator) services(m *schema.Manifest) {
 					fmt.Sprintf("Service %q is a worker and declares a port.", s.Name),
 					"A worker receives no traffic. Change kind to web if it should.")
 			}
-		}
-
-		if s.Port != 0 {
-			if prev, taken := ports[s.Port]; taken {
-				v.add(base+".port",
-					fmt.Sprintf("Services %q and %q both claim port %d.", prev, s.Name, s.Port),
-					"Give one of them a different port.")
-			}
-			ports[s.Port] = s.Name
 		}
 
 		v.build(base, s)

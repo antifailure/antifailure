@@ -22,6 +22,7 @@ const (
 	flawAcceptsEmptyEnvID           = "accepts-empty-env-id"
 	flawNoProxy                     = "no-proxy"
 	flawNoURL                       = "no-url"
+	flawSharesOnePort               = "shares-one-port"
 	flawDuplicatesOnSecondUp        = "duplicates-on-second-up"
 	flawIgnoresDependencies         = "ignores-dependencies"
 	flawHangsOnCycle                = "hangs-on-cycle"
@@ -75,6 +76,7 @@ var negativeControls = []struct {
 	{flawAcceptsEmptyEnvID, "--- FAIL: TestRuntimeSuiteChild/Up_RefusesAnEnvironmentWithNoID"},
 	{flawNoProxy, "--- FAIL: TestRuntimeSuiteChild/Up_StartsAServiceAndReportsIt"},
 	{flawNoURL, "--- FAIL: TestRuntimeSuiteChild/Up_ReportsAReachableURL"},
+	{flawSharesOnePort, "--- FAIL: TestRuntimeSuiteChild/Up_ServicesOnOnePortAreEachReachable"},
 	{flawDuplicatesOnSecondUp, "--- FAIL: TestRuntimeSuiteChild/Up_IsIdempotentForOneEnvironment"},
 	{flawIgnoresDependencies, "--- FAIL: TestRuntimeSuiteChild/Up_StartsDependenciesFirst"},
 	{flawHangsOnCycle, "--- FAIL: TestRuntimeSuiteChild/Up_ReportsACycleRatherThanHanging"},

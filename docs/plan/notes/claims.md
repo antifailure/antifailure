@@ -126,7 +126,7 @@ is not PROVEN and does not appear as one.
 
 | # | Claim | Page | Verdict | Evidence |
 | --- | --- | --- | --- | --- |
-| 24 | The shared suite defines thirty-seven runtime conformance behaviours. | twins | ROSTER VERIFIED | The gate compares the published count to `len(runtimeBehaviors)`. Historical Docker results of 32 of 32 are retained as historical measurements, not evidence of a current full pass. |
+| 24 | The shared suite defines thirty-eight runtime conformance behaviours. | twins | ROSTER VERIFIED | The gate compares the published count to `len(runtimeBehaviors)`. Historical Docker results of 32 of 32 are retained as historical measurements, not evidence of a current full pass. |
 | 25 | The seven Docker isolation properties are implemented. | twins | CORRECTED | The teardown description now names `Down_TouchesOnlyItsOwnEnvironment`, which tests scoped Docker teardown. It no longer attributes the Kubernetes namespace error to Docker. |
 | 26 | Kubernetes live conformance remains unverified. | twins | UNVERIFIED | The shared machine could not sustain the test cluster on 2026-09-09. Use a dedicated host and `just k8s-conformance`; daemon unavailability is not a test verdict. |
 | 27 | Cloud runtimes are implemented with provider-specific verification limits. | twins | WRITTEN | Enterprise runtime packages include ECS, Cloud Run and Azure Container Apps. Their source and guides must be checked individually; the former claim that no cloud runtime exists is stale. |

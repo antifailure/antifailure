@@ -42,8 +42,9 @@ func TestTheWorkingRuntimeKeepsEveryGuarantee(t *testing.T) {
 	if !env.ProxyReady {
 		t.Error("the proxy should be up, or the environment has no route out")
 	}
-	if env.URL() != "http://127.0.0.1:8080" {
-		t.Errorf("URL() should find the web service, got %q", env.URL())
+	if env.URL() == "" || env.URL() == "http://127.0.0.1:8080" {
+		t.Errorf("URL() should find the web service at an address the runtime allocated, "+
+			"not at the port it listens on, got %q", env.URL())
 	}
 	for _, s := range env.Services {
 		if !s.Ready {
@@ -289,3 +290,31 @@ var (
 	_ provider.Runtime = (*fakes.Runtime)(nil)
 	_ provider.Runtime = fakes.BreakRuntime(fakes.NewRuntime(), fakes.NeverJournals)
 )
+
+// Two services listening on the same port are each reachable, because a
+// service is reached at an address the runtime allocates rather than at its own
+// port. A fake that built the address from the port gave both the same URL,
+// which is the placement the runtime conformance suite now refuses.
+func TestTwoServicesOnOnePortGetTwoAddresses(t *testing.T) {
+	r := fakes.NewRuntime()
+	env, err := r.Up(context.Background(), provider.EnvSpec{
+		EnvID: "env1",
+		Services: []provider.ServiceSpec{
+			{Name: "web", Kind: "web", Port: 3000},
+			{Name: "api", Kind: "web", Port: 3000},
+		},
+	})
+	if err != nil {
+		t.Fatalf("up: %v", err)
+	}
+	urls := map[string]string{}
+	for _, s := range env.Services {
+		urls[s.Name] = s.URL
+	}
+	if urls["web"] == "" || urls["api"] == "" {
+		t.Fatalf("both web services should have an address, got %v", urls)
+	}
+	if urls["web"] == urls["api"] {
+		t.Errorf("two services on port 3000 were given one address, %s", urls["web"])
+	}
+}

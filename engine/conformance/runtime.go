@@ -103,6 +103,7 @@ var runtimeBehaviors = []Behavior{
 	{"Up_RefusesAnEnvironmentWithNoID", "Up with no environment id fails rather than creating something unattributable.", ""},
 	{"Up_StartsAServiceAndReportsIt", "A service that was asked for is running and named in the result.", ""},
 	{"Up_ReportsAReachableURL", "A web service answers at the URL the runtime reports.", "ingress"},
+	{"Up_ServicesOnOnePortAreEachReachable", "Two web services listening on the same container port each answer at their own reported URL.", "ingress"},
 	{"Up_IsIdempotentForOneEnvironment", "Bringing one environment up twice leaves one environment, not two.", ""},
 	{"Up_StartsDependenciesFirst", "A service does not start before something it depends on.", ""},
 	{"Up_ReportsACycleRatherThanHanging", "A dependency cycle fails with AF-RUN-041 instead of deadlocking.", ""},
@@ -393,6 +394,8 @@ func runRuntimeBehavior(
 		h.upStartsAServiceAndReportsIt(ctx)
 	case "Up_ReportsAReachableURL":
 		h.upReportsAReachableURL(ctx)
+	case "Up_ServicesOnOnePortAreEachReachable":
+		h.upServicesOnOnePortAreEachReachable(ctx)
 	case "Up_IsIdempotentForOneEnvironment":
 		h.upIsIdempotent(ctx)
 	case "Up_StartsDependenciesFirst":
@@ -835,6 +838,49 @@ func (h *rtHarness) upReportsAReachableURL(ctx context.Context) {
 		h.t.Errorf("the URL the runtime reported served %q, not the service; a URL that "+
 			"does not reach the service is worse than none, because af up prints it "+
 			"and a pull request comment links to it", got)
+	}
+}
+
+// upServicesOnOnePortAreEachReachable is why the manifest does not refuse two
+// services on one port.
+//
+// A web service listens on the port its own image chose, and images choose the
+// same few: PostgREST and a Next.js application both listen on 3000. The
+// manifest validator used to refuse that pair, which made a property of
+// placement into a rule of the manifest. Placement is the runtime's business,
+// so this is where it is checked. A runtime that put two services into one
+// network namespace, or published each on the port it listens on, fails here
+// rather than in an environment somebody is waiting for.
+func (h *rtHarness) upServicesOnOnePortAreEachReachable(ctx context.Context) {
+	id := h.envID("port1")
+	const firstBody, secondBody = "conformance-first", "conformance-second"
+	first, second := h.webService("first", firstBody), h.webService("second", secondBody)
+	if first.Port != second.Port {
+		h.t.Fatalf("the two services must share a container port for this to measure anything; got %d and %d",
+			first.Port, second.Port)
+	}
+	h.mustUp(ctx, provider.EnvSpec{
+		EnvID:    id,
+		Services: []provider.ServiceSpec{first, second},
+	})
+	a := h.waitForReady(ctx, id, "first")
+	b := h.waitForReady(ctx, id, "second")
+	if a.URL == "" || b.URL == "" {
+		h.t.Fatalf("the runtime declares ingress but reported no URL for a web service: first %q, second %q",
+			a.URL, b.URL)
+	}
+	if a.URL == b.URL {
+		h.t.Fatalf("two services on container port %d were reported at one address, %s, so one of them "+
+			"cannot be reached at all", first.Port, a.URL)
+	}
+	for _, c := range []struct{ name, url, body string }{
+		{"first", a.URL, firstBody},
+		{"second", b.URL, secondBody},
+	} {
+		if got := httpGet(h.t, ctx, c.url); !strings.Contains(got, c.body) {
+			h.t.Errorf("service %s shares a container port with another service, and %s served %q "+
+				"rather than its own body", c.name, c.url, got)
+		}
 	}
 }
 
