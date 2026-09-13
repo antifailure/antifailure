@@ -93,6 +93,20 @@ that two services would resolve differently is refused with `AF-SEC-007`.
 applied, and a request no node can satisfy is refused with `AF-RUN-047` before
 anything is created.
 
+**A workflow's declared budget now stops it.** `budget.steps` and
+`budget.duration` were accepted, normalised and refused when malformed, and then
+never sent to the runner, so every workflow ran to the runner's own forty steps
+for as long as that took. A page that never answered held a workflow for the
+browser's thirty second timeout on every attempt. Both budgets now reach the
+runner from `af test`, `af ci`, the `run_browser_workflows` tool and the hosted
+runner. **A manifest that set a step or duration budget, which until now bounded
+nothing, will now be stopped by it.** The time budget is a hard cap over the
+whole workflow, retries included. A workflow stopped by either budget ends as
+blocked, never as a pass and never as a failure of the change, with its own code,
+`AF-AGT-024`, exit status 9, naming the workflow and the budget. `AF-AGT-002` now
+means only that a workflow failed; it used to tell every failed workflow that it
+had exhausted its budget. If a flow is genuinely that long, raise its budget.
+
 ### Enterprise: what was sold now exists
 
 **Single sign-on and directory provisioning could not be reached by any
@@ -271,7 +285,7 @@ gRPC could not run (#325). The rehearsal ran with every declared secret blank
 (#392). Two services given the first value of a shared variable name (#387).
 `af init` refusing an app beside a prebuilt image (#401), and reading any image
 containing `moto` as an AWS emulator (#390). A Kafka console, a PostgREST server and every
-store's exporter read as a second store (#405). `af oracle` reporting every persona
+store's exporter read as a second store (#405). Workflow budgets that bounded nothing (#411). `af oracle` reporting every persona
 as a missing row (#395). A refusal telling Heroku and Tiger Cloud users to run a
 statement they may not run (#388). A report understating its own twin (#299),
 and claiming a substitution the sidecar refuses (#342). A silent first `af up`
