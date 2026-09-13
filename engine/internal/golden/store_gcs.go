@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/antifailure/antifailure/engine/pkg/airgap"
+	"github.com/antifailure/antifailure/engine/pkg/secret"
 )
 
 // gcsStore keeps goldens in a Google Cloud Storage bucket.
@@ -109,9 +110,12 @@ func newGCSStore(raw string, getenv func(string) string) (Store, error) {
 	if getenv == nil {
 		getenv = func(string) string { return "" }
 	}
-	u, err := url.Parse(strings.TrimSpace(raw))
+	u, err := secret.ParseURL(strings.TrimSpace(raw))
 	if err != nil {
-		return nil, fmt.Errorf("golden: %q is not a usable bucket URL: %w", redactURL(raw), err)
+		// The parse error names the address, redacted. Printing redactURL(raw)
+		// beside net/url's own error put the credential straight back, because
+		// that error quoted the address whole, signature and all.
+		return nil, fmt.Errorf("golden: not a usable bucket URL: %w", err)
 	}
 
 	s := &gcsStore{

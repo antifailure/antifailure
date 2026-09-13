@@ -20,6 +20,7 @@ import (
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
+	"github.com/antifailure/antifailure/engine/pkg/secret"
 )
 
 // Clone identifier prefixes.
@@ -176,8 +177,10 @@ func New(opts Options) (*Provider, error) {
 	if opts.Endpoint == "" {
 		return nil, errors.New("db.dblab: a Database Lab Engine endpoint is required")
 	}
-	if _, err := url.Parse(opts.Endpoint); err != nil {
-		return nil, fmt.Errorf("db.dblab: the endpoint %q is not a URL: %w", opts.Endpoint, err)
+	// Not quoted, for the reason every other address in the engine is not: an
+	// endpoint can carry a user and password, and url.Parse's error quotes it.
+	if _, err := secret.ParseURL(opts.Endpoint); err != nil {
+		return nil, fmt.Errorf("db.dblab: the endpoint is not a URL: %w", err)
 	}
 	if opts.Token.IsZero() {
 		return nil, errors.New("db.dblab: a verification token is required")

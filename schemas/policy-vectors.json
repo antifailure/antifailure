@@ -1380,5 +1380,61 @@
         }
       ]
     }
+  ],
+  "refused": [
+    {
+      "host": "",
+      "contains": "the host is empty"
+    },
+    {
+      "host": "*.",
+      "contains": "a wildcard needs a domain after it"
+    },
+    {
+      "host": "*.exa*mple.com",
+      "contains": "a star stands for one whole label"
+    },
+    {
+      "host": "web-*.example.com",
+      "contains": "a star stands for one whole label"
+    },
+    {
+      "host": "api.*com",
+      "contains": "a star stands for one whole label"
+    },
+    {
+      "host": "*.*",
+      "contains": "a pattern of stars alone matches every host"
+    },
+    {
+      "host": "*.*.*",
+      "contains": "a pattern of stars alone matches every host"
+    },
+    {
+      "host": "host:0",
+      "contains": "is not valid"
+    },
+    {
+      "host": "host:70000",
+      "contains": "is not valid"
+    },
+    {
+      "host": "api.stripe.com:anything",
+      "contains": "is not valid"
+    },
+    {
+      "host": "deploy:pv3pass@registry.example.com",
+      "contains": "the host carries user information",
+      "excludes": "pv3pass"
+    },
+    {
+      "host": "deploy@registry.example.com",
+      "contains": "the host carries user information"
+    },
+    {
+      "host": "pv4tok@registry.example.com:443",
+      "contains": "the host carries user information",
+      "excludes": "pv4tok"
+    }
   ]
 }

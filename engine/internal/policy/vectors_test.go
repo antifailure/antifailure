@@ -6,6 +6,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/antifailure/antifailure/engine/pkg/schema"
@@ -32,6 +33,16 @@ type vectorFile struct {
 	// Note is addressed to whoever opens the file wondering what it is for.
 	Note     string         `json:"note"`
 	Policies []vectorPolicy `json:"policies"`
+	// Refused are rule hosts every implementation must refuse to compile.
+	Refused []vectorRefusal `json:"refused"`
+}
+
+// vectorRefusal is one rule host every implementation must refuse to compile.
+type vectorRefusal struct {
+	Host     string `json:"host"`
+	Contains string `json:"contains"`
+	// Excludes is a piece of a credential the refusal must not print.
+	Excludes string `json:"excludes,omitempty"`
 }
 
 type vectorPolicy struct {
@@ -325,7 +336,54 @@ func buildVectors(t *testing.T) vectorFile {
 			"of the policy must reproduce them exactly. Regenerate with " +
 			"'go test ./internal/policy -update-vectors'.",
 		Policies: policies,
+		Refused:  refusals(t),
 	}
+}
+
+// refusals are the rule hosts every implementation must refuse, each with a
+// fragment its refusal must contain and, for a host carrying a credential, a
+// piece of that credential the refusal must not print.
+//
+// The engine is asked about every case before the corpus is written. A case
+// the engine compiles, words differently, or refuses by printing the
+// credential stops the file from being written rather than writing it wrong.
+// The web engine used to keep its own copy of this list, and that copy is how
+// the two came to disagree: a host with user information in front of it and a
+// port that is not a number were refused here and compiled there.
+func refusals(t *testing.T) []vectorRefusal {
+	t.Helper()
+	cases := []vectorRefusal{
+		{Host: "", Contains: "the host is empty"},
+		{Host: "*.", Contains: "a wildcard needs a domain after it"},
+		{Host: "*.exa*mple.com", Contains: "a star stands for one whole label"},
+		{Host: "web-*.example.com", Contains: "a star stands for one whole label"},
+		{Host: "api.*com", Contains: "a star stands for one whole label"},
+		{Host: "*.*", Contains: "a pattern of stars alone matches every host"},
+		{Host: "*.*.*", Contains: "a pattern of stars alone matches every host"},
+		{Host: "host:0", Contains: "is not valid"},
+		{Host: "host:70000", Contains: "is not valid"},
+		// A port that is not a number.
+		{Host: "api.stripe.com:anything", Contains: "is not valid"},
+		// User information: a password, a user alone, and a token with a port. The
+		// credentials are lowercase because both engines lowercase a host before
+		// quoting any part of it, and a mixed case Excludes would miss the leak.
+		{Host: "deploy:pv3pass@registry.example.com", Contains: "the host carries user information", Excludes: "pv3pass"},
+		{Host: "deploy@registry.example.com", Contains: "the host carries user information"},
+		{Host: "pv4tok@registry.example.com:443", Contains: "the host carries user information", Excludes: "pv4tok"},
+	}
+	for _, c := range cases {
+		_, err := New(&schema.Egress{Rules: []schema.EgressRule{{Host: c.Host, Mode: schema.ModeAllow}}})
+		if err == nil {
+			t.Fatalf("the engine compiled %q, and every implementation must refuse it", c.Host)
+		}
+		if !strings.Contains(err.Error(), c.Contains) {
+			t.Fatalf("the refusal of %q is %q, which does not contain %q", c.Host, err, c.Contains)
+		}
+		if c.Excludes != "" && strings.Contains(err.Error(), c.Excludes) {
+			t.Fatalf("the refusal of %q prints %q, a piece of the credential it refuses: %v", c.Host, c.Excludes, err)
+		}
+	}
+	return cases
 }
 
 func vectorPath(t *testing.T) string {

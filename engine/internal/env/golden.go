@@ -28,6 +28,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/verify"
 	"github.com/antifailure/antifailure/engine/pkg/extension"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
+	"github.com/antifailure/antifailure/engine/pkg/secret"
 )
 
 // A golden is a masked, verified copy of production that branches are made
@@ -599,6 +600,21 @@ func (o *Orchestrator) sourceURL(ctx context.Context) (secrets.Value, error) {
 	// Registered before it is used, so that it is redacted everywhere rather
 	// than everywhere somebody remembered.
 	o.opts.Redactor.Register(value.Reveal())
+
+	// A URL is parsed here, once, before anything connects with it. pgx reports
+	// one that does not parse with the inner half of net/url's error, and that
+	// half quotes pieces of the address: the start of a password holding a
+	// slash, or the bytes after a stray percent sign. The whole value is
+	// registered with the redactor above, and a piece of it is not the whole
+	// value. The keyword form is not a URL and is left to the driver.
+	//
+	// The value comes back with the error, so a caller that asks only whether
+	// production is named, as the fidelity report does, is still told it is.
+	if s := value.Reveal(); strings.HasPrefix(s, "postgres://") || strings.HasPrefix(s, "postgresql://") {
+		if _, err := secret.ParseURL(s); err != nil {
+			return value, aferrors.Coded(aferrors.AFDB024, "detail", err.Error())
+		}
+	}
 	return value, nil
 }
 

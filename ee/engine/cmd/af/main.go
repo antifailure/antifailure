@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/antifailure/antifailure/ee/engine/airgapped"
@@ -43,6 +44,7 @@ import (
 	"github.com/antifailure/antifailure/engine/pkg/afcli"
 	"github.com/antifailure/antifailure/engine/pkg/edition"
 	"github.com/antifailure/antifailure/engine/pkg/extension"
+	"github.com/antifailure/antifailure/engine/pkg/secret"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -330,6 +332,15 @@ func gatherEvidence(ctx context.Context, org string, from, to time.Time) (compli
 	if url == "" {
 		return compliance.Evidence{}, fmt.Errorf(
 			"%s is not set, and the evidence lives in the control plane's database", databaseEnv)
+	}
+	// Parsed before pgx sees it. pgx reports a URL that does not parse with
+	// the inner half of net/url's error, and that half quotes pieces of the
+	// address: the start of a password holding a slash, or the bytes after a
+	// stray percent sign. The keyword form is not a URL and is left to pgx.
+	if strings.HasPrefix(url, "postgres://") || strings.HasPrefix(url, "postgresql://") {
+		if _, err := secret.ParseURL(url); err != nil {
+			return compliance.Evidence{}, fmt.Errorf("%s is not a connection string: %w", databaseEnv, err)
+		}
 	}
 	conn, err := pgx.Connect(ctx, url)
 	if err != nil {

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,6 +19,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/antifailure/antifailure/engine/pkg/airgap"
+	"github.com/antifailure/antifailure/engine/pkg/secret"
 )
 
 // An OTLP exporter written here rather than imported, and the reason is the
@@ -63,8 +63,10 @@ type otlpJSONExporter struct {
 // signal's path appended. Getting that backwards posts traces to the
 // collector's root and gets a 404 that reads like the collector is broken.
 func newOTLPJSONExporter(endpoint string, headers map[string]string, client *http.Client) (*otlpJSONExporter, error) {
-	if _, err := url.Parse(endpoint); err != nil {
-		return nil, fmt.Errorf("telemetry: %q is not a URL: %w", endpoint, err)
+	// Not quoted. A collector endpoint can carry a user and password, and
+	// url.Parse's own error quotes the address it could not read.
+	if _, err := secret.ParseURL(endpoint); err != nil {
+		return nil, fmt.Errorf("telemetry: the export endpoint is not a URL: %w", err)
 	}
 	if client == nil {
 		client = airgap.Client(airgap.SiteTelemetry, 10*time.Second)

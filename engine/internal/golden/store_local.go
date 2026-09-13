@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/antifailure/antifailure/engine/pkg/secret"
 )
 
 // localStore keeps goldens in a directory.
@@ -25,9 +26,12 @@ func newLocalStore(raw string) (Store, error) {
 	// file:// is accepted because somebody who has written azure_blob and s3
 	// URLs in the same manifest will write one here too.
 	if strings.HasPrefix(raw, "file://") {
-		u, err := url.Parse(raw)
+		u, err := secret.ParseURL(raw)
 		if err != nil {
-			return nil, fmt.Errorf("golden: %q is not a usable file URL: %w", redactURL(raw), err)
+			// The parse error names the address, redacted. Printing redactURL(raw)
+			// beside net/url's own error put the credential straight back, because
+			// that error quoted the address whole, signature and all.
+			return nil, fmt.Errorf("golden: not a usable file URL: %w", err)
 		}
 		path = u.Path
 		if u.Host != "" && u.Host != "localhost" {

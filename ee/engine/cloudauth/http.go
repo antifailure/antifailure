@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/antifailure/antifailure/engine/pkg/airgap"
+	"github.com/antifailure/antifailure/engine/pkg/secret"
 )
 
 // httpTimeout bounds a single request.
@@ -101,8 +102,18 @@ func Do(ctx context.Context, req Request) (*Response, error) {
 	if req.Body != nil {
 		body = bytes.NewReader(req.Body)
 	}
+	// Parsed before NewRequestWithContext is allowed to. An address that does
+	// not parse never reaches the transport, so net/http's rewriting of a
+	// password to *** never runs, and the error net/url builds quotes the
+	// address whole. A Vault address can carry a user and a password, and a
+	// typo in one printed the password in the error that reported the typo.
+	if _, err := secret.ParseURL(req.URL); err != nil {
+		return nil, err
+	}
 	httpReq, err := http.NewRequestWithContext(ctx, req.Method, req.URL, body)
 	if err != nil {
+		// The address parsed above, so what can fail here is the method,
+		// which is not a secret.
 		return nil, err
 	}
 	if len(req.Query) > 0 {

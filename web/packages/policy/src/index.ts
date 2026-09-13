@@ -194,6 +194,12 @@ function parseIPv6(value: string): string | null {
   return out.join(':')
 }
 
+/** A rule's host with any user information replaced, for an error. */
+function hostForMessage(host: string): string {
+  const at = host.lastIndexOf('@')
+  return at >= 0 ? `***${host.slice(at)}` : host
+}
+
 /** Splits a trailing :port the way Go's net.SplitHostPort does. */
 function splitHostPort(value: string): { host: string; port: number } | null {
   const colon = value.lastIndexOf(':')
@@ -220,7 +226,24 @@ function compileRule(rule: EgressRule, index: number): Compiled {
   let host = rule.host.trim().toLowerCase()
   if (host === '') throw new PolicyError(`policy: rule ${index}: the host is empty`)
 
+  // A rule names a host, never a login. Refused before the port is split, as
+  // the engine does, and without quoting the host, which would print the
+  // password in front of it.
+  if (host.includes('@')) {
+    throw new PolicyError(
+      `policy: rule ${index} for ${hostForMessage(rule.host)}: the host carries user information, and a rule names a host rather than a login`,
+    )
+  }
+
   const split = splitHostPort(host)
+  // splitHostPort answers null for a port that is not digits, and the whole
+  // string then fell through as an exact host: api.stripe.com:anything was
+  // accepted here and refused by the engine. One colon outside brackets is a
+  // port, so a port that is not a number is refused the way the engine
+  // refuses it.
+  if (!split && !host.startsWith('[') && host.split(':').length === 2) {
+    throw new PolicyError(`policy: rule ${index} for ${rule.host}: the port is not valid`)
+  }
   if (split) {
     if (split.port <= 0 || split.port > 65535) {
       throw new PolicyError(`policy: rule ${index} for ${rule.host}: the port is not valid`)

@@ -19,6 +19,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/oracle"
 	"github.com/antifailure/antifailure/engine/pkg/livekey"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
+	"github.com/antifailure/antifailure/engine/pkg/secret"
 )
 
 // validate applies every semantic rule the JSON Schema cannot express: cross
@@ -367,8 +368,12 @@ func (v *validator) build(base string, s *schema.Service) {
 	}
 	for _, h := range b.AllowHosts {
 		if !validHostPattern(h) {
+			// Redacted, because a host this check rejects is exactly where a
+			// pasted credential lands: a URL with a user and password copied into
+			// a field that wants a hostname. RedactURL keeps the host, so the
+			// reader still sees which entry to fix, and leaves a plain typo alone.
 			v.add(base+".build.allow_hosts",
-				fmt.Sprintf("The host %q is not a valid hostname or wildcard.", h),
+				fmt.Sprintf("The host %q is not a valid hostname or wildcard.", secret.RedactURL(h)),
 				"Use a hostname, or a wildcard such as *.example.com.")
 		}
 	}
@@ -1067,7 +1072,8 @@ func (v *validator) egress(m *schema.Manifest) {
 
 		if !validHostPattern(r.Host) {
 			v.add(base+".host",
-				fmt.Sprintf("The host %q is not a valid hostname, address, or wildcard.", r.Host),
+				// Redacted for the reason the build allow list is.
+				fmt.Sprintf("The host %q is not a valid hostname, address, or wildcard.", secret.RedactURL(r.Host)),
 				"Use a hostname, an IP address, or a wildcard such as *.example.com.")
 		}
 		if r.Host == "*" && r.Mode != schema.ModeBlock {
@@ -2243,7 +2249,20 @@ func validHostPattern(h string) bool {
 		h = strings.Join(kept, ".")
 	}
 	// A port may be attached, and is matched separately by the policy engine.
-	if host, _, err := net.SplitHostPort(h); err == nil {
+	//
+	// It has to BE a port. net.SplitHostPort splits at the last colon and never
+	// looks at what follows it, so deploy:<password>@registry.example.com
+	// validated as the host "deploy" with the port
+	// "<password>@registry.example.com", and a credential sat in the manifest's
+	// host list, printed by every command that lists hosts. Digits only, and not
+	// strconv.Atoi alone, because Atoi accepts a sign.
+	if host, port, err := net.SplitHostPort(h); err == nil {
+		if port == "" || strings.Trim(port, "0123456789") != "" {
+			return false
+		}
+		if n, convErr := strconv.Atoi(port); convErr != nil || n < 1 || n > 65535 {
+			return false
+		}
 		h = host
 	}
 	if ip := net.ParseIP(h); ip != nil {

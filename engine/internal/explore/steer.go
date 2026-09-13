@@ -9,6 +9,7 @@ import (
 	"time"
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/pkg/secret"
 )
 
 // Steering is what a call adds to a goal at the moment it runs.
@@ -161,15 +162,19 @@ func ParseStartPath(s string) (string, error) {
 	}
 	if !strings.HasPrefix(s, "/") || strings.HasPrefix(s, "//") ||
 		strings.ContainsAny(s, " \t\r\n#") {
+		// Redacted, in both refusals here. A value that is not a path is most
+		// often a whole URL pasted in, and a URL is where a user, a password or
+		// a signed query travels. RedactURL keeps the path, which is what the
+		// reader needs to see.
 		return "", aferrors.Coded(aferrors.AFAGT023, "detail",
 			fmt.Sprintf("%q is not a path. A start path begins with a single / and names a "+
-				"page on the environment, such as /settings/billing.", s))
+				"page on the environment, such as /settings/billing.", secret.RedactURL(s)))
 	}
 	u, err := url.Parse(s)
 	if err != nil || u.Scheme != "" || u.Host != "" {
 		return "", aferrors.Coded(aferrors.AFAGT023, "detail",
 			fmt.Sprintf("%q is not a path. A start path begins with a single / and names a "+
-				"page on the environment, such as /settings/billing.", s))
+				"page on the environment, such as /settings/billing.", secret.RedactURL(s)))
 	}
 	return s, nil
 }

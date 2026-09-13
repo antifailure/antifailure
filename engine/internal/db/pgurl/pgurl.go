@@ -59,6 +59,7 @@ import (
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
+	"github.com/antifailure/antifailure/engine/pkg/secret"
 )
 
 // The database name prefixes this provider owns, one per kind of thing it
@@ -1100,7 +1101,11 @@ func HostPortOf(v secrets.Value) string {
 // normalize parses the admin URL, defaults its database, and returns the host
 // and port with no credential in them for use in messages.
 func normalize(raw secrets.Value, variable string) (secrets.Value, string, error) {
-	u, err := url.Parse(raw.Reveal())
+	// secret.ParseURL, because the detail is printed. url.Parse quotes the
+	// value it could not read, and this value is a connection string with a
+	// password in it, so a typo in DATABASE_URL printed the password in the
+	// message that reported the typo.
+	u, err := secret.ParseURL(raw.Reveal())
 	if err != nil {
 		return secrets.Value{}, "", aferrors.Coded(aferrors.AFDB024, "detail", shortError(err))
 	}

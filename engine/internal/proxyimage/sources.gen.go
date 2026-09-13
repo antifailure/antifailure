@@ -3384,7 +3384,7 @@ func New(e *schema.Egress) (*Engine, error) {
 	for i, r := range e.Rules {
 		c, err := compile(r, i)
 		if err != nil {
-			return nil, fmt.Errorf("policy: rule %d for %q: %w", i, r.Host, err)
+			return nil, fmt.Errorf("policy: rule %d for %q: %w", i, ruleHostForMessage(r.Host), err)
 		}
 		eng.rules = append(eng.rules, c)
 	}
@@ -3400,12 +3400,30 @@ func New(e *schema.Egress) (*Engine, error) {
 	return eng, nil
 }
 
+// ruleHostForMessage is a rule's host with any user information replaced, for
+// an error. It is here rather than a call to engine/pkg/secret because this
+// file is compiled into the sidecar image from a fixed list of this
+// repository's files, and that package is not on it.
+func ruleHostForMessage(host string) string {
+	if at := strings.LastIndex(host, "@"); at >= 0 {
+		return "***" + host[at:]
+	}
+	return host
+}
+
 func compile(r schema.EgressRule, index int) (compiled, error) {
 	c := compiled{rule: r, index: index}
 
 	host := strings.ToLower(strings.TrimSpace(r.Host))
 	if host == "" {
 		return c, errEmptyHost
+	}
+	// A rule names a host, never a login. Refused before the port is split,
+	// because net.SplitHostPort cuts at the last colon and would read
+	// deploy:<password>@registry.example.com as a host and a port, and the
+	// port refusal below would then quote the password back.
+	if strings.Contains(host, "@") {
+		return c, errUserInformation
 	}
 
 	if h, port, err := net.SplitHostPort(host); err == nil {
@@ -3475,6 +3493,10 @@ var errStarPlacement = fmt.Errorf(
 // two are different mistakes and one message for both sends the reader to the
 // wrong place.
 var errEmptyHost = fmt.Errorf("the host is empty")
+
+// errUserInformation is the refusal for a host with a user or a password in
+// front of it. It does not quote the host, which is the point.
+var errUserInformation = fmt.Errorf("the host carries user information, and a rule names a host rather than a login")
 
 // errStarsOnly refuses a pattern made only of stars, which matches every host
 // while reading as though it named one.

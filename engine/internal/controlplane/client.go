@@ -31,6 +31,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	"github.com/antifailure/antifailure/engine/internal/redact"
 	"github.com/antifailure/antifailure/engine/pkg/airgap"
+	"github.com/antifailure/antifailure/engine/pkg/secret"
 )
 
 // DefaultBaseURL is the hosted instance.
@@ -104,16 +105,19 @@ func New(opts Options) (*Client, error) {
 	if raw == "" {
 		raw = DefaultBaseURL
 	}
-	base, err := url.Parse(raw)
+	// Neither message below quotes raw. The address comes from configuration,
+	// and one carrying a user and password would print them in the error
+	// saying it could not be used.
+	base, err := secret.ParseURL(raw)
 	if err != nil {
-		return nil, fmt.Errorf("controlplane: %q is not a URL: %w", raw, err)
+		return nil, fmt.Errorf("controlplane: the control plane address is not a URL: %w", err)
 	}
 	if base.Scheme != "https" && base.Hostname() != "localhost" && base.Hostname() != "127.0.0.1" {
 		// A token sent over plain HTTP to anywhere but the local machine is a
 		// token on the wire. Refused rather than warned about, because a
 		// warning during a CI run is a warning nobody reads.
 		return nil, fmt.Errorf(
-			"controlplane: %s is not https, and a token must not be sent in the clear", raw)
+			"controlplane: %s is not https, and a token must not be sent in the clear", secret.RedactURL(raw))
 	}
 	// A client may start with no credential when it has a way to obtain one:
 	// the first request mints it, so a process that never sends never mints.

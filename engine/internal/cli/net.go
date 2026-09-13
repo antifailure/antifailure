@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"net"
-	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/policy"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
+	"github.com/antifailure/antifailure/engine/pkg/secret"
 )
 
 // The network commands answer questions about the policy without needing an
@@ -394,12 +394,16 @@ matched, so a surprising answer is diagnosable rather than mysterious.`),
 // It is strict about the URL because a typo that parses as a relative path
 // would otherwise be explained against an empty host, and the answer would be
 // confidently wrong rather than obviously wrong.
+//
+// The URL is redacted wherever a refusal quotes it. It is typed on a command
+// line and read back in a terminal, a CI log and an agent's transcript, and a
+// URL is where people put a token.
 func parseRequest(method, raw string) (policy.Request, error) {
 	var req policy.Request
 	method = strings.ToUpper(strings.TrimSpace(method))
 	if method == "" || strings.ContainsAny(method, " \t/:") {
 		return req, aferrors.Coded(aferrors.AFNET002,
-			"request", method+" "+raw, "detail", fmt.Sprintf("%q is not an HTTP method", method))
+			"request", method+" "+secret.RedactURL(raw), "detail", fmt.Sprintf("%q is not an HTTP method", method))
 	}
 
 	if !strings.Contains(raw, "://") {
@@ -408,18 +412,18 @@ func parseRequest(method, raw string) (policy.Request, error) {
 		// speaks.
 		raw = "https://" + raw
 	}
-	u, err := url.Parse(raw)
+	u, err := secret.ParseURL(raw)
 	if err != nil {
 		return req, aferrors.Wrap(err, aferrors.AFNET002,
-			"request", method+" "+raw, "detail", err.Error())
+			"request", method+" "+secret.RedactURL(raw), "detail", err.Error())
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return req, aferrors.Coded(aferrors.AFNET002,
-			"request", method+" "+raw, "detail", fmt.Sprintf("the scheme %q is not http or https", u.Scheme))
+			"request", method+" "+secret.RedactURL(raw), "detail", fmt.Sprintf("the scheme %q is not http or https", u.Scheme))
 	}
 	if u.Hostname() == "" {
 		return req, aferrors.Coded(aferrors.AFNET002,
-			"request", method+" "+raw, "detail", fmt.Sprintf("%q names no host", raw))
+			"request", method+" "+secret.RedactURL(raw), "detail", fmt.Sprintf("%q names no host", secret.RedactURL(raw)))
 	}
 	// A pattern is not a destination. Asked about https://*.zapier.com/, the
 	// policy matched the star as a literal label and answered ALLOW for a host
@@ -427,7 +431,7 @@ func parseRequest(method, raw string) (policy.Request, error) {
 	// the strictness above exists to prevent.
 	if strings.Contains(u.Hostname(), "*") {
 		return req, aferrors.Coded(aferrors.AFNET002,
-			"request", method+" "+raw, "detail",
+			"request", method+" "+secret.RedactURL(raw), "detail",
 			fmt.Sprintf("%q is a pattern, and a request goes to one host. Ask about a host the pattern matches", u.Hostname()))
 	}
 
@@ -442,7 +446,7 @@ func parseRequest(method, raw string) (policy.Request, error) {
 		n, convErr := strconv.Atoi(p)
 		if convErr != nil || n <= 0 || n > 65535 {
 			return req, aferrors.Coded(aferrors.AFNET002,
-				"request", method+" "+raw, "detail", fmt.Sprintf("the port %q is not valid", p))
+				"request", method+" "+secret.RedactURL(raw), "detail", fmt.Sprintf("the port %q is not valid", p))
 		}
 		req.Port = n
 	}

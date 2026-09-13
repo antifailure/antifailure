@@ -2,9 +2,10 @@ package policy
 
 import (
 	"fmt"
-	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/antifailure/antifailure/engine/pkg/secret"
 )
 
 // ParseRequest turns a method and a URL into a request the engine can decide.
@@ -36,7 +37,9 @@ func ParseRequest(method, raw string) (Request, error) {
 		// speaks.
 		raw = "https://" + raw
 	}
-	u, err := url.Parse(raw)
+	// secret.ParseURL, and the address redacted below, because the caller
+	// passes these errors on and a URL is where people put a token.
+	u, err := secret.ParseURL(raw)
 	if err != nil {
 		return req, err
 	}
@@ -44,7 +47,7 @@ func ParseRequest(method, raw string) (Request, error) {
 		return req, fmt.Errorf("the scheme %q is not http or https", u.Scheme)
 	}
 	if u.Hostname() == "" {
-		return req, fmt.Errorf("%q names no host", raw)
+		return req, fmt.Errorf("%q names no host", secret.RedactURL(raw))
 	}
 	// A pattern is not a destination, and matching its star as a literal label
 	// answers for a host no request can carry.

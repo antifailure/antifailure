@@ -28,10 +28,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/antifailure/antifailure/engine/pkg/airgap"
+	"github.com/antifailure/antifailure/engine/pkg/secret"
 )
 
 // Outcome is what a probe found.
@@ -92,14 +94,21 @@ func Probe(ctx context.Context, client *http.Client, cfg Config, now func() time
 	if err != nil {
 		return Result{Outcome: OutcomeUnreadable, Detail: err.Error()}
 	}
-	req, err := http.NewRequestWithContext(
-		ctx, http.MethodPost, cfg.Endpoint(), bytes.NewReader(body))
-	if err != nil {
+	// Parsed first. A base URL for a gateway can carry a user and a password,
+	// and an address that does not parse is quoted whole by the error net/url
+	// builds for it, which this would have put in Detail.
+	if _, err := secret.ParseURL(cfg.Endpoint()); err != nil {
 		return Result{
 			Outcome:  OutcomeUnreachable,
 			Detail:   err.Error(),
-			NextStep: fmt.Sprintf("Check that %s is a URL.", cfg.BaseURL),
+			NextStep: fmt.Sprintf("Check that %s is a URL.", secret.RedactURL(cfg.BaseURL)),
 		}
+	}
+	req, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, cfg.Endpoint(), bytes.NewReader(body))
+	if err != nil {
+		// The address parsed above, so only the request itself is left to fail.
+		return Result{Outcome: OutcomeUnreachable, Detail: err.Error()}
 	}
 	req.Header.Set("content-type", "application/json")
 	// The one place the key is revealed, on the way into a request.
@@ -170,7 +179,7 @@ func transportFailure(cfg Config, err error) Result {
 	if cfg.Custom() {
 		next = fmt.Sprintf(
 			"Check that %s is running and reachable from this machine. It is a "+
-				"custom endpoint, so nothing is wrong with the provider.", cfg.BaseURL)
+				"custom endpoint, so nothing is wrong with the provider.", secret.RedactURL(cfg.BaseURL))
 	}
 	return Result{
 		Outcome:  OutcomeUnreachable,
@@ -185,7 +194,13 @@ func isTimeout(err error) bool {
 }
 
 func hostOf(rawURL string) string {
-	s := strings.TrimPrefix(strings.TrimPrefix(rawURL, "https://"), "http://")
+	// The parsed host when there is one. Cutting the scheme off and taking
+	// what came before the first slash or colon returned "token@host" for an
+	// address carrying a token as its user name, and this is printed.
+	if u, err := url.Parse(rawURL); err == nil && u.Hostname() != "" {
+		return u.Hostname()
+	}
+	s := strings.TrimPrefix(strings.TrimPrefix(secret.RedactURL(rawURL), "https://"), "http://")
 	if i := strings.IndexAny(s, "/:"); i > 0 {
 		return s[:i]
 	}

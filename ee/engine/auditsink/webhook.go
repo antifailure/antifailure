@@ -50,6 +50,7 @@ import (
 
 	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"github.com/antifailure/antifailure/engine/pkg/extension"
+	"github.com/antifailure/antifailure/engine/pkg/secret"
 )
 
 // webhookAttempts is how many times one entry is posted before it is spooled.
@@ -115,9 +116,12 @@ func NewWebhook(cfg WebhookConfig) (*Webhook, error) {
 	if raw == "" {
 		return nil, fmt.Errorf("a webhook sink needs a URL")
 	}
-	u, err := url.Parse(raw)
+	// The error does not quote raw. A webhook URL carries a token in its query
+	// or a user and password in front of its host often enough that the error
+	// saying it is malformed must not be where it gets printed.
+	u, err := secret.ParseURL(raw)
 	if err != nil {
-		return nil, fmt.Errorf("%q is not a usable webhook URL: %w", raw, err)
+		return nil, fmt.Errorf("not a usable webhook URL: %w", err)
 	}
 	if u.Scheme != "https" {
 		// Refused rather than downgraded, for the reason the syslog sink
@@ -129,8 +133,13 @@ func NewWebhook(cfg WebhookConfig) (*Webhook, error) {
 				"record itself", u.Scheme)
 	}
 	if u.Host == "" {
-		return nil, fmt.Errorf("%q names no host", raw)
+		return nil, fmt.Errorf("%q names no host", secret.RedactURL(raw))
 	}
+
+	// Kept as it was parsed. Write builds every request from cfg.URL, and the
+	// untrimmed value it held before parsed here and then failed there, on
+	// every delivery, with the whole address in the error.
+	cfg.URL = raw
 
 	spool := strings.TrimSpace(cfg.DeadLetterFile)
 	if spool == "" {

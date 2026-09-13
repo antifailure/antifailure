@@ -10,6 +10,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/policy"
 	"github.com/antifailure/antifailure/engine/internal/report"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
+	"github.com/antifailure/antifailure/engine/pkg/secret"
 )
 
 // observeDecisions reads the sidecar's decision log for the bound project.
@@ -413,7 +414,9 @@ func runProbes(eng *policy.Engine, args map[string]any) ([]probeResultDoc, *Faul
 		req, err := policy.ParseRequest(method, rawURL)
 		if err != nil {
 			out = append(out, probeResultDoc{
-				Request: clip(strings.ToUpper(method)+" "+rawURL, 200),
+				// Redacted, because the probe echoed is the one that did not
+				// parse, and a URL an agent was given is where a token turns up.
+				Request: clip(strings.ToUpper(method)+" "+secret.RedactURL(rawURL), 200),
 				Error:   "This is not a request the policy can be asked about.",
 			})
 			continue

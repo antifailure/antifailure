@@ -25,6 +25,7 @@ const vectorPath = path.join(here, '..', '..', '..', '..', 'schemas', 'policy-ve
 interface VectorFile {
   note: string
   policies: VectorPolicy[]
+  refused: { host: string; contains: string; excludes?: string }[]
 }
 interface VectorPolicy {
   name: string
@@ -115,18 +116,18 @@ describe('the policy engine reproduces the engine’s decisions', () => {
 })
 
 describe('compilation refuses what the engine refuses', () => {
-  const refused: [string, string][] = [
-    ['', 'the host is empty'],
-    ['*.', 'a wildcard needs a domain after it'],
-    ['*.exa*mple.com', 'a star stands for one whole label'],
-    ['web-*.example.com', 'a star stands for one whole label'],
-    ['api.*com', 'a star stands for one whole label'],
-    ['*.*', 'a pattern of stars alone matches every host'],
-    ['*.*.*', 'a pattern of stars alone matches every host'],
-    ['host:0', 'the port is not valid'],
-    ['host:70000', 'the port is not valid'],
-  ]
-  for (const [host, fragment] of refused) {
+  // The cases are the engine's own. engine/internal/policy/vectors_test.go asks
+  // the engine about every one before it writes the corpus. A list kept here
+  // drifted from the engine: a host with user information in front of it, and a
+  // port that is not a number, were refused there and compiled here.
+  it('reads refusal cases, so a corpus without them fails loudly', () => {
+    assert.ok(vectors.refused.length > 0, 'the corpus carries no refusal cases')
+    assert.ok(
+      vectors.refused.some((c) => c.host.includes('@')),
+      'the corpus carries no host with user information in front of it',
+    )
+  })
+  for (const { host, contains, excludes } of vectors.refused) {
     it(`refuses ${JSON.stringify(host)}`, () => {
       assert.throws(
         () => new PolicyEngine({ rules: [{ host, mode: 'allow' }] }),
@@ -136,10 +137,14 @@ describe('compilation refuses what the engine refuses', () => {
         // regular expression is how an unescaped dot ends up matching more
         // hosts than its author wrote, which is a real bug in a policy and a
         // false alarm here that nobody should have to re-read to dismiss.
-        (err: unknown) => err instanceof PolicyError && err.message.includes(fragment),
+        (err: unknown) =>
+          err instanceof PolicyError &&
+          err.message.includes(contains) &&
+          (excludes === undefined || !err.message.includes(excludes)),
         // A rule that fails to compile and is skipped produces an engine that
-        // enforces less than the manifest says while looking like it works.
-        'a rule that cannot be compiled must be refused, never skipped',
+        // enforces less than the manifest says while looking like it works,
+        // and a refusal that prints the credential it refuses is a leak.
+        'a rule that cannot be compiled must be refused, never skipped, and never by printing its credential',
       )
     })
   }
