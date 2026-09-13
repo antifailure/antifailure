@@ -104,6 +104,28 @@ func TestUpLive_AScopedValueReachesOnlyItsOwnContainer(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	// The golden `af up` makes, taken away again. This manifest declares no
+	// database, and that does not mean no golden: the Docker provider is the
+	// default, and with nothing made for this project yet, Up builds an empty
+	// golden before it branches. It outlives Down by design, so without this
+	// every run left one image behind. Registered before Down's cleanup so it
+	// runs after it, and only a version that was not here before the test is
+	// removed, because one that was is an earlier run's and not this one's.
+	identity, err := o.GoldenIdentity()
+	require.NoError(t, err)
+	before := goldensMadeFor(t, ctx, o.Goldens, identity)
+	var made string
+	t.Cleanup(func() {
+		c, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if made != "" && !before[made] {
+			if err := o.DestroyGolden(c, made); err != nil {
+				t.Errorf("the golden %s af up made could not be removed: %v", made, err)
+			}
+		}
+		requireNothingNewMadeFor(t, c, "Postgres", o.Goldens, identity, before)
+	})
+
 	t.Cleanup(func() {
 		down, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
@@ -117,7 +139,10 @@ func TestUpLive_AScopedValueReachesOnlyItsOwnContainer(t *testing.T) {
 		}
 	})
 
-	_, err = o.Up(ctx)
+	result, err := o.Up(ctx)
+	if result != nil {
+		made = result.Golden
+	}
 	require.NoError(t, err)
 
 	storage := containerEnv(t, ctx, o, "storage")
