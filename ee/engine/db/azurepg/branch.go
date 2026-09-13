@@ -167,12 +167,15 @@ func (p *Provider) Branch(ctx context.Context, version string, envID string) (pr
 // bounded by RestoreReadyTimeout. The time returned is now, which is the latest
 // restore point and the default every Azure client uses.
 func (p *Provider) waitForRestorePoint(ctx context.Context, srv *server) (time.Time, error) {
-	deadline := p.now().Add(p.opts.RestoreReadyTimeout)
+	started := p.now()
+	deadline := started.Add(p.opts.RestoreReadyTimeout)
 	// Bounded twice. The clock is injectable, and a clock that does not move
 	// never reaches a deadline measured with it, so the number of polls is
 	// bounded too and the wait ends whatever the clock does.
 	maxPolls := int(p.opts.RestoreReadyTimeout/p.opts.PollInterval) + 1
 	polls := 0
+	waiting := false
+	var lastReported time.Time
 	for {
 		raw := srv.Properties.Backup.EarliestRestoreDate
 		if raw != "" {
@@ -183,20 +186,36 @@ func (p *Provider) waitForRestorePoint(ctx context.Context, srv *server) (time.T
 					srv.Name, raw, err)
 			}
 			if now := p.now().UTC(); !now.Before(earliest) {
+				if waiting {
+					p.report(fmt.Sprintf("Azure's first backup of %s is ready after %s; restoring from it",
+						srv.Name, p.now().Sub(started).Round(time.Second)))
+				}
 				return now, nil
 			}
 		}
+		state := "not yet reported"
+		if raw != "" {
+			state = "reported as " + raw
+		}
 		if !p.now().Before(deadline) || polls >= maxPolls {
-			reported := raw
-			if reported == "" {
-				reported = "nothing"
-			}
 			return time.Time{}, fmt.Errorf(
 				"azurepg: server %q has no backup to restore from after waiting %s: its "+
-					"backup.earliestRestoreDate reads %s, and Azure answers a restore time before "+
+					"backup.earliestRestoreDate is %s, and Azure answers a restore time before "+
 					"that with InternalServerError. A server's first backup is taken after it is "+
 					"created, so a golden published moments ago can need a few minutes",
-				srv.Name, p.opts.RestoreReadyTimeout, reported)
+				srv.Name, p.opts.RestoreReadyTimeout, state)
+		}
+		switch {
+		case !waiting:
+			waiting = true
+			lastReported = p.now()
+			p.report(fmt.Sprintf("waiting for Azure's first backup of %s, earliest restore point %s; "+
+				"a restore before it is refused, so this waits for it, up to %s",
+				srv.Name, state, p.opts.RestoreReadyTimeout))
+		case p.now().Sub(lastReported) >= restoreWaitHeartbeat:
+			lastReported = p.now()
+			p.report(fmt.Sprintf("still waiting for Azure's first backup of %s after %s, earliest restore point %s",
+				srv.Name, p.now().Sub(started).Round(time.Second), state))
 		}
 		select {
 		case <-ctx.Done():
