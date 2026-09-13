@@ -40,7 +40,10 @@ do not discard valid collection entries. A server with several application
 databases requires an explicit selection. Cancellation after restore acceptance
 cleans up with a fresh context instead of leaving an untracked billed server.
 
-Neither has been run against the real service. Both suites drive a fake control
+`cloudsql` has not been run against Google Cloud. `azurepg` has met Azure once,
+where a golden restore, mask and verification succeeded over `verify-full` in
+392.4 seconds and the branch restore after it failed with an internal error from
+Azure, so the branch path is not proved there. Both suites drive a fake control
 plane with a real Postgres behind it, so the behaviours that are claims about
 bytes are checked against bytes, and neither asserts `RealService`, so the
 service owned verdicts report unproven rather than passed. Both carry an entry

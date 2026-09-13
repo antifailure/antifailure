@@ -143,3 +143,12 @@ verdicts report as unproven. The separate opt-in private Azure test restores a
 synthetic source, masks and verifies its row, branches it, checks that the
 source stayed unchanged, and deletes the branch and golden. A successful live
 run is required before claiming that path has been proved on Azure.
+
+That run has been made once, on 2026-09-13, from a container inside a private
+network against a real flexible server, and half of it passed. The golden
+restore succeeded: the source was restored, the row was masked and verified
+over a `verify-full` connection that accepted Microsoft's certificate, and that
+took 392.4 seconds. The branch restore from that golden then failed with an
+`InternalServerError` from Azure, so the branch, the write on it, the check
+that the source was unchanged, and the teardown were never reached on Azure.
+Until a run completes, the branch path is proved only against the fake.

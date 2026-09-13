@@ -13230,6 +13230,15 @@ verdicts report as unproven. The separate opt-in private Azure test restores a
 synthetic source, masks and verifies its row, branches it, checks that the
 source stayed unchanged, and deletes the branch and golden. A successful live
 run is required before claiming that path has been proved on Azure.
+
+That run has been made once, on 2026-09-13, from a container inside a private
+network against a real flexible server, and half of it passed. The golden
+restore succeeded: the source was restored, the row was masked and verified
+over a ` + "`" + `verify-full` + "`" + ` connection that accepted Microsoft's certificate, and that
+took 392.4 seconds. The branch restore from that golden then failed with an
+` + "`" + `InternalServerError` + "`" + ` from Azure, so the branch, the write on it, the check
+that the source was unchanged, and the teardown were never reached on Azure.
+Until a run completes, the branch path is proved only against the fake.
 `,
 	"providers/cloudsql.md": `---
 title: Google Cloud SQL
@@ -13466,9 +13475,12 @@ has not, so here is the split, in the terms the
 - **` + "`" + `cloudsql` + "`" + ` and ` + "`" + `azurepg` + "`" + ` are proved against fakes, and not against Google
   or Azure.** The same arrangement as ` + "`" + `aurora` + "`" + `: every line of each provider
   runs on every pull request, against a fake Cloud SQL Admin API and a fake
-  Azure Resource Manager, each with a real Postgres behind it. Neither has met
-  the real service, and no connection has met a certificate Google or Microsoft
-  issued.
+  Azure Resource Manager, each with a real Postgres behind it. ` + "`" + `cloudsql` + "`" + ` has
+  never met Google Cloud. ` + "`" + `azurepg` + "`" + ` has met Azure once, and only half of it
+  passed: a live run restored a golden from a real flexible server and masked
+  and verified it over ` + "`" + `verify-full` + "`" + ` against Microsoft's certificate, and the
+  branch restore from that golden failed with an internal error from Azure. No
+  branch has been created, timed or checked on Azure.
 
 ` + "`" + `cloudsql` + "`" + ` is the one for a production on Google Cloud, and it is in the
 enterprise edition for the same reason ` + "`" + `aurora` + "`" + ` is. A branch is a Cloud SQL
@@ -13478,17 +13490,21 @@ nobody who wrote this provider has run a clone on Google Cloud, so the table's
 "flat" is an expectation. The thing to know before choosing it is that Cloud
 SQL also has a slower clone whose duration scales with the database, it picks
 between the two from the shape of the request rather than from anything you ask
-for, and it tells you nothing about which you got. The provider is built so it cannot ask for the slow
-one, and its page explains the three conditions that would have selected it.
+for, and it tells you nothing about which you got. The provider is built so it
+cannot ask for the slow one, and its page explains the three conditions that
+would have selected it.
 
 ` + "`" + `azurepg` + "`" + ` is the one for a production on Azure, and it is the only provider here
 that does NOT claim flat branch time. A branch is a point in time restore, whose
 snapshot half is flat in the size of the data and whose log replay half is not,
 so the honest number is one that grows. Microsoft gives the overall recovery as
 a few minutes up to a few hours. Its page says why claiming otherwise would be
-quoting the fast half of that. No restore this provider requested has been
-timed on Azure either, so the growth is Microsoft's description rather than a
-number anybody here measured.
+quoting the fast half of that. One restore this provider requested has been
+timed on Azure: creating a golden from a nearly empty source, including the
+mask and the verification, took 392.4 seconds. That is one data point at one
+size, so it says nothing about how the time grows, and the branch restore that
+followed it failed on Azure's side, so the growth is still Microsoft's
+description rather than a number anybody here measured.
 
 A provider named in the manifest and neither built into this binary nor
 registered with it is refused at startup rather than substituted. Falling back
