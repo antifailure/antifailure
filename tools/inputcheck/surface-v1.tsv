@@ -134,6 +134,9 @@ helm	value	probes.startup.periodSeconds	number	optional
 helm	value	providerKeys.existingSecret	string	optional
 helm	value	providerKeys.secret	string	optional
 helm	value	providerKeys.secretKeys.secret	string	optional
+helm	value	providerKeys.secretKeys.secrets	string	optional
+helm	value	providerKeys.secrets	string	optional
+helm	value	providerKeys.version	string	optional
 helm	value	replicaCount	number	optional
 helm	value	resources.limits.memory	string	optional
 helm	value	resources.requests.cpu	string	optional
@@ -192,6 +195,7 @@ terraform:modules/control-plane	output	job_ids	-	-
 terraform:modules/control-plane	output	key_vault_id	-	-
 terraform:modules/control-plane	output	key_vault_name	-	-
 terraform:modules/control-plane	output	postgres_server_id	-	-
+terraform:modules/control-plane	output	sealing_key_environment	-	-
 terraform:modules/control-plane	output	usable_connections	-	-
 terraform:modules/control-plane	variable	admin_pool_max	number	optional
 terraform:modules/control-plane	variable	analytics_enabled	bool	optional
@@ -353,6 +357,8 @@ terraform:stacks/control-plane	variable	posthog_project_key	string	optional
 terraform:stacks/control-plane	variable	posthog_region	string	optional
 terraform:stacks/control-plane	variable	product_name	string	optional
 terraform:stacks/control-plane	variable	provider_key_secret_enabled	bool	optional
+terraform:stacks/control-plane	variable	provider_key_secrets_name	string	optional
+terraform:stacks/control-plane	variable	provider_key_version	string	optional
 terraform:stacks/control-plane	variable	public_url	string	optional
 terraform:stacks/control-plane	variable	resend_api_key_secret_name	string	optional
 terraform:stacks/control-plane	variable	resource_group_name	string	optional

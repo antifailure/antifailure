@@ -1520,6 +1520,8 @@ test-infra-config:
     terraform -chdir=infra/terraform/modules/control-plane test
     terraform -chdir=infra/terraform/modules/alerting init -backend=false -input=false
     terraform -chdir=infra/terraform/modules/alerting test
+    terraform -chdir=infra/terraform/stacks/control-plane init -backend=false -input=false
+    terraform -chdir=infra/terraform/stacks/control-plane test
 
 # No file in the tree carries a merge conflict marker.
 #

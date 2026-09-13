@@ -224,6 +224,24 @@ variable "provider_key_secret_enabled" {
   description = "Generate a sealing secret so customers' provider keys can be stored."
 }
 
+# The two halves of rotating that secret, declared HERE as well as in the module.
+# The rotation runbook tells an operator to set them in this stack's tfvars, and a
+# tfvars key the stack does not declare is a warning Terraform prints and then
+# ignores: the module keeps its empty default, the app and the re-sealing job never
+# see the added key, and the rotation's second step changes nothing while looking
+# as if it applied.
+variable "provider_key_secrets_name" {
+  type        = string
+  default     = ""
+  description = "Key Vault secret holding further sealing keys as version=base64, comma separated. Empty means only the generated v1 key is configured. The operator writes its value; Terraform only addresses it."
+}
+
+variable "provider_key_version" {
+  type        = string
+  default     = ""
+  description = "Which sealing key version new provider keys are sealed under. Empty leaves it unset, which the application accepts only while exactly one key is configured. It must name a version the app holds or the container refuses to start."
+}
+
 # The enterprise edition. The module's copies carry the reason each exists;
 # the short version is that the enterprise image will not start without them.
 variable "enterprise_edition" {
