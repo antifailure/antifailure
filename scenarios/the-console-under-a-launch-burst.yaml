@@ -1,0 +1,40 @@
+scenario: the-console-under-a-launch-burst
+description: >-
+  A team walks every console page in a row, the way people following the
+  launch link together do, while the readers of the other scenario are still
+  arriving. Sized to the page limit one address is allowed, which is the
+  address every session here comes from.
+ramp_ms: 3000
+steps:
+  - request: GET /environments
+    think_ms: 200
+    jitter_ms: 200
+  - request: GET /runs
+    think_ms: 200
+    jitter_ms: 200
+  - request: GET /start
+    think_ms: 200
+    jitter_ms: 200
+  - request: GET /plan
+    think_ms: 200
+    jitter_ms: 200
+  - request: GET /cli
+    think_ms: 200
+    jitter_ms: 200
+  - request: GET /members
+    think_ms: 200
+    jitter_ms: 200
+  - request: GET /settings
+    think_ms: 200
+    jitter_ms: 200
+  # The operator's door is a console page like the others to a browser
+  # without an operator cookie, and it is served by the same process.
+  - request: GET /admin
+assertions:
+  - name: every_page_was_served
+    every_request_succeeded: true
+  # Stricter than the mix's two percent. These are files read from disk by
+  # the process that also serves the API; one in a hundred failing to arrive
+  # is the process itself struggling, not a page.
+  - name: fewer_than_one_in_a_hundred_failed
+    error_rate_below: 0.01

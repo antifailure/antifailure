@@ -125,6 +125,43 @@ func TestAFailingSeedCommandSaysWhatItPrinted(t *testing.T) {
 	require.Contains(t, err.Error(), "no such table: users")
 }
 
+// A persona that never signs in never reaches the seed command.
+//
+// The command below is shaped like this repository's own
+// deploy/docker/personas.mjs: it refuses a persona with no address, because an
+// account with no address is not one anybody can sign in as. Declaring a signed
+// out visitor beside two members used to hand the visitor to it, the command
+// exited non zero, and provisioning stopped for all three, which is af test and
+// af ci failing before a single workflow for a persona that needed nothing.
+func TestAPersonaThatNeverSignsInIsNeverHandedToTheSeedCommand(t *testing.T) {
+	dir := t.TempDir()
+	calls := filepath.Join(dir, "calls.txt")
+	a := personas.NewSeedAdapter(personas.SeedOptions{
+		Command: `[ -n "$AF_PERSONA_EMAIL" ] || { echo "AF_PERSONA_EMAIL is required" >&2; exit 1; }; ` +
+			`echo "$AF_PERSONA_NAME" >> ` + calls,
+		Dir: dir, Environ: []string{"PATH=" + os.Getenv("PATH")},
+	})
+	d := personas.NewDeriver("env-abc", personas.PasswordPolicy{})
+
+	visitor := schema.Persona{Name: "visitor", Login: schema.LoginNone}
+	got, err := personas.Provision(context.Background(), a, d,
+		[]schema.Persona{seedPersona(), visitor})
+	require.NoError(t, err, "a signed out visitor stopped the members from being provisioned")
+
+	body, err := os.ReadFile(calls)
+	require.NoError(t, err)
+	require.Equal(t, "owner\n", string(body), "the seed command was asked to create an account that never signs in")
+
+	// Still in the result, in manifest order and with no credential, because
+	// the runner's persona list is built from it and a persona missing there
+	// is a workflow that cannot say who it acts as.
+	require.Len(t, got.Accounts, 2)
+	account, ok := got.Account("visitor")
+	require.True(t, ok)
+	require.Equal(t, schema.LoginNone, account.Login)
+	require.Empty(t, account.Password.Reveal())
+}
+
 func TestASeedCommandThatHangsIsCutOffWithAnExplanation(t *testing.T) {
 	// Without a bound, a seed script waiting on something that will never
 	// arrive hangs the whole environment with no output at all.

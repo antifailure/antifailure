@@ -138,6 +138,7 @@ var notASurface = map[string]string{
 	"lychee.toml":   "link checker configuration",
 	"masking.yaml":  "this repository's own dogfood masking policy",
 	"observability": "our own dashboards and alert rules",
+	"scenarios":     "the load journeys this repository's own dogfood manifest sends, not shipped ones",
 	"tools":         "the gates themselves",
 }
 

@@ -6,6 +6,7 @@
 // only way to write a workflow as a sentence rather than as a script.
 
 import { chromium, type Browser, type BrowserContext, type Page as PWPage } from 'playwright';
+import type { Request as PWRequest } from 'playwright';
 import type { Page } from './login.ts';
 import type { Snapshot } from './workflow.ts';
 
@@ -164,6 +165,8 @@ export class Session {
   readonly #failed: string[] = [];
   /** How many requests this page has in the air right now. See quiet. */
   #inFlight = 0;
+  /** The main frame's navigation that has not answered yet, if any. See click. */
+  #navigating: PWRequest | undefined;
   /** lastStatus is the HTTP status of the last document navigated to,
    *  undefined until the first goto. See snapshot's own field for why this
    *  exists at all. */
@@ -201,8 +204,14 @@ export class Session {
     const page = await context.newPage();
     const session = new Session(browser, context, page, options.artifacts);
 
-    page.on('request', () => { session.#inFlight++; });
-    page.on('requestfinished', () => { session.#inFlight--; });
+    page.on('request', (r) => {
+      session.#inFlight++;
+      if (r.isNavigationRequest() && r.frame() === page.mainFrame()) session.#navigating = r;
+    });
+    page.on('requestfinished', (r) => {
+      session.#inFlight--;
+      if (r === session.#navigating) session.#navigating = undefined;
+    });
     page.on('console', (m) => {
       if (m.type() === 'error' || m.type() === 'warning') {
         session.#console.push(`${m.type()}: ${m.text()}`);
@@ -210,6 +219,7 @@ export class Session {
     });
     page.on('requestfailed', (r) => {
       session.#inFlight--;
+      if (r === session.#navigating) session.#navigating = undefined;
       // The egress policy is the usual cause, and naming the request is the
       // difference between a mystery and a one line fix.
       session.#failed.push(`${r.method()} ${r.url()}: ${r.failure()?.errorText ?? 'failed'}`);
@@ -264,27 +274,49 @@ export class Session {
         }
       },
       async click(control: RegExp) {
+        // noWaitAfter, because the wait after a press is settled and quiet
+        // below, and Playwright's own wait for "scheduled navigations to
+        // finish" is one that can never end. A link to a host the environment
+        // will not let answer, Continue with GitHub inside a preview, starts a
+        // navigation that never commits: the click had landed, the wait timed
+        // out after ten seconds, and the throw ended a whole exploration as
+        // blocked with nothing explored. The ten second timeout still bounds
+        // finding and pressing the control, which is what it is for.
         const press = async () => {
           const button = pw.getByRole('button', { name: control });
           if (await button.count() > 0) {
-            await button.first().click({ timeout: 10_000 });
+            await button.first().click({ timeout: 10_000, noWaitAfter: true });
             return;
           }
           const link = pw.getByRole('link', { name: control });
           if (await link.count() > 0) {
-            await link.first().click({ timeout: 10_000 });
+            await link.first().click({ timeout: 10_000, noWaitAfter: true });
             return;
           }
           // Falls back to anything with that accessible name, which covers the
           // div somebody made into a button. Failing here rather than guessing
           // at a selector keeps the failure honest.
-          await pw.getByText(control).first().click({ timeout: 10_000 });
+          await pw.getByText(control).first().click({ timeout: 10_000, noWaitAfter: true });
         };
+        const from = pw.url();
         await press();
         // A navigation first, which is a new document and the one thing
         // `settled` still answers honestly, then the page's own rerender.
         await settled(pw);
         await quiet(pw, PRESS_MS, inFlight);
+        // A navigation the press started and nobody ever answered. Left
+        // pending, it held every later read of the page, and the snapshot
+        // after the press waited on it forever. Going back to where the
+        // press started supersedes it, and the request is named with the
+        // others the page could not make, so the evidence says which host
+        // never answered rather than the run going quiet.
+        const stuck = self.#navigating;
+        if (stuck) {
+          self.#navigating = undefined;
+          self.#failed.push(`${stuck.method()} ${stuck.url()}: never answered, so the press was abandoned and ${from} opened again`);
+          await pw.goto(from, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => {});
+          await settled(pw);
+        }
       },
       async waitForAny(patterns: readonly RegExp[], timeoutMs: number) {
         const deadline = Date.now() + timeoutMs;
@@ -397,6 +429,17 @@ export class Session {
       };
       for (const el of document.querySelectorAll(
         'button, a[href], [role="button"], [role="link"], input[type="submit"]')) {
+        // Only what a person could press. A control that is not rendered, the
+        // mobile menu button a desktop layout hides with display: none, was
+        // offered here anyway, and pressing it could never work: the role
+        // locators skip hidden elements, the text fallback cannot match a
+        // name that lives in aria-label, and the click waited ten seconds and
+        // ended the whole exploration as blocked. The console's own "Open the
+        // menu" did exactly that to two of this repository's goals. The
+        // submits list below already asked this question; the list the
+        // planner chooses from did not.
+        if (typeof (el as HTMLElement).checkVisibility === 'function'
+          && !(el as HTMLElement).checkVisibility()) continue;
         add(el.getAttribute('aria-label') ?? el.getAttribute('title')
           ?? el.textContent ?? (el as HTMLInputElement).value);
       }

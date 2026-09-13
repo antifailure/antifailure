@@ -272,6 +272,16 @@ personas:
     role: viewer
     login: magic_link
 
+  # Somebody who has never signed in and is not going to. The launch reader
+  # arriving from the announcement is this person for the whole of their first
+  # minute: the front door, the sign-in form, the operator portal's door if
+  # they guess at /admin. Nothing above could stand there, because every other
+  # persona is signed in before its first step, so the one screen every new
+  # customer sees first was the one screen no workflow and no exploration ever
+  # looked at. `login: none` creates no account and types nothing.
+  - name: visitor
+    login: none
+
   # The operator who is also a customer, which is everybody on this team and
   # was the person who hit the launch-night bug. It is a SEPARATE account in a
   # separate table from `owner` above: the console's sessions live in `users`
@@ -539,8 +549,182 @@ workflows:
       - '"Nothing has come in through the careers page since the last one was reviewed or removed."'
     tags: [rbac, csrf, operator]
 
+  # The launch day surfaces, which nothing above visited.
+  #
+  # Every workflow so far started signed in and went to one of four pages. The
+  # pages a new customer actually crosses on the first day, the sign-in screen,
+  # the getting started steps, the plan, the terminal sign-in, the members
+  # list, settings and the operator portal's home, had no workflow at all, so
+  # a launch morning defect on any of them would have been found by a customer
+  # rather than by the rehearsal. The readiness evaluation found exactly that:
+  # the console's own start page was configured as not existing in production
+  # and nothing here could have said so.
+  #
+  # Each of these is read only and names the page's own labels, for the reason
+  # given at the top of this block: without a model key the runner verifies
+  # words that are on the page and nothing else. Six journeys that needed a
+  # model to press the right control (create and revoke a token, invite a
+  # member, sign out, complete onboarding as a stranger) were written for the
+  # evaluation and came back blocked or unverified, and a workflow that cannot
+  # pass without a key nobody sets in CI is a workflow that will be muted. The
+  # two that could be made to pass by naming the right page are here; the rest
+  # are covered as explorations below, which need no key.
+  #
+  # Every one sets start_path. Three of the evaluation's workflows left it
+  # unset and all three hung on a disabled Continue button: the root of the
+  # console sends a first-time browser to the getting started question, whose
+  # Continue is disabled until an answer is ticked, and a workflow that did not
+  # say where it was going was standing on the one page whose only button
+  # needs a decision first.
+  - name: a-visitor-is-asked-to-sign-in
+    description: >-
+      As a visitor who has never signed in, open the console and check that it
+      offers GitHub and an email link, and nothing else.
+    persona: visitor
+    start_path: /environments
+    expect:
+      # The two ways in, and the field the second one needs. All three are on
+      # the signed out screen and none of them survives a sign-in, so a
+      # visitor who was somehow shown the environments list would fail this.
+      - "Continue with GitHub"
+      - "Send a sign-in link"
+      - "Email address"
+    tags: [smoke, auth, visitor]
+
+  - name: a-visitor-finds-the-operator-door
+    description: >-
+      As a visitor who has never signed in, open the operator portal and check
+      that it asks for an operator's email and password rather than showing
+      anything an operator would see.
+    persona: visitor
+    start_path: /admin
+    expect:
+      # The portal's own sign-in title and the one field the console's sign-in
+      # screen never shows. "What needs an operator" is what the signed in
+      # home says, so an anonymous visitor seeing it would be the finding.
+      - "Operator sign-in"
+      - "Password"
+    tags: [auth, operator, visitor]
+
+  - name: get-started-as-the-owner
+    description: >-
+      As the owner, open the getting started steps and check that the first
+      question asks where Antifailure will be used.
+    persona: owner
+    start_path: /start
+    expect:
+      # The first step's heading and its lede, from console/lib/onboarding.ts.
+      # A fresh browser always lands on the first step, because the answer is
+      # remembered in the browser rather than in the organization.
+      - "Where will you use Antifailure?"
+      - "Tick every one that applies"
+    tags: [onboarding, smoke]
+
+  - name: open-the-plan-page
+    description: >-
+      As the owner, open the plan page and check that it shows the current
+      subscription, what each plan allows, and the invoices.
+    persona: owner
+    start_path: /plan
+    expect:
+      - "Plan and billing"
+      # These two cards render only when billing is configured, which the
+      # Stripe placeholders above make true. A control plane that lost its
+      # billing configuration would show the "takes no payment" note instead
+      # and lose both of these, which is the failure this is for.
+      - "Subscription"
+      - "What each plan allows"
+      - "Invoices"
+    tags: [billing]
+
+  - name: read-the-command-line-page
+    description: >-
+      As the owner, open the command line page and check that it says how to
+      install the engine, how to sign a terminal in, and which terminals are
+      signed in now.
+    persona: owner
+    start_path: /cli
+    expect:
+      - "Install the engine"
+      - "Sign this terminal in"
+      - "Terminals and tokens"
+    tags: [onboarding, tokens]
+
+  - name: see-who-is-in-the-organization
+    description: >-
+      As the owner, open the members page and check that it lists the people
+      and the invitations, and says role changes take effect on the next
+      request.
+    persona: owner
+    start_path: /members
+    expect:
+      - "People"
+      - "Invitations"
+      # The lede the page shows only to somebody who may manage members. The
+      # viewer's workflow below expects the other sentence.
+      - "Changing a role takes effect on their next request"
+    tags: [team]
+
+  - name: a-viewer-cannot-change-a-role
+    description: >-
+      As the viewer, open the members page and check that it says changing a
+      role is somebody else's job.
+    persona: viewer
+    start_path: /members
+    expect:
+      - "People"
+      # The one sentence on this page an owner does not see, for the reason on
+      # a-viewer-cannot-edit-policy: the checker asserts presence, so the role
+      # is proven through the sentence the console shows exactly when the
+      # invite form and the role menus are withheld.
+      - "Changing a role needs owner or admin"
+    tags: [team, rbac]
+
+  - name: open-the-settings-page
+    description: >-
+      As the owner, open settings and check that it shows the organization,
+      how they said they wanted to get started, and the billing contact.
+    persona: owner
+    start_path: /settings
+    expect:
+      - "Organization"
+      - "Getting started"
+      - "Billing contact"
+    tags: [settings]
+
+  - name: the-operator-sees-what-needs-an-operator
+    description: >-
+      As the operator, sign in to the operator portal and check that its home
+      says what needs an operator, describes the installation, and lists
+      recent operator actions.
+    persona: operator-owner
+    start_path: /admin
+    expect:
+      # The three cards on the portal's home, which render only behind a
+      # working operator session and a working AF_ADMIN_DATABASE_URL. The
+      # evaluation's operator workflow never got here because it looked for a
+      # magic link on a page that has a password form.
+      - "What needs an operator"
+      - "The installation"
+      - "Recent operator actions"
+    tags: [operator, smoke]
+
 explore:
   enabled: true
+  # One goal per persona per launch day surface. There was one goal here, a
+  # viewer looking for a run from the environments list, so the getting
+  # started steps, the plan, settings, the terminal sign-in, the members list,
+  # the sign-in screen and the operator portal were explored by nobody, and
+  # the readiness evaluation's "exploration cannot be pointed at a persona or
+  # a page beyond what the manifest declares" was a true statement about this
+  # file rather than about the product. Each goal below is what one kind of
+  # person is trying to do on the first day, started on the page they would
+  # start on, with its own seed so two goals never walk the same tie breaks.
+  #
+  # There is no viewport here because the goal schema has none: an
+  # exploration drives one desktop sized page. A narrow viewport is a product
+  # gap and is said so in the report, not papered over with a key the
+  # validator would refuse.
   goals:
     - name: find-a-run-as-a-viewer
       goal: Find a run and read its verdict and evidence.
@@ -550,6 +734,230 @@ explore:
       slow_ms: 3000
       budget:
         steps: 12
+
+    - name: ask-for-a-link-as-a-visitor
+      # The front door as a stranger sees it. The address the exploration
+      # types comes from the seed and is a reserved example.test one, so the
+      # form's answer is the same "check your mail" every stranger gets and no
+      # message is sent to anybody.
+      # The goal does not name GitHub, and it used to. Without a model key the
+      # planner scores controls by the words they share with the goal, so
+      # "without using a GitHub account" made Continue with GitHub the best
+      # match on the page, and pressing it starts a navigation to github.com
+      # that this environment will never let finish.
+      goal: Ask for a sign-in link to be sent by email.
+      persona: visitor
+      seed: visitor-front-door
+      start_path: /environments
+      slow_ms: 3000
+      budget:
+        steps: 10
+
+    - name: find-the-operator-door-as-a-visitor
+      goal: Find where an operator signs in and what it asks for.
+      persona: visitor
+      seed: visitor-operator-door
+      start_path: /admin
+      slow_ms: 3000
+      budget:
+        steps: 8
+
+    - name: answer-the-getting-started-questions
+      goal: Answer the getting started questions and open the environments list.
+      persona: owner
+      seed: owner-getting-started
+      start_path: /start
+      slow_ms: 3000
+      budget:
+        steps: 20
+
+    - name: move-to-the-team-plan-as-the-owner
+      # Stops short of paying by construction: api.stripe.com is blocked, so
+      # the checkout the console starts fails inside the control plane and the
+      # exploration records how that failure reads to a customer.
+      goal: Find what the organization pays for and how to move to the Team plan.
+      persona: owner
+      seed: owner-team-plan
+      start_path: /plan
+      slow_ms: 3000
+      budget:
+        steps: 16
+
+    - name: change-the-billing-contact-as-the-owner
+      goal: Find where the billing contact is set and what the organization is called.
+      persona: owner
+      seed: owner-billing-contact
+      start_path: /settings
+      slow_ms: 3000
+      budget:
+        steps: 16
+
+    - name: sign-a-terminal-in-as-the-owner
+      goal: Find how to install the engine and sign a terminal in with a token.
+      persona: owner
+      seed: owner-terminal-token
+      start_path: /cli
+      slow_ms: 3000
+      budget:
+        steps: 16
+
+    - name: look-at-load-and-masking-as-the-owner
+      goal: Find the last load run and what masking does to the data.
+      persona: owner
+      seed: owner-load-masking
+      start_path: /load
+      slow_ms: 3000
+      budget:
+        steps: 16
+
+    - name: invite-somebody-as-the-viewer
+      # A viewer may not invite, so the interesting output is how the console
+      # says so, not whether an invitation is sent.
+      goal: Find who is in the organization and how to invite somebody new.
+      persona: viewer
+      seed: viewer-invite
+      start_path: /members
+      slow_ms: 3000
+      budget:
+        steps: 12
+
+    - name: review-the-queue-as-the-operator
+      goal: Find what needs an operator and the applications waiting for review.
+      persona: operator-owner
+      seed: operator-queue
+      start_path: /admin
+      slow_ms: 3000
+      budget:
+        steps: 16
+
+oracle:
+  # The other half of a release gate. `af test` says whether the console does
+  # what the workflows above ask; this says what a change did that the version
+  # it replaces did not, on the same data. It was absent, so
+  # `compare_with_previous_release` refused to run against this repository on
+  # the morning it was tagged: "This project declares no oracle probes, so
+  # there is nothing to send to either side and no comparison to make."
+  #
+  # The probes are the requests a launch reader's browser makes in its first
+  # minute, signed out, plus the three endpoints whose answer to a stranger is
+  # the whole of their contract. They are sent with no session, because a
+  # probe is bytes written down in advance and a session cookie is not.
+  # Everything behind a sign-in is judged by the workflows and the explorations.
+  #
+  # What each probe can show is a status that changed class, a header that
+  # appeared or went, a JSON body that lost a field, and a table whose rows the
+  # two versions left different. The console pages are static HTML, which the
+  # comparison reads as bytes rather than structure, so on a pull request that
+  # rebuilds the console those probes report one minor "bodies differ" each and
+  # nothing more. That is the truth about such a change and it does not fail
+  # anything: `fail_on: critical` is a page that vanished, a request the last
+  # version served and this one refuses, or a row it stopped writing.
+  enabled: true
+  baseline: merge_base
+  base_ref: origin/main
+  fail_on: critical
+  probes:
+    - name: readiness
+      # JSON, and the one answer a deploy gate acts on. `ready` is compared
+      # by value; `version` and `commit` are whatever the build stamped, which
+      # a preview does not, so both read "dev" and "unknown" on both sides.
+      path: /readyz
+    - name: liveness
+      path: /health
+    - name: the-front-door
+      # The console's shell, which is the sign-in screen to a stranger.
+      path: /
+    - name: no-session-for-a-stranger
+      # {"signedIn": false} with the sign-in methods and whether signups are
+      # open. A change that closed email sign-in or opened signups shows up
+      # here as a field that changed value, before anybody's browser sees it.
+      path: /auth/session
+    - name: the-environments-page
+      path: /environments
+    - name: the-runs-page
+      path: /runs
+    - name: the-getting-started-page
+      # The page the launch found configured as not existing in production.
+      # 200 on both sides is the expectation; a 404 on one is critical.
+      path: /start
+    - name: the-plan-page
+      path: /plan
+    - name: the-settings-page
+      path: /settings
+    - name: the-command-line-page
+      path: /cli
+    - name: the-operator-door
+      path: /admin
+    - name: a-page-that-does-not-exist
+      # The negative control. The static export answers an unknown path with
+      # its own 404 page and status 404, and a change that made every path
+      # answer 200 would make the pages above meaningless as probes.
+      path: /a-page-that-does-not-exist
+    - name: the-api-refuses-a-stranger
+      # The session gate on the application's own API, as JSON. A change that
+      # let this through would be the worst thing a diff could find.
+      path: /trpc/environments.list
+    - name: the-published-contract
+      # The OpenAPI document, which is a structural description of every
+      # endpoint. A route added, removed or retyped is a JSON path here, which
+      # is exactly the kind of difference somebody did not mean to make.
+      path: /openapi.json
+    - name: a-magic-link-for-a-stranger
+      # The sign-in request itself, with an address that has no account. The
+      # control plane answers {"sent": true} for every input by design, writes
+      # no token and sends no mail for an unknown address, so both sides do
+      # nothing and must say the same thing about it. This is the one write
+      # path on the sign-in journey a probe can exercise without creating a
+      # message somebody's workflow then reads.
+      method: POST
+      path: /auth/email
+      headers:
+        content-type: application/json
+      body: '{"email": "stranger@example.test"}'
+    - name: an-operator-sign-in-with-a-wrong-password
+      # 401 with one fixed sentence for every refusal, and one audit row on
+      # each side recording the refusal. The row is written identically on
+      # both, so it is a comparison of the audit path rather than noise.
+      method: POST
+      path: /v1/admin/signin
+      headers:
+        content-type: application/json
+      body: '{"email": "nobody@example.test", "password": "not-the-password"}'
+    - name: an-unsigned-stripe-delivery
+      # Billing is configured above, so this is refused as unverifiable with
+      # 401. A version that answered 200 to an unsigned delivery would be a
+      # webhook anybody on the internet could send, and 401 to 2xx is minor
+      # in the ranking, so read this probe's line rather than only the verdict.
+      method: POST
+      path: /webhooks/stripe
+      headers:
+        content-type: application/json
+      body: '{"id": "evt_oracle_probe", "type": "ping"}'
+    - name: the-analytics-proxy
+      # The PostHog forwarder at /ph is mounted only when a region is
+      # configured, which a preview does not, so both sides answer 404. A
+      # change that mounted it unconditionally, or moved it, shows here.
+      method: POST
+      path: /ph/e/
+      headers:
+        content-type: application/json
+      body: '{"event": "oracle-probe"}'
+  # What the database half says on every run, measured rather than expected.
+  # A fresh run against origin/main answered all eighteen probes with zero
+  # differences and reported eleven database differences, six of them major,
+  # every one of them the personas above. Both sides provision owner, viewer
+  # and operator-owner, and each side's rows carry their own generated primary
+  # keys, so the comparison pairs nothing: users, members and admin_users read
+  # as a row missing and a row extra, and the operator audit chain's first
+  # hash differs because it covers the operator's id. They are attributed to
+  # the migration phase, which is not where they came from, and ranked major,
+  # so `fail_on: critical` passes over them. A JSON path in `ignore` cannot
+  # pair two rows whose keys differ, so they are read past here rather than
+  # hidden, and a difference in any of those tables beyond one row missing and
+  # one extra per persona is a real one.
+  database:
+    enabled: true
+    max_rows: 10000
 
 invariants:
   # Each of these returns the rows that break it rather than a count of them.
@@ -622,17 +1030,77 @@ load:
   # shape's 5 requests a second. A quarter of a request a second for a minute
   # is fifteen requests, which is not a smoke of anything. 1 against a
   # synthesised 5 is the honest reading of "as fast as the default sends", and
-  # thirty seconds of it is 150 requests across the four pages below.
+  # thirty seconds of it is 150 requests across the pages below.
   scale: 1
   duration: 30s
+  # Every literal GET here is also a step a scenario below may send: a
+  # scenario is checked against this list before anything goes out, and one
+  # that names a route not on it does not run at all. So the list is the
+  # signed out journey a launch reader makes plus the console's pages, not only
+  # the four signed in pages it used to be.
   safe_routes:
+    - GET /
+    - GET /readyz
+    - GET /health
+    - GET /auth/session
     - GET /environments
     - GET /runs
     - GET /audit
     - GET /network
+    - GET /start
+    - GET /plan
+    - GET /cli
+    - GET /members
+    - GET /settings
+    - GET /admin
+  # POST /auth/email stays out, and that is a decision rather than a gap.
+  #
+  # It is the sign-in request, and the readiness evaluation was right that
+  # nothing here could ever put a request against it. It still cannot, for
+  # two reasons a load run cannot get around. The route answers in constant
+  # time by design, before the mail is sent and whether or not the address has
+  # an account, so its latency under load says nothing a load run would want to
+  # know. And every request with a known address writes a token row and lands
+  # a message in the inbox that the workflows above then read the newest link
+  # out of, while the route shares a per client limiter of one request a second
+  # with the callback and the operator sign-in: fifty sessions here would spend
+  # the budget the workflows need a minute later and turn their sign-ins into
+  # 429s. A load run that breaks the checks that follow it is not a
+  # measurement. The sign-in journey under load is the page the form is on, the
+  # session read the console makes before it renders it, and readiness, which
+  # the scenarios below send; the request itself is covered once, by the
+  # oracle probe above, where a single send is what is wanted.
   unsafe_routes:
     - POST /auth/email
     - POST /trpc/*
+  # Two journeys with an order to them, which the weighted mix above has
+  # none of. There were no scenarios, so `af load scenario` and the MCP
+  # `run_load_test` scenarios profile failed with AF-LOD-010 on this very
+  # repository. Each document is under scenarios/ and says what it measures.
+  scenarios:
+    # A reader arrives from the announcement, signed out, and reloads once
+    # when the first paint feels slow. Twenty at a time, three times each.
+    - path: scenarios/a-reader-arrives-signed-out.yaml
+      sessions: 20
+      iterations: 3
+    # Ten seconds in, a team opens every console page in a row while the
+    # readers above are still arriving.
+    #
+    # Twelve sessions once through, not forty twice, and the smaller number is
+    # the measurement rather than a retreat from one. Every session a scenario
+    # sends comes from the one address the load generator has, and the control
+    # plane allows one address twenty page loads a second with a burst of 120
+    # (`GET /console/app/*` in web/apps/api/src/limits.ts). Forty sessions
+    # twice through is 640 page loads in about seven seconds, and the first
+    # run of it had 392 of them refused with 429: it measured the rate
+    # limiter doing its job and said nothing about whether the console
+    # serves. Ninety six loads sit inside the burst beside the readers'
+    # hundred and twenty, so a refusal here means the limit changed or the
+    # process fell over, and both are worth a red.
+    - path: scenarios/the-console-under-a-launch-burst.yaml
+      sessions: 12
+      iterations: 1
+      start_after: 10s
   thresholds:
     # No p95_increase, because the source is none. A default shape carries no
     # production baseline, so the threshold would have been listed in the
