@@ -120,7 +120,7 @@ func TestTransformReferenceIsCurrent(t *testing.T) {
 	}
 	require.Equal(t, want, string(raw),
 		"the transform reference is out of date with the registry. "+
-			"Regenerate with: go test ./internal/masking -update-transforms")
+			"Regenerate with: go test ./internal/masking -run '^TestTransformReferenceIsCurrent$' -update-transforms")
 }
 
 // The page's own claim, checked directly rather than through the diff: every

@@ -103,7 +103,7 @@ var ledger = []generator{
 	{"go run ./tools/eventcheck -freeze .", []string{
 		"engine/internal/events/stream.register.json",
 	}},
-	{"cd engine && go test ./internal/masking -update-transforms", []string{
+	{"cd engine && go test ./internal/masking -run '^TestTransformReferenceIsCurrent$' -update-transforms", []string{
 		"docs/src/content/docs/reference/transforms.md",
 	}},
 	{"cd engine && go test ./internal/hud -update-frames", []string{
@@ -388,6 +388,13 @@ func main() {
 // it had not made. Not an apology, evidence: the reader most primed to see it
 // did not, which is the argument for a tool that CANNOT say it over a person
 // asked to remember.
+//
+// That generator no longer starts a container. It runs
+// TestTransformReferenceIsCurrent alone, because rewriting one page never
+// needed the package's live Postgres and ClickHouse tests, which run in the
+// engine job's Test step instead. runpattern_test.go holds the scoped name to a
+// test that exists, since a -run that matches nothing exits 0 having written
+// nothing, which is this tool's defect wearing a generator's clothes.
 func generateAll(root string, out io.Writer) error {
 	// Before anything, so that there is no window in which a stale receipt
 	// vouches for a tree this run is part way through rewriting.

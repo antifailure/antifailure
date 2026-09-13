@@ -148,7 +148,7 @@ jobs:
         run: npx playwright install --with-deps chromium
         working-directory: runner
 
-      - name: The generators run, and so do the tests of the packages they live in
+      - name: The generators run, most of them with the tests of the packages they live in
         # The error catalog and the sidecar's packaged source are generated and
         # checked in. A drift between the generator and what is committed is
         # invisible until somebody wonders why their change did nothing.
@@ -172,9 +172,19 @@ jobs:
         # can see that half of it, because it never reads the committed copy.
         #
         # Named for what it does rather than for what the next step checks.
-        # Four of these are `go test <pkg> -update-something`, which runs the
-        # WHOLE package, so a test in engine/internal/cli that has nothing to
-        # do with the committed reference fails here.
+        # Most of the generators that are `go test <pkg> -update-something` run
+        # the WHOLE package, so a test in engine/internal/cli that has nothing
+        # to do with the committed reference fails here.
+        #
+        # The masking one does not, and the name says "most" because of it.
+        # That package starts Postgres and ClickHouse containers, so rewriting
+        # one page waited minutes on Docker, and against a wedged daemon on
+        # 2026-09-09 it hung this step. It runs TestTransformReferenceIsCurrent
+        # alone. The whole package still runs in the Test step below, through
+        # tools/enginetest with AF_REQUIRE_DOCKER and AF_REQUIRE_DATABASE set,
+        # so a live test there cannot pass by skipping itself. Run 34768933346,
+        # job 103754836396, ran it in both places before this: 61 seconds here
+        # and 133 in the Test step.
         #
         # Under the old name this step said "Generated files are current", and
         # the comparison was the LAST line of it. The shell is `bash -e`, so on
