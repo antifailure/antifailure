@@ -42,6 +42,17 @@ async function readVariables(): Promise<Set<string>> {
   return found
 }
 
+/** The heading of the section the enterprise edition's suite checks. */
+const ENTERPRISE_SECTION = '## Read by the enterprise edition'
+
+/** The page with that section cut out, from its heading to the next one. */
+function outsideEnterpriseSection(doc: string): string {
+  const start = doc.indexOf(`\n${ENTERPRISE_SECTION}\n`)
+  if (start < 0) return doc
+  const next = doc.indexOf('\n## ', start + 1)
+  return doc.slice(0, start) + (next < 0 ? '' : doc.slice(next))
+}
+
 describe('the control plane configuration reference', () => {
   it('describes every variable the process reads', async () => {
     const doc = await readFile(docPath, 'utf8')
@@ -57,7 +68,18 @@ describe('the control plane configuration reference', () => {
   it('describes nothing the process does not read', async () => {
     // The other direction. A variable removed from the code and left on the
     // page is an operator setting something that does nothing.
-    const doc = await readFile(docPath, 'utf8')
+    //
+    // ONE SECTION IS SET ASIDE, BY ITS POSITION, AND IT IS NOT A HOLE. The
+    // page also documents what the enterprise entry point reads, because the
+    // hosted control plane runs it and tools/wirecheck requires every variable
+    // the Terraform module sets to be documented here. This process cannot
+    // see those reads and must not be able to: the edition boundary job fails
+    // the build if anything in this tree so much as names the enterprise
+    // code. So the section under ENTERPRISE_SECTION is checked by the
+    // enterprise edition's own suite instead, against the source that reads
+    // it, and a row there that nothing reads fails that suite. Renaming the
+    // heading fails this one, because the names come back into view.
+    const doc = outsideEnterpriseSection(await readFile(docPath, 'utf8'))
     const read = await readVariables()
     const described = [...doc.matchAll(/`(AF_[A-Z0-9_]+)`/g)].map((m) => m[1]!)
     const stale = [...new Set(described)].filter((v) => !read.has(v)).sort()

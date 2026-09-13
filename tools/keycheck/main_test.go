@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -354,8 +355,11 @@ func TestChartProfilesReachTheirOptionalBranches(t *testing.T) {
 				"mountPath: /archive", "replicas: 2", "topologySpreadConstraints:",
 				"nodeSelector:", "tolerations:", "affinity:",
 				"image: ghcr.io/antifailure/control-plane:",
+				"name: AF_EE_SSO_KEY", "name: AF_LICENSE_KEY", "name: AF_ORG\n              value: \"keycheck\"",
+				"name: AF_LICENSE_PUBLIC_KEYS", "name: keycheck-inline-profile-enterprise",
+				"AF_EE_SSO_KEY: \"keycheck\"", "AF_LICENSE_KEY: \"keycheck\"",
 			},
-			omits: []string{"kind: HorizontalPodAutoscaler", "kind: Ingress", "@sha256:"},
+			omits: []string{"kind: HorizontalPodAutoscaler", "kind: Ingress", "@sha256:", "optional: true"},
 		},
 		{
 			profile: chartProfiles[1],
@@ -369,6 +373,8 @@ func TestChartProfilesReachTheirOptionalBranches(t *testing.T) {
 				"keycheck.ingress: covered", "ingressClassName: keycheck",
 				"secretName: keycheck-tls", "namespaceSelector:",
 				"keycheck.network: allowed",
+				"name: AF_EE_SSO_KEY", "name: keycheck-enterprise",
+				"name: AF_LICENSE_KEY\n              valueFrom:\n                secretKeyRef:\n                  name: keycheck-enterprise\n                  key: AF_LICENSE_KEY\n                  optional: true",
 			},
 			omits: []string{
 				"kind: Secret", "kind: ServiceAccount", "kind: CronJob",
@@ -390,6 +396,7 @@ func TestChartProfilesReachTheirOptionalBranches(t *testing.T) {
 				"kind: NetworkPolicy", "kind: ServiceAccount", "ingressClassName:",
 				"imagePullSecrets:", "topologySpreadConstraints:", "nodeSelector:",
 				"tolerations:", "affinity:", "keycheck.ingress:", "secretName:", "@sha256:",
+				"AF_EE_SSO_KEY", "AF_LICENSE_KEY", "AF_ORG", "AF_LICENSE_PUBLIC_KEYS",
 			},
 		},
 	}
@@ -415,6 +422,64 @@ func TestChartProfilesReachTheirOptionalBranches(t *testing.T) {
 	}
 	if len(failures) > 0 {
 		t.Fatalf("profile branch coverage:\n%s", strings.Join(failures, "\n"))
+	}
+}
+
+// The chart refuses the enterprise edition in the shapes its entry point
+// refuses at start-up, and one more a chart can see and a process cannot.
+//
+// Measured against the entry point before the chart was written: without
+// AF_EE_SSO_KEY it exits before it listens, and a licence with no AF_ORG or no
+// trusted key is refused with exit status 2. A chart that rendered those would
+// install a pod that never becomes ready, with the reason only in its log. The
+// third case is values nothing reads, set on a release that does not run the
+// enterprise image. Each case is rendered by the real helm against the valid
+// sparse profile, so the only thing that can refuse it is the rule under test.
+func TestTheEnterpriseEditionIsRefusedWhereItsEntryPointWouldBe(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Fatalf("helm is not installed, so the chart's refusals cannot be rendered: %v", err)
+	}
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := chartProfiles[2]
+	cases := []struct {
+		name   string
+		values string
+		want   string
+	}{
+		{
+			name:   "no sealing key",
+			values: "enterprise:\n  enabled: true\n",
+			want:   "enterprise.enabled is true and enterprise.ssoKey is not set",
+		},
+		{
+			name:   "a licence with no organization",
+			values: "enterprise:\n  enabled: true\n  ssoKey: keycheck\n  licenseKey: keycheck\n  licensePublicKeys: keycheck=keycheck\n",
+			want:   "enterprise.licenseKey is set and enterprise.org or enterprise.licensePublicKeys is not",
+		},
+		{
+			name:   "a licence with no trusted key",
+			values: "enterprise:\n  enabled: true\n  ssoKey: keycheck\n  licenseKey: keycheck\n  org: keycheck\n",
+			want:   "enterprise.licenseKey is set and enterprise.org or enterprise.licensePublicKeys is not",
+		},
+		{
+			name:   "enterprise values on a community release",
+			values: "enterprise:\n  org: keycheck\n",
+			want:   "enterprise.org is set and enterprise.enabled is not",
+		},
+	}
+	for _, c := range cases {
+		profile := helmProfile{Name: c.name, Release: base.Release, Values: base.Values + c.values}
+		_, renderErr := renderChartProfile(root, "deploy/helm/antifailure-control-plane", profile)
+		if renderErr == nil {
+			t.Errorf("%s: the chart rendered, and the entry point would not have started", c.name)
+			continue
+		}
+		if !strings.Contains(renderErr.Error(), c.want) {
+			t.Errorf("%s: refused for another reason than the one under test:\n%v", c.name, renderErr)
+		}
 	}
 }
 

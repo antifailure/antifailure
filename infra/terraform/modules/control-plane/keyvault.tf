@@ -230,6 +230,20 @@ resource "random_bytes" "provider_key_secret" {
   length = 32
 }
 
+# The key single sign-on seals what it stores under, on the enterprise edition.
+#
+# ee/web/sso encrypts every OIDC client secret and service provider private key
+# with it, binding the organization id as additional data, and the enterprise
+# entry point REFUSES TO START without it. It is the provider key secret's twin
+# and it is owned for the same three reasons: nobody should ever hold it, a
+# regenerated one silently stops every stored connection from opening, and so
+# keepers is empty on purpose. 32 bytes, which keyFromEnv requires exactly, as
+# base64, which is the form it parses.
+resource "random_bytes" "ee_sso_key" {
+  count  = var.enterprise_edition ? 1 : 0
+  length = 32
+}
+
 # The key organization surrogates are computed under, 32 bytes as 64 hex
 # characters.
 #
@@ -267,6 +281,8 @@ locals {
     "admin-database-url" = local.operator_url
     } : {}, var.analytics_enabled ? {
     "analytics-surrogate-secret" = random_bytes.analytics_surrogate_secret[0].hex
+    } : {}, var.enterprise_edition ? {
+    "ee-sso-key" = random_bytes.ee_sso_key[0].base64
   } : {})
   seeded_secrets = {
     "github-client-id"     = var.github_client_id
@@ -348,6 +364,23 @@ locals {
     "stripe-secret-key"     = "${trimsuffix(azurerm_key_vault.this.vault_uri, "/")}/secrets/${var.stripe_secret_key_secret_name}"
     "stripe-webhook-secret" = "${trimsuffix(azurerm_key_vault.this.vault_uri, "/")}/secrets/${var.stripe_webhook_secret_secret_name}"
   }
+}
+
+# The licence, addressed by id like the two above, and for a stronger reason.
+#
+# It is signed by whoever holds a licence signing key, which is never this
+# stack and never a workflow, so Terraform cannot create it and must not see
+# it. A person puts it in the vault; the app reads it by reference.
+# docs/src/content/docs/self-hosting/production.md has the command, which
+# reads the licence from standard input so it never reaches an argument list.
+#
+# Missing, it fails where Azure resolves the reference, before deploy.sh moves
+# anything. That is the right place: an enterprise app that started without the
+# licence it was configured for would serve 402 to every identity provider.
+locals {
+  license_secret_ids = var.enterprise_edition ? {
+    "license-key" = "${trimsuffix(azurerm_key_vault.this.vault_uri, "/")}/secrets/${var.license_key_secret_name}"
+  } : {}
 }
 
 # Resend still uses a data source, so enabling mail requires vault read access

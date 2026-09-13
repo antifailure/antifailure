@@ -200,6 +200,31 @@ spec:
                   name: {{ include "cp.providerKeysSecretName" . }}
                   key: {{ .Values.providerKeys.secretKeys.secret }}
             {{- end }}
+            {{- if .Values.enterprise.enabled }}
+            - name: AF_EE_SSO_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cp.enterpriseSecretName" . }}
+                  key: {{ .Values.enterprise.secretKeys.ssoKey }}
+            {{- if or .Values.enterprise.licenseKey .Values.enterprise.existingSecret }}
+            - name: AF_LICENSE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cp.enterpriseSecretName" . }}
+                  key: {{ .Values.enterprise.secretKeys.licenseKey }}
+                  {{- if not .Values.enterprise.licenseKey }}
+                  optional: true
+                  {{- end }}
+            {{- end }}
+            {{- if .Values.enterprise.org }}
+            - name: AF_ORG
+              value: {{ .Values.enterprise.org | quote }}
+            {{- end }}
+            {{- if .Values.enterprise.licensePublicKeys }}
+            - name: AF_LICENSE_PUBLIC_KEYS
+              value: {{ .Values.enterprise.licensePublicKeys | quote }}
+            {{- end }}
+            {{- end }}
             {{- if include "cp.hasSecret" (dict "value" .Values.mail.resendApiKey "existing" .Values.mail.existingSecret) }}
             - name: AF_RESEND_API_KEY
               valueFrom:

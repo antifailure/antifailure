@@ -61,6 +61,11 @@ type pin struct {
 	what    string
 	pattern *regexp.Regexp
 	kind    kind
+	// repository reads the image REPOSITORY that sits beside this pin in the
+	// same file, for a pin that names an image tag. A tag that exists and an
+	// image that was published are different claims, and the second is the one
+	// the maintenance job needs. See imageBuiltAtTag.
+	repository *regexp.Regexp
 	// bare marks a pin written without the leading v, as the artifact name and
 	// the build.sh argument are. Comparing those against a tag list means
 	// putting the v back rather than stripping it off every tag, because the
@@ -74,16 +79,18 @@ type pin struct {
 // everything on the day somebody moved a variable.
 var pins = []pin{
 	{
-		file:    "infra/terraform/stacks/control-plane/variables.tf",
-		what:    "the control plane stack's image_tag default",
-		pattern: regexp.MustCompile(`(?s)variable\s+"image_tag"\s*\{.*?default\s*=\s*"([^"]+)"`),
-		kind:    live,
+		file:       "infra/terraform/stacks/control-plane/variables.tf",
+		what:       "the control plane stack's image_tag default",
+		pattern:    regexp.MustCompile(`(?s)variable\s+"image_tag"\s*\{.*?default\s*=\s*"([^"]+)"`),
+		kind:       live,
+		repository: regexp.MustCompile(`(?s)variable\s+"image_repository"\s*\{.*?default\s*=\s*"([^"]+)"`),
 	},
 	{
-		file:    "infra/terraform/modules/control-plane/variables.tf",
-		what:    "the control plane module's image_tag default",
-		pattern: regexp.MustCompile(`(?s)variable\s+"image_tag"\s*\{.*?default\s*=\s*"([^"]+)"`),
-		kind:    live,
+		file:       "infra/terraform/modules/control-plane/variables.tf",
+		what:       "the control plane module's image_tag default",
+		pattern:    regexp.MustCompile(`(?s)variable\s+"image_tag"\s*\{.*?default\s*=\s*"([^"]+)"`),
+		kind:       live,
+		repository: regexp.MustCompile(`(?s)variable\s+"image_repository"\s*\{.*?default\s*=\s*"([^"]+)"`),
 	},
 	{
 		file:    "deploy/helm/antifailure-control-plane/Chart.yaml",
@@ -180,6 +187,21 @@ func main() {
 				"This is a worked example, so it has to describe the release it ships in.",
 				"Naming an older tag is how the page came to tell readers to fetch a file that release does not have."))
 		case published[value]:
+			// THE TAG EXISTS. THAT IS NOT THE SAME AS THE IMAGE EXISTING.
+			//
+			// The failure: control-plane-enterprise:v1.3.5 has never been
+			// published and never will be. v1.3.5 was cut on 2026-09-07 and
+			// deploy/docker/control-plane-enterprise.Dockerfile arrived the day
+			// after, so the tree that tag names could not build that image. The
+			// registry answers "manifest unknown". Pointing image_repository at
+			// it while image_tag still names v1.3.5 gives the maintenance
+			// container app job, which reads both defaults with no
+			// ignore_changes, an image that does not exist, and the next apply
+			// from main takes it. Every check above passes: the TAG is real.
+			if problem := imagePinProblem(*root, p, value); problem != "" {
+				problems = append(problems, problem)
+				continue
+			}
 			fmt.Printf("ok  %-24s %s\n", value, p.what)
 		case p.kind == released && value == pending:
 			fmt.Printf("ok  %-24s %s, the release being prepared\n", value, p.what)
@@ -206,6 +228,65 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("tagsync: every version pin names a tag that exists, or the release being prepared\n")
+}
+
+// imagePinProblem is the complaint about a pin whose image repository and tag
+// name something nobody could have published, or empty when there is none.
+func imagePinProblem(root string, p pin, tag string) string {
+	if p.repository == nil {
+		return ""
+	}
+	repository, err := read(root, pin{file: p.file, what: "the image repository beside it", pattern: p.repository})
+	if err != nil {
+		return err.Error()
+	}
+	built, dockerfile, err := imageBuiltAtTag(root, repository, tag)
+	if err != nil {
+		return fmt.Sprintf("%s: reading %s at %s: %v", p.file, dockerfile, tag, err)
+	}
+	if built {
+		return ""
+	}
+	return fmt.Sprintf(
+		"%s pins %s:%s, and %s does not exist at %s, so no build of that tag could have "+
+			"published that image.\n"+
+			"    That default is live: the maintenance container app job reads the repository\n"+
+			"    and the tag with no ignore_changes, so the next apply from main pulls an image\n"+
+			"    the registry does not have. Move the repository in the commit that bumps the\n"+
+			"    tag to a release built from a tree that carries its Dockerfile, never before.",
+		p.file, repository, tag, dockerfile, tag)
+}
+
+// imageBuiltAtTag asks whether the tree a tag names carried the Dockerfile for
+// an image repository.
+//
+// WHAT IT PROVES AND WHAT IT DOES NOT, because the difference is the whole
+// value of it. The Dockerfile being absent at that tag proves no build of that
+// tag can have produced that image, which is the refusal this exists for. The
+// Dockerfile being present does NOT prove a push happened: the workflow may have
+// failed, or the tag may predate publishing altogether. So this is one
+// directional on purpose, and it is offline, which a registry query would not
+// be. The check that a tag was published at all is the tag list above.
+//
+// The Dockerfile is derived from the repository rather than looked up in a list:
+// deploy/docker/<last path segment>.Dockerfile is how both images are named, and
+// a list of two would be a list somebody has to remember to add the third to.
+func imageBuiltAtTag(root, repository, tag string) (bool, string, error) {
+	name := repository
+	if cut := strings.LastIndex(name, "/"); cut >= 0 {
+		name = name[cut+1:]
+	}
+	if name == "" {
+		return false, "", fmt.Errorf("%q names no image", repository)
+	}
+	dockerfile := "deploy/docker/" + name + ".Dockerfile"
+	cmd := exec.Command("git", "ls-tree", "--name-only", tag, "--", dockerfile)
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return false, dockerfile, err
+	}
+	return strings.TrimSpace(string(out)) == dockerfile, dockerfile, nil
 }
 
 // read pulls one pin's value out of its file.

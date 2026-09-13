@@ -109,6 +109,7 @@ gate: _reports
     run "gate matches CI"                just gatecheck
     run "every script can be executed"   just execcheck
     run "deploy keeps jobs on one image" just deploycheck
+    run "the deployed edition is the one sold" just editiondeploycheck
     run "configuration applies itself safely" just applycheck
     run "no yaml key is shadowed"        just keycheck
     run "vet"                            just vet
@@ -1539,6 +1540,14 @@ execcheck:
 # including every failure ordering that must leave maintenance unchanged.
 deploycheck:
     ./deploy/cd/deploy_test.sh
+
+# The deploy refuses an environment that cannot run the edition it is about to
+# be given, and says so after the shift when the origin does not serve it. Runs
+# the real script against a fake Azure and a fake origin, in every answer the
+# real ones give, including the two that read as success: a 404 from the
+# community image and a 402 from a licence that does not permit the feature.
+editiondeploycheck:
+    ./deploy/cd/edition-check_test.sh
 
 # The configuration apply that runs before every deploy does what its header
 # says: init, a targeted plan, the guard, then an apply only when the guard

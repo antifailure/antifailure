@@ -279,6 +279,7 @@ resource "azurerm_container_app" "this" {
       var.provider_key_secret_enabled ? ["provider-key-secret"] : [],
       var.operator_portal_enabled ? ["admin-database-url"] : [],
       var.analytics_enabled ? ["analytics-surrogate-secret"] : [],
+      var.enterprise_edition ? ["ee-sso-key"] : [],
     ))
     content {
       name                = secret.value
@@ -293,6 +294,7 @@ resource "azurerm_container_app" "this" {
     for_each = merge(
       local.github_app_secret_ids,
       local.stripe_secret_ids,
+      local.license_secret_ids,
       var.mail_from == "" ? {} : {
         "resend-api-key" = data.azurerm_key_vault_secret.resend_api_key[0].versionless_id
       },
@@ -722,6 +724,44 @@ resource "azurerm_container_app" "this" {
         }
       }
 
+      # -------------------------------------------------------------------
+      # THE ENTERPRISE EDITION, all four on one switch.
+      #
+      # Measured rather than read off the code, against the entry point with
+      # every one of these present, absent and wrong: without AF_EE_SSO_KEY the
+      # process exits before it listens, whatever the licence says, and a
+      # licence with no AF_ORG or no trusted key is refused at start-up. So the
+      # four arrive together or not at all, and the precondition below refuses
+      # a tfvars file that switches the edition on without the two values.
+      dynamic "env" {
+        for_each = var.enterprise_edition ? [1] : []
+        content {
+          name        = "AF_EE_SSO_KEY"
+          secret_name = "ee-sso-key"
+        }
+      }
+      dynamic "env" {
+        for_each = var.enterprise_edition ? [1] : []
+        content {
+          name        = "AF_LICENSE_KEY"
+          secret_name = "license-key"
+        }
+      }
+      dynamic "env" {
+        for_each = var.enterprise_edition ? [var.license_org] : []
+        content {
+          name  = "AF_ORG"
+          value = env.value
+        }
+      }
+      dynamic "env" {
+        for_each = var.enterprise_edition ? [var.license_public_keys] : []
+        content {
+          name  = "AF_LICENSE_PUBLIC_KEYS"
+          value = env.value
+        }
+      }
+
       # The plan gate on a control plane sold only to enterprise organizations.
       # Dynamic because any value other than `enterprise` stops the process, and
       # an empty string is one of those values.
@@ -892,6 +932,17 @@ resource "azurerm_container_app" "this" {
     precondition {
       condition     = contains(["", "enterprise"], var.hosted_required_plan) && (var.hosted_required_plan == "" || var.stripe_price_team != "")
       error_message = "hosted_required_plan is ${jsonencode(var.hosted_required_plan)}. It must be `enterprise` or empty, and setting it requires billing, which means stripe_price_team and the two Stripe secrets in the vault. The control plane exits at start-up on either mistake: an organization on a plane with a gate it cannot buy its way past is locked out of the product."
+    }
+
+    # An enterprise edition that cannot read its own licence.
+    #
+    # Both halves are start-up refusals in the entry point, exit 2, measured:
+    # "AF_LICENSE_KEY is set and AF_ORG is not" and "this installation carries
+    # no licence signing keys". The licence reference itself is not checked
+    # here, because its value lives in the vault and a plan must not read it.
+    precondition {
+      condition     = !var.enterprise_edition || (trimspace(var.license_org) != "" && trimspace(var.license_public_keys) != "")
+      error_message = "enterprise_edition is true and license_org or license_public_keys is empty. The enterprise entry point refuses at start-up a licence it has no organization to compare against or no key to verify, so this revision would never listen. Set both, or turn enterprise_edition off for a deployment that runs the community image."
     }
 
     # A plan that can be granted by hand is not a plan anybody has to buy.
