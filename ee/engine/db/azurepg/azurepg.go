@@ -274,7 +274,10 @@ type Options struct {
 	TLSMode      string
 	MaxBranches  int
 	PollInterval time.Duration
-	Getenv       func(string) string
+	// RestoreReadyTimeout bounds how long a restore waits for the server it
+	// restores from to have a backup at or before now. Zero means 30 minutes.
+	RestoreReadyTimeout time.Duration
+	Getenv              func(string) string
 	// Token supplies an externally managed identity; nil uses the Azure credential chain.
 	Token      func(context.Context) (string, error)
 	Now        func() time.Time
@@ -313,6 +316,9 @@ func New(opts Options) (*Provider, error) {
 	}
 	if opts.PollInterval <= 0 {
 		opts.PollInterval = 2 * time.Second
+	}
+	if opts.RestoreReadyTimeout <= 0 {
+		opts.RestoreReadyTimeout = 30 * time.Minute
 	}
 	api, err := newARMAPI(opts)
 	if err != nil {

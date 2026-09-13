@@ -98,9 +98,20 @@ type serverProperties struct {
 	State                    string       `json:"state"`
 	Version                  string       `json:"version"`
 	AdministratorLogin       string       `json:"administratorLogin"`
-	CreateTimeRaw            string       `json:"earliestRestoreDate"`
+	Backup                   backupProps  `json:"backup"`
 	Storage                  storageProps `json:"storage"`
 	Network                  networkProps `json:"network"`
+}
+
+// backupProps is the part of a server's backup configuration a restore needs.
+//
+// earliestRestoreDate is under properties.backup, per the 2024-08-01 Server
+// schema: "Earliest restore point time (ISO8601 format) for a flexible server."
+// This provider used to declare it directly under properties, where Resource
+// Manager never puts it, so it decoded as empty on every real server and
+// nothing read it.
+type backupProps struct {
+	EarliestRestoreDate string `json:"earliestRestoreDate"`
 }
 
 type serverSKU struct {
