@@ -185,6 +185,63 @@ jobs:
       # a commit like every other action here.
       - uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        id: buildx
+
+      # THE FIRST PUSH OF v1.4.0 DIED HERE, 100 MS IN, WITH A BUILDER THAT HAD
+      # JUST BUILT: "waiting for BuildKit: DeadlineExceeded: context deadline
+      # exceeded while waiting for connections to become ready".
+      #
+      # docker/buildx#4027, first released in v0.37.0 and carried by
+      # ubuntu-latest, waits for BuildKit only while the builder container is
+      # less than 20 seconds old, and gives that wait the REST of the 20 seconds
+      # rather than a timeout of its own. Run 34779202432's first attempt
+      # started its push 19.9 seconds after the container did, so the connection
+      # had about a tenth of a second. Its second attempt pushed at 21.4
+      # seconds, outside the window, and passed. docker/buildx#4050 gives the
+      # wait a full timeout of its own, and was released in v0.37.1.
+      #
+      # The window is measured from the container's StartedAt, which never
+      # moves after boot, so waiting until it has passed once protects every
+      # buildx call after this step, the `--load` build included.
+      #
+      # WHY NOT PIN buildx v0.37.1 INSTEAD. setup-buildx-action at the commit
+      # pinned above downloads a pinned version without verifySignature, so the
+      # pin would trade a timing race for an unverified binary.
+      #
+      # REMOVE THIS STEP when the runner's `docker buildx version` is v0.37.1 or
+      # later. It prints that version below so the log says when.
+      #
+      # It FAILS rather than skips when it cannot read the container's start
+      # time. A wait that silently does nothing is a green step that protects
+      # nothing, which is the shape of the failure this step exists for.
+      - name: Wait until buildx no longer cuts its own connection short
+        env:
+          BUILDER: ${{ steps.buildx.outputs.name }}
+        run: |
+          set -euo pipefail
+          docker buildx version
+          if [ -z "$BUILDER" ]; then
+            echo "::error::setup-buildx-action reported no builder name, so there is no builder container to wait on."
+            exit 1
+          fi
+          container="buildx_buildkit_${BUILDER}0"
+          if ! started=$(docker inspect -f '{{.State.StartedAt}}' "$container" 2>&1); then
+            echo "::error::could not read the start time of $container: $started"
+            echo "::error::Refusing to skip the wait, because skipping it is how the v1.4.0 push failed."
+            exit 1
+          fi
+          if ! started_epoch=$(date -u -d "$started" +%s 2>&1); then
+            echo "::error::$container reported a start time that does not parse: $started"
+            exit 1
+          fi
+          age() { echo $(( $(date -u +%s) - started_epoch )); }
+          before=$(age)
+          echo "$container started at $started, ${before}s ago"
+          if [ "$before" -lt 22 ]; then
+            echo "waiting $(( 22 - before ))s for buildx's 20 second startup window to close"
+            sleep $(( 22 - before ))
+          fi
+          echo "$container is now $(age)s old, outside buildx's 20 second startup window"
 
       - name: The reference the engine will ask for, and the context it would build
         id: image
