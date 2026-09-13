@@ -219,6 +219,126 @@ func TestASuiteThatFailsWithoutNamingAPackageIsUndecided(t *testing.T) {
 	require.Contains(t, rep.render(), "COULD-NOT-LOOK")
 }
 
+// The reaper on #394: COULD-NOT-LOOK named a package and printed nothing else,
+// so the only way to learn which test had failed was to reproduce a flake. The
+// verdict has to carry what the failing run said, and only what that package
+// said: a neighbour's failure printed under this name would send somebody to
+// the wrong test.
+func TestACouldNotLookVerdictCarriesWhatTheFailingRunPrinted(t *testing.T) {
+	root := tree(t, map[string]string{
+		"unsteady": flaky("unsteady"),
+		"stale":    alwaysFails("stale"),
+	})
+	require.NoError(t, os.WriteFile(
+		filepath.Join(root, moduleDir, "internal", "unsteady", "first-run"), []byte("x"), 0o644))
+
+	rep, err := check(root, shell)
+	require.NoError(t, err)
+	require.Equal(t, []string{"example/engine/internal/unsteady"}, rep.unclear)
+
+	got := rep.evidence["example/engine/internal/unsteady"]
+	require.Contains(t, got, "failed once and will not fail again",
+		"the verdict did not carry the failing test's own message")
+	require.NotContains(t, got, "pages.gen.go is stale",
+		"another package's failure was printed as this one's")
+	require.Contains(t, rep.render(), "      pkg_test.go:",
+		"the failing run's output was not printed under the package")
+	require.Contains(t, rep.render(), "failed once and will not fail again")
+}
+
+// readsEECounting is readsEE numbering its attempts, so a report can be held to
+// printing the reproduction rather than the first run. Without ee it fails on
+// attempt 1, passes with ee on attempt 2, and fails again on attempt 3.
+func readsEECounting(name string) string {
+	return fmt.Sprintf("package %s\n\nimport (\n\t\"os\"\n\t\"strconv\"\n\t\"testing\"\n)\n\n"+
+		"func TestReadsTheEnterpriseTree(t *testing.T) {\n"+
+		"\tb, _ := os.ReadFile(\"attempts\")\n"+
+		"\tn, _ := strconv.Atoi(string(b))\n"+
+		"\tn++\n"+
+		"\t_ = os.WriteFile(\"attempts\", []byte(strconv.Itoa(n)), 0o644)\n"+
+		"\tif _, err := os.Stat(\"../../../ee/marker.txt\"); err != nil {\n"+
+		"\t\tt.Fatalf(\"attempt %%d: the enterprise tree is not there: %%v\", n, err)\n\t}\n}\n", name)
+}
+
+// The other red verdict needs the same, and its evidence is the reproduction,
+// which ran the package alone, so nothing else on the run can have caused what
+// it printed.
+func TestADependentVerdictCarriesWhatItsReproductionPrinted(t *testing.T) {
+	rep, err := check(tree(t, map[string]string{"reaches": readsEECounting("reaches")}), shell)
+	require.NoError(t, err)
+	require.Equal(t, []string{"example/engine/internal/reaches"}, rep.dependent)
+	require.Contains(t, rep.evidence["example/engine/internal/reaches"], "attempt 3:",
+		"the reproduction's output was not the evidence")
+	require.Contains(t, rep.render(), "attempt 3: the enterprise tree is not there",
+		"the dependent verdict did not say what failed")
+}
+
+// A suite that died naming nothing is the case where the output is the only
+// clue there is.
+func TestASuiteThatDiesWithoutNamingAPackagePrintsWhatItSaid(t *testing.T) {
+	rep, err := check(tree(t, map[string]string{"clean": passing("clean")}),
+		func(dir string, args ...string) (string, bool) {
+			if args[1] == "build" {
+				return "", true
+			}
+			return "panic: test timed out after 15m0s\nsignal: killed\n", false
+		})
+	require.NoError(t, err)
+	require.Contains(t, rep.render(), "panic: test timed out after 15m0s",
+		"the dead suite's output was not printed")
+}
+
+// A green run prints no evidence section at all, so the section only ever
+// means something failed.
+func TestAPassingTreePrintsNoEvidence(t *testing.T) {
+	rep, err := check(tree(t, map[string]string{"clean": passing("clean")}), shell)
+	require.NoError(t, err)
+	require.True(t, rep.ok())
+	require.NotContains(t, rep.render(), "what go printed",
+		"a passing run printed an evidence section")
+}
+
+func TestPackageOutputTakesOnlyThatPackagesBlock(t *testing.T) {
+	out := strings.Join([]string{
+		"--- FAIL: TestA (0.00s)",
+		"    a_test.go:9: a is broken",
+		"FAIL",
+		"FAIL\tgithub.com/x/internal/a\t0.010s",
+		"?   \tgithub.com/x/internal/empty\t[no test files]",
+		"--- FAIL: TestB (0.00s)",
+		"    b_test.go:4: b is broken",
+		"FAIL",
+		"FAIL\tgithub.com/x/internal/b\t0.020s",
+		"ok  \tgithub.com/x/internal/c\t0.030s",
+	}, "\n")
+
+	b := packageOutput(out, "github.com/x/internal/b")
+	require.Contains(t, b, "b is broken")
+	require.Contains(t, b, "FAIL\tgithub.com/x/internal/b")
+	require.NotContains(t, b, "a is broken", "the block before it leaked in")
+	require.NotContains(t, b, "internal/c", "the block after it leaked in")
+	require.NotContains(t, b, "internal/empty", "a package with no test files leaked in")
+	require.Contains(t, packageOutput(out, "github.com/x/internal/a"), "a is broken")
+	require.Empty(t, packageOutput(out, "github.com/x/internal/missing"))
+}
+
+// A goroutine dump must not bury the verdict, and a shortened block must say
+// that it was shortened.
+func TestLongEvidenceIsCutAndSaysHowMuch(t *testing.T) {
+	lines := make([]string, maxEvidenceLines+50)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line %d", i+1)
+	}
+	rep := report{
+		unclear:  []string{"example/p"},
+		evidence: map[string]string{"example/p": strings.Join(lines, "\n")},
+	}
+	got := rep.render()
+	require.Contains(t, got, fmt.Sprintf("line %d\n", maxEvidenceLines))
+	require.NotContains(t, got, fmt.Sprintf("line %d\n", maxEvidenceLines+1), "the cap was not applied")
+	require.Contains(t, got, "(50 further lines not shown)")
+}
+
 func writeEEModule(t *testing.T, root string) {
 	t.Helper()
 	require.NoError(t, os.WriteFile(filepath.Join(root, "ee", "go.mod"),
