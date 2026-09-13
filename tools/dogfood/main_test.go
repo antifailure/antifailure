@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -19,8 +20,9 @@ import (
 // gatecheck makes about a stale exemption.
 func TestBudgets_EveryOneIsReachable(t *testing.T) {
 	produced := map[string]bool{
-		// The two steps run directly, by name.
+		// The steps run directly, by name.
 		"doctor": true, "ci": true, "golden refresh": true,
+		"scenarios": true, "oracle": true,
 	}
 	for _, p := range phases {
 		produced[p.step] = true
@@ -872,5 +874,176 @@ func TestTheClaimComesBeforeTheWork(t *testing.T) {
 				"step %d, so the check reads as waiting for a runner while one is working and a "+
 				"run that dies leaves an environment nothing can name", name, claimed, ran)
 		}
+	}
+}
+
+// fakeAF writes an af that records each invocation and exits with the code the
+// test asked for, keyed by its first two words.
+func fakeAF(t *testing.T, codes map[string]int) (binary, calls string) {
+	t.Helper()
+	dir := t.TempDir()
+	calls = filepath.Join(dir, "calls")
+	var cases strings.Builder
+	for words, code := range codes {
+		fmt.Fprintf(&cases, "  %q) exit %d ;;\n", words, code)
+	}
+	script := "#!/bin/sh\n" +
+		"echo \"$*\" >> " + calls + "\n" +
+		"case \"$1 $2\" in\n" + cases.String() + "esac\n" +
+		"case \"$1\" in\n" + cases.String() + "esac\n" +
+		"exit 0\n"
+	binary = filepath.Join(dir, "af")
+	if err := os.WriteFile(binary, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return binary, calls
+}
+
+// The scenarios and the oracle run on environments of their own after af ci,
+// and either failing fails the run.
+//
+// af ci runs the workflows, the explorations and the load mix, and neither the
+// manifest's ordered load scenarios nor its oracle probes, so a dogfood run
+// that only called it proved less than the manifest declared. Both halves are
+// asserted: a run whose scenarios and oracle pass is green, and each of them
+// failing on its own turns it red, because a step that ran and could not fail
+// the run is decoration. And af ci is never told to keep its environment for
+// them: the oracle's candidate is brought up clean, because the one af ci used
+// carries every row its workflows wrote.
+func TestTheScenariosAndTheOracleRunAfterCIAndDecideTheVerdict(t *testing.T) {
+	withOracle := []string{
+		"doctor", "ci --no-color",
+		"oracle --no-color --baseline abc123 --report REPORT",
+		"load scenario --no-color", "down --no-color",
+	}
+	for _, tc := range []struct {
+		name      string
+		oracle    string
+		codes     map[string]int
+		wantGreen bool
+		wantCalls []string
+	}{
+		{"everything held", "abc123", nil, true, withOracle},
+		{"a scenario assertion did not hold", "abc123", map[string]int{"load scenario": 8}, false, withOracle},
+		{"the oracle found a difference at the threshold", "abc123", map[string]int{"oracle": 1}, false, withOracle},
+		{"af ci failed first", "abc123", map[string]int{"ci": 1}, false, []string{"doctor", "ci --no-color"}},
+		{"scenarios with no oracle bring their own environment up", "", nil, true, []string{
+			"doctor", "ci --no-color", "up --no-color", "load scenario --no-color", "down --no-color",
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.WriteFile(filepath.Join(root, "antifailure.yaml"), []byte("version: 1\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			binary, calls := fakeAF(t, tc.codes)
+			report := filepath.Join(root, "oracle-report.md")
+			r := &runner{
+				root: root, af: binary, mode: "pr", scale: 1,
+				scenarios: true, oracleBaseline: tc.oracle, oracleReport: report,
+			}
+			run := r.do()
+
+			body, err := os.ReadFile(calls)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := strings.Split(strings.TrimSpace(strings.ReplaceAll(string(body), report, "REPORT")), "\n")
+			if strings.Join(got, "|") != strings.Join(tc.wantCalls, "|") {
+				t.Errorf("af was called as\n  %s\nwant\n  %s", strings.Join(got, "\n  "), strings.Join(tc.wantCalls, "\n  "))
+			}
+			if run.Green != tc.wantGreen {
+				t.Errorf("green = %v, want %v; findings: %v", run.Green, tc.wantGreen, run.Findings)
+			}
+			if tc.codes["ci"] != 0 {
+				said := false
+				for _, f := range run.Findings {
+					if strings.Contains(f, "did not run") && strings.Contains(f, "Neither is a pass") {
+						said = true
+					}
+				}
+				if !said {
+					t.Errorf("a run whose scenarios and oracle never ran does not say so: %v", run.Findings)
+				}
+			}
+		})
+	}
+}
+
+// The pull request job asks for both, can resolve the base the oracle compares
+// against, and gives every budget room to fire before the runner's own timeout.
+func TestThePullRequestJobSendsTheScenariosAndRunsTheOracle(t *testing.T) {
+	var workflow struct {
+		Jobs map[string]struct {
+			Timeout int `yaml:"timeout-minutes"`
+			Steps   []struct {
+				Uses string            `yaml:"uses"`
+				With map[string]any    `yaml:"with"`
+				Run  string            `yaml:"run"`
+				Env  map[string]string `yaml:"env"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	body, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "dogfood.yml"))
+	if err != nil {
+		t.Fatalf("could not read the workflow: %v", err)
+	}
+	if err := yaml.Unmarshal(body, &workflow); err != nil {
+		t.Fatalf("could not parse the workflow: %v", err)
+	}
+
+	checked := 0
+	for name, job := range workflow.Jobs {
+		harness := -1
+		for i, s := range job.Steps {
+			if strings.Contains(s.Run, "tools/dogfood") && strings.Contains(s.Run, "--mode pr") {
+				harness = i
+			}
+		}
+		if harness < 0 {
+			continue
+		}
+		checked++
+		s := job.Steps[harness]
+		if !strings.Contains(s.Run, "--scenarios") {
+			t.Errorf("job %q runs the pull request check without --scenarios, so the manifest's load scenarios are never sent", name)
+		}
+		if !strings.Contains(s.Run, "--oracle-baseline") {
+			t.Errorf("job %q runs the pull request check without --oracle-baseline, so the oracle never runs", name)
+		}
+		if !strings.Contains(s.Env["BASE_SHA"], "github.event.pull_request.base.sha") {
+			t.Errorf("job %q does not take the oracle's baseline from the pull request's base: %q", name, s.Env["BASE_SHA"])
+		}
+
+		depth := 0
+		for _, step := range job.Steps {
+			if strings.HasPrefix(step.Uses, "actions/checkout@") {
+				if v, ok := step.With["fetch-depth"].(int); ok {
+					depth = v
+				}
+				break
+			}
+		}
+		if depth != 0 && depth < 2 {
+			t.Errorf("job %q checks out %d commit, so the merge commit's parents are missing and af oracle finds no merge base", name, depth)
+		}
+		if depth == 0 {
+			t.Errorf("job %q checks out one commit by default, so the merge commit's parents are missing and af oracle finds no merge base", name)
+		}
+
+		total := time.Duration(0)
+		for _, step := range []string{"golden refresh", "ci", "scenarios", "oracle", "down"} {
+			b, ok := budgetFor(step)
+			if !ok {
+				t.Fatalf("no budget for %q", step)
+			}
+			total += b.max
+		}
+		if time.Duration(job.Timeout)*time.Minute <= total {
+			t.Errorf("job %q times out at %d minutes and its budgets add up to %s, so the runner kills it before a budget can fire", name, job.Timeout, total)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no job runs the pull request check, so nothing here was checked")
 	}
 }

@@ -856,6 +856,30 @@ oracle:
   baseline: merge_base
   base_ref: origin/main
   fail_on: critical
+  # Four fields that differ on every build, measured rather than expected.
+  #
+  # With personas matched by who they are, a fresh af oracle against an
+  # identical build of this repository still reported two major differences,
+  # and neither was the change:
+  #
+  #   admin_users password_hash and password_salt. personas.mjs hashes the
+  #   operator's password under a random 32 byte salt, and each side derives
+  #   its own password from its own environment, so the two rows can never
+  #   agree however identical the builds are.
+  #
+  #   admin_audit_entries entry_hash, and prev_hash after it. The chain hash
+  #   covers occurred_at. The timestamp normaliser already treats the two
+  #   occurred_at values as equal, but the hash of each still differs, and
+  #   every later entry's prev_hash carries that on.
+  #
+  # With these four ignored, the same identical build read zero differences
+  # across all 18 probes, 84 tables and 1438 rows. Chain integrity is the audit
+  # verifier's job (packages/db/src/admin-audit.ts), and it recomputes every
+  # hash; a cross build diff of two chains with different clocks cannot do it.
+  # A pattern here is ignored in every table and every response body, and no
+  # other column or field in this product carries these four names.
+  ignore:
+    fields: [$.password_hash, $.password_salt, $.entry_hash, $.prev_hash]
   probes:
     - name: readiness
       # JSON, and the one answer a deploy gate acts on. `ready` is compared
