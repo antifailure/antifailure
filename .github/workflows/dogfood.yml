@@ -75,7 +75,15 @@ jobs:
     # cannot fire before the timeout is a budget replaced by a blank. The whole
     # check budgets 40 minutes and the golden refresh 12 before it, so this has
     # to leave room for both to be exceeded and reported rather than cut off.
-    timeout-minutes: 75
+    #
+    # 95 since the harness also sends the manifest's load scenarios and runs
+    # the oracle against the base of the pull request. The budgets now add up
+    # to 83 minutes: 12 for the golden refresh, 40 for af ci, 3 for the
+    # scenarios, 25 for the oracle and 3 for the teardown. The twelve left over
+    # cover the setup steps before the harness, which have no budget of their
+    # own, so every budget can still fire and be reported before the runner
+    # kills the job and writes nothing.
+    timeout-minutes: 95
 
     # The database the golden is copied from. A real Postgres, because
     # everything under test is what Postgres enforces: row level security, the
@@ -122,6 +130,15 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Two commits, for the oracle. A pull request checks out the merge of
+          # its head into its base, and af oracle compares against the merge
+          # base of HEAD and the base commit it is given. With the default
+          # depth of one the merge commit's parents are not in the clone, so
+          # there is no merge base to find and the oracle refuses with
+          # AF-ORC-003. Depth two brings both parents, and the base is one of
+          # them.
+          fetch-depth: 2
 
       # BEFORE THE WORK, NOT AFTER IT, AND THE ORDER IS THE POINT.
       #
@@ -404,7 +421,23 @@ jobs:
           # the same workflow identity the claim above used. Unset, it does not
           # even try, which is right for a laptop and was wrong here.
           AF_CONTROL_PLANE_URL: ${{ env.AF_CONTROL_PLANE }}
+          # The commit the oracle compares against. On a pull request that is
+          # the base the change is being merged into; on the schedule and on a
+          # manual run there is no base, the job's own commit would be compared
+          # with itself, and af oracle refuses that with AF-ORC-004, so the
+          # oracle is left out of those runs rather than reported as refused.
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        # --scenarios and --oracle-baseline because af ci runs the workflows,
+        # the explorations and the load mix, and neither the manifest's ordered
+        # load scenarios nor its oracle probes. The manifest declared both and
+        # this job proved neither. Each is a step of its own with a budget, and
+        # a scenario assertion that does not hold, or an oracle difference at
+        # or above oracle.fail_on, is a non zero exit that fails the job.
         run: |
+          oracle=()
+          if [ -n "$BASE_SHA" ]; then
+            oracle=(--oracle-baseline "$BASE_SHA" --oracle-report "$GITHUB_WORKSPACE/oracle-report.md")
+          fi
           go run ./tools/dogfood \
             -C . \
             --af "$GITHUB_WORKSPACE/bin/af" \
@@ -412,6 +445,8 @@ jobs:
             --report "$GITHUB_WORKSPACE/dogfood-report.md" \
             --report-json "$GITHUB_WORKSPACE/dogfood-report.json" \
             --require-load \
+            --scenarios \
+            "${oracle[@]}" \
             --record "$GITHUB_WORKSPACE/dogfood-record.json"
 
       # The verdict, to the check the App posts on this pull request.
@@ -515,6 +550,7 @@ jobs:
             dogfood-report.md
             dogfood-report.json
             dogfood-record.json
+            oracle-report.md
             .antifailure/logs
             .antifailure/artifacts
           retention-days: 30

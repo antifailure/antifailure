@@ -70,6 +70,15 @@ func main() {
 		refresh     = flag.Bool("refresh-golden", false, "Refresh the golden first, as the nightly does")
 		keep        = flag.Bool("keep", false, "Leave the environment up, for debugging")
 		requireLoad = flag.Bool("require-load", false, "Require a completed load report with actual requests")
+		// The two things af ci does not run. The manifest can declare ordered
+		// load scenarios and oracle probes, and `af ci` sends neither, so a
+		// dogfood run that only called it proved less than the manifest said.
+		// Each runs as a step of its own, against an environment brought up
+		// after af ci has torn its own down, and a non zero exit from either
+		// fails the run.
+		scenarios      = flag.Bool("scenarios", false, "After af ci, send the manifest's load scenarios")
+		oracleBaseline = flag.String("oracle-baseline", "", "After af ci, run af oracle against this revision")
+		oracleReport   = flag.String("oracle-report", "", "Where af oracle writes its report")
 	)
 	flag.Parse()
 
@@ -92,6 +101,7 @@ func main() {
 		root: abs, af: binary, mode: *mode, scale: *scale,
 		keep: *keep, refresh: *refresh, reportPath: *report, reportJSONPath: *reportJSON,
 		requireLoad: *requireLoad,
+		scenarios:   *scenarios, oracleBaseline: *oracleBaseline, oracleReport: *oracleReport,
 	}
 	run := r.do()
 
@@ -155,6 +165,17 @@ var budgets = []budget{
 			"application rather than a provider's queue."},
 	{"load", 4 * time.Minute,
 		"Thirty seconds of traffic plus the ramp and the report."},
+	{"scenarios", 3 * time.Minute,
+		"The manifest's two scenarios, 300 and 96 requests, finished in about " +
+			"twenty seconds against an environment on a laptop. Three minutes is " +
+			"a journey that has stopped answering, not one that slowed down."},
+	{"oracle", 25 * time.Minute,
+		"Two environments of its own, a clean candidate and one built from the " +
+			"pull request's base, the same eighteen probes to both, and two reads " +
+			"of both databases. Locally, with image layers cached, the command " +
+			"took under a minute; the console build inside a cold image is the " +
+			"860 seconds the up budget above describes, and on a hosted runner " +
+			"the base image is cold by default."},
 	{"down", 3 * time.Minute,
 		"Removing containers, a network, a proxy and a database branch. Slower " +
 			"than this means something is not answering, and a teardown that " +
@@ -188,6 +209,12 @@ type runner struct {
 	// and this one is read by the control plane's check.
 	reportJSONPath string
 	requireLoad    bool
+	// scenarios sends the manifest's load scenarios after af ci.
+	scenarios bool
+	// oracleBaseline, when set, runs af oracle against that revision after
+	// af ci, and oracleReport is where it writes what it found.
+	oracleBaseline string
+	oracleReport   string
 }
 
 // Step is one command, timed and judged.
@@ -274,6 +301,7 @@ func (r *runner) do() *Run {
 	if r.mode == "nightly" {
 		args = append(args, "--load")
 	}
+	afterCI := r.scenarios || r.oracleBaseline != ""
 	if r.keep {
 		args = append(args, "--keep")
 	}
@@ -282,6 +310,10 @@ func (r *runner) do() *Run {
 	r.readVerdicts(run)
 	r.readLoadEvidence(run)
 	r.readExplorationEvidence(run)
+
+	if afterCI {
+		r.afterCI(run, ci)
+	}
 
 	// Only ask about events when the run reached the point of making an
 	// environment. `af ci` refusing a directory with no manifest produces no
@@ -822,4 +854,52 @@ func shortCommit(c string) string {
 func fatal(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "dogfood: "+format+"\n", args...)
 	os.Exit(2)
+}
+
+// afterCI sends what af ci does not, and then tears down what it brought up.
+//
+// On environments of its own, not on the one af ci used. That was the first
+// version, and it was measured wrong: the oracle compares a candidate against
+// a baseline brought up fresh from the same golden, and a candidate that af
+// ci's workflows had just signed into, explored and marked reviewed carried
+// every row they wrote. On an identical build the oracle reported 79
+// differences, 73 of them sessions, sign in tokens and operator audit entries
+// the workflows had left behind, a report nobody could read for what the
+// change did. af ci tears its own environment down, af oracle brings up a
+// clean candidate beside the baseline and leaves that candidate running, and
+// the scenarios are sent at it. Without an oracle the scenarios bring an
+// environment up for themselves.
+//
+// Only after a green af ci. A red one has already failed the run, and pointing
+// scenarios and an oracle at a change whose workflows failed would add minutes
+// and a second verdict about something already known to be broken. Saying so
+// is the part that matters: a run in which they did not happen must not read
+// like one in which they passed.
+func (r *runner) afterCI(run *Run, ci Step) {
+	if ci.ExitCode != 0 {
+		run.Findings = append(run.Findings, "The load scenarios and the oracle did not run, "+
+			"because af ci failed first. Neither is a pass.")
+		return
+	}
+	up := r.keep
+	if r.oracleBaseline != "" {
+		argv := []string{r.af, "oracle", "--no-color", "--baseline", r.oracleBaseline}
+		if r.oracleReport != "" {
+			argv = append(argv, "--report", r.oracleReport)
+		}
+		// Whether or not it found anything, af oracle leaves its candidate
+		// running, and that is the environment the scenarios below use.
+		r.step(run, "oracle", argv...)
+		up = true
+	}
+	if r.scenarios {
+		if !up {
+			r.step(run, "scenario environment", r.af, "up", "--no-color")
+			up = true
+		}
+		r.step(run, "scenarios", r.af, "load", "scenario", "--no-color")
+	}
+	if up && !r.keep {
+		r.step(run, "teardown", r.af, "down", "--no-color")
+	}
 }
