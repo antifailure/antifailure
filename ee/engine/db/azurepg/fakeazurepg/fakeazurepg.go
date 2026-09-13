@@ -242,6 +242,22 @@ func (s *Server) PasswordOf(name string) (string, bool) {
 	return srv.AdminPassword, true
 }
 
+// TagsOf is a copy of a server's tags, for the tests that check what a restore
+// left on a branch.
+func (s *Server) TagsOf(name string) (map[string]string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	srv, ok := s.servers[name]
+	if !ok {
+		return nil, false
+	}
+	out := make(map[string]string, len(srv.Tags))
+	for k, v := range srv.Tags {
+		out[k] = v
+	}
+	return out, true
+}
+
 // FirewallRulesOf is how many rules a server has, for the test that checks a
 // branch was actually opened.
 func (s *Server) FirewallRulesOf(name string) (int, bool) {
