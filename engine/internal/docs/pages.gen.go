@@ -28266,9 +28266,31 @@ nobody has seen.
    actually work".
 
    ` + "`" + "`" + "`" + `sh
-   az containerapp job start -n afcp-reseal -g af-cp-centralus \
-     --command "node backup-cli.mjs reseal --check"
+   az containerapp job show -n afcp-reseal -g af-cp-centralus -o json \
+     | jq '{containers: [.properties.template.containers[0]
+         | {name, image, command: ["node", "backup-cli.mjs", "reseal", "--check"],
+            env, resources: {cpu: .resources.cpu, memory: .resources.memory}}]}' \
+     > reseal-check.json
+   az rest --method post --body @reseal-check.json \
+     --headers Content-Type=application/json \
+     --url "https://management.azure.com$(az containerapp job show \
+       -n afcp-reseal -g af-cp-centralus --query id -o tsv)/start?api-version=2025-07-01"
+   az containerapp job execution list -n afcp-reseal -g af-cp-centralus \
+     --query "[0].{name:name, command:properties.template.containers[0].command}" -o json
    ` + "`" + "`" + "`" + `
+
+   The last command must show ` + "`" + `node` + "`" + `, ` + "`" + `backup-cli.mjs` + "`" + `, ` + "`" + `reseal` + "`" + `, ` + "`" + `--check` + "`" + ` as
+   four separate entries before you read anything the execution reports. Without
+   ` + "`" + `--check` + "`" + ` it is step 4, which writes.
+
+   This is not ` + "`" + `az containerapp job start --command` + "`" + `, and that is not a style
+   choice. The CLI takes that flag as a list, so a quoted command arrives as one
+   program name with spaces in it, and it sends a container named after the job
+   rather than ` + "`" + `reseal` + "`" + ` with no image and no environment. Every value the check
+   needs comes from the job itself here, including the second key and the version
+   a rotation adds in step 2, so the check runs with exactly the keys step 4 had.
+   This form was run against staging on 2026-09-13: the execution's own template
+   read those four entries, it exited 0, and it reported every row opened.
 
    It opens EVERY row whatever version it is at and writes nothing. It must
    report zero rows that could not be opened and zero rows not yet at ` + "`" + `v2` + "`" + `.

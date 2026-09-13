@@ -341,6 +341,14 @@ jobs:
         # any terraform call when an input is missing.
         run: ./deploy/cd/apply-config_test.sh
 
+      - name: The rotation runbook's check command starts the check
+        # Step 5 of the key rotation runbook is what an operator runs before
+        # deleting a sealing key, and it shipped as a job start whose quoted
+        # --command could not start it. This runs the block from the published
+        # page against a fake Azure CLI and reads the argv, image, environment
+        # and resources it would send, and refuses the command it replaced.
+        run: ./deploy/cd/reseal-check-runbook_test.sh
+
       - name: No YAML key is defined twice in one mapping
         # examples/github-workflow.yml declared `seed` and `concurrency` twice
         # each in its workflow_dispatch inputs. YAML keeps the last definition,
