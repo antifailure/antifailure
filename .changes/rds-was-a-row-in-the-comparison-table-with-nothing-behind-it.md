@@ -33,7 +33,10 @@ lists it as pending and the new password actually opens the database, because
 RDS reports an instance available before a password change is in force. The
 attestation, the masking rules hash and the provenance are stored in tags as
 base64, because a tag value refuses the braces, quotes and commas a document
-contains.
+contains. Beside the attestation's chunks go a count of them and a digest of
+the whole, so a golden that lost a chunk, or had one shortened or rewritten,
+reads as unverified and cannot be branched instead of passing a shorter
+attestation off as the whole one.
 
 Part of this has run against real AWS. One run in `us-east-1` reached a masked,
 verified candidate over `verify-full` against RDS's own certificate, with a

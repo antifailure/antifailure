@@ -142,6 +142,12 @@ const (
 	tagProvenance  = "antifailure:provenance"
 	tagCreated     = "antifailure:created"
 	tagAttestation = "antifailure:attestation"
+
+	// How many attestation chunks were written, and the digest of the
+	// attestation before it was encoded. Both are required on read; see
+	// tagvalue.Assemble.
+	tagAttestationCount  = "antifailure:attestation.count"
+	tagAttestationDigest = "antifailure:attestation.sha256"
 )
 
 // The values tagKind takes.
@@ -169,9 +175,10 @@ const (
 // identifier.
 const identifierLimit = 63
 
-// attestationChunks is how many tags the attestation may occupy. Fifty tags
-// per resource is the AWS limit and the rest of this provider's metadata takes
-// six of them.
+// attestationChunks is how many tags the attestation's chunks may occupy. Fifty
+// tags per resource is the AWS limit, and the rest of a golden's metadata takes
+// ten: the marker, scope, version, creation time, kind, rules hash, provenance,
+// receipt, and the attestation's count and digest.
 const attestationChunks = 32
 
 // candidateAge is how old a candidate has to be before it can only be an
@@ -1601,7 +1608,9 @@ func withKind(base map[string]string, kind string) map[string]string {
 //
 // The encoding, the split into tag sized pieces and the bound are tagvalue's,
 // shared with the Aurora provider; the bound is on the encoded length, which is
-// what the tags hold. What is this provider's is the key spelling.
+// what the tags hold. What is this provider's is the key spelling. Beside the
+// chunks go their count and the digest of the attestation, which is what lets
+// a reader tell a whole attestation from part of one.
 func chunkAttestation(attestation string) (map[string]string, error) {
 	chunks, err := tagvalue.Chunk("rds", attestation, attestationChunks)
 	if err != nil {
@@ -1611,17 +1620,18 @@ func chunkAttestation(attestation string) (map[string]string, error) {
 	for i, chunk := range chunks {
 		out[tagAttestation+"."+strconv.Itoa(i+1)] = chunk
 	}
+	if len(chunks) > 0 {
+		out[tagAttestationCount] = strconv.Itoa(len(chunks))
+		out[tagAttestationDigest] = tagvalue.Digest(attestation)
+	}
 	return out, nil
 }
 
 // joinAttestation puts a chunked attestation back together.
 //
-// In numbered order, and it stops at the first missing chunk rather than
-// skipping it. A gap means the tags were not all written, and concatenating
-// across one would produce a document that looks whole and is not.
-//
 // It answers the decoded attestation, or the empty string when there is none or
-// the chunks do not decode, which is what makes such a golden read unverified.
+// it is not whole, which is what makes such a golden read unverified. The
+// checks are readAttestation's.
 func joinAttestation(tags map[string]string) string {
 	attestation, _ := readAttestation(tags)
 	return attestation

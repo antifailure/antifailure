@@ -9,7 +9,8 @@ package rds
 // letters, digits, whitespace and _ . : / = + - @ only. The encoding, the
 // character check and AWS's refusal live once, in ee/engine/db/managed/tagvalue,
 // shared with the Aurora provider. What stays here is this provider's own key
-// spelling, antifailure:attestation.N, and which of its tags hold free text:
+// spelling, antifailure:attestation.N with .count and .sha256 beside it, and
+// which of its tags hold free text:
 // the attestation, the rules hash and the provenance, always encoded.
 
 import (
@@ -28,22 +29,22 @@ func decodedTag(stored string) string {
 	return plain
 }
 
-// readAttestation gathers a golden's attestation chunks in numbered order,
-// stopping at the first missing one, and decodes them.
+// readAttestation reads a golden's attestation back through tagvalue.Assemble:
+// the count of chunks, every chunk it names under antifailure:attestation.1 and
+// on, and the digest of the whole.
 //
-// It answers the attestation, or the empty string and why there is none. A
-// golden whose chunks do not decode was not published by this provider, and it
-// reads as unverified with that reason rather than as a scan of garbage.
+// It answers the attestation, or the empty string and why there is none. It
+// used to join chunks up to the first missing one, and because padded base64
+// cut at a whole chunk decodes cleanly, a lost chunk read as a shorter
+// attestation that was still verified. A golden whose tags are not all there,
+// do not decode, or do not match their digest now reads as unverified with the
+// reason, and Branch refuses it naming that reason.
 func readAttestation(tags map[string]string) (string, string) {
-	var chunks []string
-	for i := 1; i <= attestationChunks; i++ {
-		chunk, ok := tags[tagAttestation+"."+strconv.Itoa(i)]
-		if !ok {
-			break
-		}
-		chunks = append(chunks, chunk)
-	}
-	plain, err := tagvalue.Join(chunks)
+	plain, err := tagvalue.Assemble(tags[tagAttestationCount], tags[tagAttestationDigest], attestationChunks,
+		func(i int) (string, bool) {
+			chunk, ok := tags[tagAttestation+"."+strconv.Itoa(i+1)]
+			return chunk, ok
+		})
 	if err != nil {
 		return "", err.Error()
 	}

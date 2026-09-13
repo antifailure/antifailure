@@ -96,15 +96,20 @@ func TestChunkAndJoinAttestationRoundTrip(t *testing.T) {
 	require.Equal(t, attestation, joinAttestation(chunks))
 }
 
-// A gap in the numbering stops the join rather than being skipped over.
-// Concatenating across a missing chunk produces a document that looks whole and
-// is not, and the attestation is the record of what was scanned.
-func TestJoinAttestationStopsAtAGap(t *testing.T) {
-	tags := map[string]string{
-		tagAttestation + ".1": tagvalue.Encode("first"),
-		tagAttestation + ".3": tagvalue.Encode("third"),
-	}
-	require.Equal(t, "first", joinAttestation(tags))
+// A gap in the numbering is no attestation at all, and the reason names it. The
+// join used to stop at the gap and answer the chunks before it, which decoded
+// cleanly and read as a whole, verified attestation.
+func TestAnAttestationWithAGapIsNoAttestation(t *testing.T) {
+	attestation := `{"scanner":"conformance","padding":"` + strings.Repeat("p", 600) + `"}`
+	tags, err := chunkAttestation(attestation)
+	require.NoError(t, err)
+	require.Equal(t, "4", tags[tagAttestationCount], "the fixture must span four chunks")
+	require.Equal(t, tagvalue.Digest(attestation), tags[tagAttestationDigest])
+	delete(tags, tagAttestation+".2")
+
+	require.Equal(t, "", joinAttestation(tags))
+	_, reason := readAttestation(tags)
+	require.Equal(t, "its attestation tags are incomplete: 3 of 4 chunks are present", reason)
 }
 
 // Every value the provider writes into a tag is inside the characters AWS
@@ -131,7 +136,11 @@ func TestEveryFreeTextTagValueIsInsideAWSsCharacterSet(t *testing.T) {
 
 // Chunks that do not decode are not an attestation, and the reason says so.
 func TestAnAttestationThatDoesNotDecodeIsNotAnAttestation(t *testing.T) {
-	attestation, reason := readAttestation(map[string]string{tagAttestation + ".1": "{not base64, at all}"})
+	attestation, reason := readAttestation(map[string]string{
+		tagAttestation + ".1": "{not base64, at all}",
+		tagAttestationCount:   "1",
+		tagAttestationDigest:  tagvalue.Digest("anything"),
+	})
 	require.Empty(t, attestation)
 	require.Contains(t, reason, "do not decode")
 }

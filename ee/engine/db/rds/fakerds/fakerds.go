@@ -1645,6 +1645,22 @@ func (s *Server) SetTags(identifier string, tags map[string]string) {
 	}
 }
 
+// DeleteTags removes tags from an instance or a snapshot, for tests that take
+// away metadata a provider needs. SetTags merges, so it cannot.
+func (s *Server) DeleteTags(identifier string, keys ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	target := map[string]string(nil)
+	if in := s.instances[identifier]; in != nil {
+		target = in.tags
+	} else if snap := s.snapshots[identifier]; snap != nil {
+		target = snap.tags
+	}
+	for _, k := range keys {
+		delete(target, k)
+	}
+}
+
 // SetEndpoint points every instance's reported address somewhere else, for a
 // test that puts a real TLS listener in front of the Postgres.
 func (s *Server) SetEndpoint(host string, port int) {

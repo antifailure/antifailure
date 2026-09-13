@@ -183,6 +183,14 @@ as pending. And the attestation was stored in tag values whose characters AWS
 refuses, which is why the golden was not published. The provider with all
 three fixes has not run against AWS end to end.
 
+Reading the code afterwards found a fourth, which no run had reached. A golden
+that lost one of its attestation tags, or had one shortened or rewritten, still
+read as verified and could be branched, because the chunks that remained
+decoded cleanly as a shorter attestation. The attestation now carries a count
+of its chunks and a digest of the whole. A golden missing a chunk, or whose
+chunks do not match the digest, is unverified, and branching from it is
+refused with the reason.
+
 The conformance suite runs against a fake RDS control plane on localhost backed
 by a real Postgres, in `ee/engine/db/rds/fakerds`. Every line of the provider
 runs, and the claims about bytes are checked against bytes: a golden is masked
