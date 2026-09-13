@@ -148,6 +148,11 @@ var notShipped = map[string]string{
 		"tools/release/build.sh builds ./cmd/af and nothing else from this module.",
 	"engine/cmd/loadcp": "points load at the hosted control plane, run with go run by whoever " +
 		"operates it, and built into no release.",
+	"engine/cmd/sidecarimage": "the release workflow's question to the engine. release.yml's " +
+		"sidecar job runs it with go run to learn the content addressed reference and write the " +
+		"build context for the egress sidecar image. What that image carries is " +
+		"engine/cmd/af-proxy, listed in shipped; this program is not in the image, not in a " +
+		"release archive, and no customer runs it.",
 	"examples/go-api": "the example application the walkthroughs rehearse. It is a " +
 		"customer's application in miniature rather than the product, and it imports " +
 		"nothing from the engine.",
