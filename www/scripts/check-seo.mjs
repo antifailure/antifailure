@@ -18,6 +18,7 @@ import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { twinCells } from "./twin-cells.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = path.join(ROOT, "out");
@@ -550,41 +551,15 @@ console.log("\nMarkdown twins carry the page's tables and definition lists");
 // Derived from the built pages rather than from a fixture, so a cell added to a
 // page is covered the day it ships and a hardcoded list cannot go stale.
 {
-  const cellText = (html) =>
-    html
-      .replace(/<[^>]+>/g, " ")
-      .replace(/&nbsp;/g, " ")
-      .replace(/&amp;/g, "&")
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&quot;/g, '"')
-      .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(+d))
-      .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
-      .replace(/\s+/g, " ")
-      .trim();
-
   let cellsChecked = 0;
   const absent = [];
   for (const file of pages) {
     const twinPath = file.replace(/\.html$/, ".md");
     if (!existsSync(twinPath)) continue;
-    const html = readFileSync(file, "utf8");
-    const main = html.match(/<main\b[^>]*>([\s\S]*)<\/main>/i)?.[1];
-    if (!main) continue;
-    // The extractor drops these wholesale, so a string inside one is not
-    // content and its absence from the twin is correct.
-    const body = main.replace(
-      /<(script|style|svg|noscript|template|nav)\b[^>]*>[\s\S]*?<\/\1>/gi,
-      " ",
-    );
-    const twin = readFileSync(twinPath, "utf8");
-    for (const match of body.matchAll(/<(th|td|dt|dd)\b[^>]*>([\s\S]*?)<\/\1>/gi)) {
-      const value = cellText(match[2]);
-      if (value.length < 3) continue;
-      cellsChecked++;
-      if (!twin.includes(value)) {
-        absent.push(`${path.relative(OUT, file)} <${match[1].toLowerCase()}> ${JSON.stringify(value)}`);
-      }
+    const result = twinCells(readFileSync(file, "utf8"), readFileSync(twinPath, "utf8"));
+    cellsChecked += result.checked;
+    for (const cell of result.absent) {
+      absent.push(`${path.relative(OUT, file)} <${cell.tag}> ${JSON.stringify(cell.value)}`);
     }
   }
 
