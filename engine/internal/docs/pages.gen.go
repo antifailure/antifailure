@@ -27809,6 +27809,11 @@ nobody has seen.
    image, the same way it moves the maintenance job, and a deploy that runs before
    the job exists says so and carries on.
 
+   Use the Terraform version cd uses, the one ` + "`" + `TERRAFORM_VERSION` + "`" + ` names in
+   ` + "`" + `.github/workflows/cd.yml` + "`" + ` and ` + "`" + `infra.yml` + "`" + ` pins identically. A newer Terraform
+   writing this state can leave it in a format cd's cannot read, and every deploy
+   after that stops at the configuration apply.
+
    Run it after the deploy of this change to that environment has finished, so
    the image it pins is one that contains ` + "`" + `backup-cli.mjs` + "`" + `. Staging, from a
    checkout of the commit that deploy carried:
