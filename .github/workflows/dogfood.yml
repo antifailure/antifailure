@@ -16,6 +16,30 @@ name: Dogfood
 # verdict on the diff.
 on:
   pull_request:
+    # NOT GITHUB'S DEFAULT TYPES, BECAUSE THE DEFAULT WAS THE DEFECT.
+    #
+    # A bare `pull_request:` means opened, synchronize and reopened, and nothing
+    # else. The control plane opens the check this job reports to on those AND
+    # on ready_for_review, and on a draft it starts nothing at all:
+    # startGeneration in web/apps/api/src/github/lifecycle.ts returns "the pull
+    # request is a draft, so nothing was started". So a draft's run did the
+    # whole twenty minutes, was refused with HTTP 409 "no check is waiting on"
+    # its commit, and failed its last step (pull request 420, job
+    # 103756164719, and 414). Marking the pull request ready then started the
+    # check and no run of this workflow, so the red stood until somebody pushed
+    # or re-ran it by hand. Pull request 420 was marked ready at 17:04:17 on
+    # 2026-09-13 and no run of this file followed.
+    #
+    # ready_for_review starts the run the new check is waiting for.
+    # converted_to_draft starts a run whose check job is skipped, and because it
+    # shares the concurrency group below it cancels a run already in flight, so a
+    # pull request sent back to draft stops spending a runner on a report the
+    # control plane has just stopped waiting for. These are the customer
+    # workflow's types less `labeled` and `unlabeled`, which exist for the fork
+    # approval label: a fork's run here has no workflow identity and reports
+    # nothing either way, so a label would start twenty minutes that change
+    # nothing.
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   schedule:
     # Nightly, after the existing security scan, so two jobs are not competing
     # for the same runners.
@@ -53,6 +77,16 @@ jobs:
     # plane" job had passed, and the checks list showed "control plane fail"
     # next to "control plane pass" with nothing to say which log to open.
     name: dogfood, against the control plane
+    # NOTHING ON A DRAFT, AND THE COMMENT BELOW SAYS SO.
+    #
+    # A draft has no check waiting on it, so a run can verify the product and
+    # still cannot report, and the step at the end of this job would fail it for
+    # that, correctly. Skipping the job is the only answer that neither spends a
+    # saturated runner on a report nobody will take nor calls a draft red for
+    # being a draft. A skipped job reads as passed in some views, which is why
+    # the comment job does not stay quiet about it. The nightly schedule and a
+    # manual dispatch are not pull requests and are untouched.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
 
     # `id-token: write` is the whole reason this check reported nothing for as
@@ -129,6 +163,19 @@ jobs:
       AF_ADMIN_DATABASE_URL: postgres://antifailure_admin:preview-operator-portal@db:5432/antifailure?sslmode=disable
 
     steps:
+      # WHICH EVENT STARTED THIS RUN, SAID AS THE FIRST LINE OF THE LOG.
+      #
+      # A workflow run records `pull_request` as its event and nothing about
+      # which one: opened, synchronize, ready_for_review and converted_to_draft
+      # all read the same in the runs API. Telling them apart is what showed that
+      # marking a draft ready started no run here at all, so every run says it.
+      - name: Which event started this run
+        env:
+          EVENT: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+        run: echo "event ${EVENT}, action ${ACTION:-none}, draft ${DRAFT:-not a pull request}"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Two commits, for the oracle. A pull request checks out the merge of
@@ -694,6 +741,19 @@ jobs:
       pull-requests: write
 
     steps:
+      # WHICH EVENT STARTED THIS RUN, SAID AS THE FIRST LINE OF THE LOG.
+      #
+      # A workflow run records `pull_request` as its event and nothing about
+      # which one: opened, synchronize, ready_for_review and converted_to_draft
+      # all read the same in the runs API. Telling them apart is what showed that
+      # marking a draft ready started no run here at all, so every run says it.
+      - name: Which event started this run
+        env:
+          EVENT: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+        run: echo "event ${EVENT}, action ${ACTION:-none}, draft ${DRAFT:-not a pull request}"
+
       # Allowed to find nothing. A run that fails before `af ci` writes
       # anything uploads no artifact at all, and this step is a hard error on a
       # missing one, so the job died here and the pull request got silence. The
@@ -710,6 +770,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DRAFT: ${{ github.event.pull_request.draft }}
         run: |
           set -euo pipefail
 
@@ -718,7 +779,23 @@ jobs:
           # ran, and the first dogfood run in CI gave exactly that: it fell over
           # on the seeder and said nothing here at all. So a run with no report
           # posts the fact that it has no report.
-          if [ ! -f report/dogfood-report.md ]; then
+          #
+          # A draft is its own sentence, not that one. The check job above is
+          # skipped on a draft on purpose, so "did not get far enough" would be
+          # false, and a skipped job alone reads as passed in some views.
+          if [ "$DRAFT" = "true" ]; then
+            mkdir -p report
+            {
+              echo "## Dogfood"
+              echo
+              echo "This pull request is a draft. The control plane starts no check on a"
+              echo "draft, so dogfood did not run and says nothing about the change. It"
+              echo "runs when the pull request is marked ready for review, and this"
+              echo "comment is replaced then."
+              echo
+              echo "[This run]($RUN_URL)"
+            } > report/dogfood-report.md
+          elif [ ! -f report/dogfood-report.md ]; then
             mkdir -p report
             {
               echo "## Dogfood"
