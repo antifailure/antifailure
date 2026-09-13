@@ -111,6 +111,7 @@ gate: _reports
     run "deploy keeps jobs on one image" just deploycheck
     run "the deployed edition is the one sold" just editiondeploycheck
     run "configuration applies itself safely" just applycheck
+    run "the rotation check command checks" just resealrunbookcheck
     run "no yaml key is shadowed"        just keycheck
     run "vet"                            just vet
     run "typecheck"                      just typecheck
@@ -1566,6 +1567,13 @@ editiondeploycheck:
 # a fake terraform with the real guard and the real plan fixtures.
 applycheck:
     ./deploy/cd/apply-config_test.sh
+
+# The key rotation runbook's verification command starts the verification. The
+# test runs step 5's block from the published page against a fake Azure CLI and
+# reads what it would send: the argv, and the job's own image, environment and
+# resources. It refuses the quoted --command form the page shipped with.
+resealrunbookcheck:
+    ./deploy/cd/reseal-check-runbook_test.sh
 
 # No YAML key is defined twice in one mapping.
 #
