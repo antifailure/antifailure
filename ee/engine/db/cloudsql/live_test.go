@@ -4,29 +4,35 @@ package cloudsql_test
 
 // The live proof against Google Cloud SQL, and the counterpart of azurepg's
 // TestLivePrivateAzureRestoreMaskBranchAndDelete. It is skipped unless its
-// runner sets AF_CLOUDSQL_LIVE=1, and that runner is a Cloud Run job inside the
-// disposable private network that drive.sh builds and deletes.
+// driver sets AF_CLOUDSQL_LIVE=1, and that driver runs it from one machine
+// against a public IP source whose ONLY authorized network is that machine's
+// egress address as a /32.
 //
-// Every provider call is the customer's code path: cloudsql.New with the real
-// Admin API endpoint, the Google identity from the metadata server or
-// GOOGLE_APPLICATION_CREDENTIALS, and the provider's own default TLS
-// verification. Two things are added and both only READ:
+// Every provider call is the customer's code path, with two stated exceptions:
 //
+//   - The Google identity. The provider takes a key file or the metadata
+//     server (api.go newAdminAPI), and neither exists here: key creation is
+//     blocked by organization policy and a laptop has no metadata server. So
+//     Options.Token is set to an access token from gcloud for the proof
+//     account, held in memory. Options.Token is the provider's own documented
+//     seam for an externally managed identity.
 //   - The HTTP transport is the provider's own guarded client wrapped in an
 //     observer. It keeps the first successful read of each instance and every
-//     finished operation, and changes no byte of any request or response. The
-//     first read of a clone happens straight after the clone operation and
-//     before the provider writes a single label, so it is the only place a test
-//     can see what Cloud SQL copied onto a clone. Whether Cloud SQL copies user
-//     labels on a clone is NOT established, and this run records the answer
-//     rather than depending on it.
-//   - The test reads instances itself through the same client and identity, to
-//     check the network shape and that deleted instances are gone.
+//     finished operation, and changes nothing, with one exception that only
+//     ever makes the run fail: a clone whose first read is not network isolated
+//     (exactly one authorized network, a single IPv4 /32, public IPv4 on, TLS
+//     required) is refused before the provider can connect to it, so the
+//     provider's own cleanup removes it.
+//
+// The first read of a clone happens straight after the clone operation and
+// before the provider writes a label or opens a connection, so it is where this
+// test sees what Cloud SQL copied onto a clone: user labels, authorized
+// networks, TLS mode, CA mode. The provider sets none of those on a clone, so
+// every one of them is inherited or defaulted by Google, and none of that is
+// established by documentation.
 //
 // What this cannot prove: that a clone took the fast workflow. The database is
-// a few rows, so a standard clone and a fast clone take the same time here. The
-// clone operations' own start and end times are logged for the record, not as a
-// verdict about copy on write.
+// a few rows, so a standard clone and a fast clone take the same time here.
 
 import (
 	"bytes"
@@ -36,9 +42,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"sort"
 	"strings"
 	"sync"
@@ -48,7 +56,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
 
-	"github.com/antifailure/antifailure/ee/engine/cloudauth"
 	"github.com/antifailure/antifailure/ee/engine/db/cloudsql"
 	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
@@ -60,42 +67,49 @@ const (
 	liveVariable = "AF_CLOUDSQL_LIVE"
 	// liveSourceVariable names the disposable source instance.
 	liveSourceVariable = "AF_CLOUDSQL_LIVE_SOURCE"
-	// liveHostVariable is the source's PRIVATE address, used only to seed it.
+	// liveHostVariable is the source's public address, used only to seed it.
 	liveHostVariable = "AF_CLOUDSQL_LIVE_HOST"
-	// livePasswordVariable is the source's postgres password, used only to
-	// seed it. The provider never receives it.
-	livePasswordVariable = "AF_CLOUDSQL_LIVE_PASSWORD"
+	// liveAccountVariable is the gcloud account the access token is issued for.
+	liveAccountVariable = "AF_CLOUDSQL_LIVE_ACCOUNT"
+	// livePasswordFileVariable names a file holding the source's postgres
+	// password, used only to seed it. The provider never receives it.
+	livePasswordFileVariable = "AF_CLOUDSQL_LIVE_PASSWORD_FILE"
+	// liveBranchKeyFileVariable names a file holding the branch key.
+	liveBranchKeyFileVariable = "AF_CLOUDSQL_LIVE_BRANCH_KEY_FILE"
 	// liveSourcePrefix is the naming convention of an owned disposable source.
 	liveSourcePrefix = "af-proof-src-"
-	// liveSeedLabel is set on the source by the runner, so that its presence
+	// liveSeedLabel is set on the source by the driver, so that its presence
 	// on a clone's first read answers whether Cloud SQL copies user labels.
 	liveSeedLabel = "af-proof-seed"
 	liveSeedValue = "source"
-	// liveReader is a login the test creates on the source. A branch must
+	// liveSSLMode is the server side TLS requirement every instance must carry.
+	liveSSLMode = "ENCRYPTED_ONLY"
+	// liveReaderRole is a login the test creates on the source. A branch must
 	// refuse it and the source must keep accepting it.
 	liveReaderRole     = "af_proof_reader"
 	liveReaderPassword = "AF_FAKE_INHERITED_PASSWORD"
 	liveAdminAPI       = "https://sqladmin.googleapis.com"
 )
 
-func TestLivePrivateCloudSQLCloneMaskBranchAndDelete(t *testing.T) {
+func TestLiveCloudSQLCloneMaskBranchAndDelete(t *testing.T) {
 	if os.Getenv(liveVariable) != "1" {
-		t.Skip("requires the disposable private Cloud SQL proof runner")
+		t.Skip("requires the disposable Cloud SQL proof driver")
 	}
 	project := os.Getenv(cloudsql.ProjectVariable)
 	region := os.Getenv(cloudsql.RegionVariable)
 	sourceName := os.Getenv(liveSourceVariable)
 	host := os.Getenv(liveHostVariable)
-	password := os.Getenv(livePasswordVariable)
-	branchKey := os.Getenv(cloudsql.DefaultVariable)
+	account := os.Getenv(liveAccountVariable)
 	require.NotEmpty(t, project)
 	require.NotEmpty(t, region)
 	require.True(t, strings.HasPrefix(sourceName, liveSourcePrefix), "live proof requires an owned disposable source instance")
 	require.NotEmpty(t, host)
-	require.NotEmpty(t, password)
-	require.NotEmpty(t, branchKey)
+	require.NotEmpty(t, account)
 	require.Empty(t, os.Getenv(cloudsql.EndpointVariable), "the live proof must reach the real Admin API")
 	require.Empty(t, os.Getenv(cloudsql.TLSModeVariable), "the live proof must take the provider's default verification")
+	require.Empty(t, os.Getenv(cloudsql.DefaultVariable), "the branch key arrives in a file, never in the environment")
+	password := liveSecretFile(t, livePasswordFileVariable)
+	branchKey := liveSecretFile(t, liveBranchKeyFileVariable)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Minute)
 	defer cancel()
@@ -114,15 +128,14 @@ func TestLivePrivateCloudSQLCloneMaskBranchAndDelete(t *testing.T) {
 	client := airgap.Client(airgap.SiteCloudSQL, 60*time.Second)
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	observer := &liveObserver{inner: client, first: map[string][]byte{}}
-	token, err := liveToken()
-	require.NoError(t, err)
-	reader := &liveReader{client: client, project: project, token: token}
+	tokens := &liveGcloudToken{account: account}
+	reader := &liveReader{client: client, project: project, token: tokens.Token}
 
 	sourceState, status, err := reader.instance(ctx, sourceName)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, status, "the source instance could not be read")
 	require.Equal(t, liveSeedValue, sourceState.Settings.UserLabels[liveSeedLabel], "the source does not carry the seed label, so the label inheritance observation would mean nothing")
-	require.False(t, sourceState.Settings.IPConfiguration.IPv4Enabled, "the source has a public address; this proof is for a private one")
+	require.Empty(t, liveNetworkProblem(sourceState), "the source is not network isolated")
 	t.Logf("AF_OBSERVED source %s", describeInstance(sourceState))
 
 	p, err := cloudsql.New(ctx, cloudsql.Options{
@@ -133,6 +146,7 @@ func TestLivePrivateCloudSQLCloneMaskBranchAndDelete(t *testing.T) {
 		Variable:       cloudsql.DefaultVariable,
 		Database:       "postgres",
 		Getenv:         os.Getenv,
+		Token:          tokens.Token,
 		HTTPClient:     observer,
 	})
 	require.NoError(t, err)
@@ -177,7 +191,7 @@ func TestLivePrivateCloudSQLCloneMaskBranchAndDelete(t *testing.T) {
 		return value, err
 	}
 
-	t.Log("source seeded; starting private golden clone")
+	t.Log("source seeded; starting golden clone")
 	goldenStarted := time.Now()
 	golden, err := p.RefreshGolden(ctx, provider.GoldenSpec{RulesHash: "live-private-proof", Provenance: "disposable synthetic rows", Mask: func(ctx context.Context, connection secret.Value) error {
 		value, err := query(ctx, connection, "UPDATE af_live_proof SET value='masked' RETURNING value")
@@ -198,6 +212,7 @@ func TestLivePrivateCloudSQLCloneMaskBranchAndDelete(t *testing.T) {
 	if golden.ID != "" {
 		createdGolden = golden.ID
 	}
+	require.Empty(t, observer.refusals(), "a clone came up without network isolation and was refused")
 	require.NoError(t, err)
 	require.True(t, golden.Verified)
 	t.Logf("AF_MEASURED golden_seconds=%.1f (clone of the source, credential preparation, mask, verify, publish)", time.Since(goldenStarted).Seconds())
@@ -214,6 +229,7 @@ func TestLivePrivateCloudSQLCloneMaskBranchAndDelete(t *testing.T) {
 	if branch.ProviderRef != "" {
 		createdBranch = branch
 	}
+	require.Empty(t, observer.refusals(), "a clone came up without network isolation and was refused")
 	require.NoError(t, err)
 	t.Logf("AF_MEASURED branch_seconds=%.1f (Branch returning a published branch)", time.Since(branchStarted).Seconds())
 
@@ -229,23 +245,27 @@ func TestLivePrivateCloudSQLCloneMaskBranchAndDelete(t *testing.T) {
 	require.Contains(t, []string{"verify-ca", "verify-full"}, mode, "the branch connection string does not verify the server")
 	require.NotEmpty(t, branchURL.Query().Get("sslrootcert"), "the branch connection string names no CA bundle")
 
+	// Read again rather than trusting the first read: the network must still
+	// be isolated after every patch the provider made.
 	branchState, status, err := reader.instance(ctx, branch.ProviderRef)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, status)
-	require.False(t, branchState.Settings.IPConfiguration.IPv4Enabled, "the branch has a public address")
-	require.NotEmpty(t, branchState.Settings.IPConfiguration.PrivateNetwork, "the branch is not attached to a private network")
-	private := ""
+	require.Empty(t, liveNetworkProblem(branchState), "the branch is not network isolated")
+	public := ""
 	for _, address := range branchState.IPAddresses {
-		require.NotEqual(t, "PRIMARY", address.Type, "the branch answers on a public address")
-		if address.Type == "PRIVATE" {
-			private = address.IPAddress
+		if address.Type == "PRIMARY" {
+			public = address.IPAddress
 		}
 	}
-	require.NotEmpty(t, private, "the branch has no private address")
+	require.NotEmpty(t, public, "the branch has no public address to reach it on")
 	if mode == "verify-ca" {
-		require.Equal(t, private, branchURL.Hostname(), "the branch connection string does not point at the branch's private address")
+		require.Equal(t, public, branchURL.Hostname(), "the branch connection string does not point at the branch's public address")
 	}
-	t.Logf("AF_OBSERVED branch_connection sslmode=%s host_is_private_address=%t", mode, branchURL.Hostname() == private)
+	t.Logf("AF_OBSERVED branch_connection sslmode=%s host_is_public_address=%t", mode, branchURL.Hostname() == public)
+	goldenState, status, err := reader.instance(ctx, golden.ProviderRef)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, status)
+	require.Empty(t, liveNetworkProblem(goldenState), "the golden is not network isolated")
 
 	value, err := query(ctx, connection, "SELECT value FROM af_live_proof WHERE id=1")
 	require.NoError(t, err)
@@ -332,12 +352,12 @@ func TestLivePrivateCloudSQLCloneMaskBranchAndDelete(t *testing.T) {
 	}
 	t.Logf("AF_OBSERVED clone_operations_observed=%d", clones)
 	finished = true
-	t.Log("private branch served masked rows; source unchanged; branch and golden deleted")
+	t.Log("branch served masked rows; source unchanged; every clone network isolated; branch and golden deleted")
 }
 
 // liveInstance is the part of the instance resource this proof reads. It is
 // the test's own decoding, so a field the provider does not read can still be
-// recorded.
+// checked and recorded.
 type liveInstance struct {
 	Name        string `json:"name"`
 	State       string `json:"state"`
@@ -356,12 +376,51 @@ type liveInstance struct {
 			Value string `json:"value"`
 		} `json:"databaseFlags"`
 		IPConfiguration struct {
-			IPv4Enabled    bool   `json:"ipv4Enabled"`
-			PrivateNetwork string `json:"privateNetwork"`
-			ServerCAMode   string `json:"serverCaMode"`
-			SSLMode        string `json:"sslMode"`
+			IPv4Enabled        bool   `json:"ipv4Enabled"`
+			PrivateNetwork     string `json:"privateNetwork"`
+			ServerCAMode       string `json:"serverCaMode"`
+			SSLMode            string `json:"sslMode"`
+			RequireSSL         bool   `json:"requireSsl"`
+			AuthorizedNetworks []struct {
+				Value string `json:"value"`
+			} `json:"authorizedNetworks"`
 		} `json:"ipConfiguration"`
 	} `json:"settings"`
+}
+
+// liveNetworkProblem names every way an instance falls short of isolation on
+// this topology, or returns the empty string. Exactly one authorized network,
+// a single IPv4 host, public IPv4 on so the one host can reach it, and TLS
+// required at the server. A missing field is a problem, not a pass.
+func liveNetworkProblem(in liveInstance) string {
+	ip := in.Settings.IPConfiguration
+	var problems []string
+	if !ip.IPv4Enabled {
+		problems = append(problems, "public IPv4 is off")
+	}
+	values := make([]string, 0, len(ip.AuthorizedNetworks))
+	for _, network := range ip.AuthorizedNetworks {
+		values = append(values, network.Value)
+	}
+	if len(values) != 1 {
+		problems = append(problems, fmt.Sprintf("%d authorized networks %v, want exactly one IPv4 /32", len(values), values))
+	} else if !liveSingleHost(values[0]) {
+		problems = append(problems, fmt.Sprintf("authorized network %q is not a single IPv4 /32", values[0]))
+	}
+	if ip.SSLMode != liveSSLMode {
+		problems = append(problems, fmt.Sprintf("sslMode %q, want %s", ip.SSLMode, liveSSLMode))
+	}
+	return strings.Join(problems, "; ")
+}
+
+// liveSingleHost reports whether a CIDR is exactly one IPv4 address.
+func liveSingleHost(value string) bool {
+	address, network, err := net.ParseCIDR(value)
+	if err != nil || address.To4() == nil {
+		return false
+	}
+	ones, bits := network.Mask.Size()
+	return ones == 32 && bits == 32
 }
 
 // liveOperation is a finished operation as the Admin API reported it. Times
@@ -375,14 +434,15 @@ type liveOperation struct {
 	EndTime       string `json:"endTime"`
 }
 
-// liveObserver wraps the provider's transport and records, without altering
-// anything, the first successful read of each instance and each finished
-// operation.
+// liveObserver wraps the provider's transport. It records the first
+// successful read of each instance and each finished operation, and refuses a
+// clone whose first read is not network isolated.
 type liveObserver struct {
 	inner      *http.Client
 	mu         sync.Mutex
 	first      map[string][]byte
 	operations []liveOperation
+	refused    []string
 }
 
 func (o *liveObserver) Do(req *http.Request) (*http.Response, error) {
@@ -411,8 +471,25 @@ func (o *liveObserver) Do(req *http.Request) (*http.Response, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if isInstance {
-		if _, seen := o.first[segments[4]]; !seen {
-			o.first[segments[4]] = body
+		name := segments[4]
+		if _, seen := o.first[name]; seen {
+			return resp, nil
+		}
+		o.first[name] = body
+		if !strings.HasPrefix(name, "af-g-") && !strings.HasPrefix(name, "af-b-") {
+			return resp, nil
+		}
+		// A clone's first read comes before any label write and any
+		// connection. Refusing it here makes the provider's own deferred
+		// cleanup remove the clone, before a single row is reachable on it.
+		var in liveInstance
+		problem := "its first read did not decode"
+		if json.Unmarshal(body, &in) == nil {
+			problem = liveNetworkProblem(in)
+		}
+		if problem != "" {
+			o.refused = append(o.refused, name+": "+problem)
+			return nil, fmt.Errorf("live proof refused the clone %s before any connection: %s", name, problem)
 		}
 		return resp, nil
 	}
@@ -438,6 +515,12 @@ func (o *liveObserver) completed() []liveOperation {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	return append([]liveOperation(nil), o.operations...)
+}
+
+func (o *liveObserver) refusals() []string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return append([]string(nil), o.refused...)
 }
 
 type liveErrReader struct{ err error }
@@ -479,22 +562,52 @@ func (r *liveReader) instance(ctx context.Context, name string) (liveInstance, i
 	return in, resp.StatusCode, json.Unmarshal(body, &in)
 }
 
-// liveToken resolves the Google identity the way the provider's own client
-// does: a key file when GOOGLE_APPLICATION_CREDENTIALS names one, otherwise the
-// metadata server.
-func liveToken() (func(context.Context) (string, error), error) {
-	var account *cloudauth.GCPServiceAccount
-	if path := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"); path != "" {
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return nil, err
-		}
-		account, err = cloudauth.ParseGCPServiceAccount(raw)
-		if err != nil {
-			return nil, err
-		}
+// liveGcloudToken issues access tokens for one gcloud account.
+//
+// The provider asks for a token on every Admin API request (api.go do), so
+// the token is kept for five minutes rather than one gcloud process per
+// request. Five rather than the token's hour, because gcloud may hand back a
+// cached token that is already part way through its life. The token lives
+// only in this struct: it is never logged, never an argument and never a file.
+type liveGcloudToken struct {
+	account string
+	mu      sync.Mutex
+	token   string
+	fetched time.Time
+}
+
+func (g *liveGcloudToken) Token(ctx context.Context) (string, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.token != "" && time.Since(g.fetched) < 5*time.Minute {
+		return g.token, nil
 	}
-	return cloudauth.NewGCPTokenSource(account, cloudauth.ScopeGoogleCloudPlatform).Token, nil
+	var stdout, stderr bytes.Buffer
+	command := exec.CommandContext(ctx, "gcloud", "--account="+g.account, "auth", "print-access-token")
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	if err := command.Run(); err != nil {
+		return "", fmt.Errorf("gcloud could not issue an access token for the proof account: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	token := strings.TrimSpace(stdout.String())
+	if token == "" || strings.ContainsAny(token, " \t\r\n") {
+		return "", fmt.Errorf("gcloud returned no usable access token")
+	}
+	g.token, g.fetched = token, time.Now()
+	return token, nil
+}
+
+// liveSecretFile reads a secret from the file a variable names. The value is
+// never logged; only the variable name appears in a failure.
+func liveSecretFile(t *testing.T, variable string) string {
+	t.Helper()
+	path := os.Getenv(variable)
+	require.NotEmpty(t, path, "%s must name a file", variable)
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err, "reading the file %s names", variable)
+	value := strings.TrimSpace(string(raw))
+	require.NotEmpty(t, value, "the file %s names is empty", variable)
+	return value
 }
 
 // describeLabels renders labels for the log. Values that identify what an
@@ -521,16 +634,21 @@ func describeLabels(labels map[string]string) string {
 }
 
 // describeInstance renders the settings whose inheritance by a clone is not
-// established: CA mode, TLS mode, deletion protection, public address, flags.
+// established: authorized networks, TLS mode, CA mode, deletion protection,
+// flags.
 func describeInstance(in liveInstance) string {
 	flags := make([]string, 0, len(in.Settings.DatabaseFlags))
 	for _, flag := range in.Settings.DatabaseFlags {
 		flags = append(flags, flag.Name+"="+flag.Value)
 	}
 	sort.Strings(flags)
-	return fmt.Sprintf("name=%s state=%s tier=%s edition=%s disk=%s server_ca_mode=%s ssl_mode=%s ipv4_enabled=%t private_network_set=%t deletion_protection=%t flags=[%s]",
+	networks := make([]string, 0, len(in.Settings.IPConfiguration.AuthorizedNetworks))
+	for _, network := range in.Settings.IPConfiguration.AuthorizedNetworks {
+		networks = append(networks, network.Value)
+	}
+	return fmt.Sprintf("name=%s state=%s tier=%s edition=%s disk=%s server_ca_mode=%s ssl_mode=%s require_ssl=%t ipv4_enabled=%t authorized_networks=[%s] private_network_set=%t deletion_protection=%t flags=[%s]",
 		in.Name, in.State, in.Settings.Tier, in.Settings.Edition, in.Settings.DataDiskType,
-		in.Settings.IPConfiguration.ServerCAMode, in.Settings.IPConfiguration.SSLMode,
-		in.Settings.IPConfiguration.IPv4Enabled, in.Settings.IPConfiguration.PrivateNetwork != "",
+		in.Settings.IPConfiguration.ServerCAMode, in.Settings.IPConfiguration.SSLMode, in.Settings.IPConfiguration.RequireSSL,
+		in.Settings.IPConfiguration.IPv4Enabled, strings.Join(networks, " "), in.Settings.IPConfiguration.PrivateNetwork != "",
 		in.Settings.DeletionProtectionEnabled, strings.Join(flags, " "))
 }
