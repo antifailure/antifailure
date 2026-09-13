@@ -3,14 +3,17 @@ package insights
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
@@ -67,6 +70,44 @@ type Attachable interface {
 
 // Name identifies the applier.
 func (*ContainerApplier) Name() string { return "container" }
+
+// Environment is what the migration container is started with: the service's
+// own variables, and the branch's connection string under the variable the
+// application reads it from.
+//
+// One map, and the branch written into it last, so there is exactly one entry
+// per name and the branch is the one that survives. This was a list with the
+// branch first and the service's variables appended after it, and Docker keeps
+// the LAST of two entries with one name. A service declaring DATABASE_URL as a
+// secret therefore replaced the branch's address with its own: blank while
+// secrets were not resolved for the rehearsal, which failed the migration with
+// no database to connect to, and the resolved secret once they were, which
+// would have run a pull request's migrations against whatever database that
+// secret names instead of against a throwaway copy. The branch is the only
+// database a rehearsal may touch, so the precedence is decided here rather
+// than by the order Docker happens to read its arguments in.
+func (a *ContainerApplier) Environment(url secrets.Value) []string {
+	variable := a.URLVar
+	if variable == "" {
+		variable = "DATABASE_URL"
+	}
+	vars := make(map[string]string, len(a.Env)+1)
+	for k, v := range a.Env {
+		vars[k] = v.Reveal()
+	}
+	vars[variable] = url.Reveal()
+
+	keys := make([]string, 0, len(vars))
+	for k := range vars {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, k+"="+vars[k])
+	}
+	return out
+}
 
 // databaseAlias is the name the migration reaches the branch by.
 //
@@ -129,14 +170,7 @@ func (a *ContainerApplier) Apply(
 		reachable = rewritten
 	}
 
-	variable := a.URLVar
-	if variable == "" {
-		variable = "DATABASE_URL"
-	}
-	env := []string{variable + "=" + reachable.Reveal()}
-	for k, v := range a.Env {
-		env = append(env, k+"="+v.Reveal())
-	}
+	env := a.Environment(reachable)
 
 	name := "af-rehearse-" + a.EnvID
 	// A container left by an interrupted run holds the name, and adopting one
@@ -243,16 +277,26 @@ func lastLines(ctx context.Context, cli *client.Client, id string) string {
 		return ""
 	}
 	defer dockerutil.Discard(logs)
-	buf := make([]byte, 8192)
-	n, _ := logs.Read(buf)
-	// Docker multiplexes stdout and stderr with an eight byte header per
-	// frame. Stripping the non printing bytes is enough to make it readable
-	// without demultiplexing properly, which this does not need to do.
+	return demuxLogs(logs)
+}
+
+// maxToolOutput bounds how much of a failing tool's output reaches a report.
+const maxToolOutput = 64 << 10
+
+// demuxLogs turns a container's multiplexed log stream into the text the tool
+// printed.
+//
+// Docker frames every write with eight bytes: the stream, three zeros, and the
+// payload's length as a big endian number. This used to keep whatever bytes
+// printed and drop the rest, on the reasoning that a header does not print. A
+// length is a number rather than a character, and any length from 32 to 126
+// prints: a 49 byte line reached the report as "1rehearsal sees", the header's
+// last byte glued to the tool's first word, in the one message whose whole
+// value is being the tool's own words. It also read once, so a message longer
+// than the first chunk Docker happened to send was cut short. Both streams go
+// to one buffer, so their lines keep the order the tool wrote them in.
+func demuxLogs(r io.Reader) string {
 	var b strings.Builder
-	for _, c := range string(buf[:n]) {
-		if c == '\n' || c == '\t' || (c >= 32 && c < 127) || c > 159 {
-			b.WriteRune(c)
-		}
-	}
+	_, _ = stdcopy.StdCopy(&b, &b, io.LimitReader(r, maxToolOutput))
 	return strings.TrimSpace(b.String())
 }
