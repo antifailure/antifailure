@@ -79,6 +79,20 @@ type DatabaseTrust interface {
 	TrustBundle(context.Context, Branch) (string, error)
 }
 
+// ProgressReporting is optionally implemented by a database provider whose
+// operations can wait a long time on something the engine cannot see, such as
+// a cloud control plane taking a new server's first backup.
+//
+// The engine calls ReportProgressTo once, after opening the provider, with a
+// function that publishes each line as an engine.progress event and prints it,
+// which is what the runtime's own long steps use. A provider calls it when such
+// a wait starts, while it lasts, and when it ends, so a first af up after a
+// refresh is not silent for as long as the wait takes. A provider that never
+// waits need not implement it.
+type ProgressReporting interface {
+	ReportProgressTo(report func(line string))
+}
+
 const (
 	// ConnDirect is a direct connection, which is what migrations and
 	// pg_restore need because they use session level features a pooler in

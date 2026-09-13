@@ -255,6 +255,15 @@ func (g *gatedDatabase) TrustBundle(ctx context.Context, b provider.Branch) (str
 	return "", nil
 }
 
+// ReportProgressTo forwards to the provider underneath. Every managed database
+// provider reaches the engine through this wrapper, so without the forwarding
+// the engine's type assertion finds nothing and a provider's reports go nowhere.
+func (g *gatedDatabase) ReportProgressTo(report func(string)) {
+	if reporting, ok := g.inner.(provider.ProgressReporting); ok {
+		reporting.ReportProgressTo(report)
+	}
+}
+
 func (g *gatedDatabase) Health(ctx context.Context, b provider.Branch) (provider.Health, error) {
 	return g.inner.Health(ctx, b)
 }

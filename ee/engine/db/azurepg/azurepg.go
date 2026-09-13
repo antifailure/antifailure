@@ -290,6 +290,7 @@ type Provider struct {
 	opts         Options
 	now          func() time.Time
 	closed       atomic.Bool
+	progress     atomic.Pointer[func(string)]
 	loginCatalog func(context.Context, *sql.DB) ([]string, error)
 	trustDir     string
 	trustFile    string

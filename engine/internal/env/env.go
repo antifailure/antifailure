@@ -479,6 +479,7 @@ func (o *Orchestrator) openLocking(ctx context.Context, command, lockName string
 		s.close()
 		return nil, err
 	}
+	o.attachDatabaseProgress(s)
 	if s.runtime, err = o.newRuntime(ctx); err != nil {
 		s.close()
 		return nil, err
@@ -526,6 +527,7 @@ func (o *Orchestrator) openReading(ctx context.Context) (*session, error) {
 		s.close()
 		return nil, err
 	}
+	o.attachDatabaseProgress(s)
 	return s, nil
 }
 
