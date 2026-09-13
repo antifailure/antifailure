@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -519,6 +520,146 @@ func TestNoGateRecipeAtAllIsAFailure(t *testing.T) {
 	}
 }
 
+// The exact justfile #409 produced: #213's `runbookcheck` and a second one for
+// the rotation runbook, with other recipes between them. just refused it whole.
+const twoRunbookchecks = `# A numbered runbook still numbers itself.
+runbookcheck:
+    go run ./tools/runbookcheck .
+
+applycheck:
+    ./deploy/cd/apply-config_test.sh
+
+# The key rotation runbook's verification command starts the verification.
+runbookcheck:
+    ./deploy/cd/reseal-check-runbook_test.sh
+`
+
+func TestARecipeNameDefinedTwiceIsRefusedNamingBothLines(t *testing.T) {
+	got := duplicateRecipes(justRecipes(twoRunbookchecks))
+	if len(got) != 1 {
+		t.Fatalf("want exactly one repeated name reported, got %d: %v", len(got), got)
+	}
+	want := "`runbookcheck` heads 2 recipes, on lines 2 and 9"
+	if got[0] != want {
+		t.Errorf("the refusal does not name the recipe and both lines:\n got  %s\n want %s", got[0], want)
+	}
+}
+
+func TestTheRenamedRecipeIsNotRefused(t *testing.T) {
+	renamed := strings.Replace(twoRunbookchecks,
+		"runbookcheck:\n    ./deploy/cd/reseal-check-runbook_test.sh",
+		"resealrunbookcheck:\n    ./deploy/cd/reseal-check-runbook_test.sh", 1)
+	if renamed == twoRunbookchecks {
+		t.Fatal("the fixture was not renamed, so this would prove nothing")
+	}
+	if got := duplicateRecipes(justRecipes(renamed)); len(got) != 0 {
+		t.Errorf("distinct recipe names were refused: %v", got)
+	}
+}
+
+func TestEveryDefinitionOfARepeatedNameIsNamed(t *testing.T) {
+	const three = "a:\n    true\nb:\n    true\na:\n    true\nc:\n    true\na:\n    true\nb:\n    true\n"
+	got := duplicateRecipes(justRecipes(three))
+	want := []string{
+		"`a` heads 3 recipes, on lines 1, 5 and 9",
+		"`b` heads 2 recipes, on lines 3 and 11",
+	}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("got %v\nwant %v", got, want)
+	}
+}
+
+// The refusal is wired into the command, not only into a function a test can
+// call. This builds gatecheck and runs it against a repository holding #409's
+// justfile, so deleting the check from main fails here even though every test
+// above still passes. Nothing in it can skip.
+func TestTheCommandRefusesARepeatedRecipeName(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "gatecheck")
+	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("could not build gatecheck, so nothing was checked: %v\n%s", err, out)
+	}
+
+	const workflow = `on:
+  pull_request:
+jobs:
+  engine:
+    runs-on: ubuntu-latest
+    steps:
+      - run: go run ./tools/runbookcheck .
+      - run: ./deploy/cd/apply-config_test.sh
+      - run: ./deploy/cd/reseal-check-runbook_test.sh
+`
+	// Four lines of gate recipe ahead of the fixture move its headers from
+	// lines 2 and 9 to 6 and 13.
+	const gate = "gate:\n    just runbookcheck\n    just applycheck\n\n"
+	run := func(just string) (int, string) {
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, ".github", "workflows"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, ".github", "workflows", "ci.yml"), []byte(workflow), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "justfile"), []byte(just), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command(bin, root)
+		out, err := cmd.CombinedOutput()
+		code := 0
+		if err != nil {
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) {
+				t.Fatalf("gatecheck did not run: %v", err)
+			}
+			code = exit.ExitCode()
+		}
+		return code, string(out)
+	}
+
+	code, out := run(gate + twoRunbookchecks)
+	if code != 1 {
+		t.Errorf("gatecheck exited %d on a justfile just refuses, want 1\n%s", code, out)
+	}
+	if !strings.Contains(out, "`runbookcheck` heads 2 recipes, on lines 6 and 13") {
+		t.Errorf("the refusal does not name the recipe and both lines:\n%s", out)
+	}
+
+	// The renamed file is not refused for this reason. It is not held to exit 0:
+	// the fixture's workflow carries none of the real repository's exempt gates,
+	// so gatecheck goes on to report those exemptions as stale, which is its
+	// ordinary job and is proven against the real files elsewhere.
+	renamed := strings.Replace(gate+twoRunbookchecks,
+		"runbookcheck:\n    ./deploy/cd/reseal-check-runbook_test.sh",
+		"resealrunbookcheck:\n    ./deploy/cd/reseal-check-runbook_test.sh", 1)
+	renamed = strings.Replace(renamed, "    just applycheck\n", "    just applycheck\n    just resealrunbookcheck\n", 1)
+	if renamed == gate+twoRunbookchecks {
+		t.Fatal("the fixture was not renamed, so the second half would prove nothing")
+	}
+	if _, out := run(renamed); strings.Contains(out, "defines a recipe name more than once") {
+		t.Errorf("distinct recipe names were refused as a repeat:\n%s", out)
+	}
+}
+
+func TestSettingsAndAliasesAreNotSecondDefinitions(t *testing.T) {
+	// just keeps settings, aliases and variables apart from recipes, so a
+	// justfile with several `set` lines is a valid file. recipeHeader never
+	// matches the spaced spelling, `set shell := ...`, because the space ends
+	// its words before the colon. It does match `set export:= true`, reading a
+	// recipe named `set`, and just accepts that spelling as readily. The
+	// unspaced lines are the ones that reach the assigns flag: without it, the
+	// two of them are a `set` defined twice.
+	const valid = "set shell := [\"bash\", \"-c\"]\nset dotenv-load := false\n" +
+		"set export:= true\nset positional-arguments:= true\n" +
+		"alias gc := gatecheck\ngatecheck:\n    go run ./tools/gatecheck .\n" +
+		"gc := \"unused\"\ntools_dir:= \"tools\"\n"
+	if n := len(justRecipes(valid)); n < 3 {
+		t.Fatalf("recipeHeader read %d headers from the fixture, so the unspaced settings never reached the check and this proves nothing", n)
+	}
+	if got := duplicateRecipes(justRecipes(valid)); len(got) != 0 {
+		t.Errorf("settings, aliases or variables were read as a second recipe: %v", got)
+	}
+}
+
 // uncalled is uncalledByGate over a justfile's text, which is how every caller
 // of it outside main already thinks about it.
 func uncalled(just string) []string {
@@ -564,6 +705,9 @@ func TestTheRealRepositoryAgrees(t *testing.T) {
 		t.Fatalf("only %d gates found in CI; the patterns have probably stopped matching", len(ci))
 	}
 	recipes := justRecipes(string(just))
+	if d := duplicateRecipes(recipes); len(d) > 0 {
+		t.Errorf("the justfile defines a recipe name more than once, which just refuses outright: %v", d)
+	}
 	reach := reachableFromGate(recipes)
 	jg := scan(recipeBlocks(recipes))
 	for key, e := range ci {

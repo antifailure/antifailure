@@ -167,6 +167,12 @@ func main() {
 	ciGates := scan(workflows.blocks())
 
 	recipes := justRecipes(string(just))
+	if dups := duplicateRecipes(recipes); len(dups) > 0 {
+		fail("%s defines a recipe name more than once:\n  %s\n\njust refuses the whole "+
+			"file on a redefinition, so every recipe in it stops, `just gate` and `just merge` "+
+			"included, and so does every CI step that calls just. Rename one of them.",
+			justPath, strings.Join(dups, "\n  "))
+	}
 	reachable := reachableFromGate(recipes)
 	justGates := scan(recipeBlocks(recipes))
 
@@ -332,6 +338,44 @@ func main() {
 	fmt.Fprintf(os.Stderr, "\nCONTRIBUTING.md says a green `just gate` means a green CI. "+
 		"That is only true while these agree.\n")
 	os.Exit(1)
+}
+
+// duplicateRecipes names every recipe name that heads more than one recipe,
+// with the line of each header, in the order the names first appear.
+//
+// just refuses the whole justfile when a name is defined twice, so one repeated
+// name stops every recipe in the file. Nothing else in this check could see it:
+// recipes are read into a slice, both copies were parsed, and a CI command that
+// matched either of them paired cleanly. #409 added a second `runbookcheck` 250
+// lines after the one #213 added, git merged it without a conflict, this check
+// passed, and the conformance job died on `just k8s-conformance` because just
+// would not read the file at all.
+func duplicateRecipes(recipes []recipe) []string {
+	lines := map[string][]int{}
+	var order []string
+	for _, r := range recipes {
+		if r.assigns {
+			continue
+		}
+		if _, seen := lines[r.name]; !seen {
+			order = append(order, r.name)
+		}
+		lines[r.name] = append(lines[r.name], r.line)
+	}
+	var out []string
+	for _, name := range order {
+		at := lines[name]
+		if len(at) < 2 {
+			continue
+		}
+		nums := make([]string, len(at))
+		for i, n := range at {
+			nums[i] = fmt.Sprint(n)
+		}
+		listed := strings.Join(nums[:len(nums)-1], ", ") + " and " + nums[len(nums)-1]
+		out = append(out, fmt.Sprintf("`%s` heads %d recipes, on lines %s", name, len(at), listed))
+	}
+	return out
 }
 
 // runStep matches a step's `run:` key, which is the only thing in a workflow

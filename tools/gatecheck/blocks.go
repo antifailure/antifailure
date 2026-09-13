@@ -217,6 +217,14 @@ var recipeHeader = regexp.MustCompile(`^([a-z_][\w-]*)((?: [\w"'=.-]+)*):(.*)$`)
 type recipe struct {
 	block
 	deps []string
+	// line is the header's line in the justfile, counting from one, so a
+	// failure can send the reader to it.
+	line int
+	// assigns says the header is really `name := value`. recipeHeader reads
+	// `set shell := [...]` and `alias x := y` as a recipe with a colon in it,
+	// and just keeps those in namespaces of their own, so they are never a
+	// second definition of anything.
+	assigns bool
 }
 
 // justRecipes reads the justfile into its recipes.
@@ -230,15 +238,17 @@ func justRecipes(source string) []recipe {
 	var out []recipe
 	var cur *recipe
 
-	for _, line := range strings.Split(source, "\n") {
+	for i, line := range strings.Split(source, "\n") {
 		trimmed := strings.TrimSpace(line)
 		indented := line != "" && (line[0] == ' ' || line[0] == '\t')
 
 		if !indented && trimmed != "" && !strings.HasPrefix(trimmed, "#") {
 			if m := recipeHeader.FindStringSubmatch(line); m != nil {
 				out = append(out, recipe{
-					block: block{name: m[1]},
-					deps:  strings.Fields(m[3]),
+					block:   block{name: m[1]},
+					deps:    strings.Fields(m[3]),
+					line:    i + 1,
+					assigns: strings.HasPrefix(m[3], "="),
 				})
 				cur = &out[len(out)-1]
 				continue
