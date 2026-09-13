@@ -442,11 +442,41 @@ func (a *ComposeAnalyzer) Analyze(_ context.Context, r *Repo) ([]Finding, error)
 
 			conf := Medium
 			detail := fmt.Sprintf("%s declares the service %s.", p, svc.name)
-			out = append(out, Finding{
-				Kind: KindService, Subject: name, Value: "web",
-				Confidence: conf, Evidence: p, Detail: detail,
-				Extra: map[string]string{"dir": svc.buildContext, "name_from": "compose"},
-			})
+
+			// An image nothing builds is not a service in any directory of
+			// this repository. It was reported with the build context it does
+			// not have, which is empty, and empty is how the root is spelled,
+			// so it joined the application's own directory. Beside `web:
+			// build: .` that made compose the source of two services at the
+			// root, the fold that joins web to its Dockerfile and package.json
+			// refused, and af init wrote three services claiming one port.
+			// With no sibling it was folded into the application instead, and
+			// the image silently disappeared. It is a service run from the
+			// image it names, and it has no directory to be grouped by.
+			if svc.image != "" && !svc.hasBuild {
+				kind := "worker"
+				if svc.port != 0 {
+					kind = "web"
+				}
+				out = append(out,
+					Finding{
+						Kind: KindService, Subject: name, Value: kind,
+						Confidence: conf, Evidence: p, Detail: detail,
+						Extra: map[string]string{"name_from": "compose"},
+					},
+					Finding{
+						Kind: KindBuild, Subject: name, Value: "image",
+						Confidence: High, Evidence: p,
+						Detail: fmt.Sprintf("%s runs %s as %s, and nothing builds it.", p, svc.image, svc.name),
+						Extra:  map[string]string{"image": svc.image},
+					})
+			} else {
+				out = append(out, Finding{
+					Kind: KindService, Subject: name, Value: "web",
+					Confidence: conf, Evidence: p, Detail: detail,
+					Extra: map[string]string{"dir": svc.buildContext, "name_from": "compose"},
+				})
+			}
 			if svc.port != 0 {
 				out = append(out, Finding{
 					Kind: KindPort, Subject: name, Value: strconv.Itoa(svc.port),
@@ -485,10 +515,14 @@ type composeService struct {
 	name         string
 	image        string
 	buildContext string
-	port         int
-	command      string
-	dependsOn    []string
-	envNames     []string
+	// hasBuild records that the service declares build at all. buildContext
+	// cannot say so, because `build: .` leaves it empty exactly as a service
+	// with no build key does.
+	hasBuild  bool
+	port      int
+	command   string
+	dependsOn []string
+	envNames  []string
 	// envValues holds the values as well as the names, for the handful of
 	// variables whose value is the finding. LocalStack's SERVICES is the
 	// case this exists for: it names the AWS services the application uses,
@@ -573,6 +607,7 @@ func parseCompose(body string) []composeService {
 			cur.command = normalizeDockerArgs(strings.Trim(value, `"'`))
 			section = ""
 		case key == "build":
+			cur.hasBuild = true
 			if value != "" && value != "." {
 				cur.buildContext = strings.Trim(value, `"'`)
 			}
