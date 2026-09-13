@@ -47,7 +47,7 @@ const (
 var (
 	// provider: 'anthropic', ... model: env.AF_MODEL ?? 'claude-sonnet-5',
 	runnerDefault = regexp.MustCompile(`(?s)provider: '([a-z]+)'.{0,240}?AF_MODEL \?\? '([^']+)'`)
-	// 'claude-sonnet-5': { inputPerMillion: 3, ... }
+	// 'claude-sonnet-5': { inputPerMillion: 2, ... }
 	pricedModel = regexp.MustCompile(`'([^']+)': \{ inputPerMillion:`)
 )
 

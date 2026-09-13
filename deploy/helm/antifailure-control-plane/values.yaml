@@ -189,7 +189,7 @@ config:
   # Empty leaves the application's own default.
   productName: ""
   # What a model costs, as model=input/output in US dollars per million tokens,
-  # comma separated: claude-sonnet-5=3/15,gpt-4.1=2/8. Adds to the built-in
+  # comma separated: claude-sonnet-5=2/10,gpt-4.1=2/8. Adds to the built-in
   # defaults rather than replacing them. A model with no price is refused rather
   # than charged nothing, and a malformed entry stops the process at startup.
   modelPrices: ""

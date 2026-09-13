@@ -82,6 +82,46 @@ describe('pricing', () => {
     assert.deepEqual(prices['gpt-4.1'], DEFAULT_PRICES['gpt-4.1'])
   })
 
+  test('every default price names the page it was read from, and when', () => {
+    // A default is the rate a customer's budget is charged at. On 2026-09-13 two
+    // of them were a price the provider no longer charged, claude-sonnet-5 at
+    // 3/15 against a published 2/10 and claude-opus-5 at 15/75 against 5/25,
+    // and nothing beside either number said where it came from, so nothing
+    // could be checked. A default with no source is refused here.
+    const rows = Object.entries(DEFAULT_PRICES)
+    assert.ok(rows.length >= 5, `only ${rows.length} default prices, so this checks almost nothing`)
+    for (const [model, price] of rows) {
+      const source = (price as { source?: { url?: unknown; fetched?: unknown } }).source
+      assert.ok(source, `${model} has a default price and no source for it`)
+      let protocol: string | null = null
+      try {
+        protocol = new URL(String(source.url)).protocol
+      } catch {
+        protocol = null
+      }
+      assert.equal(protocol, 'https:', `${model} cites ${JSON.stringify(source.url)}, which is not an https page`)
+      const fetched = String(source.fetched)
+      assert.match(fetched, /^\d{4}-\d{2}-\d{2}$/, `${model} does not say which day its price was read`)
+      const day = new Date(`${fetched}T00:00:00Z`)
+      assert.ok(
+        !Number.isNaN(day.getTime()) && day.toISOString().slice(0, 10) === fetched,
+        `${model} says its price was read on ${fetched}, which is not a real day`,
+      )
+    }
+  })
+
+  test('a default model is charged what its provider publishes', () => {
+    // The overcharge as a budget saw it, a million tokens in and a million out.
+    // One assertion per model, so a wrong row names itself.
+    const prices = pricesFrom(undefined)
+    const million = { inputTokens: 1_000_000, outputTokens: 1_000_000 }
+    assert.equal(costOf(prices, 'claude-sonnet-5', million), 2 + 10)
+    assert.equal(costOf(prices, 'claude-opus-5', million), 5 + 25)
+    assert.equal(costOf(prices, 'claude-haiku-4-5-20251001', million), 1 + 5)
+    assert.equal(costOf(prices, 'gpt-4.1', million), 2 + 8)
+    assert.equal(costOf(prices, 'gpt-4.1-mini', million), 0.4 + 1.6)
+  })
+
   test('a malformed override throws at start-up rather than being skipped', () => {
     // A skipped entry is a model that silently falls back to a different price,
     // which is the same failure this file exists to prevent.
