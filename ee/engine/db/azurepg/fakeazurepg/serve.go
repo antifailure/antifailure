@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 )
 
 func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
@@ -118,6 +119,7 @@ func (s *Server) render(srv *fakeServer) map[string]any {
 			"version":                  "16",
 			"administratorLogin":       srv.AdminLogin,
 			"storage":                  map[string]any{"storageSizeGB": srv.StorageGB},
+			"backup":                   map[string]any{"earliestRestoreDate": srv.EarliestRestore.UTC().Format(time.RFC3339Nano)},
 			"network":                  network,
 		},
 	}
@@ -206,6 +208,24 @@ func (s *Server) restore(w http.ResponseWriter, r *http.Request, name string) {
 			"the flexible server "+name+" already exists")
 		return
 	}
+	// Microsoft: a restore time earlier than the earliest restore point available
+	// on the source server is answered with InternalServerError. That is the
+	// error the one live branch run received.
+	at, err := time.Parse(time.RFC3339Nano, body.Properties.PointInTimeUTC)
+	if err != nil {
+		s.mu.Unlock()
+		writeErr(w, http.StatusBadRequest, "InvalidParameterValue",
+			"pointInTimeUTC is not an ISO8601 time: "+body.Properties.PointInTimeUTC)
+		return
+	}
+	if at.Before(src.EarliestRestore) {
+		s.mu.Unlock()
+		writeErr(w, http.StatusInternalServerError, "InternalServerError",
+			"An unexpected error occured while processing the request. fakeazurepg: "+
+				"pointInTimeUTC "+at.UTC().Format(time.RFC3339Nano)+" is before the earliest "+
+				"restore point of "+src.Name+", "+src.EarliestRestore.UTC().Format(time.RFC3339Nano))
+		return
+	}
 	// Microsoft: a restore cannot cross between public and private access.
 	if src.Subnet != body.Properties.Network.Subnet || src.PrivateDNS != body.Properties.Network.DNS ||
 		(src.Subnet != "" && body.Properties.Network.Public != "Disabled") {
@@ -237,6 +257,11 @@ func (s *Server) restore(w http.ResponseWriter, r *http.Request, name string) {
 		StorageGB:     src.StorageGB,
 		// EMPTY. Azure does not copy firewall rules across a restore.
 		FirewallRules: map[string][2]string{},
+		// Not restorable until its first backup exists, when a test asks for
+		// that. With no delay it is restorable at once, so a test that is not
+		// about the first backup never compares this fake's clock with the
+		// provider's.
+		EarliestRestore: s.restorableFrom(),
 	}
 	s.restores++
 	op := s.nextOp()
@@ -244,6 +269,15 @@ func (s *Server) restore(w http.ResponseWriter, r *http.Request, name string) {
 
 	w.Header().Set("Azure-AsyncOperation", "/operations/"+op)
 	writeJSON(w, http.StatusCreated, nil)
+}
+
+// restorableFrom is the earliest restore point of a server this fake creates
+// now. Called with s.mu held.
+func (s *Server) restorableFrom() time.Time {
+	if s.opts.FirstBackupDelay <= 0 {
+		return time.Unix(0, 0).UTC()
+	}
+	return s.opts.Now().Add(s.opts.FirstBackupDelay)
 }
 
 func (s *Server) patch(w http.ResponseWriter, r *http.Request, name string) {
