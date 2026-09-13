@@ -628,18 +628,29 @@ func classify(sql, upper string, schema Schema) (blockingDDL, bool) {
 //
 // The fix is one line, which is why the absence of it is worth a finding of its
 // own rather than a sentence inside every other one.
+//
+// A timeout covers a lock only if it is in effect at the moment the lock is
+// asked for. So the migrations are followed in the order one session runs them,
+// one transaction per file, and every lock is judged against the value of that
+// moment. This rule used to ask only whether a SET appeared anywhere, and so a
+// SET after the ALTER, a RESET or a SET to zero before it, a SET LOCAL whose
+// transaction had already ended, a ROLLBACK that undid the SET, and an ALTER
+// ROLE that reaches only later sessions all read as covered while the lock they
+// were meant to bound would have queued with no limit.
 func lintLockTimeout(stmts []Statement, schema Schema) (LintFinding, bool) {
-	if configured(schema.LockTimeout) {
-		return LintFinding{}, false
-	}
-	for _, st := range stmts {
-		if setsLockTimeout(fold(st.SQL)) {
-			return LintFinding{}, false
+	s := newSessionTimeout(configured(schema.LockTimeout))
+	for i, st := range stmts {
+		if i > 0 && st.Migration != stmts[i-1].Migration {
+			s.commit("the end of " + stmts[i-1].Migration)
 		}
-	}
-	for _, st := range stmts {
-		ddl, ok := classify(st.SQL, fold(st.SQL), schema)
+		upper := fold(st.SQL)
+		s.apply(st, upper)
+		ddl, ok := classify(st.SQL, upper, schema)
 		if !ok {
+			continue
+		}
+		now := s.effective()
+		if now.state == timeoutOn {
 			continue
 		}
 		// The table is unknown when the statement names an index the branch's
@@ -651,14 +662,16 @@ func lintLockTimeout(stmts []Statement, schema Schema) (LintFinding, bool) {
 			locked, its = ddl.Table, ddl.Table
 		}
 		detail := fmt.Sprintf(
-			"Nothing in these migrations sets lock_timeout, and this statement locks %s in %s "+
-				"mode. A lock request that is not granted immediately queues, and every "+
-				"query that arrives after it queues behind the request rather than behind the "+
-				"table, so a statement that would have taken milliseconds stops all traffic on "+
-				"%s for as long as whatever it is waiting for runs.",
-			locked, ddl.Mode, its)
+			"%s, and this statement locks %s in %s mode. A lock request that is not granted "+
+				"immediately queues, and every query that arrives after it queues behind the "+
+				"request rather than behind the table, so a statement that would have taken "+
+				"milliseconds stops all traffic on %s for as long as whatever it is waiting for runs.",
+			now.sentence(), locked, ddl.Mode, its)
 		if rows := schema.Rows[ddl.Table]; rows > 0 {
 			detail += fmt.Sprintf(" That table holds about %d rows.", rows)
+		}
+		for _, note := range s.notes {
+			detail += " " + note
 		}
 		return LintFinding{
 			Rule: RuleNoLockTimeout, Migration: st.Migration, Statement: st.SQL,
@@ -667,8 +680,9 @@ func lintLockTimeout(stmts []Statement, schema Schema) (LintFinding, bool) {
 				"lock_timeout = '3s' inside the transaction, and have the deploy retry the " +
 				"migration. The statement then gives up instead of queueing, which turns a " +
 				"stalled table into a failed migration somebody runs again. Setting it on the " +
-				"migration role with ALTER ROLE ... SET lock_timeout covers every migration " +
-				"rather than this one, and this rule reads that setting from the server.",
+				"migration role with ALTER ROLE ... SET lock_timeout covers every migration run " +
+				"in a session that starts afterwards, though not the session that ran the ALTER " +
+				"ROLE, and this rule reads that setting from the server.",
 		}, true
 	}
 	return LintFinding{}, false
@@ -681,29 +695,295 @@ func configured(setting string) bool {
 	return setting != "" && setting != "0"
 }
 
-// setsLockTimeout reports whether a statement sets lock_timeout to something
-// other than zero.
+// timeoutState is what a session's lock_timeout amounts to at one point in the
+// migrations.
+type timeoutState int
+
+const (
+	timeoutOff timeoutState = iota
+	timeoutOn
+	// timeoutUnreadable is a value the file does not spell out: a parameter, an
+	// expression, or whatever a ROLLBACK TO SAVEPOINT left. It never covers a
+	// lock, because a rule that guessed it did would be the false negative this
+	// rule exists to prevent.
+	timeoutUnreadable
+)
+
+// timeoutValue is one lock_timeout and the reason it is what it is. why is
+// empty for the value a session starts with.
+type timeoutValue struct {
+	state timeoutState
+	why   string
+}
+
+// sentence opens a finding about a lock this value does not cover.
+func (v timeoutValue) sentence() string {
+	switch {
+	case v.state == timeoutUnreadable:
+		return "Whether lock_timeout is in effect when this statement runs could not be read " +
+			"statically, because " + v.why
+	case v.why != "":
+		return "lock_timeout is off when this statement runs, because " + v.why
+	default:
+		return "Nothing in these migrations sets lock_timeout before this statement runs"
+	}
+}
+
+// sessionTimeout follows lock_timeout through the migrations the way Postgres
+// does for the one session that applies them.
 //
-// SET, SET LOCAL and SET SESSION all count, and so do the ALTER ROLE and ALTER
-// DATABASE spellings, because the rule asks whether the migration will give up
-// rather than where somebody chose to say so.
-func setsLockTimeout(upper string) bool {
-	if !strings.Contains(upper, "LOCK_TIMEOUT") {
-		return false
+// A SET or SET SESSION lasts for the session, across files, until something
+// replaces it. A SET LOCAL lasts until its transaction ends, which is the end of
+// its file or a COMMIT, END or ROLLBACK written inside it. A ROLLBACK also undoes
+// a SET made inside the transaction it ends. RESET returns to the value the
+// session started with, which is the server's.
+type sessionTimeout struct {
+	server  timeoutValue
+	session timeoutValue
+	local   *timeoutValue
+	// begun is the session's value when the current transaction began, which is
+	// what a ROLLBACK returns to.
+	begun timeoutValue
+	// notes are sentences about statements that look as if they set the timeout
+	// and do not, so that a finding does not contradict the file it is about.
+	notes []string
+}
+
+func newSessionTimeout(serverSetsIt bool) *sessionTimeout {
+	server := timeoutValue{state: timeoutOff}
+	if serverSetsIt {
+		server.state = timeoutOn
 	}
-	if !strings.HasPrefix(upper, "SET ") &&
-		!strings.HasPrefix(upper, "ALTER ROLE") && !strings.HasPrefix(upper, "ALTER DATABASE") {
-		return false
+	return &sessionTimeout{server: server, session: server, begun: server}
+}
+
+// effective is the value a statement runs with.
+func (s *sessionTimeout) effective() timeoutValue {
+	if s.local != nil {
+		return *s.local
 	}
-	rest := strings.TrimSpace(upper[strings.Index(upper, "LOCK_TIMEOUT")+len("LOCK_TIMEOUT"):])
-	rest = strings.TrimSpace(strings.TrimPrefix(rest, "="))
-	rest = strings.TrimSpace(strings.TrimPrefix(rest, "TO "))
-	fields := strings.Fields(rest)
-	if len(fields) == 0 {
-		return false
+	return s.session
+}
+
+// set applies a SET, or a SET LOCAL when local is true.
+func (s *sessionTimeout) set(local bool, v timeoutValue) {
+	if local {
+		s.local = &v
+		return
 	}
-	value := strings.Trim(fields[0], `'";,`)
-	return value != "" && value != "0" && value != "DEFAULT"
+	s.session = v
+	s.local = nil
+}
+
+// serverValue is the value a session starts with, carrying why when it is off.
+func (s *sessionTimeout) serverValue(why string) timeoutValue {
+	if s.server.state == timeoutOn {
+		return s.server
+	}
+	return timeoutValue{state: timeoutOff, why: why}
+}
+
+// commit ends the transaction, which ends a SET LOCAL and keeps every SET.
+func (s *sessionTimeout) commit(at string) {
+	if s.local != nil && s.local.state == timeoutOn && s.session.state == timeoutOff {
+		s.session.why = "the SET LOCAL before it ended with its transaction at " + at
+	}
+	s.local = nil
+	s.begun = s.session
+}
+
+// rollback ends the transaction and undoes every SET made inside it.
+func (s *sessionTimeout) rollback(at string) {
+	undid := s.session.state == timeoutOn || (s.local != nil && s.local.state == timeoutOn)
+	s.session = s.begun
+	s.local = nil
+	if undid && s.session.state == timeoutOff {
+		s.session.why = "the ROLLBACK at " + at + " undid the lock_timeout set inside its transaction"
+	}
+	s.begun = s.session
+}
+
+// apply moves the session past one statement.
+func (s *sessionTimeout) apply(st Statement, upper string) {
+	at := fmt.Sprintf("statement %d of %s", st.Index, st.Migration)
+	switch firstWord(upper) {
+	case "BEGIN", "START":
+		s.begun = s.session
+	case "COMMIT", "END":
+		s.commit(at)
+	case "ROLLBACK", "ABORT":
+		if strings.Contains(upper, " TO ") {
+			// A ROLLBACK TO SAVEPOINT undoes only what came after its savepoint,
+			// and savepoints are not followed here.
+			u := timeoutValue{state: timeoutUnreadable, why: "the ROLLBACK TO SAVEPOINT at " + at +
+				" may have undone a SET, and savepoints are not followed"}
+			s.session, s.local = u, &u
+			return
+		}
+		s.rollback(at)
+	case "RESET":
+		if rest := strings.TrimSpace(strings.TrimPrefix(upper, "RESET")); rest == "LOCK_TIMEOUT" || rest == "ALL" {
+			s.set(false, s.serverValue(at+" resets it to the server's value, which is 0"))
+		}
+	case "SET":
+		s.applySet(upper, at)
+	case "SELECT":
+		if strings.Contains(upper, "SET_CONFIG(") {
+			s.applySetConfig(upper, at)
+		}
+	case "ALTER":
+		for _, kind := range []string{"ALTER ROLE", "ALTER USER", "ALTER DATABASE"} {
+			if strings.HasPrefix(upper, kind) && strings.Contains(upper, " SET LOCK_TIMEOUT") {
+				s.notes = append(s.notes, "The "+kind+" at "+at+" sets lock_timeout only for "+
+					"sessions that start after it, not for the one running these migrations.")
+			}
+		}
+	}
+}
+
+// applySet follows SET, SET SESSION and SET LOCAL for lock_timeout, and ignores
+// every other SET.
+func (s *sessionTimeout) applySet(upper, at string) {
+	rest := strings.TrimSpace(strings.TrimPrefix(upper, "SET"))
+	local := false
+	switch {
+	case strings.HasPrefix(rest, "LOCAL "):
+		local, rest = true, strings.TrimSpace(strings.TrimPrefix(rest, "LOCAL "))
+	case strings.HasPrefix(rest, "SESSION "):
+		rest = strings.TrimSpace(strings.TrimPrefix(rest, "SESSION "))
+	}
+	if !strings.HasPrefix(rest, "LOCK_TIMEOUT") {
+		return
+	}
+	rest = strings.TrimSpace(strings.TrimPrefix(rest, "LOCK_TIMEOUT"))
+	switch {
+	case strings.HasPrefix(rest, "="):
+		rest = strings.TrimSpace(strings.TrimPrefix(rest, "="))
+	case strings.HasPrefix(rest, "TO "):
+		rest = strings.TrimSpace(strings.TrimPrefix(rest, "TO "))
+	default:
+		return
+	}
+	if rest == "DEFAULT" {
+		s.set(local, s.serverValue(at+" sets it back to the server's value, which is 0"))
+		return
+	}
+	s.setLiteral(local, strings.Trim(rest, "'"), at)
+}
+
+// applySetConfig follows SELECT set_config('lock_timeout', value, is_local),
+// which is SET, or SET LOCAL when is_local is true, spelled as a function. It
+// counts only when the value and is_local are both written out in the file.
+func (s *sessionTimeout) applySetConfig(upper, at string) {
+	call := upper[strings.Index(upper, "SET_CONFIG(")+len("SET_CONFIG("):]
+	args, ok := callArguments(call)
+	unreadable := func(why string) {
+		u := timeoutValue{state: timeoutUnreadable, why: at + why}
+		s.session, s.local = u, &u
+	}
+	if !ok {
+		unreadable(" calls set_config in a way that could not be followed")
+		return
+	}
+	name, quoted := literalString(args[0])
+	if !quoted {
+		unreadable(" calls set_config with a setting name the file does not spell out")
+		return
+	}
+	if name != "LOCK_TIMEOUT" {
+		return
+	}
+	if len(args) != 3 {
+		s.notes = append(s.notes, fmt.Sprintf("The set_config at %s is called with %d "+
+			"arguments, and Postgres has only set_config(setting_name, new_value, is_local), "+
+			"so that statement fails and sets nothing.", at, len(args)))
+		return
+	}
+	var local bool
+	switch strings.TrimSpace(args[2]) {
+	case "TRUE", "'TRUE'":
+		local = true
+	case "FALSE", "'FALSE'":
+	default:
+		unreadable(" calls set_config with an is_local the file does not spell out, so " +
+			"whether it lasts past its transaction is not known")
+		return
+	}
+	value, quoted := literalString(args[1])
+	if !quoted {
+		s.set(local, timeoutValue{state: timeoutUnreadable,
+			why: at + " sets it with set_config to a value the file does not spell out"})
+		return
+	}
+	s.setLiteral(local, value, at)
+}
+
+// setLiteral applies a timeout written out in the file. Postgres reads it as a
+// number with an optional unit, milliseconds when there is none, and zero turns
+// the timeout off.
+func (s *sessionTimeout) setLiteral(local bool, text, at string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		s.set(local, timeoutValue{state: timeoutOff,
+			why: at + " sets it to an empty value, which is not a timeout"})
+		return
+	}
+	unit := strings.TrimLeft(text, "0123456789.")
+	number := text[:len(text)-len(unit)]
+	switch strings.TrimSpace(unit) {
+	case "", "US", "MS", "S", "MIN", "H", "D":
+	default:
+		number = ""
+	}
+	if number == "" || strings.Count(number, ".") > 1 {
+		s.notes = append(s.notes, "The lock_timeout set at "+at+" is not a value Postgres "+
+			"accepts, so that statement fails and sets nothing.")
+		return
+	}
+	if strings.Trim(number, "0.") == "" {
+		s.set(local, timeoutValue{state: timeoutOff, why: at + " sets it to 0, which turns it off"})
+		return
+	}
+	s.set(local, timeoutValue{state: timeoutOn})
+}
+
+// callArguments splits the arguments of a call whose opening parenthesis has
+// already been read, at the commas that belong to it rather than to a nested
+// call or a quoted string. It reports false when the call is never closed.
+func callArguments(s string) ([]string, bool) {
+	var args []string
+	depth, start, quoted := 0, 0, false
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '\'':
+			quoted = !quoted
+		case quoted:
+		case c == '(':
+			depth++
+		case c == ')' && depth > 0:
+			depth--
+		case c == ')':
+			return append(args, strings.TrimSpace(s[start:i])), true
+		case c == ',' && depth == 0:
+			args = append(args, strings.TrimSpace(s[start:i]))
+			start = i + 1
+		}
+	}
+	return nil, false
+}
+
+// literalString reports the contents of a single quoted SQL string, and false
+// for anything else, a parameter or an expression included.
+func literalString(arg string) (string, bool) {
+	arg = strings.TrimSpace(arg)
+	if len(arg) < 2 || arg[0] != '\'' || arg[len(arg)-1] != '\'' {
+		return "", false
+	}
+	inner := arg[1 : len(arg)-1]
+	if strings.Contains(strings.ReplaceAll(inner, "''", ""), "'") {
+		return "", false
+	}
+	return strings.ReplaceAll(inner, "''", "'"), true
 }
 
 // lockingDDLPerMigration is the first blocking statement in each migration
