@@ -25,7 +25,9 @@ failure can be seen: the cloud credential client and the secret stores behind
 it, the audit webhook and object store sinks, all four golden stores, the
 production database variable, the database URL a local environment rewrites,
 the control plane address, the telemetry export endpoint, the Database Lab
-endpoint, a model gateway's base URL, `af net explain`, and the egress probe the
-MCP server answers. The audit webhook also kept the URL it was given rather than
+endpoint, a model gateway's base URL, `af net explain` including its refusal of a
+wildcard used as a request host, the egress probe the MCP server answers, a
+host the manifest refuses in `build.allow_hosts` or an egress rule, and a start
+path `af explore` refuses. The audit webhook also kept the URL it was given rather than
 the one it checked, so a URL pasted with a trailing newline was accepted and
 then failed on every delivery.
