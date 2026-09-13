@@ -10550,6 +10550,15 @@ reached.
 ` + "`" + `af doctor` + "`" + ` checks this and everything else about the machine before you need
 it, and names the command that fixes each thing it finds.
 
+The daemon has to speak Docker API 1.40 or later, which is Docker Engine 19.03
+and every release since. The floor belongs to the Docker client library the
+engine is built with rather than to a policy of ours: below it the client
+refuses to negotiate a version and sends its requests unversioned, and what an
+older daemon does with those is not something any release has been checked
+against. ` + "`" + `af doctor` + "`" + ` reads the daemon's API version and fails its Docker check
+below the floor, naming the version it found, so the mismatch is reported
+before an environment is attempted rather than halfway through one.
+
 ## The egress sidecar image
 
 The first thing ` + "`" + `af up` + "`" + ` needs is the egress sidecar's image, and a release
@@ -24601,7 +24610,7 @@ Install [cosign](https://docs.sigstore.dev/cosign/system_config/installation/).
 The identity is long and you need it three times, so name it once:
 
 ` + "`" + "`" + "`" + `sh
-TAG=v1.3.5
+TAG=v1.4.0
 REPO=antifailure/antifailure
 WORKFLOW=.github/workflows/release.yml
 
@@ -24670,10 +24679,10 @@ trusting either of us.
 ` + "`" + "`" + "`" + `sh
 git clone https://github.com/antifailure/antifailure
 cd antifailure
-git checkout v1.3.5
-./tools/release/build.sh linux amd64 1.3.5 \
+git checkout v1.4.0
+./tools/release/build.sh linux amd64 1.4.0 \
   "$(git rev-parse HEAD)" "$(git show -s --format=%cI HEAD)" dist stage
-sha256sum dist/antifailure_1.3.5_linux_amd64.tar.gz
+sha256sum dist/antifailure_1.4.0_linux_amd64.tar.gz
 ` + "`" + "`" + "`" + `
 
 That hash should be the line for your platform in ` + "`" + `checksums.txt` + "`" + `. You need the
@@ -27825,8 +27834,62 @@ tag in the same command as a branch: a tag that arrives before its commit is on
 gh run watch "$(gh run list --workflow release.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
 ` + "`" + "`" + "`" + `
 
-Five jobs. Four of them build one platform each and only compile; the fifth is
-the only one in the repository that holds ` + "`" + `contents: write` + "`" + `.
+Seven jobs. ` + "`" + `gate` + "`" + ` waits for CI on the tagged commit. Four build one platform
+each and only compile. ` + "`" + `the egress sidecar image` + "`" + ` builds and pushes
+` + "`" + `ghcr.io/antifailure/af-proxy` + "`" + ` for linux/amd64 and linux/arm64, and is the only
+job holding ` + "`" + `packages: write` + "`" + `. ` + "`" + `publish` + "`" + ` needs all five of the jobs after the
+gate, and is the only job in the repository that holds ` + "`" + `contents: write` + "`" + `.
+
+### The first release that publishes the sidecar image stops, and a person makes it public
+
+A container package GitHub creates is **private on its first publish**. It
+inherits the repository's access permissions, and not its visibility, so a
+public repository does not make its first package public.
+
+That matters here more than anywhere, because the engine pulls the sidecar
+image with no credentials at all. ` + "`" + `ImagePull` + "`" + ` in
+` + "`" + `engine/internal/runtime/local/proxyobtain.go` + "`" + ` passes no registry
+authentication, so every customer's first ` + "`" + `af up` + "`" + ` asks ` + "`" + `ghcr.io` + "`" + ` as a stranger.
+A private package answers a stranger with a refusal, the engine falls back to
+compiling the sidecar, and that compile is the 25 minutes the image exists to
+remove. Nothing a customer sees goes red.
+
+So the sidecar job's last step, *Pulling it back is what a customer's first af
+up does*, logs out of ` + "`" + `ghcr.io` + "`" + ` and pulls under an empty Docker configuration,
+exactly as a customer would. On the first release it will fail with an error
+saying an anonymous pull was refused. That red is correct, and the remedy is
+one time:
+
+1. Open ` + "`" + `https://github.com/orgs/antifailure/packages/container/af-proxy/settings` + "`" + `.
+2. Under **Danger Zone**, choose **Change visibility**, then **Public**.
+3. Re-run the failed jobs of that ` + "`" + `release.yml` + "`" + ` run. The sidecar job pushes the
+   same content again, pulls it back anonymously, and ` + "`" + `publish` + "`" + ` runs after it.
+
+Why it cannot be a step in the workflow: GitHub documents changing a package's
+visibility only through that settings page, and offers no API for it. It is
+also irreversible, because a public package cannot be made private again,
+which is a decision for a person rather than for a job. It happens once: later
+releases push new tags into the same package, and the package stays public.
+
+Until the step passes, ` + "`" + `publish` + "`" + ` does not run, so no release is created and
+` + "`" + `releases/latest` + "`" + ` does not move. That is the direction to fail in.
+
+### Approve production only after ` + "`" + `publish` + "`" + ` reads success
+
+` + "`" + `cd.yml` + "`" + ` and ` + "`" + `release.yml` + "`" + ` start from the same tag and neither waits for the
+other. The production approval belongs to ` + "`" + `cd.yml` + "`" + `, so it can be granted while
+` + "`" + `release.yml` + "`" + ` is still building, or after its sidecar job has stopped on the
+visibility step above. Approve then, and the control plane in production runs
+a version that has no release, no signed checksums and no published sidecar
+image. Before approving, read the run:
+
+` + "`" + "`" + "`" + `sh
+gh run list --workflow release.yml --limit 1 --json databaseId,headBranch,conclusion
+gh run view <id> --json jobs --jq '.jobs[] | "\(.name) \(.conclusion)"'
+` + "`" + "`" + "`" + `
+
+The ` + "`" + `publish` + "`" + ` line must say ` + "`" + `success` + "`" + `. ` + "`" + `skipped` + "`" + `, ` + "`" + `cancelled` + "`" + `, ` + "`" + `failure` + "`" + ` or an
+empty conclusion are all reasons to wait.
 
 | Stage | Green looks like | Red means |
 | --- | --- | --- |
@@ -28643,9 +28706,31 @@ nobody has seen.
    actually work".
 
    ` + "`" + "`" + "`" + `sh
-   az containerapp job start -n afcp-reseal -g af-cp-centralus \
-     --command "node backup-cli.mjs reseal --check"
+   az containerapp job show -n afcp-reseal -g af-cp-centralus -o json \
+     | jq '{containers: [.properties.template.containers[0]
+         | {name, image, command: ["node", "backup-cli.mjs", "reseal", "--check"],
+            env, resources: {cpu: .resources.cpu, memory: .resources.memory}}]}' \
+     > reseal-check.json
+   az rest --method post --body @reseal-check.json \
+     --headers Content-Type=application/json \
+     --url "https://management.azure.com$(az containerapp job show \
+       -n afcp-reseal -g af-cp-centralus --query id -o tsv)/start?api-version=2025-07-01"
+   az containerapp job execution list -n afcp-reseal -g af-cp-centralus \
+     --query "[0].{name:name, command:properties.template.containers[0].command}" -o json
    ` + "`" + "`" + "`" + `
+
+   The last command must show ` + "`" + `node` + "`" + `, ` + "`" + `backup-cli.mjs` + "`" + `, ` + "`" + `reseal` + "`" + `, ` + "`" + `--check` + "`" + ` as
+   four separate entries before you read anything the execution reports. Without
+   ` + "`" + `--check` + "`" + ` it is step 4, which writes.
+
+   This is not ` + "`" + `az containerapp job start --command` + "`" + `, and that is not a style
+   choice. The CLI takes that flag as a list, so a quoted command arrives as one
+   program name with spaces in it, and it sends a container named after the job
+   rather than ` + "`" + `reseal` + "`" + ` with no image and no environment. Every value the check
+   needs comes from the job itself here, including the second key and the version
+   a rotation adds in step 2, so the check runs with exactly the keys step 4 had.
+   This form was run against staging on 2026-09-13: the execution's own template
+   read those four entries, it exited 0, and it reported every row opened.
 
    It opens EVERY row whatever version it is at and writes nothing. It must
    report zero rows that could not be opened and zero rows not yet at ` + "`" + `v2` + "`" + `.
