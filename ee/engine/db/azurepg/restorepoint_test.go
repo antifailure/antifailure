@@ -19,6 +19,7 @@ package azurepg_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,6 +49,31 @@ func TestABranchWaitsForTheGoldensFirstBackup(t *testing.T) {
 	_, err = p.Branch(ctx, version.ID, "env_waits_for_backup")
 	require.NoError(t, err, "a branch taken right after the golden was published asked for a "+
 		"restore time before the golden's earliest restore point")
+}
+
+func TestTheWaitForAFirstBackupIsReportedAsItHappens(t *testing.T) {
+	server := newFakeWithBackupDelay(t, 300*time.Millisecond)
+	p := newProvider(t, server)
+	var lines []string
+	p.ReportProgressTo(func(line string) { lines = append(lines, line) })
+	ctx := context.Background()
+
+	version, err := p.RefreshGolden(ctx, goldenSpec())
+	require.NoError(t, err)
+	_, err = p.Branch(ctx, version.ID, "env_reports_its_wait")
+	require.NoError(t, err)
+
+	started, ended := false, false
+	for _, line := range lines {
+		if strings.Contains(line, "waiting for Azure's first backup of") {
+			started = true
+		}
+		if strings.Contains(line, "is ready after") {
+			ended = true
+		}
+	}
+	require.Truef(t, started, "a restore waited for a first backup and never said it was waiting: %q", lines)
+	require.Truef(t, ended, "a restore finished waiting for a first backup and never said so: %q", lines)
 }
 
 func TestARestorePointThatNeverArrivesIsReportedByName(t *testing.T) {
