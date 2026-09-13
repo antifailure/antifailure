@@ -68,13 +68,17 @@ func TestARefreshAndABranchReportTheirWaits(t *testing.T) {
 func TestALongWaitReportsAHeartbeat(t *testing.T) {
 	server := newFake(t, conformance.DefaultSeedSQL, fakerds.FaultInstanceNeverBecomesAvailable)
 	opts := options(t, server)
-	var mu sync.Mutex
-	clock := time.Date(2026, 9, 13, 0, 0, 0, 0, time.UTC)
+	// A clock that runs at 600 times real time, so ten minutes of waiting pass
+	// in one real second. It used to advance twenty seconds on every call, which
+	// tied the provider's timeout to how many times it asked the time rather
+	// than to how long anything took: on a loaded machine the whole timeout
+	// passed while the fake's snapshot was still copying for real, the instance
+	// wait this test is about never started, and the test failed without the
+	// provider having done anything wrong.
+	realStart := time.Now()
+	start := time.Date(2026, 9, 13, 0, 0, 0, 0, time.UTC)
 	opts.Now = func() time.Time {
-		mu.Lock()
-		defer mu.Unlock()
-		clock = clock.Add(20 * time.Second)
-		return clock
+		return start.Add(time.Since(realStart) * 600)
 	}
 	opts.ReadyTimeout = 10 * time.Minute
 	p, err := scopedNew(context.Background(), opts)
