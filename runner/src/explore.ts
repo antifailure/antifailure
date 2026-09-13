@@ -25,7 +25,7 @@
 // like it destroys state, and it says in `missing` which ones it refused, so
 // an unexplored corner reads as unexplored rather than as clean.
 
-import { Session } from './browser.ts';
+import { DEFAULT_VIEWPORT, Session } from './browser.ts';
 import { signIn, type Persona } from './login.ts';
 import type { InboxSource } from './inbox.ts';
 import { systemClock, type Clock } from './clock.ts';
@@ -49,6 +49,28 @@ export interface Goal {
   readonly seed: string;
   /** slowMs is how long a step may take before it is reported as friction. */
   readonly slowMs?: number;
+  /** maxMs is a time budget a call added beside the step budget. The run stops
+   *  at whichever ends first. Absent means steps alone bound the run. */
+  readonly maxMs?: number;
+  /** viewport is the window a call asked for. Absent means the default. */
+  readonly viewport?: Viewport;
+  /** focus is a sentence whose words decide which controls are pressed first.
+   *  It is never judged against: the goal is what the run is measured by, and
+   *  a call that could move it could make any run pass. */
+  readonly focus?: string;
+  /** steered is the command line flags that point a replay the same way this
+   *  run was pointed, rendered by the engine. Absent when nothing was steered. */
+  readonly steered?: string;
+}
+
+/** Viewport is the window an exploration runs in. */
+export interface Viewport {
+  /** name is phone, tablet, desktop or custom, and empty for the default. */
+  readonly name: string;
+  readonly width: number;
+  readonly height: number;
+  /** mobile is a touch screen and a phone's user agent as well as the size. */
+  readonly mobile: boolean;
 }
 
 /** Kind names one way an application costs somebody effort without failing.
@@ -133,6 +155,15 @@ export interface Exploration {
   readonly name: string;
   readonly goal: string;
   readonly seed: string;
+  /** persona, startPath and viewport are how the run was actually pointed,
+   *  rather than how the manifest declared it. A call can steer all three, and
+   *  a finding on a phone as a viewer is not the same finding on a desktop as
+   *  the owner. persona is the account used, empty when nobody signed in. */
+  readonly persona: string;
+  readonly startPath: string;
+  readonly viewport: Viewport;
+  /** focus is the sentence the call steered with, absent when it did not. */
+  readonly focus?: string;
   readonly outcome: Outcome;
   /** reached says whether the goal's own words ever appeared on a page. */
   readonly reached: boolean;
@@ -190,6 +221,7 @@ export class Explorer {
   readonly #rng: Seeded;
   readonly #slowMs: number;
   readonly #goalWords: readonly string[];
+  readonly #focusWords: readonly string[];
 
   /** controlsAt is every control seen at a URL, unioned across visits. */
   readonly #controlsAt = new Map<string, string[]>();
@@ -226,6 +258,7 @@ export class Explorer {
     this.#identity = freshIdentity(goal.seed);
     this.#slowMs = goal.slowMs ?? DEFAULT_SLOW_MS;
     this.#goalWords = keywords(goal.goal);
+    this.#focusWords = keywords(goal.focus ?? '');
   }
 
   /** redact removes anything this exploration typed from a URL it reports.
@@ -504,7 +537,9 @@ export class Explorer {
   /** choose picks among the candidates, preferring the ones the goal names.
    *
    * A control whose name shares a word with the goal is where a person would
-   * go, so it goes first. Among equals the seeded generator decides, and the
+   * go, so it goes first. A word from the call's focus outranks any number of
+   * the goal's, because a call that named a focus has said where to look
+   * first, and the goal's words still order what the focus says nothing about. Among equals the seeded generator decides, and the
    * list is sorted before it does, because a set iterated in insertion order
    * would make the choice depend on the order the DOM happened to be in.
    */
@@ -524,9 +559,10 @@ export class Explorer {
   }
 
   #relevance(control: string): number {
-    if (this.#goalWords.length === 0) return 0;
     const name = control.toLowerCase();
-    return this.#goalWords.filter((w) => name.includes(w)).length;
+    const goal = this.#goalWords.filter((w) => name.includes(w)).length;
+    const focus = this.#focusWords.filter((w) => name.includes(w)).length;
+    return focus * (this.#goalWords.length + 1) + goal;
   }
 }
 
@@ -624,6 +660,9 @@ export async function pursue(
   const journey: Move[] = [];
 
   const start = goal.startPath ?? '/';
+  // Measured from before the first page opens, because a time budget is what
+  // the whole run may cost somebody waiting on it, and the first page counts.
+  const begun = clock.monotonicMs();
   await surface.goto(start);
   journey.push({ kind: 'goto', url: start });
   steps.push(`Open ${start}`);
@@ -632,6 +671,10 @@ export async function pursue(
   let lastURL = start;
   let step = 0;
   for (; step < limit; step++) {
+    if (goal.maxMs !== undefined && clock.monotonicMs() - begun >= goal.maxMs) {
+      steps.push(`The time budget of ${goal.maxMs} ms ran out.`);
+      break;
+    }
     const before = await surface.snapshot();
     lastURL = before.url;
     // Refusals are recorded from what the page offers, not from what was
@@ -703,11 +746,25 @@ async function exploreOne(job: ExploreJob, goal: Goal): Promise<Exploration> {
   let evidence: Exploration['evidence'] = { console: [], failed: [] };
   let attempt: Attempt;
   let session: Session | undefined;
+  let signedInAs = '';
+  // The window actually opened, which is what the result reports. A viewport
+  // the engine sent that is not a size is refused below rather than quietly
+  // replaced with the default, because a run asked for a phone that walked a
+  // desktop and said nothing would be a finding about the wrong device.
+  const viewport: Viewport = goal.viewport ?? { name: '', ...DEFAULT_VIEWPORT, mobile: false };
 
   try {
+    if (!readableViewport(viewport)) {
+      throw new Error(
+        `The viewport ${JSON.stringify(goal.viewport)} is not a size this runner can open.`,
+      );
+    }
     session = await Session.open({
       artifacts: job.artifacts,
       ...(job.headless === undefined ? {} : { headless: job.headless }),
+      ...(goal.viewport
+        ? { viewport: { width: viewport.width, height: viewport.height }, mobile: viewport.mobile }
+        : {}),
     });
     const page = session.page();
 
@@ -727,6 +784,7 @@ async function exploreOne(job: ExploreJob, goal: Goal): Promise<Exploration> {
         ...(job.inbox ? { inbox: job.inbox } : {}),
       });
       signIns.push(`Sign in as ${persona.name}: ${login.detail}`);
+      signedInAs = persona.name;
       // A sign in that did not work is the environment's problem or the
       // application's, and either way the exploration has nothing to explore.
       // Reporting it as an exploration that found no friction would be the
@@ -771,6 +829,12 @@ async function exploreOne(job: ExploreJob, goal: Goal): Promise<Exploration> {
     name: goal.name,
     goal: goal.goal,
     seed: goal.seed,
+    // Only a persona that signed in is reported, so a run blocked at the sign
+    // in does not read as one that explored as that account.
+    persona: signedInAs,
+    startPath: goal.startPath ?? '/',
+    viewport,
+    ...(goal.focus ? { focus: goal.focus } : {}),
     outcome: {
       ...outcome,
       reproduction: reproduction(goal, journey, outcome.cause),
@@ -788,6 +852,11 @@ async function exploreOne(job: ExploreJob, goal: Goal): Promise<Exploration> {
     evidence,
     durationMs: clock.monotonicMs() - started,
   };
+}
+
+/** readableViewport reports whether a viewport is a size a browser can open. */
+function readableViewport(v: Viewport): boolean {
+  return Number.isInteger(v.width) && Number.isInteger(v.height) && v.width > 0 && v.height > 0;
 }
 
 /** Environment marks a failure the environment owes rather than the runner. */
@@ -814,15 +883,19 @@ function summarise(explorer: Explorer, steps: number): string {
 export function reproduction(
   goal: Goal, journey: readonly Move[], cause: Cause,
 ): readonly string[] {
+  // The steering goes on every line that runs something. A path found as the
+  // owner on a phone and replayed on the manifest's defaults walks somewhere
+  // else, and the original finding then reads as one nobody can reproduce.
+  const steered = goal.steered ? ` ${goal.steered}` : '';
   if (cause !== 'explored') {
     return [
       `Bring the environment up with af up, then run:`,
-      `af explore --only ${goal.name}`,
+      `af explore --only ${goal.name}${steered}`,
     ];
   }
   return [
     `Bring the environment up with af up, then replay this exact path:`,
-    `af explore --only ${goal.name} --seed ${goal.seed}`,
+    `af explore --only ${goal.name} --seed ${goal.seed}${steered}`,
     `Or follow it by hand:`,
     ...journey.map((m, i) => `${i + 1}. ${describeMove(m)}`),
   ];

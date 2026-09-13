@@ -135,6 +135,28 @@
       "planned": false
     },
     {
+      "code": "AF-AGT-022",
+      "area": "AGT",
+      "areaName": "Agents",
+      "message": "The exploration cannot run as {persona}: the manifest declares {personas}.",
+      "resolution": "Pass one of the declared persona names to --persona, or add the persona to the manifest and run 'af up' so it exists.",
+      "docs": "https://antifailure.dev/docs/concepts/exploration",
+      "retryable": false,
+      "exitCode": 2,
+      "planned": false
+    },
+    {
+      "code": "AF-AGT-023",
+      "area": "AGT",
+      "areaName": "Agents",
+      "message": "The exploration cannot be steered that way: {detail}",
+      "resolution": "A start path begins with /, a viewport is phone, tablet, desktop or WIDTHxHEIGHT, and a budget is a step count or a duration such as 5m. 'af explore --help' states the sizes.",
+      "docs": "https://antifailure.dev/docs/concepts/exploration",
+      "retryable": false,
+      "exitCode": 2,
+      "planned": false
+    },
+    {
       "code": "AF-BLD-001",
       "area": "BLD",
       "areaName": "Build",

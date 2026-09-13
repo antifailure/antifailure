@@ -176,6 +176,30 @@ No goal named {goal} is declared under explore.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/exploration](/docs/concepts/exploration) |
 
+### AF-AGT-022
+
+The exploration cannot run as {persona}: the manifest declares {personas}.
+
+**What to do.** Pass one of the declared persona names to --persona, or add the persona to the manifest and run 'af up' so it exists.
+
+| | |
+| --- | --- |
+| Exit code | `2` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/exploration](/docs/concepts/exploration) |
+
+### AF-AGT-023
+
+The exploration cannot be steered that way: {detail}
+
+**What to do.** A start path begins with /, a viewport is phone, tablet, desktop or WIDTHxHEIGHT, and a budget is a step count or a duration such as 5m. 'af explore --help' states the sizes.
+
+| | |
+| --- | --- |
+| Exit code | `2` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/exploration](/docs/concepts/exploration) |
+
 ## Build
 
 ### AF-BLD-001

@@ -402,6 +402,16 @@ that could not start is reported as blocked.
 Every choice comes from the goal's seed, so the same seed takes the same path
 and every finding arrives with the command that replays it.
 
+The manifest's goal is the default and the flags below override it for one run,
+without writing anything: explore as a different persona, from a different
+page, in a different window, for a different budget. A viewport of phone is
+390x844 with a mobile user agent and a touch screen, tablet is 768x1024,
+desktop is 1440x900, and WIDTHxHEIGHT is any size between 320 and 3840 a side.
+A budget is a step count such as 8 or a duration such as 5m. A persona the
+manifest does not declare is refused, and the refusal names the ones it does.
+The report and the artifacts record the persona, the start path and the
+viewport that were actually used.
+
 ```
 af explore [flags]
 ```
@@ -409,17 +419,24 @@ af explore [flags]
 ```
 # Agents go at a goal with no workflow written for it.
 af explore
+# The same goal as the owner, from the billing page, on a phone, in eight steps.
+af explore --only upgrade-a-plan --persona owner --start /settings/billing --viewport phone --budget 8
 af explore --emit-workflow checkout.yaml
 ```
 
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--branch` | - | Branch to run against, defaulting to the checked out one. |
+| `--budget` | - | Most this run may spend: a step count such as 8, or a duration such as 5m. |
 | `--emit-workflow` | `false` | Print the workflow block that replays what was explored, instead of the report. |
+| `--focus` | - | A sentence about what to attend to; its words decide which controls are pressed first. |
 | `--headed` | `false` | Show the browser rather than running it hidden. |
 | `--only` | - | Explore just these goals, by name. |
+| `--persona` | - | Explore as this declared persona rather than the goal's. |
 | `--runner` | - | Path to the runner's entry point. |
 | `--seed` | - | Replay with this seed rather than the one the manifest declares. |
+| `--start` | - | Begin at this path rather than the goal's start_path, such as /settings/billing. |
+| `--viewport` | - | Window to explore in: phone (390x844, mobile), tablet (768x1024), desktop (1440x900), or WIDTHxHEIGHT. |
 
 ### `af fidelity`
 

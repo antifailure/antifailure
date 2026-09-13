@@ -2,10 +2,12 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/antifailure/antifailure/engine/internal/env"
+	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/explore"
 	"github.com/antifailure/antifailure/engine/internal/report"
 )
@@ -39,7 +41,13 @@ const (
 type driveWorkflows func(ctx context.Context, only []string, attempts int) (*env.TestReport, error)
 
 // driveExploration sends agents at the manifest's goals.
-type driveExploration func(ctx context.Context, only []string, seed string) (*explore.Report, []string, error)
+//
+// It takes the orchestrator's own options rather than a list of arguments,
+// because the call can now steer a goal five ways and a function of seven
+// positional strings is one whose callers put the start path where the
+// persona goes. Headed and RunnerPath are never set from a call, for the
+// reasons on driveWorkflows below.
+type driveExploration func(ctx context.Context, opts env.ExploreOptions) (*explore.Report, []string, error)
 
 // newRunWorkflowsTool builds run_browser_workflows.
 func newRunWorkflowsTool(p *Project, eng *Engine, drive driveWorkflows) *Tool {
@@ -515,6 +523,11 @@ func newExploreTool(p *Project, eng *Engine, drive driveExploration) *Tool {
 			"every finding is an observation. " +
 			"Every choice comes from a seed, so the same seed walks the same path and a " +
 			"finding can be replayed. " +
+			"The goal sentence lives in the manifest; this call can point a goal " +
+			"somewhere else for one run without writing anything: persona, start_path, " +
+			"viewport, budget and focus each override the goal's own value, so the " +
+			"same goal can be explored as a new owner, from onboarding, on a phone. " +
+			"The result records the persona, start path and viewport actually used. " +
 			"It needs a running environment and the goals the manifest declares under " +
 			"explore; without either it reports INCONCLUSIVE. Nothing touches production. " +
 			"This takes minutes, so it returns a run_id immediately: poll it with " +
@@ -529,8 +542,9 @@ func newExploreTool(p *Project, eng *Engine, drive driveExploration) *Tool {
 					Type: "array", MaxItems: maxNamedGoals,
 					Description: "Optional. Explore only these goals, by the name the " +
 						"manifest gives each one. Leave it out to explore every declared " +
-						"goal. The goals themselves live in antifailure.yaml and cannot " +
-						"be written from here: this selects among them.",
+						"goal. The goal sentences themselves live in antifailure.yaml and " +
+						"cannot be written from here: this selects among them, and the " +
+						"fields below steer the selected ones.",
 					Items: nameSchema("A goal's declared name, such as \"find-the-refund-page\"."),
 				},
 				"seed": {
@@ -540,6 +554,56 @@ func newExploreTool(p *Project, eng *Engine, drive driveExploration) *Tool {
 						"goal declares, which is how a finding reported earlier is walked " +
 						"again step for step. Every report names the seed that produced " +
 						"it. Leave it out to use the manifest's own seeds.",
+				},
+				"persona": {
+					// The manifest's own pattern for a persona name, so a name
+					// that could never be declared is refused as an argument.
+					Type: "string", MinLength: 1, MaxLength: 40,
+					Pattern: `[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?`,
+					Description: "Optional. Explore as this persona instead of the one each " +
+						"goal names. It must be a persona the manifest declares under " +
+						"personas, such as \"owner\" or \"viewer\"; a name it does not " +
+						"declare is refused and the refusal lists the ones it does. Use it " +
+						"to ask whether a path that works for the goal's persona also works " +
+						"for a less privileged one.",
+				},
+				"start_path": {
+					Type: "string", MinLength: 1, MaxLength: 512,
+					Pattern: `/[^\s#]{0,511}`,
+					Description: "Optional. Begin on this page instead of the goal's " +
+						"start_path. A path on the running environment, beginning with /, " +
+						"such as \"/onboarding\" or \"/settings/billing?tab=plan\"; never a " +
+						"URL, because the environment under test is the only place an " +
+						"exploration may go. Use it to start next to the thing in question " +
+						"rather than spending the budget getting there.",
+				},
+				"viewport": {
+					Type: "string", MinLength: 1, MaxLength: 16,
+					Pattern: `phone|tablet|desktop|[0-9]{3,4}x[0-9]{3,4}`,
+					Description: "Optional. The window to explore in. \"phone\" is 390x844 " +
+						"with a mobile user agent and a touch screen, \"tablet\" is " +
+						"768x1024, \"desktop\" is 1440x900, and WIDTHxHEIGHT such as " +
+						"\"1280x720\" is any size from 320 to 3840 a side. Leave it out for " +
+						"the runner's default window. A layout that hides a control below " +
+						"a breakpoint is found only by asking for the breakpoint.",
+				},
+				"budget": {
+					Type: "string", MinLength: 1, MaxLength: 8,
+					Pattern: `[0-9]{1,4}|[0-9]{1,4}(ms|s|m|h)`,
+					Description: "Optional. The most this run may spend, replacing the " +
+						"goal's budget. A bare number is a step count, such as \"8\"; a " +
+						"number with a unit is a duration, such as \"5m\" or \"90s\", " +
+						"and the run stops at whichever of the goal's steps and that " +
+						"time ends first. Every extra step is another browser action.",
+				},
+				"focus": {
+					Type: "string", MinLength: 1, MaxLength: 500,
+					Description: "Optional. One sentence about what to attend to while " +
+						"wandering, such as \"the plan upgrade and the invoices\". Its " +
+						"words decide which controls are pressed first when several are " +
+						"offered. It does not change the goal and it does not change what " +
+						"counts as reaching it, so it cannot make a run pass; it only " +
+						"changes where the run looks. Recorded on the result.",
 				},
 			},
 		},
@@ -551,27 +615,82 @@ func newExploreTool(p *Project, eng *Engine, drive driveExploration) *Tool {
 			if fault != nil {
 				return nil, fault
 			}
-			seed, _ := args["seed"].(string)
+			opts := env.ExploreOptions{Only: only}
+			opts.Seed, _ = args["seed"].(string)
+			opts.Steer.Persona, _ = args["persona"].(string)
+			opts.Steer.StartPath, _ = args["start_path"].(string)
+			opts.Steer.Viewport, _ = args["viewport"].(string)
+			opts.Steer.Budget, _ = args["budget"].(string)
+			opts.Steer.Focus, _ = args["focus"].(string)
+			// The schema's patterns are the coarse gate. The fine one is
+			// the same parsing the command line and the orchestrator run,
+			// applied here so that a viewport out of bounds or a budget of
+			// zero is refused as an argument now, naming the field, rather
+			// than as a run that failed to start minutes later. The
+			// persona is checked by the orchestrator, which is the only
+			// party that knows the manifest.
+			if fault := steeringFault(opts.Steer); fault != nil {
+				return nil, fault
+			}
 
 			return eng.Submit(call, "explore_for_friction", args,
 				func(ctx context.Context, runID string) (string, *ResultBody, *Fault) {
-					return runExploration(ctx, eng, drive, runID, only, seed)
+					return runExploration(ctx, eng, drive, runID, opts)
 				})
 		},
 	}
 }
 
+// steeringFault checks the steering fields a call can validate without the
+// manifest, and blames the field that is wrong.
+func steeringFault(s explore.Steering) *Fault {
+	if _, err := explore.ParseStartPath(s.StartPath); err != nil {
+		return fieldFault(FaultInvalidArgument, "start_path", "%s", messageOf(err))
+	}
+	if _, err := explore.ParseViewport(s.Viewport); err != nil {
+		return fieldFault(FaultInvalidArgument, "viewport", "%s", messageOf(err))
+	}
+	if _, err := explore.ParseBudget(s.Budget); err != nil {
+		return fieldFault(FaultInvalidArgument, "budget", "%s", messageOf(err))
+	}
+	if _, err := (explore.Steering{Focus: s.Focus}).Resolve(nil); err != nil {
+		return fieldFault(FaultInvalidArgument, "focus", "%s", messageOf(err))
+	}
+	return nil
+}
+
+// messageOf is a coded error's message, without its code and next step.
+//
+// The engine's own prose about a value the caller sent. It repeats nothing the
+// application rendered, so it is safe to quote, and quoting it is what tells a
+// caller which of the five steering fields to fix.
+func messageOf(err error) string {
+	var coded *aferrors.Error
+	if errors.As(err, &coded) {
+		return coded.Message()
+	}
+	return "This field could not be read."
+}
+
 func runExploration(
 	ctx context.Context, eng *Engine, drive driveExploration,
-	runID string, only []string, seed string,
+	runID string, opts env.ExploreOptions,
 ) (string, *ResultBody, *Fault) {
 	if eng.Cancelled(ctx, runID) {
 		return "", nil, faultf(FaultRunNotCancellable, "This run was cancelled before it started.")
 	}
 	eng.Phase(ctx, runID, "sending agents at the declared goals")
 
-	rep, declared, err := drive(ctx, only, seed)
+	rep, declared, err := drive(ctx, opts)
 	if err != nil {
+		// A persona the manifest does not declare is the caller's mistake
+		// and not the environment's, and the message names the personas that
+		// would have worked, which is exactly what the caller needs next. It
+		// is the one drive error whose text is repeated, because every word
+		// of it is the engine's and the manifest's, never the application's.
+		if errors.Is(err, aferrors.Coded(aferrors.AFAGT022)) {
+			return "", nil, fieldFault(FaultInvalidArgument, "persona", "%s", messageOf(err))
+		}
 		return "", nil, &Fault{
 			Code: FaultSafetyUnavailable,
 			Detail: "The exploration could not be run, so nothing was observed. The usual " +
@@ -624,8 +743,16 @@ type oneExplorationDoc struct {
 	Name    string `json:"goal"`
 	Verdict string `json:"verdict"`
 	// Reached says whether the goal's own words ever appeared on a page.
-	Reached      bool             `json:"goal_reached"`
-	Seed         string           `json:"seed"`
+	Reached bool   `json:"goal_reached"`
+	Seed    string `json:"seed"`
+	// Persona, StartPath and Viewport are what the run was actually pointed
+	// at, so a caller that steered can see the steering took, and one that
+	// did not can see the manifest's defaults. A finding on a phone is not
+	// the same finding on a desktop.
+	Persona      string           `json:"persona,omitempty"`
+	StartPath    string           `json:"start_path,omitempty"`
+	Viewport     string           `json:"viewport,omitempty"`
+	Focus        string           `json:"focus,omitempty"`
 	PagesVisited int              `json:"pages_visited"`
 	Moves        int              `json:"moves"`
 	DurationMs   int64            `json:"duration_ms"`
@@ -683,6 +810,12 @@ func describeExploration(rep *explore.Report, declared []string) *explorationDoc
 			Name:    neutralize(x.Name, 128),
 			Verdict: knownVerdict(x.Outcome.Verdict),
 			Reached: x.Reached, Seed: neutralize(x.Seed, 64),
+			// The persona and the focus are the manifest's and the caller's
+			// own words. The start path and the viewport are echoed by the
+			// runner from what it was given, and bounded anyway, because a
+			// runner is a boundary.
+			Persona: neutralize(x.Persona, 40), StartPath: neutralize(x.StartPath, 300),
+			Viewport: neutralize(x.Viewport.String(), 32), Focus: neutralize(x.Focus, 500),
 			PagesVisited: len(x.Visited), Moves: len(x.Journey),
 			DurationMs: x.DurationMs, HasTrace: x.Evidence.Trace != "",
 		}
@@ -835,19 +968,21 @@ func (f *orchestratorFactory) driveWorkflows(
 // judged against it: results without the list cannot tell a goal that found
 // nothing from a goal that never ran.
 func (f *orchestratorFactory) driveExploration(
-	ctx context.Context, only []string, seed string,
+	ctx context.Context, opts env.ExploreOptions,
 ) (*explore.Report, []string, error) {
 	o, err := f.build()
 	if err != nil {
 		return nil, nil, err
 	}
-	rep, err := o.Explore(ctx, env.ExploreOptions{Only: only, Seed: seed})
+	// Only the fields a call may set are copied, so that Headed and
+	// RunnerPath cannot arrive here whatever the caller sent.
+	rep, err := o.Explore(ctx, env.ExploreOptions{Only: opts.Only, Seed: opts.Seed, Steer: opts.Steer})
 	if err != nil {
 		return nil, nil, err
 	}
 	var declared []string
 	for _, g := range o.Goals() {
-		if len(only) > 0 && !contains(only, g.Name) {
+		if len(opts.Only) > 0 && !contains(opts.Only, g.Name) {
 			continue
 		}
 		declared = append(declared, g.Name)
