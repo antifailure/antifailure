@@ -907,7 +907,7 @@ describe('the terms describe guards that are really in the engine', () => {
     )
     assert.match(
       source,
-      /func RemoveContainer[\s\S]{0,600}IsOurs\(insp\.Config\.Labels\)/,
+      /func RemoveContainer[\s\S]{0,600}IsOurs\(insp\.Container\.Config\.Labels\)/,
       'RemoveContainer no longer checks ownership before removing, so the published claim that ' +
         'it refuses a container it does not own is false.',
     )
