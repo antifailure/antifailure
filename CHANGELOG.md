@@ -131,6 +131,13 @@ blocked, never as a pass and never as a failure of the change, with its own code
 means only that a workflow failed; it used to tell every failed workflow that it
 had exhausted its budget. If a flow is genuinely that long, raise its budget.
 
+**Docker Engine 19.03 is now the oldest daemon the engine will use.** The engine
+moved to the Docker client Moby now publishes, which negotiates no lower than
+Docker API 1.40, where the old client fell back as far as 1.24. `af doctor` now
+reads the daemon's API version and fails its Docker check below that floor,
+naming the version it found, instead of leaving an older daemon to fail partway
+through an environment.
+
 ### Enterprise: what was sold now exists
 
 **Single sign-on and directory provisioning could not be reached by any
@@ -207,6 +214,17 @@ rule for `api.stripe.com:443` in allow mode reached a denied `api.stripe.com`,
 and a `*.stripe.com` entry on the list missed it as well. The list now compares
 hosts the way the engine reaches them: lowercased, with the port and any
 trailing dot removed.
+
+**Every Dependabot alert on this repository matched a module the engine no
+longer uses.** All eight were four Moby advisories counted twice, once for
+`engine/go.mod` and once for `ee/engine/go.mod`, against
+`github.com/docker/docker`, a path with no fix to move to: it stops at v28.5.2,
+three of the four cover everything through that version, and the Go
+vulnerability database records no fixed version for it. The engine now uses
+`github.com/moby/moby/client` and `github.com/moby/moby/api`, which no advisory
+names. All four advisories are bugs in `dockerd` itself, so this changes what
+the engine is built from and not the daemon you run, and keeping that daemon
+upgraded is still yours to do.
 
 **A wildcard allow rule reached somebody's live automation with a clean ALLOW.**
 Every place a rule is explained now says how far a rule naming no single host
@@ -322,7 +340,7 @@ check holding the detector's providers to the sidecar's handlers (#359).
 
 **Changed.** The cloud credential signers moved into one package (#304). The
 copy on write conformance verdict gained `UNPROVEN` (#343). This repository's own
-manifest rehearses the pages a customer crosses on the first day (#389). Four
+manifest rehearses the pages a customer crosses on the first day (#389). The engine's Docker client, which now needs Docker Engine 19.03 or later (#391). Four
 legal pages were removed from the site, in a commit that carried no pull request number.
 
 **Fixed.** The GitHub Action failing every pull request check at its dispatch step
@@ -379,7 +397,7 @@ manifest (#334). A DNS firewall rule group that blocked nothing (#335). Thirteen
 container images named by a moving tag (#338). The credential gate reporting a
 tree it had not read as clean (#341). The sealing key that could not be rotated
 (#384). An air gapped installation pulling emulator images from an external
-registry (#306).
+registry (#306). Eight Dependabot alerts on a Docker module with no fixed version (#391).
 
 <!-- relnotes:end -->
 
