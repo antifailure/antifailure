@@ -548,13 +548,19 @@ stance_text() {
 }
 
 every_mutation_has_a_stance() {
-  local operation tail undeclared=""
+  local operation tail undeclared="" stance
+  # Read the whole header before matching. `stance_text | grep -q` under
+  # pipefail is a race: grep leaves at its first match, and once the header
+  # outgrew one 4096 byte write, sed died of SIGPIPE on its second write and a
+  # declared operation read as undeclared. It went red on Linux and green on
+  # this check's own pull request, from the same source.
+  stance="$(stance_text)"
   while read -r operation; do
     [ -z "$operation" ] && continue
     # The last two words, which is how the header names an operation: `job
     # start`, `traffic set`, `revision deactivate`, `containerapp update`.
     tail="$(printf '%s' "$operation" | awk '{ print $(NF - 1), $NF }')"
-    if ! stance_text | grep -Fq "$tail"; then
+    if [[ "$stance" != *"$tail"* ]]; then
       undeclared="$undeclared $tail"
     fi
   done < <(mutating_call_sites | sort -u)
