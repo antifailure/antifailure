@@ -284,8 +284,11 @@ func openTerminal(t *testing.T) (master, slave *os.File) {
 
 	require.NoError(t, unix.IoctlSetInt(fd, unix.TIOCPTYGRANT, 0), "grantpt")
 	require.NoError(t, unix.IoctlSetInt(fd, unix.TIOCPTYUNLK, 0), "unlockpt")
+	// x/sys has no darwin wrapper for an ioctl that fills a buffer, and its raw
+	// SYS_IOCTL is deprecated there, so this goes through the standard library's
+	// syscall package, which routes the call through libSystem on darwin.
 	var name [128]byte
-	if _, _, errno := unix.Syscall(unix.SYS_IOCTL, uintptr(fd), uintptr(unix.TIOCPTYGNAME),
+	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), uintptr(unix.TIOCPTYGNAME),
 		uintptr(unsafe.Pointer(&name[0]))); errno != 0 {
 		t.Fatalf("ptsname: %v", errno)
 	}
