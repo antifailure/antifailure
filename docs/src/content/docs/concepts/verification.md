@@ -176,7 +176,12 @@ With the Neon provider it lives in the branch itself:
 SELECT version, rules_hash, created_at, attestation FROM _antifailure.golden;
 ```
 
-It is signed so that "this data was scanned" is a claim you can check rather
-than one you have to take on trust.
+It is signed so that an altered copy can be told from the original.
+`af fidelity` reads the stored attestation back in a process that did not sign
+it and checks the signature before repeating what it says. What that proves is
+that the document was not changed after it was signed. It does not prove who
+signed it, because the verifying key is generated for each signature and
+travels inside the document, so a machine that trusts an attestation is
+trusting whoever was able to write it.
 
 Related: [masking](/docs/concepts/masking), [goldens](/docs/concepts/goldens).

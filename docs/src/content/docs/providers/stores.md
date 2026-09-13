@@ -20,10 +20,23 @@ database:
     storage_url: $AF_GOLDEN_STORE_URL
 ```
 
-The attestation travels beside the dump and is checked before the dump is used.
-That ordering is the point: a dump on its own is a database somebody could have
-put anything in, and the signed statement of what the verification scan found
-is what makes it a golden rather than a file.
+The attestation travels beside the dump and is read before the dump is used. It
+names the project the golden was made for, and a version made for another
+project is refused before any of it is restored. That check is against an
+accidental collision in a bucket several projects publish to. It is not a check
+on who wrote the object: the pull does not check the attestation's signature,
+and a signature would not answer that question, because the verifying key is
+generated for each signature and travels inside the document. It proves the
+document was not changed after it was signed, and nothing about who signed it.
+
+**Anyone who can write to a golden store is trusted by every machine that pulls
+from it.** What stops a pulled golden holding data nobody checked is the
+verification scan, which runs again on the machine that pulled it, against the
+database that actually arrived. What decides who may publish at all is the
+store's own access control, so the store credentials and the bucket policy are
+the trust boundary. A store takes one credential and the engine does not
+distinguish reading from writing, so restricting a machine that only pulls to
+read access is done in the store's own policy rather than here.
 
 ## What ships
 

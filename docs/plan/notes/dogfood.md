@@ -468,10 +468,11 @@ nothing outside a test, so the section that tells a reviewer the data was
 proved masked was unreachable. That is the product's central promise and it was
 a field nobody filled in. `af ci` ran no insights either, although it is the
 command whose entire purpose is the pull request check. Fixed: `af ci` reads
-the golden's stored attestation, checks the signature (this is a different
-process from the one that signed it, which is the whole reason the signature
-exists) and renders the result, plus a new insights section that distinguishes
-"looked and found nothing" from "could not look".
+the golden's stored attestation and checks the signature, which proves the
+document was not changed after it was signed and not who signed it, since the
+key is generated per signature and travels inside the document. It renders the
+result, plus a new insights section that distinguishes "looked and found
+nothing" from "could not look".
 
 ### Configuration that is read by nothing
 

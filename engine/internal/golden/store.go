@@ -17,10 +17,13 @@ import (
 // is a fleet that reads production once per runner. One machine refreshes and
 // publishes; the rest pull what it published.
 //
-// The attestation travels beside the dump and is checked before the dump is
-// used. That ordering is the whole point: a dump on its own is a database
-// somebody could have put anything in, and the signed statement of what the
-// verification scan found is what makes it a golden rather than a file.
+// The attestation travels beside the dump and is read before the dump is used:
+// it says which project the golden was made for, and a version made for another
+// project is refused. That check is against an accidental collision in a shared
+// bucket rather than against whoever wrote the object, and the pull does not
+// check the attestation's signature. What makes a pulled dump a golden rather
+// than a file is the verification scan running again on the database that
+// arrived, so anyone who can write to the store is trusted that far.
 //
 // The interface itself lives in engine/pkg/extension, and these are aliases
 // rather than a second declaration.

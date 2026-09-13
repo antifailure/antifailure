@@ -232,11 +232,20 @@ func (o *Orchestrator) pullWithin(ctx context.Context, s *session, version strin
 	// would branch it as its own.
 	//
 	// The attestation is where the claim lives because it is the only part of
-	// a published golden that travels with it and is signed. An older
-	// attestation carries none, and one is refused rather than assumed to be
-	// ours: this refusal costs a refresh and naming the version explicitly
-	// still works, where the other way round costs somebody a preview built on
-	// data that was never theirs.
+	// a published golden that travels with it. An older attestation carries
+	// none, and one is refused rather than assumed to be ours: this refusal
+	// costs a refresh and naming the version explicitly still works, where the
+	// other way round costs somebody a preview built on data that was never
+	// theirs.
+	//
+	// What this check is, exactly: the provenance field is read out of the
+	// attestation and compared. The signature is not checked here, and checking
+	// it would not turn this into an authentication, because verify.Sign
+	// generates a key per signature and puts the public half inside the
+	// document, so anyone who can write an attestation into the store can sign
+	// a matching one. So this stops the accidental collision it was written
+	// for, and write access to the store is the trust boundary. What protects
+	// the data itself is Verify below, re-running the scan on what arrived.
 	if attested := attestedProvenance(attestation); attested != prov.digest() {
 		return nil, aferrors.Coded(aferrors.AFDB015,
 			"version", version, "store", store.Name())
