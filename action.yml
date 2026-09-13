@@ -82,7 +82,11 @@ runs:
         AF_RUNNER_INPUT: ${{ inputs.runner }}
       run: |
         set -euo pipefail
-        dispatch="${AF_DISPATCH:-{}}"
+        # The default is on its own line. In `${AF_DISPATCH:-{}}` the expansion
+        # ends at the first closing brace, so a shell reads the default `{` and
+        # then a literal `}`, and every dispatch that was not empty gained a
+        # brace: the `{}` a pull request sends reached jq as `{}}`.
+        dispatch="${AF_DISPATCH:-}"
         if [ "$dispatch" = "null" ] || [ -z "$dispatch" ]; then dispatch='{}'; fi
         pick() { printf '%s' "$dispatch" | jq -r --arg k "$1" '.[$k] // empty'; }
         command=$(pick command)
