@@ -1,12 +1,12 @@
 {
   "counted_through": {
-    "console": "2026-09-12T23:18:27Z",
-    "control-plane-api": "2026-09-12T23:18:27Z",
-    "docs": "2026-09-12T23:18:27Z",
-    "installer": "2026-09-12T23:18:28Z",
-    "site-api": "2026-09-12T23:18:29Z",
-    "staging": "2026-09-12T23:18:30Z",
-    "website": "2026-09-12T23:18:27Z"
+    "console": "2026-09-13T00:10:25Z",
+    "control-plane-api": "2026-09-13T00:10:25Z",
+    "docs": "2026-09-13T00:10:26Z",
+    "installer": "2026-09-13T00:10:26Z",
+    "site-api": "2026-09-13T00:10:26Z",
+    "staging": "2026-09-13T00:10:26Z",
+    "website": "2026-09-13T00:10:25Z"
   },
   "days": [
     {
@@ -76,6 +76,12 @@
       "ok": 19
     },
     {
+      "id": "console",
+      "day": "2026-09-13",
+      "checks": 1,
+      "ok": 1
+    },
+    {
       "id": "control-plane-api",
       "day": "2026-09-02",
       "checks": 6,
@@ -142,6 +148,12 @@
       "ok": 19
     },
     {
+      "id": "control-plane-api",
+      "day": "2026-09-13",
+      "checks": 1,
+      "ok": 1
+    },
+    {
       "id": "docs",
       "day": "2026-09-02",
       "checks": 6,
@@ -208,6 +220,12 @@
       "ok": 19
     },
     {
+      "id": "docs",
+      "day": "2026-09-13",
+      "checks": 1,
+      "ok": 1
+    },
+    {
       "id": "installer",
       "day": "2026-09-02",
       "checks": 6,
@@ -272,6 +290,12 @@
       "day": "2026-09-12",
       "checks": 19,
       "ok": 19
+    },
+    {
+      "id": "installer",
+      "day": "2026-09-13",
+      "checks": 1,
+      "ok": 1
     },
     {
       "id": "site-api",
@@ -338,6 +362,12 @@
       "day": "2026-09-12",
       "checks": 19,
       "ok": 19
+    },
+    {
+      "id": "site-api",
+      "day": "2026-09-13",
+      "checks": 1,
+      "ok": 1
     },
     {
       "id": "staging",
@@ -418,6 +448,12 @@
       "ok": 19
     },
     {
+      "id": "staging",
+      "day": "2026-09-13",
+      "checks": 1,
+      "ok": 1
+    },
+    {
       "id": "website",
       "day": "2026-09-02",
       "checks": 6,
@@ -482,6 +518,12 @@
       "day": "2026-09-12",
       "checks": 19,
       "ok": 19
+    },
+    {
+      "id": "website",
+      "day": "2026-09-13",
+      "checks": 1,
+      "ok": 1
     }
   ]
 }
