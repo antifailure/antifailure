@@ -16,9 +16,11 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"unicode"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/antifailure/antifailure/ee/engine/db/managed/tagvalue"
 	"github.com/antifailure/antifailure/engine/pkg/secret"
 )
 
@@ -79,7 +81,7 @@ func TestBranchNameRefusesAnEmptyEnvironment(t *testing.T) {
 }
 
 func TestChunkAttestationRefusesRatherThanTruncating(t *testing.T) {
-	tooLong := strings.Repeat("x", tagValueLimit*attestationChunks+1)
+	tooLong := strings.Repeat("x", tagvalue.Limit*attestationChunks+1)
 	_, err := chunkAttestation(tooLong)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "refused")
@@ -99,10 +101,39 @@ func TestChunkAndJoinAttestationRoundTrip(t *testing.T) {
 // is not, and the attestation is the record of what was scanned.
 func TestJoinAttestationStopsAtAGap(t *testing.T) {
 	tags := map[string]string{
-		tagAttestation + ".1": "first",
-		tagAttestation + ".3": "third",
+		tagAttestation + ".1": tagvalue.Encode("first"),
+		tagAttestation + ".3": tagvalue.Encode("third"),
 	}
 	require.Equal(t, "first", joinAttestation(tags))
+}
+
+// Every value the provider writes into a tag is inside the characters AWS
+// allows, for an attestation and a provenance full of what it does not.
+func TestEveryFreeTextTagValueIsInsideAWSsCharacterSet(t *testing.T) {
+	allowed := func(s string) bool {
+		for _, r := range s {
+			if !unicode.IsLetter(r) && !unicode.IsDigit(r) && !unicode.IsSpace(r) && !strings.ContainsRune("_.:/=+-@", r) {
+				return false
+			}
+		}
+		return true
+	}
+	attestation := `{"scanner": "conformance", "findings": 0, "tables": ["customers", "orders"], "note": "a, b; c!"}` +
+		strings.Repeat("?", 700)
+	require.False(t, allowed(attestation), "the attestation must contain refused characters, or this checks nothing")
+	chunks, err := chunkAttestation(attestation)
+	require.NoError(t, err)
+	for key, value := range chunks {
+		require.Truef(t, allowed(value), "%s holds a character AWS refuses: %q", key, value)
+	}
+	require.True(t, allowed(tagvalue.Encode("acme/production, eu (golden) #1")))
+}
+
+// Chunks that do not decode are not an attestation, and the reason says so.
+func TestAnAttestationThatDoesNotDecodeIsNotAnAttestation(t *testing.T) {
+	attestation, reason := readAttestation(map[string]string{tagAttestation + ".1": "{not base64, at all}"})
+	require.Empty(t, attestation)
+	require.Contains(t, reason, "do not decode")
 }
 
 func TestJoinAttestationOfNothingIsEmpty(t *testing.T) {

@@ -111,6 +111,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the pgx driver
 
 	"github.com/antifailure/antifailure/ee/engine/cloudauth"
+	"github.com/antifailure/antifailure/ee/engine/db/managed/tagvalue"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 	"github.com/antifailure/antifailure/engine/pkg/secret"
 )
@@ -167,15 +168,6 @@ const (
 // identifierLimit is what RDS allows in a DB instance or DB snapshot
 // identifier.
 const identifierLimit = 63
-
-// tagValueLimit is the number of characters AWS allows in one tag value.
-//
-// The attestation is the only thing this provider records that can exceed it,
-// so it is split across numbered tags. The split is bounded and the boundary
-// REFUSES rather than truncating: a golden whose attestation was silently cut
-// in half would still read as verified, and the attestation is the record of
-// what was scanned.
-const tagValueLimit = 256
 
 // attestationChunks is how many tags the attestation may occupy. Fifty tags
 // per resource is the AWS limit and the rest of this provider's metadata takes
@@ -706,8 +698,10 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 	}
 
 	tags := withKind(base, kindGolden)
-	tags[tagRules] = spec.RulesHash
-	tags[tagProvenance] = spec.Provenance
+	// Encoded, always: both are free text a manifest supplies, and a tag value
+	// refuses most punctuation. See tagcodec.go.
+	tags[tagRules] = tagvalue.Encode(spec.RulesHash)
+	tags[tagProvenance] = tagvalue.Encode(spec.Provenance)
 	chunks, err := chunkAttestation(attestation)
 	if err != nil {
 		return provider.GoldenVersion{}, err
@@ -819,8 +813,8 @@ func (p *Provider) ListGoldens(ctx context.Context) ([]provider.GoldenVersion, e
 			ID:         tags[tagVersion],
 			CreatedAt:  parseTime(tags[tagCreated]),
 			SizeBytes:  s.AllocatedStorage * (1 << 30),
-			RulesHash:  tags[tagRules],
-			Provenance: tags[tagProvenance],
+			RulesHash:  decodedTag(tags[tagRules]),
+			Provenance: decodedTag(tags[tagProvenance]),
 			// Recomputed from the attestation rather than from a flag, for the
 			// reason every provider here records: a refresh with no verifier
 			// publishes honestly with Verified false, and a provider that
@@ -994,14 +988,17 @@ func (p *Provider) Branch(ctx context.Context, version, envID string) (provider.
 			"there is no golden version %s in this account and region. %s",
 			version, p.describeGoldens(ctx)))
 	}
-	if joinAttestation(tagMap(snapshot.Tags)) == "" || !p.preparedSnapshot(snapshot) {
+	if attestation, reason := readAttestation(tagMap(snapshot.Tags)); attestation == "" || !p.preparedSnapshot(snapshot) {
+		if attestation != "" {
+			reason = "its receipt was not written with this provider's key"
+		}
 		// The product's central promise, enforced here rather than in a
 		// checklist. A golden with no attestation, or with a receipt this key
 		// did not write, was never scanned by this provider, and a preview
 		// environment restored from one is a copy of production nobody checked.
 		return provider.Branch{}, coded(codeUnverifiedGolden, fmt.Sprintf(
 			"the golden %s carries no verification attestation this provider published, so "+
-				"nothing has scanned it for unmasked data and it cannot be branched", version))
+				"nothing has scanned it for unmasked data and it cannot be branched: %s", version, reason))
 	}
 
 	if p.maxBranches > 0 {
@@ -1599,26 +1596,18 @@ func withKind(base map[string]string, kind string) map[string]string {
 // cut in half would still read as verified, and the attestation is the record
 // of what was scanned; half of one is not a smaller record, it is a document
 // that no longer parses.
+//
+// The encoding, the split into tag sized pieces and the bound are tagvalue's,
+// shared with the Aurora provider; the bound is on the encoded length, which is
+// what the tags hold. What is this provider's is the key spelling.
 func chunkAttestation(attestation string) (map[string]string, error) {
-	out := map[string]string{}
-	if attestation == "" {
-		return out, nil
+	chunks, err := tagvalue.Chunk("rds", attestation, attestationChunks)
+	if err != nil {
+		return nil, err
 	}
-	rest := attestation
-	for i := 1; rest != ""; i++ {
-		if i > attestationChunks {
-			return nil, fmt.Errorf(
-				"the verification attestation is %d characters and does not fit in the %d "+
-					"tags of %d characters this provider reserves for it. It is refused "+
-					"rather than truncated: half an attestation still reads as verified",
-				len(attestation), attestationChunks, tagValueLimit)
-		}
-		n := tagValueLimit
-		if len(rest) < n {
-			n = len(rest)
-		}
-		out[tagAttestation+"."+strconv.Itoa(i)] = rest[:n]
-		rest = rest[n:]
+	out := make(map[string]string, len(chunks))
+	for i, chunk := range chunks {
+		out[tagAttestation+"."+strconv.Itoa(i+1)] = chunk
 	}
 	return out, nil
 }
@@ -1628,16 +1617,12 @@ func chunkAttestation(attestation string) (map[string]string, error) {
 // In numbered order, and it stops at the first missing chunk rather than
 // skipping it. A gap means the tags were not all written, and concatenating
 // across one would produce a document that looks whole and is not.
+//
+// It answers the decoded attestation, or the empty string when there is none or
+// the chunks do not decode, which is what makes such a golden read unverified.
 func joinAttestation(tags map[string]string) string {
-	var b strings.Builder
-	for i := 1; i <= attestationChunks; i++ {
-		chunk, ok := tags[tagAttestation+"."+strconv.Itoa(i)]
-		if !ok {
-			break
-		}
-		b.WriteString(chunk)
-	}
-	return b.String()
+	attestation, _ := readAttestation(tags)
+	return attestation
 }
 
 // branchName derives an RDS instance identifier from an environment

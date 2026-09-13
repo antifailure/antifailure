@@ -61,6 +61,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the pgx driver
 
 	"github.com/antifailure/antifailure/ee/engine/cloudauth"
+	"github.com/antifailure/antifailure/ee/engine/db/managed/tagvalue"
 )
 
 // Fault is one way this control plane can be broken on purpose.
@@ -637,6 +638,15 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	if version := body.Get("Version"); version != "2014-10-31" {
 		writeFault(w, http.StatusBadRequest, "InvalidParameterValue",
 			"the RDS query API version is 2014-10-31 and this request carried "+strconv.Quote(version))
+		return
+	}
+	// Tag values AWS refuses, refused here in AWS's own words, whichever action
+	// carries them. A live run against real RDS had its golden snapshot refused
+	// this way after the fake had accepted every value, so the fake's silence
+	// was the only thing between the provider and a publish that could never
+	// work.
+	if !tagValuesAllowed(body) {
+		writeFault(w, http.StatusBadRequest, "InvalidParameterValue", tagvalue.Refusal)
 		return
 	}
 
@@ -1524,6 +1534,21 @@ func (s *Server) tagsToRecord(form url.Values) map[string]string {
 		return map[string]string{}
 	}
 	return tagsFrom(form)
+}
+
+// tagValuesAllowed reports whether every Tags.Tag.N.Value in a request is one
+// AWS accepts. The check and AWS's refusal are tagvalue's, the same ones the
+// Aurora fake uses.
+func tagValuesAllowed(form url.Values) bool {
+	for i := 1; ; i++ {
+		prefix := "Tags.Tag." + strconv.Itoa(i)
+		if form.Get(prefix+".Key") == "" {
+			return true
+		}
+		if !tagvalue.Valid(form.Get(prefix + ".Value")) {
+			return false
+		}
+	}
 }
 
 // tagsFrom reads the query API's Tags.Tag.N form back into a map.
