@@ -3,6 +3,14 @@ name: Kubernetes conformance proof
 on:
   workflow_dispatch:
   push:
+    # Branches only. GitHub does not evaluate paths for a tag push ("Path
+    # filters are not evaluated for pushes of tags"), so with paths alone every
+    # tag started this 115 minute run whatever its commit changed. Three archive
+    # tags did on 2026-09-13 (runs 34765714888, 34766744479, 34766749195) while
+    # main's CI and cd queued behind them. Naming branches excludes tags, and a
+    # branch push still has to touch a path below. tags-ignore alone would be
+    # wrong: defining only it stops branch pushes as well.
+    branches: ['**']
     paths:
       - '.github/workflows/k8s-conformance.yml'
       - 'engine/internal/runtime/k8s/**'

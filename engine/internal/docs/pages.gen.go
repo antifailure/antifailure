@@ -27341,12 +27341,20 @@ learn to skip, which is why this paragraph exists rather than a rule saying
 
 **1b. Every branch that landed reached CI before it landed.**
 
-Pushing a ` + "`" + `w-*` + "`" + ` or ` + "`" + `prep-*` + "`" + ` branch to this repository runs NOTHING. ` + "`" + `ci.yml` + "`" + `
-triggers on ` + "`" + `push` + "`" + ` to ` + "`" + `main` + "`" + ` and on ` + "`" + `pull_request` + "`" + `, and no other branch triggers
-any workflow. A branch that was merged without a pull request has therefore
-never been through CI, and the tag's commit is the first run of it. Open a draft
-pull request per branch before landing, so that its first CI run is not on
-` + "`" + `main` + "`" + `.
+Pushing a ` + "`" + `w-*` + "`" + ` or ` + "`" + `prep-*` + "`" + ` branch to this repository does not run CI. ` + "`" + `ci.yml` + "`" + `,
+` + "`" + `codeql.yml` + "`" + ` and ` + "`" + `security.yml` + "`" + ` trigger on ` + "`" + `push` + "`" + ` to ` + "`" + `main` + "`" + ` and on
+` + "`" + `pull_request` + "`" + `. Every other workflow needs ` + "`" + `main` + "`" + `, a ` + "`" + `v*` + "`" + ` tag, a pull request, a
+schedule, a manual dispatch, or another workflow calling or following it, with
+one exception: ` + "`" + `k8s-conformance.yml` + "`" + ` runs on a push to any branch whose changes
+touch its paths, and posts a check named ` + "`" + `conformance` + "`" + ` on that commit. It is the
+Kubernetes proof, not CI.
+
+A branch that was merged without a pull request has therefore never been
+through CI, and the tag's commit is the first run of it. Open a draft pull
+request per branch before landing, so that its first CI run is not on ` + "`" + `main` + "`" + `.
+
+A tag other than ` + "`" + `v*` + "`" + ` starts no workflow. Archive a branch head under
+` + "`" + `refs/keep/` + "`" + ` rather than as a tag, which keeps it out of the tag list as well.
 
 **2. The ` + "`" + `main` + "`" + ` deploy of that commit has finished.**
 
