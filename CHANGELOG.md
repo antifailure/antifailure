@@ -243,9 +243,14 @@ which is a community project and is labelled as one. gRPC works through the
 sidecar, which it did not before in any form.
 
 **A first `af up` could sit silent for twenty five minutes** on a base image pull
-nobody could see. The egress sidecar is now published with each release and
-fetched before anything is compiled, and a build that does compile shows its
-progress and is bounded.
+nobody could see. `af up` now tries the sidecar image a release publishes at
+`ghcr.io/antifailure/af-proxy` before it compiles anything, and gives that fetch
+two minutes. When the fetch fails, for any reason, including a package this
+machine cannot read without logging in, it compiles the sidecar as it always
+did, but now shows each step as it happens, with a line every fifteen seconds,
+and gives the compile ten minutes. If both fail, `af up` stops with `AF-RUN-048`
+naming what went wrong with each. `AF_PROXY_IMAGE_TIMEOUT` raises both limits,
+and `AF_PROXY_IMAGE` names your own copy of the image, with no compile behind it.
 
 **A store declared `empty`, `derived` or `topics_only` did nothing.** Each is now
 an outcome: an empty store said out loud, a rebuild command run to completion, or
