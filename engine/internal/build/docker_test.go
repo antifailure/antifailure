@@ -206,10 +206,10 @@ func refusedConnectionError() net.Error {
 
 func dockerConnectionFailure(t *testing.T) error {
 	t.Helper()
-	cli, err := dockerclient.NewClientWithOpts(
+	cli, err := dockerclient.New(
 		dockerclient.WithHost("http://docker.invalid"),
 		dockerclient.WithHTTPClient(&http.Client{Transport: refusedRoundTripper{}}),
-		dockerclient.WithVersion("1.48"),
+		dockerclient.WithAPIVersion("1.48"),
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = cli.Close() })
@@ -409,10 +409,10 @@ func TestDockerBuilder_AnImmediateHTTPRefusalHasNoBuildLog(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	cli, err := dockerclient.NewClientWithOpts(
+	cli, err := dockerclient.New(
 		dockerclient.WithHost(srv.URL),
 		dockerclient.WithHTTPClient(srv.Client()),
-		dockerclient.WithVersion("1.48"),
+		dockerclient.WithAPIVersion("1.48"),
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = cli.Close() })

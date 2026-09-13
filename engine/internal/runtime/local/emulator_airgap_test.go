@@ -54,7 +54,7 @@ func TestEmulatorImagePullHonoursTheAirGapAndTheDaemonsAnswer(t *testing.T) {
 				_, _ = w.Write([]byte(`{"Id":"sha256:fixture"}`))
 			}))
 			defer daemon.Close()
-			cli, err := client.NewClientWithOpts(client.WithHost(daemon.URL), client.WithVersion("1.44"))
+			cli, err := client.New(client.WithHost(daemon.URL), client.WithAPIVersion("1.44"))
 			require.NoError(t, err)
 			defer func() { _ = cli.Close() }()
 			r := &Runtime{cli: cli}

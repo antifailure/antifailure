@@ -175,7 +175,7 @@ func EnvFilter(envID string) client.Filters { return Filter(LabelEnv, envID) }
 // Docker daemon" with no next step is the single most common first failure a
 // new user hits, and the next step depends on which endpoint was tried.
 func Client() (*client.Client, error) {
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	cli, err := client.New(client.FromEnv)
 	if err != nil {
 		return nil, aferrors.Wrap(err, aferrors.AFRUN002, "endpoint", Host())
 	}

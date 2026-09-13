@@ -55,10 +55,10 @@ func newFakeDaemon(t *testing.T) (*fakeDaemon, *dockerclient.Client) {
 	d := &fakeDaemon{t: t, held: map[string]bool{}, live: map[string]string{}}
 	srv := httptest.NewServer(http.HandlerFunc(d.serve))
 	t.Cleanup(srv.Close)
-	cli, err := dockerclient.NewClientWithOpts(
+	cli, err := dockerclient.New(
 		dockerclient.WithHost("tcp://"+srv.Listener.Addr().String()),
 		dockerclient.WithHTTPClient(srv.Client()),
-		dockerclient.WithVersion("1.47"),
+		dockerclient.WithAPIVersion("1.47"),
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = cli.Close() })
