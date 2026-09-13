@@ -3,13 +3,22 @@
 package secrets_test
 
 import (
+	"bytes"
+	"encoding/hex"
 	"errors"
+	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
+	"time"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 )
@@ -58,22 +67,82 @@ func TestSystemKeyringRoundTrips(t *testing.T) {
 	require.NoError(t, ring.Delete(service, name))
 }
 
-func TestAValueWithAwkwardCharactersSurvives(t *testing.T) {
+// Every value comes back byte for byte.
+//
+// Two defects lived here and neither made a sound. The prompt route this
+// replaced read the value through readpassphrase, which keeps 128 bytes and
+// drops the rest with exit status 0, so an OpenAI project key and every
+// credential af login writes were stored cut short and read back as something
+// else. And the read used -w, which prints a value holding any byte that is not
+// printable ASCII as bare hex, indistinguishable from a value that is hex text,
+// so a key with a tab or an accent in it came back as its own encoding.
+//
+// The cases are the bytes most likely to be mangled somewhere between a Go
+// string, a command stream parsed by security, and a listing printed by it.
+func TestEveryValueSurvivesTheRoundTripByteForByte(t *testing.T) {
 	if _, err := exec.LookPath("security"); err != nil {
 		t.Skip("skipped: the security command is not on the path")
 	}
 	ring := secrets.NewSystemKeyring()
-	const service = "antifailure-test"
-	const name = "awkward"
+	const service = "antifailure-test-bytes"
+
+	for name, value := range map[string]string{
+		"a connection string":           `postgres://u:p@ss w0rd!"'$&@host:5432/db?opt=a b`,
+		"a PEM block with line breaks":  "-----BEGIN KEY-----\nabc\ndef\n-----END KEY-----\n",
+		"a carriage return":             "one\r\ntwo",
+		"a tab":                         "tab\there",
+		"multibyte characters":          "unicodé ✓ 鍵",
+		"a backslash":                   `C:\keys\n`,
+		"double and single quotes":      `he said "it's" fine`,
+		"a leading dash that is a flag": "-U",
+		"another flag":                  "-w",
+		"text that is valid hex":        "deadbeef",
+		"text shaped like the listing":  `0x41  "A"`,
+		"spaces at both ends":           "  padded  ",
+		"a NUL byte":                    "before\x00after",
+		"the empty string":              "",
+		"128 bytes, the old ceiling":    strings.Repeat("a", 128),
+		"129 bytes, one past it":        strings.Repeat("b", 129),
+		"an OpenAI project key's size":  "sk-proj-" + strings.Repeat("Xy9_", 40),
+		"a kilobyte":                    strings.Repeat("0123456789abcdef", 64),
+		"one byte":                      "x",
+		"127 bytes":                     strings.Repeat("c", 127),
+		"2000 bytes":                    strings.Repeat("z", 2000),
+		"bytes that are not UTF-8":      "\xff\xfe\x80 not utf-8 \xc3",
+	} {
+		t.Run(name, func(t *testing.T) {
+			account := "bytes-" + strings.ReplaceAll(name, " ", "-")
+			t.Cleanup(func() { _ = ring.Delete(service, account) })
+
+			require.NoError(t, ring.Set(service, account, value))
+			got, err := ring.Get(service, account)
+			require.NoError(t, err)
+			require.Equal(t, len(value), len(got), "the stored value has a different length")
+			require.Equal(t, value, got)
+		})
+	}
+}
+
+// The entry's own names go through the command stream too, and a name holding
+// the characters that stream quotes with has to name the same entry the
+// argv based Get and Delete name.
+func TestAnEntryNameWithQuotesAndBackslashesNamesOneEntry(t *testing.T) {
+	if _, err := exec.LookPath("security"); err != nil {
+		t.Skip("skipped: the security command is not on the path")
+	}
+	ring := secrets.NewSystemKeyring()
+	const service = `antifailure test "quoted" \service`
+	const name = `cli:https://host:8443/a b "c" \d`
 	t.Cleanup(func() { _ = ring.Delete(service, name) })
 
-	// A connection string is the value most likely to be stored here, and it
-	// carries the characters most likely to be mangled by a shell.
-	const value = `postgres://u:p@ss w0rd!"'$&@host:5432/db?opt=a b`
-	require.NoError(t, ring.Set(service, name, value))
+	require.NoError(t, ring.Set(service, name, "value"))
 	got, err := ring.Get(service, name)
 	require.NoError(t, err)
-	require.Equal(t, value, got, "the value did not survive the round trip")
+	require.Equal(t, "value", got)
+
+	require.NoError(t, ring.Delete(service, name))
+	_, err = ring.Get(service, name)
+	require.ErrorIs(t, err, secrets.ErrNotFound, "the delete removed some other entry")
 }
 
 func TestAMissingSecurityCommandIsReportedAsUnavailable(t *testing.T) {
@@ -83,12 +152,161 @@ func TestAMissingSecurityCommandIsReportedAsUnavailable(t *testing.T) {
 	require.True(t, errors.Is(secrets.ErrKeyringUnavailable, secrets.ErrKeyringUnavailable))
 }
 
-// The secret must not reach the child process's argv.
+// terminalHelperEnv tells the test binary it was started by
+// TestAWriteFromInsideATerminalReturnsWithoutWaitingOnIt, inside a terminal.
+const terminalHelperEnv = "AF_TEST_KEYCHAIN_WRITE_IN_A_TERMINAL"
+
+const (
+	terminalService = "antifailure-test-terminal"
+	terminalName    = "terminal-probe"
+	terminalValue   = "af-terminal-canary-0b7e53c1"
+)
+
+// A write made by a process that has a controlling terminal returns.
 //
-// This is the defect the file's comment describes: every secret this product
-// stores went through `security add-generic-password -w <value>`, where any
-// other user on the machine could read it out of ps. A control plane bearer
-// token was read that way on this project's own machine, by accident.
+// Which is every write a person makes: af login and af model set run in
+// Terminal.app, in iTerm, in an editor's terminal, over ssh with a pty, and all
+// of those are a controlling terminal. The prompt route this replaced asked
+// security to read the value, and security reads a password from the terminal
+// whenever there is one, ignoring the stdin it was handed. So on every Mac the
+// login printed "password data for new item:" and waited for a person to type a
+// token they have never seen, until killed, with nothing stored. The tests
+// beside this one all passed throughout, because go test gives them no
+// terminal, and with no terminal security falls back to stdin.
+//
+// So this starts the test binary again with a pseudo terminal as its
+// controlling terminal, has that process make the write, and gives it a
+// deadline. Main's implementation fails here by timing out with the prompt on
+// the terminal; it cannot hang the suite.
+func TestAWriteFromInsideATerminalReturnsWithoutWaitingOnIt(t *testing.T) {
+	if _, err := exec.LookPath("security"); err != nil {
+		t.Skip("skipped: the security command is not on the path")
+	}
+	if os.Getenv(terminalHelperEnv) != "" {
+		t.Skip("this is the helper process")
+	}
+	ring := secrets.NewSystemKeyring()
+	t.Cleanup(func() { _ = ring.Delete(terminalService, terminalName) })
+
+	master, slave := openTerminal(t)
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestKeychainWriteHelperInsideATerminal$", "-test.v")
+	cmd.Env = append(os.Environ(), terminalHelperEnv+"=1")
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = slave, slave, slave
+	// Setsid makes a new session, Setctty makes the pseudo terminal its
+	// controlling terminal, and Ctty names it by the child's descriptor, which
+	// is stdin.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
+	require.NoError(t, cmd.Start())
+	// The parent's copy, closed so the terminal hangs up when the child's side
+	// is gone and the reader below sees the end.
+	require.NoError(t, slave.Close())
+
+	var (
+		mu     sync.Mutex
+		screen bytes.Buffer
+	)
+	read := make(chan struct{})
+	go func() {
+		defer close(read)
+		buf := make([]byte, 4096)
+		for {
+			n, err := master.Read(buf)
+			mu.Lock()
+			screen.Write(buf[:n])
+			mu.Unlock()
+			if err != nil {
+				return
+			}
+		}
+	}()
+	terminal := func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return screen.String()
+	}
+
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+
+	const deadline = 30 * time.Second
+	select {
+	case <-exited:
+	case <-time.After(deadline):
+		// The whole session, which includes security, since it never left the
+		// process group its parent was started in.
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		<-exited
+		<-read
+		t.Fatalf("the write was still waiting %s after it started, from inside a terminal. "+
+			"The terminal read:\n%s", deadline, terminal())
+	}
+	<-read
+	shown := terminal()
+
+	// Without this the test passes against the defect whenever the helper
+	// somehow has no terminal, because that is exactly the case that works.
+	require.Contains(t, shown, "HAS A CONTROLLING TERMINAL",
+		"the helper had no controlling terminal, so this proved nothing:\n%s", shown)
+	require.Contains(t, shown, "SET RETURNED <nil>", "the write failed:\n%s", shown)
+
+	got, err := ring.Get(terminalService, terminalName)
+	require.NoError(t, err)
+	require.Equal(t, terminalValue, got, "the write returned and stored something else")
+}
+
+// TestKeychainWriteHelperInsideATerminal is the process the test above starts.
+// Run on its own it skips.
+func TestKeychainWriteHelperInsideATerminal(t *testing.T) {
+	if os.Getenv(terminalHelperEnv) == "" {
+		t.Skip("run by TestAWriteFromInsideATerminalReturnsWithoutWaitingOnIt, inside a terminal")
+	}
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		fmt.Printf("NO CONTROLLING TERMINAL: %v\n", err)
+		t.FailNow()
+	}
+	_ = tty.Close()
+	fmt.Println("HAS A CONTROLLING TERMINAL")
+
+	err = secrets.NewSystemKeyring().Set(terminalService, terminalName, terminalValue)
+	fmt.Printf("SET RETURNED %v\n", err)
+}
+
+// openTerminal allocates a pseudo terminal pair without cgo: posix_openpt is
+// an open of /dev/ptmx, and grantpt, unlockpt and ptsname are three ioctls.
+func openTerminal(t *testing.T) (master, slave *os.File) {
+	t.Helper()
+	fd, err := unix.Open("/dev/ptmx", unix.O_RDWR|unix.O_NOCTTY|unix.O_CLOEXEC, 0)
+	require.NoError(t, err, "open /dev/ptmx")
+	master = os.NewFile(uintptr(fd), "/dev/ptmx")
+	t.Cleanup(func() { _ = master.Close() })
+
+	require.NoError(t, unix.IoctlSetInt(fd, unix.TIOCPTYGRANT, 0), "grantpt")
+	require.NoError(t, unix.IoctlSetInt(fd, unix.TIOCPTYUNLK, 0), "unlockpt")
+	var name [128]byte
+	if _, _, errno := unix.Syscall(unix.SYS_IOCTL, uintptr(fd), uintptr(unix.TIOCPTYGNAME),
+		uintptr(unsafe.Pointer(&name[0]))); errno != 0 {
+		t.Fatalf("ptsname: %v", errno)
+	}
+	path := string(name[:bytes.IndexByte(name[:], 0)])
+
+	slave, err = os.OpenFile(path, os.O_RDWR|syscall.O_NOCTTY, 0)
+	require.NoError(t, err, "open %s", path)
+	t.Cleanup(func() { _ = slave.Close() })
+	return master, slave
+}
+
+// The secret must not reach the child process's argv, in any encoding.
+//
+// This is the defect bf9f394ca fixed: every secret this product stores went
+// through `security add-generic-password -w <value>`, where any other user on
+// the machine could read it out of ps. A control plane bearer token was read
+// that way on this project's own machine, by accident.
+//
+// The value now travels as hex, so the watcher looks for the hex as well as the
+// plain text. A regression that moved the hex into argv would otherwise pass a
+// watcher that only knew the secret's plain spelling.
 //
 // Asserted by watching the process rather than by reading the code, because
 // reading the code is what missed it for the life of the file. A writer is
@@ -149,7 +367,7 @@ func TestTheSecretNeverReachesTheProcessListing(t *testing.T) {
 }
 
 // securityArgvHolding reports whether this is the security command with the
-// secret in its own arguments.
+// secret in its own arguments, spelled plainly or as hex in either case.
 //
 // Scoped to that process rather than to any line containing the string, and the
 // first version was not, which made it fail against a fixed implementation: the
@@ -161,7 +379,9 @@ func securityArgvHolding(line, secret string) bool {
 	if len(fields) == 0 || filepath.Base(fields[0]) != "security" {
 		return false
 	}
-	return strings.Contains(line, secret)
+	encoded := hex.EncodeToString([]byte(secret))
+	return strings.Contains(line, secret) ||
+		strings.Contains(strings.ToLower(line), encoded)
 }
 
 // The sampler has to be able to see a secret that IS on a command line, or the
@@ -180,17 +400,27 @@ func securityArgvHolding(line, secret string) bool {
 func TestTheProcessListingWatcherCanSeeASecretThatIsThere(t *testing.T) {
 	const canary = "af-argv-positive-control-5b2f9a"
 
-	// What ps showed while the old implementation ran.
+	// What ps showed while the implementation before bf9f394ca ran.
 	defective := "/usr/bin/security add-generic-password -s antifailure -a model.anthropic -w " +
 		canary + " -U"
 	if !securityArgvHolding(defective, canary) {
 		t.Error("the watcher cannot see the defect it was written for, so the test above proves nothing")
+	}
+	// And the same value moved into argv in the form it now travels in.
+	for _, encoded := range []string{
+		hex.EncodeToString([]byte(canary)),
+		strings.ToUpper(hex.EncodeToString([]byte(canary))),
+	} {
+		if !securityArgvHolding("/usr/bin/security add-generic-password -s antifailure -a x -U -X "+encoded, canary) {
+			t.Errorf("the watcher cannot see the secret as hex in argv: %s", encoded)
+		}
 	}
 
 	// And the shapes it must not report. The first is this test's own shell,
 	// which is why the earlier version failed against a fixed implementation.
 	for name, line := range map[string]string{
 		"a shell whose command line quotes this file": "/bin/zsh -c cat > keyring_darwin_test.go <<EOF " + canary,
+		"security in interactive mode":                "/usr/bin/security -i",
 		"security running with no secret in argv":     "/usr/bin/security add-generic-password -s antifailure -a model.anthropic -U -w",
 		"an unrelated process":                        "/usr/bin/grep -r " + canary + " .",
 		"an empty line":                               "",
@@ -199,25 +429,4 @@ func TestTheProcessListingWatcherCanSeeASecretThatIsThere(t *testing.T) {
 			t.Errorf("the watcher reports %s, which is a false finding: %s", name, line)
 		}
 	}
-}
-
-// A newline cannot go through the prompt protocol, so it is refused rather than
-// silently truncated at the first line.
-func TestAValueWithALineBreakIsRefusedRatherThanTruncated(t *testing.T) {
-	if _, err := exec.LookPath("security"); err != nil {
-		t.Skip("skipped: the security command is not on the path")
-	}
-	ring := secrets.NewSystemKeyring()
-	const service = "antifailure-test-newline"
-	const name = "pem"
-	t.Cleanup(func() { _ = ring.Delete(service, name) })
-
-	err := ring.Set(service, name, "-----BEGIN KEY-----\nabc\n-----END KEY-----")
-	require.Error(t, err, "a value with a line break was accepted")
-	require.ErrorIs(t, err, secrets.ErrKeyringUnavailable,
-		"the refusal has to fall through to the encrypted store rather than fail the command")
-
-	// Nothing was written, so a later read cannot return a truncated key.
-	_, getErr := ring.Get(service, name)
-	require.ErrorIs(t, getErr, secrets.ErrNotFound)
 }
