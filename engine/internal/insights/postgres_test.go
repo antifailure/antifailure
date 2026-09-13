@@ -1254,15 +1254,36 @@ func TestRehearse_TimesEachStatementFromTheServerWhenTheApplierCannot(t *testing
 
 	// The planted second landed on the statement that slept and on neither
 	// neighbour. Contention only ever makes a duration longer, so a slow
-	// machine cannot push the sleeping statement under its floor, and the
-	// ceiling over the two catalogue only statements beside it is more than
-	// twenty times the worst either of them has been seen to take.
+	// machine cannot push the sleeping statement under its floor.
+	//
+	// The two catalogue only statements beside it are bounded by what the
+	// sleeping statement itself was reported to take, not by a fixed number.
+	// That was a 500ms ceiling, more than twenty times the worst either had
+	// been seen to take locally, and a pull request that changed no engine
+	// code went red on it in CI: statement 3 reported 643.614ms on a runner
+	// whose one Postgres was shared with every other package's tests. A busy
+	// machine stretches the sleeping statement as well, so a neighbour now has
+	// to be reported as taking as long as a statement that slept for a full
+	// second before this says the sleep was charged to it. A running total
+	// still fails here, at statement 3, and the sleep charged to statement 1
+	// on top of its own time still fails at statement 1.
+	//
+	// THE CASE THIS NO LONGER CATCHES, stated so nobody has to rediscover it.
+	// A sleep SPLIT between its own row and a neighbour, without counting any
+	// of it twice, passes every assertion in this test when the sleeping row
+	// keeps enough to stay over its floor. A sleep of 1500ms reported as 950ms
+	// on its own row and 550ms on the next one is that shape: the floor holds,
+	// no two rows agree, 550 is under 950, and the rows still add up to the
+	// run. The fixed ceiling caught it; nothing here does. It was measured as a
+	// surviving break when this bound replaced the ceiling, and no timing path
+	// in capture.go is known to produce it.
 	require.Greater(t, r.Statements[1].MS, plantedSleepMS*0.9,
 		"the statement that slept for a second is not reported as taking about a second")
 	for _, i := range []int{0, 2} {
-		require.Lessf(t, r.Statements[i].MS, plantedSleepMS/2,
-			"statement %d only adds a nullable column, so a duration near the sleeping "+
-				"statement's is that statement's time charged to the wrong row", i+1)
+		require.Lessf(t, r.Statements[i].MS, r.Statements[1].MS,
+			"statement %d only adds a nullable column, and it is reported as taking at least "+
+				"as long as the statement that slept for a second, which is that statement's "+
+				"time charged to the wrong row", i+1)
 	}
 
 	// The index build carries no ceiling, only what holds whatever the
