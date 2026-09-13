@@ -19,6 +19,10 @@ package cloudauth
 // of them as somebody else's credentials being wrong.
 
 import (
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -162,8 +166,14 @@ func TestAWSChainNamesEveryPlaceItLookedForCredentials(t *testing.T) {
 	// or a web identity token file, is not one this chain reads.
 	//
 	// An environment with nothing in it and no metadata service to reach, which
-	// is what a laptop looks like.
+	// is what a laptop looks like. The address is a server that has already
+	// closed rather than the real one, because on an EC2 instance with a role
+	// the real one answers, and this test once passed there only because the
+	// chain could not read a role it had found.
+	closed := httptest.NewServer(http.NotFoundHandler())
+	closed.Close()
 	chain := NewAWSChain(func(string) string { return "" }, nil)
+	chain.metadataBase = closed.URL
 	_, err := chain.Credentials(t.Context())
 	require.ErrorIs(t, err, ErrNotConfigured)
 	require.Contains(t, err.Error(), "AWS_ACCESS_KEY_ID")
@@ -220,4 +230,70 @@ func TestAWSChainNamesAHalfSuppliedEnvironmentRatherThanIgnoringIt(t *testing.T)
 	require.ErrorIs(t, err, ErrNotConfigured)
 	require.Contains(t, err.Error(), "AWS_SECRET_ACCESS_KEY")
 	require.NotContains(t, err.Error(), exampleKeyID, "a message must not quote a key id")
+}
+
+// fakeIMDSv2 behaves the way instance metadata does on an instance that
+// requires version 2, which is the only kind this chain reads: a PUT hands out
+// a session token, and every GET without that token is answered 401. The
+// credentials document is a GET like any other, so it is refused too.
+func fakeIMDSv2(t *testing.T, role string, credentialsStatus int) *httptest.Server {
+	t.Helper()
+	const token = "example-imds-session-token"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut && r.URL.Path == "/latest/api/token" {
+			if r.Header.Get("X-aws-ec2-metadata-token-ttl-seconds") == "" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			_, _ = io.WriteString(w, token)
+			return
+		}
+		if r.Method != http.MethodGet || r.Header.Get("X-aws-ec2-metadata-token") != token {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		switch r.URL.Path {
+		case "/latest/meta-data/iam/security-credentials/":
+			_, _ = io.WriteString(w, role+"\n")
+		case "/latest/meta-data/iam/security-credentials/" + role:
+			if credentialsStatus != http.StatusOK {
+				w.WriteHeader(credentialsStatus)
+				return
+			}
+			_, _ = fmt.Fprintf(w, `{"Code":"Success","Type":"AWS-HMAC","AccessKeyId":%q,"SecretAccessKey":%q,"Token":"example-session-token","Expiration":"2099-01-01T00:00:00Z"}`,
+				exampleKeyID, exampleSecret)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+func TestAWSChainReadsAnInstanceRoleThroughIMDSv2(t *testing.T) {
+	// Found against AWS on 2026-09-13, not here. The token was sent when the
+	// role was listed and not when its credentials were read, so an instance
+	// that requires IMDSv2 answered the last request 401 and every EC2 instance
+	// role in existence read as no credentials at all. The chain had no test
+	// that reached this path, because the address was a constant.
+	chain := NewAWSChain(func(string) string { return "" }, nil)
+	chain.metadataBase = fakeIMDSv2(t, "proof-role", http.StatusOK).URL
+	got, err := chain.Credentials(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, "the EC2 instance role proof-role", got.Source)
+	require.Equal(t, exampleKeyID, got.AccessKeyID)
+	require.Equal(t, "example-session-token", got.SessionToken)
+	require.Equal(t, 2099, got.Expires.Year())
+}
+
+func TestAWSChainSaysWhatAnInstanceRoleAnsweredRatherThanThatNothingDid(t *testing.T) {
+	// The defect above read as "instance metadata did not answer", on an
+	// instance where it had answered twice. That sends somebody to check
+	// whether they are on EC2, which is the one thing already established.
+	chain := NewAWSChain(func(string) string { return "" }, nil)
+	chain.metadataBase = fakeIMDSv2(t, "proof-role", http.StatusForbidden).URL
+	_, err := chain.Credentials(t.Context())
+	require.ErrorIs(t, err, ErrNotConfigured)
+	require.Contains(t, err.Error(), "answered 403")
+	require.NotContains(t, err.Error(), "did not answer")
 }

@@ -49,6 +49,10 @@ type AWSCredentials struct {
 // second one the first one's keys.
 type AWSChain struct {
 	getenv func(string) string
+	// metadataBase is where instance metadata is asked. It is always the
+	// link-local address outside a test, which points it at a server that
+	// behaves the way IMDSv2 does rather than at an address nothing answers.
+	metadataBase string
 
 	mu    sync.Mutex
 	creds *AWSCredentials
@@ -61,7 +65,7 @@ type AWSChain struct {
 // nil; when it is not, those credentials are used as they are and the chain is
 // never walked.
 func NewAWSChain(getenv func(string) string, supplied *AWSCredentials) *AWSChain {
-	return &AWSChain{getenv: getenv, creds: supplied}
+	return &AWSChain{getenv: getenv, creds: supplied, metadataBase: "http://169.254.169.254"}
 }
 
 // Credentials finds or renews the keys.
@@ -119,15 +123,23 @@ func (c *AWSChain) discover(ctx context.Context) (AWSCredentials, error) {
 	// is what EKS Pod Identity uses.
 	if uri := c.getenv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"); uri != "" {
 		return c.fromEndpoint(ctx, "http://169.254.170.2"+uri,
-			c.getenv("AWS_CONTAINER_AUTHORIZATION_TOKEN"), "the ECS credential endpoint", 0)
+			authorization(c.getenv("AWS_CONTAINER_AUTHORIZATION_TOKEN")), "the ECS credential endpoint", 0)
 	}
 	if uri := c.getenv("AWS_CONTAINER_CREDENTIALS_FULL_URI"); uri != "" {
 		return c.fromEndpoint(ctx, uri,
-			c.getenv("AWS_CONTAINER_AUTHORIZATION_TOKEN"), "the container credential endpoint", 0)
+			authorization(c.getenv("AWS_CONTAINER_AUTHORIZATION_TOKEN")), "the container credential endpoint", 0)
 	}
 
-	if creds, err := c.fromInstanceMetadata(ctx); err == nil {
+	creds, answered, err := c.fromInstanceMetadata(ctx)
+	if err == nil {
 		return creds, nil
+	}
+	if answered {
+		// This is an instance, and the role path failed after metadata answered.
+		// Reporting that as metadata that did not answer sends somebody to check
+		// whether they are on EC2 at all, which is the one thing already known.
+		return AWSCredentials{}, Wrap(ErrNotConfigured,
+			"instance metadata answered and the instance role credentials could not be read: %s", err)
 	}
 
 	// Named rather than silently absent. A message that says only "no
@@ -142,10 +154,10 @@ func (c *AWSChain) discover(ctx context.Context) (AWSCredentials, error) {
 }
 
 // fromEndpoint reads credentials from the ECS or Pod Identity agent.
-func (c *AWSChain) fromEndpoint(ctx context.Context, url, token, source string, timeout time.Duration) (AWSCredentials, error) {
+func (c *AWSChain) fromEndpoint(ctx context.Context, url string, extra map[string]string, source string, timeout time.Duration) (AWSCredentials, error) {
 	headers := map[string]string{"Accept": "application/json"}
-	if token != "" {
-		headers["Authorization"] = token
+	for k, v := range extra {
+		headers[k] = v
 	}
 	resp, err := Do(ctx, Request{Method: "GET", URL: url, Headers: headers, Timeout: timeout})
 	if err != nil {
@@ -176,8 +188,10 @@ func (c *AWSChain) fromEndpoint(ctx context.Context, url, token, source string, 
 // a server-side request forgery in an application on the instance into a
 // credential disclosure, and reading it here would mean this tool works on
 // instances configured the way nobody should configure them.
-func (c *AWSChain) fromInstanceMetadata(ctx context.Context) (AWSCredentials, error) {
-	const base = "http://169.254.169.254"
+// answered is true once the token request succeeded, which is what separates a
+// machine that is not an instance from an instance whose role path failed.
+func (c *AWSChain) fromInstanceMetadata(ctx context.Context) (creds AWSCredentials, answered bool, err error) {
+	base := c.metadataBase
 	// A second, not the shared ten. This address is link-local: on an instance
 	// it answers in single-digit milliseconds, and on a laptop nothing answers
 	// and the connection hangs rather than being refused. At the shared timeout
@@ -190,7 +204,7 @@ func (c *AWSChain) fromInstanceMetadata(ctx context.Context) (AWSCredentials, er
 		Timeout: metadataTimeout,
 	})
 	if err != nil || tokenResp.Status != 200 {
-		return AWSCredentials{}, fmt.Errorf("instance metadata did not answer")
+		return AWSCredentials{}, false, fmt.Errorf("instance metadata did not answer")
 	}
 	imds := map[string]string{"X-aws-ec2-metadata-token": string(tokenResp.Body)}
 
@@ -199,15 +213,19 @@ func (c *AWSChain) fromInstanceMetadata(ctx context.Context) (AWSCredentials, er
 		Headers: imds, Timeout: metadataTimeout,
 	})
 	if err != nil || roleResp.Status != 200 {
-		return AWSCredentials{}, fmt.Errorf("this instance has no role attached")
+		return AWSCredentials{}, true, fmt.Errorf("this instance has no role attached")
 	}
 	role := strings.TrimSpace(strings.Split(string(roleResp.Body), "\n")[0])
 	if role == "" {
-		return AWSCredentials{}, fmt.Errorf("this instance has no role attached")
+		return AWSCredentials{}, true, fmt.Errorf("this instance has no role attached")
 	}
-	return c.fromEndpoint(ctx,
-		base+"/latest/meta-data/iam/security-credentials/"+role, "",
+	// The token goes on this request too. IMDSv2 refuses every GET without it,
+	// the credentials document included, and this line once sent none, so an
+	// instance role could list itself and never be read.
+	creds, err = c.fromEndpoint(ctx,
+		base+"/latest/meta-data/iam/security-credentials/"+role, imds,
 		"the EC2 instance role "+role, metadataTimeout)
+	return creds, true, err
 }
 
 // ---------------------------------------------------------------------------
@@ -362,4 +380,12 @@ func hmacSHA256(key []byte, data string) []byte {
 	h := hmac.New(sha256.New, key)
 	h.Write([]byte(data))
 	return h.Sum(nil)
+}
+
+// authorization is the header a container credential endpoint is sent, or none.
+func authorization(token string) map[string]string {
+	if token == "" {
+		return nil
+	}
+	return map[string]string{"Authorization": token}
 }
