@@ -136,6 +136,50 @@ type Options struct {
 	// and an inventory that stopped at the first page would report every
 	// resource past it as already gone.
 	PageSize int
+	// RestoreCopiesSnapshotTags makes a restore carry the snapshot's tags onto
+	// the new instance, and SnapshotCopiesInstanceTags makes a snapshot carry
+	// its instance's tags. Neither is what AWS documents for a request that
+	// names its own tags, and that is the point of modelling them: a provider
+	// whose identity lives in tags has to stay right when a restore behaves
+	// the way a cloud's restore did elsewhere, and a fake that can only copy
+	// nothing cannot show the difference.
+	RestoreCopiesSnapshotTags  TagCopy
+	SnapshotCopiesInstanceTags TagCopy
+}
+
+// TagCopy is how a copied set of tags meets the tags the request named.
+type TagCopy string
+
+const (
+	// TagCopyNone records only the request's tags, which is what AWS documents
+	// for a request that names tags.
+	TagCopyNone TagCopy = ""
+	// TagCopyRequestWins merges the inherited tags underneath the request's,
+	// so a key the request names keeps the request's value.
+	TagCopyRequestWins TagCopy = "request-wins"
+	// TagCopyInheritedWins merges the request's tags underneath the inherited
+	// ones, so an inherited key overrides what the request named. No AWS
+	// documentation describes this, and it is here as the worst case.
+	TagCopyInheritedWins TagCopy = "inherited-wins"
+)
+
+// copyTags applies one TagCopy to a request's tags.
+func copyTags(mode TagCopy, inherited, requested map[string]string) map[string]string {
+	if mode == TagCopyNone {
+		return requested
+	}
+	out := map[string]string{}
+	first, second := inherited, requested
+	if mode == TagCopyInheritedWins {
+		first, second = requested, inherited
+	}
+	for k, v := range first {
+		out[k] = v
+	}
+	for k, v := range second {
+		out[k] = v
+	}
+	return out
 }
 
 // Server is a running fake control plane.
@@ -911,6 +955,7 @@ func (s *Server) createSnapshot(w http.ResponseWriter, form url.Values) {
 		storageGB: in.storageGB, created: time.Now().UTC(),
 		tags: s.tagsToRecord(form),
 	}
+	snap.tags = copyTags(s.opts.SnapshotCopiesInstanceTags, in.tags, snap.tags)
 	s.snapshots[id] = snap
 	rendered := s.renderSnapshot(snap)
 	fault := s.opts.Fault
@@ -1014,6 +1059,7 @@ func (s *Server) restore(w http.ResponseWriter, form url.Values) {
 		iamEnabled:     form.Get("EnableIAMDatabaseAuthentication") != "false",
 		public:         form.Get("PubliclyAccessible") != "false",
 	}
+	restored.tags = copyTags(s.opts.RestoreCopiesSnapshotTags, snap.tags, restored.tags)
 	s.instances[id] = restored
 	rendered := s.renderInstance(restored)
 	s.copies.Add(1)
