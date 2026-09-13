@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -173,18 +174,46 @@ func TestAuditProgressWriteFailureFailsTheGate(t *testing.T) {
 
 // The real child prints a clean JSON report and stderr but never exits within
 // its budget. JSON alone must not let an unfinished process pass the gate.
+//
+// THE DEADLINE PASSES WHEN THE CHILD HAS WRITTEN, NOT AT A FIXED TIME. The child
+// is this test binary started again through a shell, and before it writes a
+// byte it has to start that shell, a Go runtime and the testing framework. A
+// fixed 500 millisecond deadline started before any of that. Inside a full
+// `cd tools && go test ./...` on a developer Mac the child had not reached its
+// first line when that deadline passed, and the test reported evidence lost
+// that had never been written. The child now says when it has written, and
+// only then does the deadline pass, so the stderr assertion is about whether
+// the tool keeps what was written, which is what the tool is for.
 func TestAuditProjectKillsAStalledProcessAndKeepsEvidence(t *testing.T) {
 	dir := npmFixture(t, "stall")
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-	start := time.Now()
-	_, err := auditProject(ctx, dir, "stalled")
-	elapsed := time.Since(start)
+	ready := filepath.Join(t.TempDir(), "ready")
+	t.Setenv("AF_NPM_TEST_READY", ready)
+	ctx := newTestDeadline()
+	t.Cleanup(ctx.pass)
+	started := time.Now()
+	finished := make(chan error, 1)
+	go func() {
+		_, err := auditProject(ctx, dir, "stalled")
+		finished <- err
+	}()
+	if err := waitForFile(ready, finished); err != nil {
+		t.Fatal(err)
+	}
+	// Logged so a slow start is visible: this is the time the fixed deadline
+	// used to spend before the child could say anything.
+	t.Logf("the child said it had written %s after the audit started", time.Since(started).Round(time.Millisecond))
+	passed := time.Now()
+	ctx.pass()
+	err := <-finished
+	elapsed := time.Since(passed)
 	t.Run("deadline", func(t *testing.T) {
 		if !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("unfinished clean report accepted: %v", err)
 		}
 	})
+	// Measured from the deadline, not from the start, so the time the child
+	// takes to start is not counted. The child would stall for thirty seconds,
+	// so one the tool failed to stop is unmistakable.
 	t.Run("process stopped", func(t *testing.T) {
 		if elapsed > 2*time.Second {
 			t.Fatalf("child outlived its budget: %s", elapsed)
@@ -196,6 +225,62 @@ func TestAuditProjectKillsAStalledProcessAndKeepsEvidence(t *testing.T) {
 				t.Fatalf("missing %q: %v", text, err)
 			}
 		})
+	}
+}
+
+// testDeadline is a context whose deadline passes when the test says so. The
+// tool cannot tell it from one made by context.WithTimeout: Done closes and Err
+// reports context.DeadlineExceeded, which is what the kill and the message are
+// built on. It implements the four methods itself rather than embedding a
+// context, so no caller can reach a second, unrelated Done.
+type testDeadline struct {
+	done chan struct{}
+	once sync.Once
+}
+
+func newTestDeadline() *testDeadline {
+	return &testDeadline{done: make(chan struct{})}
+}
+
+// Deadline reports none, because the moment is chosen by the test rather than
+// by the clock.
+func (d *testDeadline) Deadline() (time.Time, bool) { return time.Time{}, false }
+
+func (d *testDeadline) Done() <-chan struct{} { return d.done }
+
+func (d *testDeadline) Value(any) any { return nil }
+
+func (d *testDeadline) Err() error {
+	select {
+	case <-d.done:
+		return context.DeadlineExceeded
+	default:
+		return nil
+	}
+}
+
+func (d *testDeadline) pass() { d.once.Do(func() { close(d.done) }) }
+
+// waitForFile returns once path exists. A child that finishes first was never
+// stalled, so that fails. The minute is not a timing assumption: a child that
+// starts at all writes long before it, and only one that cannot start reaches
+// it.
+func waitForFile(path string, finished <-chan error) error {
+	tick := time.NewTicker(5 * time.Millisecond)
+	defer tick.Stop()
+	giveUp := time.NewTimer(time.Minute)
+	defer giveUp.Stop()
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return nil
+		}
+		select {
+		case err := <-finished:
+			return fmt.Errorf("the stalled child finished before it said it had written: %w", err)
+		case <-giveUp.C:
+			return errors.New("the stalled child never said it had written, so there was nothing to keep")
+		case <-tick.C:
+		}
 	}
 }
 
@@ -234,8 +319,15 @@ func TestAuditProcess(t *testing.T) {
 	}
 	fmt.Fprintln(os.Stderr, "registry request is waiting")
 	fmt.Fprintln(os.Stdout, `{"auditReportVersion":2,"vulnerabilities":{}}`)
+	// Both writes are system calls on unbuffered files, so the bytes are in the
+	// pipes by the time this file exists.
+	if ready := os.Getenv("AF_NPM_TEST_READY"); ready != "" {
+		if err := os.WriteFile(ready, nil, 0o600); err != nil {
+			os.Exit(3)
+		}
+	}
 	if mode == "stall" {
-		time.Sleep(3 * time.Second)
+		time.Sleep(30 * time.Second)
 	}
 	if mode == "pipes" {
 		child := exec.Command(os.Args[0], "-test.run=TestAuditProcess")
