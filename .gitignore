@@ -7,6 +7,14 @@
 !.env.example
 !.env.sample
 *.pem
+# Public root certificate authority bundles that a database provider embeds with
+# go:embed to verify its server. Each holds certificates and no private key, and
+# each is named exactly so the rule above still refuses a key dropped elsewhere.
+!ee/engine/db/aurora/data/rds-commercial.pem
+!ee/engine/db/aurora/data/rds-gov.pem
+!ee/engine/db/azurepg/azure-roots.pem
+!ee/engine/db/rds/data/rds-commercial.pem
+!ee/engine/db/rds/data/rds-gov.pem
 *.key
 *.p12
 *.pfx
