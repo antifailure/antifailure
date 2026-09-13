@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 
 	"github.com/antifailure/antifailure/engine/conformance"
 	"github.com/antifailure/antifailure/engine/internal/clock"
+	"github.com/antifailure/antifailure/engine/internal/db/xata/fakexata"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
@@ -50,23 +52,37 @@ func requirePostgres(t *testing.T) string {
 	return raw
 }
 
+// newFakeXata starts the fake control plane over the local Postgres and removes
+// what it made when the test ends, reporting anything it could not remove.
+func newFakeXata(t *testing.T, admin string) *fakexata.Server {
+	t.Helper()
+	f, err := fakexata.New(fakexata.Options{AdminURL: admin})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		for _, problem := range f.Close() {
+			t.Errorf("the fake control plane could not clean up: %v", problem)
+		}
+	})
+	return f
+}
+
 // providerOver builds a provider pointed at a fake control plane.
 //
 // BaseURL is the ONLY override. Everything else is what a real run uses, which
 // is what makes the request shapes this exercises the real ones.
-func providerOver(t *testing.T, f *fakeXata) *Provider {
+func providerOver(t *testing.T, f *fakexata.Server) *Provider {
 	t.Helper()
 	return providerOverWith(t, f, func(*Options) {})
 }
 
 // providerOverWith is providerOver with one option changed.
-func providerOverWith(t *testing.T, f *fakeXata, change func(*Options)) *Provider {
+func providerOverWith(t *testing.T, f *fakexata.Server, change func(*Options)) *Provider {
 	t.Helper()
 	opts := Options{
 		APIKey:       secrets.New("xau_test_key"),
-		OrgID:        f.org,
-		ProjectID:    f.project,
-		BaseURL:      f.server.URL,
+		OrgID:        f.Org(),
+		ProjectID:    f.Project(),
+		BaseURL:      f.URL(),
 		Clock:        clock.New(),
 		SeedSQL:      conformance.DefaultSeedSQL,
 		PollInterval: 10 * time.Millisecond,
@@ -132,8 +148,8 @@ func TestTheRequestShapesAreTheOnesXataDocuments(t *testing.T) {
 	_, err = p.ConnString(ctx, b, provider.ConnDirect)
 	require.NoError(t, err)
 
-	paths := strings.Join(f.pathsSeen(), "\n")
-	base := "/organizations/" + f.org + "/projects/" + f.project + "/branches"
+	paths := strings.Join(f.PathsSeen(), "\n")
+	base := "/organizations/" + f.Org() + "/projects/" + f.Project() + "/branches"
 
 	require.Contains(t, paths, "POST "+base,
 		"a branch is created by posting to the branches collection")
@@ -147,14 +163,14 @@ func TestTheRequestShapesAreTheOnesXataDocuments(t *testing.T) {
 
 	// The bearer token, which is the one thing a fake could accept without
 	// checking and thereby certify a provider that never authenticated.
-	require.Equal(t, "Bearer xau_test_key", f.token,
+	require.Equal(t, "Bearer xau_test_key", f.Token(),
 		"every call carries the API key as a bearer token")
 
 	// The create body, field by field, because this is the request the vendor
 	// either accepts or rejects and the only thing standing behind it is that
 	// somebody read the reference.
 	var create map[string]any
-	for _, body := range f.bodies {
+	for _, body := range f.Bodies() {
 		if _, ok := body["mode"]; ok {
 			create = body
 			break
@@ -190,7 +206,7 @@ func TestAPreconditionRefusalCarriesXatasOwnWordsRatherThanAGuessedCode(t *testi
 	// The API document lists 412 for a create and says only that it is a
 	// precondition failure. It does not say which precondition, so the
 	// provider must not decide it means a branch limit.
-	f.failOnce("POST", "/branches", 412, "the project is suspended")
+	f.FailOnce("POST", "/branches", 412, "the project is suspended")
 	_, err = p.Branch(ctx, gv.ID, "env_precondition")
 	require.Error(t, err)
 	require.False(t, errors.Is(err, aferrors.Coded(aferrors.AFDB006)),
@@ -229,13 +245,13 @@ func TestADescriptionXataWouldRefuseIsRefusedBeforeItIsSent(t *testing.T) {
 
 	root, err := p.parentBranch(ctx)
 	require.NoError(t, err)
-	before := len(f.pathsSeen())
+	before := len(f.PathsSeen())
 
 	_, err = p.client.CreateBranch(ctx, CreateBranchRequest{
 		Name: "af-env-bad", ParentID: root.ID, Description: "_starts with an underscore",
 	})
 	require.Error(t, err, "the API document's pattern requires a letter or a digit first")
-	for _, seen := range f.pathsSeen()[before:] {
+	for _, seen := range f.PathsSeen()[before:] {
 		require.NotContains(t, seen, "POST",
 			"a description the vendor refuses was sent anyway, so the refusal names "+
 				"nothing in this process and arrives as a bare 400")
@@ -270,7 +286,7 @@ func TestDestroyingABranchThatIsAlreadyGoneSucceeds(t *testing.T) {
 	p := providerOver(t, f)
 	ctx := context.Background()
 
-	f.failOnce("DELETE", "/branches", 404, "no such branch")
+	f.FailOnce("DELETE", "/branches", 404, "no such branch")
 	require.NoError(t, p.Destroy(ctx, provider.Branch{ProviderRef: "br_gone"}),
 		"every destroy in this interface must be idempotent, because the engine retries "+
 			"after timeouts and a teardown that failed on an absent resource would report "+
@@ -456,4 +472,89 @@ func TestTheCapabilitiesAreTheOnesXataDocuments(t *testing.T) {
 	require.False(t, caps.PooledEndpoints,
 		"the credentials endpoint returns one connection string and takes no endpoint "+
 			"type, so a pooled string could only be built from a hostname convention")
+}
+
+// ---------------------------------------------------------------------------
+// A wait for a branch is reported while it lasts
+// ---------------------------------------------------------------------------
+
+// progressLines collects what the provider reports, safely across the one
+// goroutine that reports and the test that reads.
+type progressLines struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (p *progressLines) add(line string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.lines = append(p.lines, line)
+}
+
+func (p *progressLines) all() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.lines...)
+}
+
+func indexOf(lines []string, fragment string) int {
+	for i, l := range lines {
+		if strings.Contains(l, fragment) {
+			return i
+		}
+	}
+	return -1
+}
+
+func TestAWaitForABranchIsReportedWhileItLasts(t *testing.T) {
+	admin := requirePostgres(t)
+	f := newFakeXata(t, admin)
+	// Every branch created from here reports itself as creating for six gets,
+	// sixty milliseconds of polling, against a periodic line every fifteen.
+	f.SetPendingPolls(6)
+	p := providerOverWith(t, f, func(o *Options) { o.ProgressEvery = 15 * time.Millisecond })
+	got := &progressLines{}
+	p.ReportProgressTo(got.add)
+	ctx := context.Background()
+
+	gv, err := p.RefreshGolden(ctx, provider.GoldenSpec{Version: localMajor(t, admin), RulesHash: "progres1"})
+	require.NoError(t, err)
+	_, err = p.Branch(ctx, gv.ID, "env_progress")
+	require.NoError(t, err)
+
+	lines := got.all()
+	waiting := indexOf(lines, "xata: waiting for branch ")
+	require.GreaterOrEqual(t, waiting, 0,
+		"a branch Xata reported as creating was waited on and nothing said the wait had "+
+			"started, so a first af up sits on a line that does not move. Lines: %q", lines)
+	still := indexOf(lines, "xata: still waiting for branch ")
+	require.Greater(t, still, waiting,
+		"a wait that outlasted the reporting interval never said it was still going, so a "+
+			"five minute wait reads the same as a hung one. Lines: %q", lines)
+	ready := indexOf(lines, " is ready after ")
+	require.Greater(t, ready, still,
+		"the wait ended and nothing said so, so the last thing a reader saw was a branch "+
+			"still waiting. Lines: %q", lines)
+	for _, l := range lines {
+		require.NotContains(t, l, "postgres://",
+			"a progress line is printed and published, and it carried a connection string")
+	}
+}
+
+func TestABranchReadyOnTheFirstPollReportsNothing(t *testing.T) {
+	admin := requirePostgres(t)
+	f := newFakeXata(t, admin)
+	p := providerOver(t, f)
+	got := &progressLines{}
+	p.ReportProgressTo(got.add)
+	ctx := context.Background()
+
+	gv, err := p.RefreshGolden(ctx, provider.GoldenSpec{Version: localMajor(t, admin), RulesHash: "noprog01"})
+	require.NoError(t, err)
+	_, err = p.Branch(ctx, gv.ID, "env_no_progress")
+	require.NoError(t, err)
+
+	require.Empty(t, got.all(),
+		"no branch was waited on, and a line about a wait that did not happen is printed on "+
+			"every refresh and every branch, which teaches a reader to ignore the lines that matter")
 }

@@ -15,6 +15,10 @@ Postgres, built from Xata's published API document, and a fake over one Postgres
 can only copy. The command that settles it against a real account is on the
 provider's page.
 
+A wait for a Xata branch to become ready, which can last five minutes, is
+printed and published as it happens rather than leaving `af up` on a line that
+does not move.
+
 Refreshing now refuses a manifest asking for a Postgres major the project does
 not run, with `AF-DB-003`, before anything is loaded. A refusal from Xata keeps
 Xata's own code and message. The page for this provider names every call it

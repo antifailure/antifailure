@@ -127,6 +127,24 @@ func TestAManifestAskingForXataGetsXata(t *testing.T) {
 	require.IsType(t, &xatadb.Provider{}, p)
 }
 
+func TestTheBuiltInXataProviderCanReportProgress(t *testing.T) {
+	// attachDatabaseProgress reaches a provider only through a type assertion
+	// on what newDatabaseProvider returned. A built in provider comes back
+	// unwrapped, so the assertion sees the provider itself, and this is the
+	// check that the one the engine actually builds for a xata manifest is one
+	// the assertion can find. A method renamed, or a wrapper added in the
+	// switch, would leave every other test here green and the wait silent.
+	p, err := orchestrator(t, &schema.Database{
+		Provider: schema.DBXata, Project: "my-org/my-project", APIKeyEnv: "MY_XATA_KEY",
+	}, map[string]string{"MY_XATA_KEY": "xau_whatever"}).newDatabaseProvider(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = p.Close() })
+	_, ok := p.(provider.ProgressReporting)
+	require.True(t, ok,
+		"the xata provider the engine builds does not implement provider.ProgressReporting, so "+
+			"attachDatabaseProgress skips it and a wait of up to five minutes is silent")
+}
+
 func TestXataWithoutBothHalvesOfItsProjectIsRefused(t *testing.T) {
 	// Xata addresses a project by an organization AND a project identifier,
 	// both path segments of every call the provider makes, and neither can be

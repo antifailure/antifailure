@@ -15317,6 +15317,13 @@ candidate inherits its parent's image, so a refresh asks the candidate's server
 which major it is and refuses a mismatch with ` + "`" + `AF-DB-003` + "`" + ` before anything is
 loaded.
 
+Xata creates a branch asynchronously, and the provider waits for the branch to
+report ready for up to five minutes, once for a golden and once for each
+environment. That wait is printed and published as ` + "`" + `engine.progress` + "`" + `: a line
+when a branch is first found not ready, a line every thirty seconds while it
+stays that way, and a line when it is ready. A branch that is ready on the first
+check prints nothing.
+
 ## The model
 
 A Xata project holds production on its root branch, the one with no parent. A
