@@ -222,9 +222,11 @@ const (
 // the distinction between declaring and measuring is the whole of this
 // comment.
 //
-// It is not a measurement. Nobody in this repository has an RDS account, the
-// conformance suite runs against a fake control plane over a local Postgres,
-// and a number produced by timing that would be a number about this laptop. So
+// It is not a measurement. The conformance suite runs against a fake control
+// plane over a local Postgres, and a number produced by timing that would be a
+// number about this laptop. The one live run against AWS restored a candidate
+// in 5 minutes 4 seconds at 20 GB, which is one point at one size and says
+// nothing about a larger database. So
 // this is a CEILING the provider undertakes not to exceed: the suite's
 // Branch_IsWithinTheDeclaredLatency behaviour fails when a branch is slower
 // than what is declared here, which means a real account that got slower
@@ -537,9 +539,9 @@ func (p *Provider) Close() error { return p.closeTrust() }
 
 // APICalls is how many control plane requests this provider has sent.
 //
-// Exported because it is the ONE number about this provider's cost that can be
-// measured without an AWS account: it is a property of the provider's own
-// logic rather than of AWS's response time. benchmark_test.go publishes it,
+// Exported because it is the ONE number about this provider's cost that does
+// not depend on AWS's response time: it is a property of the provider's own
+// logic rather than of the account it runs against. benchmark_test.go publishes it,
 // and publishes beside it the refusal to convert it into seconds.
 func (p *Provider) APICalls() int64 { return p.api.calls.Load() }
 

@@ -63,7 +63,7 @@ type client struct {
 	securityGroups []string
 
 	// calls counts control plane requests, which is the one number about this
-	// provider's cost that can be measured without an AWS account. It is a
+	// provider's cost that is the same on every account. It is a
 	// property of the provider rather than of AWS, so measuring it here is
 	// honest; the seconds it turns into are not, and nothing in this package
 	// pretends otherwise.

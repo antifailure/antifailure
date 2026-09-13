@@ -155,8 +155,33 @@ path that reached it anyway could not dial out.
 
 ## What the tests prove, and what they do not
 
-**No AWS account was available to anybody who wrote this provider.** Nothing on
-this page has been run against AWS.
+**Part of this provider has run against real AWS, and part has not.** On
+2026-09-13 a test, `TestAgainstRealRDS` in `ee/engine/db/rds/live_test.go`,
+drove the provider through the same registration the engine uses against an
+RDS for PostgreSQL instance in `us-east-1` (`db.t4g.micro`, Postgres 17.11,
+20 GB of gp3 storage, 5000 rows). It ran from an EC2 instance inside the
+instance's VPC that read its role through instance metadata. The run reached a
+masked, verified candidate and stopped before a golden was published, so no
+golden snapshot, no branch, no isolation check and no branch teardown has run
+on AWS.
+
+What that run measured:
+
+- the snapshot of the source took 1 minute 11 seconds, and the restore into a
+  candidate took 5 minutes 4 seconds;
+- RDS listed the new master password as pending within a second of
+  `ModifyDBInstance`, applied it 1 minute 11 seconds later, and the provider
+  waited for it rather than connecting with the password the restore carried;
+- the candidate was reached over `verify-full`, held exactly the source's rows,
+  and was masked and verified.
+
+It also found three defects the fake could not show, each fixed since and
+refused by a test that fails without the fix. The credential path could not
+read an instance role on an instance that requires version 2 of instance
+metadata. The rotation was treated as done while RDS still listed the password
+as pending. And the attestation was stored in tag values whose characters AWS
+refuses, which is why the golden was not published. The provider with all
+three fixes has not run against AWS end to end.
 
 The conformance suite runs against a fake RDS control plane on localhost backed
 by a real Postgres, in `ee/engine/db/rds/fakerds`. Every line of the provider
@@ -174,12 +199,13 @@ as a string.
 
 The verified connection path runs a real PostgreSQL TLS handshake through the
 driver the provider uses, against a certificate authority the test generates,
-and refuses a wrong hostname and a wrong signer. No connection has met a
-certificate RDS issued.
+and refuses a wrong hostname and a wrong signer. The live run's connections to
+the source and to the candidate verified certificates RDS issued.
 
-**Live AWS timing is unmeasured.** The benchmark prints `UNMEASURED` for every
-wall clock cell rather than carrying a number from somewhere else, and the
-comparison table says the same. What it does measure is the provider's own
+**The benchmark does not carry the live run's timings.** It prints `UNMEASURED`
+for every wall clock cell, because one restore at one size says nothing about
+how the time grows with the data, and the comparison table says the same. What
+it does measure is the provider's own
 work: the control plane calls a branch makes are identical at twenty gibibytes
 and at a tebibyte, and a branch opens the database exactly once, to close the
 logins the restore inherited.

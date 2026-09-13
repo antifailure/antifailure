@@ -34,7 +34,7 @@ that is real for nothing.
 | --- | --- | --- | --- | --- | --- |
 | `pgurl` | no | 55 s to 169 s | 0.2 s | 25 s to 110 s | `2026-09-07-0941`, `2026-09-07-1002` |
 | `aurora` | unproven | not measured yet, L2.2 | | | |
-| `rds` | unproven | unmeasured, no AWS account was available | | | |
+| `rds` | unproven | unmeasured by the benchmark; one live restore took 5 minutes 4 seconds at 20 GB | | | |
 | `cloudsql` | unproven | not measured yet, L2.4 | | | |
 | `azurepg` | unproven | 420.3 s fixed cost at one row, not a rate | 518.3 s at one row, including the first backup wait | not measured | `2026-09-13-azurepg-live` |
 | `alloydb` | unproven | not measured yet, L2.6 | | | |

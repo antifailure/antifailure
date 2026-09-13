@@ -80,8 +80,8 @@ func conformanceOptions() conformance.Options {
 		SkipSlow: os.Getenv("AF_SKIP_SLOW") != "",
 		// RealService is deliberately NOT set, and its absence is the whole of
 		// what makes CopyOnWrite_BranchTimeMatchesTheDeclaration report
-		// unproven rather than a measured verdict. No AWS account was
-		// available, so no run has timed a real RDS restore. See
+		// unproven rather than a measured verdict. The one live run against
+		// AWS timed a single restore, which cannot decide a growth claim. See
 		// verdict_test.go and engine/conformance/verdict.go.
 	}
 }

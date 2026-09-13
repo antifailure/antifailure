@@ -28,9 +28,19 @@ instance's subnet group is read as the structure AWS returns. Every request
 goes through the air gap guard, and the provider is refused under
 `AF_AIR_GAPPED`.
 
-No AWS account was available, so none of this has run against AWS. The suite
-runs every line of the provider against a fake RDS control plane over a real
-Postgres, the benchmark prints `UNMEASURED` for every wall clock cell, and the
-copy on write verdict is recorded as unproven, because over the fake a restore
-is a local `CREATE DATABASE ... TEMPLATE` and a pass there would say nothing
-about RDS.
+After rotating the master password, the provider waits until RDS no longer
+lists it as pending and the new password actually opens the database, because
+RDS reports an instance available before a password change is in force. The
+attestation, the masking rules hash and the provenance are stored in tags as
+base64, because a tag value refuses the braces, quotes and commas a document
+contains.
+
+Part of this has run against real AWS. One run in `us-east-1` reached a masked,
+verified candidate over `verify-full` against RDS's own certificate, with a
+snapshot in 1 minute 11 seconds and a restore in 5 minutes 4 seconds at 20 GB,
+and found the two defects above and a third in instance role credentials, all
+fixed. It stopped before a golden was published, so publishing, branching,
+isolation and destroy are proved against a fake RDS control plane over a real
+Postgres only. The benchmark prints `UNMEASURED` for every wall clock cell, and
+the copy on write verdict is recorded as unproven, because one restore at one
+size cannot decide whether branch time grows with the data.

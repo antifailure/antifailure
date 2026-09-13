@@ -16,10 +16,11 @@ package rds_test
 // behaviour as unproven for any run that does not assert Options.RealService,
 // and this package does not assert it.
 //
-// No AWS account was available to the people who wrote this provider, so no
-// run anywhere has timed a real RDS snapshot restore. The declaration false is
-// AWS's documented mechanism, a restore that hydrates a new volume from the
-// snapshot, and the ledger records it as unproven rather than as measured.
+// One live run against AWS, on 2026-09-13, timed a single snapshot restore: 5
+// minutes 4 seconds for 20 GB. One restore at one size cannot say whether the
+// time grows with the data, so the declaration false is still AWS's documented
+// mechanism, a restore that hydrates a new volume from the snapshot, and the
+// ledger records it as unproven rather than as measured.
 //
 // The two assertions are complementary and neither covers the other. The first
 // is a fact about the harness: the fake really does move the bytes, so an

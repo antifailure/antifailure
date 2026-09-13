@@ -171,8 +171,9 @@ var CopyOnWriteLedger = map[string]LedgerEntry{
 			"every byte, so a declaration of false would PASS the stopwatch on the " +
 			"simulator's own copy whatever RDS would have done. That is the copying harness " +
 			"case in the direction that flatters, and a pass bought that way is worse than " +
-			"no verdict. No AWS account was available, so no run has timed a real " +
-			"RestoreDBInstanceFromDBSnapshot. The declaration false is AWS's documented " +
+			"no verdict. The one live run on AWS timed a single " +
+			"RestoreDBInstanceFromDBSnapshot, 5 minutes 4 seconds at 20 GB, and one restore at " +
+			"one size cannot decide growth. The declaration false is AWS's documented " +
 			"mechanism, a new volume hydrated from the snapshot, rather than a measurement. " +
 			"ee/engine/db/rds/verdict_test.go reads the fake's own byte counter across one " +
 			"branch and requires it to move, and requires the run to assert no real service.",

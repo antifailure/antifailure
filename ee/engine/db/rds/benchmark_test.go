@@ -322,7 +322,7 @@ func writeReport(t *testing.T, sizes []sizeResult, rows []rowResult) {
 		"RDS wall clock |\n")
 	fmt.Fprintf(&b, "| --- | --- | --- | --- |\n")
 	for _, s := range sizes {
-		fmt.Fprintf(&b, "| %s | %d | %d | UNMEASURED, no AWS account |\n",
+		fmt.Fprintf(&b, "| %s | %d | %d | UNMEASURED by this benchmark |\n",
 			humanGB(s.storageGB), len(s.actions), s.connections)
 	}
 	fmt.Fprintf(&b, "\nIdentical call sequence at both sizes: **%v**.\n\n", same)
