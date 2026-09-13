@@ -14,6 +14,291 @@ and the per change entries are what make it a wall. `just relnotes` refuses an
 unbalanced marker, a second region in one section, an empty region, and a
 section that omits all of itself.
 
+## v1.4.0
+
+Most of this release is things that had been sold, declared or reported and were
+not true. Enterprise features no binary could mount. A hosted enterprise plan
+running an image that answered 404 on everything it sold. Two checks that
+passed without looking at anything, and a licensed feature whose only
+occurrences in the tree were its own name. Each of them now works, or refuses
+out loud and says why.
+
+### For operators, before you upgrade
+
+**The hosted control plane now runs the enterprise edition.** Continuous
+deployment built and deployed the community image to both hosted environments
+for the whole life of the workflow. The hosted enterprise plan sells single
+sign-on, directory provisioning and audit streaming, and that image mounts none
+of them, so every identity provider callback and every SCIM request answered
+404. The community image is ready on the right commit and passes every health
+check, so nothing reported a problem. Deployment now builds
+`ghcr.io/antifailure/control-plane-enterprise`. Before the image moves, a check
+refuses an app missing any of the four variables the enterprise entry point needs.
+After traffic moves, another requires the public origin to answer a SCIM
+discovery request, a sign-in discovery request and the audit stream route with
+their licensed answers. A self hosted installation running the community image is
+unaffected. To run the enterprise image yourself, the four variables are
+documented in the configuration reference under "Read by the enterprise edition".
+
+**Hosted model budgets were charged at prices Anthropic no longer charges.** The
+built in price list charged `claude-sonnet-5` at 3 and 15 US dollars per million
+input and output tokens, and `claude-opus-5` at 15 and 75. Anthropic publishes 2
+and 10 for Sonnet 5, because the rise planned for September 1, 2026 was
+cancelled, and 5 and 25 for Opus 5. A customer spending through a brokered key
+was charged 50 percent too much on Sonnet 5 and three times too much on Opus 5,
+so a monthly cap was reached at two thirds or one third of what was set. Both
+prices are corrected, and every built in price now names the page it was read
+from and the date.
+
+What an operator needs to know: **spend already recorded for September 2026 is
+not recalculated.** It is a running total with no per call token counts behind
+it, so there is nothing to recompute it from. Until the month ends, an
+organization that used Sonnet 5 or Opus 5 shows more spent than it really spent,
+and its cap refuses early by the same margin. Raise the cap if that is a
+problem. A budget belongs to one calendar month in UTC, so the overcount is gone
+at 00:00 UTC on 2026-10-01, when October starts with nothing spent. As in every
+month, October has no cap until one is set, and nothing may be spent until it is.
+
+**The secret that seals every stored provider key can now be rotated.** Before
+this release, replacing it made every stored key stop opening, permanently and
+silently: rows recorded which key version sealed them and nothing read that
+column, so every row failed the same way and an operator saw authentication
+failures across every organization with no sentence saying why. The control
+plane now holds a set of sealing keys addressed by version.
+`AF_PROVIDER_KEY_SECRET` still means version `v1`, so **an installation that has
+never rotated sets nothing new** and its rows open exactly as before.
+`AF_PROVIDER_KEY_SECRETS` adds keys as `v2=<base64>`, `AF_PROVIDER_KEY_VERSION`
+chooses the version new keys are sealed under, and a row sealed under a version
+this control plane does not hold now fails with a message naming the missing
+version instead of looking like tampering. `af-control-plane-backup reseal`
+rewrites every stored credential under the new version, including the enterprise
+audit stream's collector credentials, and `--check` opens every row before you
+remove the old key. The rotation runbook carries the whole procedure.
+
+**This release applies three migrations** before any traffic moves: `0042`, the
+control plane's own failure groups; `0043`, audit stream delivery state; and
+`0044`, per organization audit stream destinations. Between them they create
+four tables, their row level security policies and one function, and they
+change no table or row that existed before this release.
+
+**Some manifests that used to be accepted are now refused, on purpose.** A star
+where the owner's name goes, as in `*.com` or `hooks.*.com`, is refused outside
+`block`, and so is `egress.default: sandbox`, which let an application reach
+every host on the internet unchanged. The manifest's published schema declared
+constraints the engine did not enforce, and it enforces them now, so a service
+name over 40 characters, a zero where the schema says the minimum is one, or a
+value outside a published list is refused at parse time. A sandbox credential
+that two services would resolve differently is refused with `AF-SEC-007`.
+`resources.cpu` and `resources.memory` were accepted and ignored; they are now
+applied, and a request no node can satisfy is refused with `AF-RUN-047` before
+anything is created.
+
+### Enterprise: what was sold now exists
+
+**Single sign-on and directory provisioning could not be reached by any
+customer.** `ee/web` held a complete SAML 2.0 and OIDC implementation and a SCIM
+server, both tested end to end, and no production binary ever mounted either
+one. Three files described an enterprise entry point that did not exist, and no
+image built one. The control plane now has an enterprise entry point, an
+enterprise image built and proven beside the community image, and a licence
+reader, so the seat limit a licence sells is enforced for the first time.
+
+**Audit streaming forwarded nothing.** The engine's audit socket had no
+implementation and the control plane's hash chained audit log reached no
+destination, while the enterprise README sold "SIEM streaming with a tamper
+evident hash chain". The engine now records five privileged actions to syslog
+over TLS, a signed webhook or an object store. The control plane forwards its
+audit log to Splunk, Event Hubs or a signed webhook, and a hosted organization
+can point that stream at its own collector through
+`/enterprise/audit-stream`, with the credential sealed and the destination held
+to HTTPS and public addresses.
+
+**Three licensed features had no code path behind them.** `air_gapped`
+appeared in the tree only as its own name, and now `AF_AIR_GAPPED=1` seals the
+process: every outbound client dials through one guard, a hostname is refused
+before it is resolved, and an environment whose egress would reach outside is
+refused before it is created. `multi_runtime` had a scheduler nothing called,
+and now `runtime.targets` and `runtime.requires` place an environment. The
+organization masking policy was checked against a list nothing filled, so
+`required_masked_columns` never refused anything; it is now evaluated during a
+golden refresh against the real catalogue, before a row is rewritten.
+
+**A licence could name a feature that granted nothing.** `billing` and
+`enterprise_dashboard` verified, reported themselves active and changed nothing.
+`tools/licensegen` now refuses to sign either. A feature that ships and is gated
+by the plan rather than the licence, such as `rbac`, is issued with a warning
+saying so. One catalogue now answers what a licence grants and where each feature
+is enforced, and a corpus of signed tokens holds the engine and the control plane
+to the same verdicts. It found the control plane permitting features the engine
+refused, on its first run.
+
+**Amazon Aurora PostgreSQL is a database provider.** A branch is an Aurora
+clone, copy on write, and no credential for the production database is ever
+read. Its branch time is expected to be minutes and has never been timed, and
+the benchmark prints that cell as unmeasured.
+
+**Three cloud runtimes answer with a containment report instead of a name
+list.** `ecs`, `aca` and `cloudrun` each enumerate the ways out of a task or
+replica, name which the generated configuration closes, which stay open and
+which nobody can decide without a run in your own account. None of them starts
+an environment, and every verdict says it was computed from a configuration
+never applied to a real account. Antifailure runs on EKS and not on raw ECS.
+
+### Security
+
+**A wildcard allow rule reached somebody's live automation with a clean ALLOW.**
+Every place a rule is explained now says how far a rule naming no single host
+reaches, and the two shapes that reach names registered by anybody are refused.
+
+**An allowed host exposed every other port a manifest opened for anybody.** An
+environment could carry nothing but HTTP, so an allowed AMQP, Kafka or MongoDB
+connection failed exactly as a blocked one did. The sidecar now decides those
+connections on the name in their TLS handshake, opens only the ports a rule
+names, and requires the matching rule to name the destination's own port.
+
+**Kubernetes containment ran on a customer's own shell and tools**, and a missing
+tool could report success without sending a probe. The engine's proxy image now
+runs the preflight and a mandatory init container in every pod, and releases
+customer code only after eight direct probes are denied three rounds in a row.
+
+**The credential detector could not see Google Cloud or Azure keys, or a private
+key with no cloud marker beside it.** This repository's own manifest carried a
+base64 encoded private key and the gate named "no credentials in the tree"
+passed over it. Both are detected, and a scan that could not read part of the
+tree now refuses rather than reporting it clean.
+
+**Thirteen container images were named by a tag**, so nothing recorded what a
+test ran against. All are pinned by digest, and a gate refuses a moving tag.
+
+### Environments
+
+**Reaching an emulator no longer means changing the application.** A new egress
+mode, `emulate`, answers for the provider's own hostname from inside the
+environment. The AWS surface is nine services proved against the unmodified Go
+and JavaScript SDKs with no endpoint override. Azure Storage is answered by
+Azurite, and six Google Cloud services are answered by their emulators, one of
+which is a community project and is labelled as one. gRPC works through the
+sidecar, which it did not before in any form.
+
+**A first `af up` could sit silent for twenty five minutes** on a base image pull
+nobody could see. The egress sidecar is now published with each release and
+fetched before anything is compiled, and a build that does compile shows its
+progress and is bounded.
+
+**A store declared `empty`, `derived` or `topics_only` did nothing.** Each is now
+an outcome: an empty store said out loud, a rebuild command run to completion, or
+Kafka topics and consumer groups created with their partition counts.
+
+**The cross store masking guarantee had no command behind it.** `af mask
+crossstore` checks that one person masks to one person in every store, reading
+schemas and no rows, and a live test reads the server's own query log to prove
+that. A project listing `datastores` in `fidelity.require` with two stores will
+see that requirement go from met to unmeasurable until each store names a
+`source_url_env`, because nothing had measured it.
+
+**A load test ran through a table locked for thirty seconds and reported nothing
+failed.** `af traffic record` counts what production actually served from a trace
+export or an access log, with no body, header or identifier, and the fidelity
+report now states the share of production's requests a run sends.
+
+**Two services needing different values for one variable both received the
+first.** Secrets now resolve per service, and `scope: service` says so directly.
+
+`af explore` can be aimed at a persona, a start page, a phone viewport, a budget
+and a focus for one run. An agent given the MCP server can now search and read
+the documentation this build ships. `af init` proposes a stance for every store
+beside the primary and writes an image nobody builds as its own service.
+
+### Instruments that could not say no
+
+Several of this repository's own gates were green because they could not fail.
+The credential scan reported a clean tree after reading nothing. The coverage
+gate could not tell a package at 100 percent from one nobody measured. Seven test
+commands passed after running no tests. The generated files check printed "21
+generated paths match" while one sat stale for thirteen commits, and two commits
+reached main with no CI verdict at all. The copy on write suite measured its own
+harness. Each now distinguishes "I looked and it is clean" from "I could not
+look", and refuses the second.
+
+<!-- relnotes:omit -->
+
+Every change in this release, by kind, with the pull request that made it.
+
+**Added.** An enterprise image built beside the community one, and the entry
+point that mounts single sign-on and provisioning (#324, #339). The engine audit
+stream to syslog, webhook and object store (#309). The control plane audit log
+forwarded to Splunk, Event Hubs or a webhook (#372), and per organization
+destinations for hosted customers (#381). Air gapped mode (#312). Multi runtime
+placement (#328). The Aurora PostgreSQL provider (#314). Containment reports for
+ECS (#335), Azure Container Apps (#316) and Cloud Run (#322). The `emulate`
+egress mode (#306), the AWS surface (#320), Azurite (#319) and six Google Cloud
+emulators (#318). The `gcs` golden store and the `cloud_database` and
+`cloud_runtime` licensed features (#321). `af mask crossstore` (#303).
+`af traffic record` and `af traffic show` (#315). The `empty`, `derived` and
+`topics_only` stances (#311). A stance for every store and cloud emulator in
+`af init` (#308). Documentation tools for the MCP server (#300). Steering for
+`af explore` (#394). The control plane's own failure groups in the operator
+portal (#361). Setting an invited operator's password in the portal (#349). A
+check holding the detector's providers to the sidecar's handlers (#359).
+
+**Changed.** The cloud credential signers moved into one package (#304). The
+copy on write conformance verdict gained `UNPROVEN` (#343). This repository's own
+manifest rehearses the pages a customer crosses on the first day (#389). Four
+legal pages were removed from the site, in a commit that carried no pull request number.
+
+**Fixed.** The hosted control plane deployed the community image (#386). Hosted
+model budgets charged at superseded Anthropic prices (#404). Single sign-on,
+provisioning and support access enforced by nothing, and two licence features
+that could be sold and did not exist (#323). Four entitlement rows that named
+real code for the wrong subject (#317). An enterprise feature enforced nowhere
+and recorded nowhere (#360). A licence corpus a comment claimed already existed
+(#345). The order of two statements deciding whether a licence was enforced
+(#366). The masking policy checked against an empty list (#331). `resources.cpu`
+and `resources.memory` ignored by both runtimes (#305). An application speaking
+gRPC could not run (#325). The rehearsal ran with every declared secret blank
+(#392). Two services given the first value of a shared variable name (#387).
+`af init` refusing an app beside a prebuilt image (#401), and reading any image
+containing `moto` as an AWS emulator (#390). `af oracle` reporting every persona
+as a missing row (#395). A refusal telling Heroku and Tiger Cloud users to run a
+statement they may not run (#388). A report understating its own twin (#299),
+and claiming a substitution the sidecar refuses (#342). A silent first `af up`
+(#377). A lost port race leaving ClickHouse unstartable. Two secret stores
+reporting themselves usable without reaching the store (#369). A precondition
+that read an unanswered daemon as an absent image (#370). Kubernetes workers
+reported started when only their pods existed (#373). Copy on write declared by
+five providers and checked by nothing (#307). 168 published schema constraints
+kept by nothing (#327), two published bounds the engine had already tightened
+(#367), and a schema gate refusing a runtime the engine would run (#344). The
+buyer pages claiming retention, residency and evidence nothing produces (#380),
+and a README selling a hash chain nothing streamed (#364). The compliance packs
+proven by a run nobody could repeat (#362). The Kubernetes conformance number
+nobody could reproduce (#373). Re-running the check from the Actions tab
+reporting success (#385). The credential gate, the coverage gate and seven test
+commands reporting success without examining anything (#341). Four required
+context steps passing without looking (#347). Two commits reaching main with no
+CI verdict (#336). The edition boundary check blaming the edition for engine
+failures (#332). A gate for unfinished work reading a tenth of the tree (#376).
+A dependency bump that could not compile (#298). An unpinned spelling gate
+failing on a registry race (#330, #340). Image pin checks refusing images
+nobody could pin and reading untracked files (#350, #354). A prose gate red
+locally and green in CI (#352). A generate pass that needed a second run (#353),
+and a generated files step blaming the wrong generator (#333). The merge tool
+refusing its own rule (#355). The enterprise image proof asking the wrong server
+whether it was ready (#351). The site smoke installing a browser nothing launched
+(#329). A schema gate measuring nothing and reporting red (#358).
+
+**Security.** A wildcard allow and `egress.default: sandbox` reaching every host
+(#383). A port opened for one host exposed to another (#326). Kubernetes
+containment run with customer tools (#373). Google Cloud and Azure credentials
+invisible to the detector (#302), and a private key in this repository's own
+manifest (#334). A DNS firewall rule group that blocked nothing (#335). Thirteen
+container images named by a moving tag (#338). The credential gate reporting a
+tree it had not read as clean (#341). The sealing key that could not be rotated
+(#384). An air gapped installation pulling emulator images from an external
+registry (#306).
+
+<!-- relnotes:end -->
+
 ## v1.3.5
 
 A twin was one Postgres and a set of started containers. This release makes it
