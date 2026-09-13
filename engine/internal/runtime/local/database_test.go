@@ -20,12 +20,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/client"
-	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/google/uuid"
+	"github.com/moby/moby/api/pkg/stdcopy"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/network"
+	"github.com/moby/moby/client"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -40,14 +39,14 @@ const relayFixturePassword = "AF_FAKE_DATABASE_PASSWORD"
 const relayFixtureHostname = "branch.af-remote.invalid"
 
 func relayExec(ctx context.Context, cli *client.Client, id string, command []string, input string) (string, int, error) {
-	created, err := cli.ContainerExecCreate(ctx, id, container.ExecOptions{
+	created, err := cli.ExecCreate(ctx, id, client.ExecCreateOptions{
 		Cmd: command, Env: []string{"PGPASSWORD=" + relayFixturePassword},
 		AttachStdout: true, AttachStderr: true, AttachStdin: input != "",
 	})
 	if err != nil {
 		return "", -1, err
 	}
-	stream, err := cli.ContainerExecAttach(ctx, created.ID, container.ExecAttachOptions{})
+	stream, err := cli.ExecAttach(ctx, created.ID, client.ExecAttachOptions{})
 	if err != nil {
 		return "", -1, err
 	}
@@ -64,7 +63,7 @@ func relayExec(ctx context.Context, cli *client.Client, id string, command []str
 	if _, err := stdcopy.StdCopy(&output, &output, stream.Reader); err != nil {
 		return "", -1, err
 	}
-	status, err := cli.ContainerExecInspect(ctx, created.ID)
+	status, err := cli.ExecInspect(ctx, created.ID, client.ExecInspectOptions{})
 	return output.String(), status.ExitCode, err
 }
 
@@ -103,17 +102,23 @@ func relayPostgres(t *testing.T, ctx context.Context, cli *client.Client, edge, 
 	t.Cleanup(func() {
 		cleanup, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
-		found, err := cli.ContainerInspect(cleanup, name)
-		if err == nil && found.Config.Labels["af.test.database-relay"] == owner {
-			require.NoError(t, cli.ContainerRemove(cleanup, found.ID, container.RemoveOptions{Force: true, RemoveVolumes: true}))
+		found, err := cli.ContainerInspect(cleanup, name, client.ContainerInspectOptions{})
+		if err == nil && found.Container.Config.Labels["af.test.database-relay"] == owner {
+			_, err = cli.ContainerRemove(cleanup, found.Container.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
+			require.NoError(t, err)
 		}
 	})
-	created, err := cli.ContainerCreate(ctx, &container.Config{
-		Image: relayPostgresImage, Labels: map[string]string{"af.test.database-relay": owner},
-		Env:        []string{"POSTGRES_PASSWORD=" + relayFixturePassword},
-		Entrypoint: []string{"/bin/sh", "-c"},
-		Cmd:        []string{"chown postgres:postgres /tmp/af-relay.key; chmod 600 /tmp/af-relay.key; exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/tmp/af-relay.crt -c ssl_key_file=/tmp/af-relay.key -c listen_addresses='*'"},
-	}, &container.HostConfig{}, &network.NetworkingConfig{EndpointsConfig: map[string]*network.EndpointSettings{edge: {}}}, nil, name)
+	created, err := cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config: &container.Config{
+			Image: relayPostgresImage, Labels: map[string]string{"af.test.database-relay": owner},
+			Env:        []string{"POSTGRES_PASSWORD=" + relayFixturePassword},
+			Entrypoint: []string{"/bin/sh", "-c"},
+			Cmd:        []string{"chown postgres:postgres /tmp/af-relay.key; chmod 600 /tmp/af-relay.key; exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/tmp/af-relay.crt -c ssl_key_file=/tmp/af-relay.key -c listen_addresses='*'"},
+		},
+		HostConfig:       &container.HostConfig{},
+		NetworkingConfig: &network.NetworkingConfig{EndpointsConfig: map[string]*network.EndpointSettings{edge: {}}},
+		Name:             name,
+	})
 	require.NoError(t, err)
 	cert, key := relayLeaf(t, ca)
 	var files bytes.Buffer
@@ -128,8 +133,10 @@ func relayPostgres(t *testing.T, ctx context.Context, cli *client.Client, edge, 
 		require.NoError(t, err)
 	}
 	require.NoError(t, archive.Close())
-	require.NoError(t, cli.CopyToContainer(ctx, created.ID, "/", &files, container.CopyToContainerOptions{}))
-	require.NoError(t, cli.ContainerStart(ctx, created.ID, container.StartOptions{}))
+	_, err = cli.CopyToContainer(ctx, created.ID, client.CopyToContainerOptions{DestinationPath: "/", Content: &files})
+	require.NoError(t, err)
+	_, err = cli.ContainerStart(ctx, created.ID, client.ContainerStartOptions{})
+	require.NoError(t, err)
 	command := []string{"psql", "-X", "-h", "127.0.0.1", "-U", "postgres", "-d", "postgres", "-Atqc", "SELECT current_setting('ssl')"}
 	require.Eventually(t, func() bool {
 		out, code, err := relayExec(ctx, cli, created.ID, command, "")
@@ -142,11 +149,11 @@ func relayPostgres(t *testing.T, ctx context.Context, cli *client.Client, edge, 
 	_, code, err := relayExec(ctx, cli, created.ID, []string{"psql", "-X", "-h", "127.0.0.1", "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q"}, setup)
 	require.NoError(t, err)
 	require.Zero(t, code)
-	state, err := cli.ContainerInspect(ctx, created.ID)
+	state, err := cli.ContainerInspect(ctx, created.ID, client.ContainerInspectOptions{})
 	require.NoError(t, err)
-	for _, endpoint := range state.NetworkSettings.Networks {
-		if endpoint.IPAddress != "" {
-			return endpoint.IPAddress
+	for _, endpoint := range state.Container.NetworkSettings.Networks {
+		if endpoint.IPAddress.IsValid() {
+			return endpoint.IPAddress.String()
 		}
 	}
 	t.Fatal("the disposable database has no edge-network address")
@@ -174,7 +181,7 @@ func TestDatabaseRelayRealPostgresTLSAndContainment(t *testing.T) {
 			present, err := dockerutil.ImagePresent(ctx, cli, relayPostgresImage)
 			require.NoError(t, err)
 			if !present {
-				pull, err := cli.ImagePull(ctx, relayPostgresImage, image.PullOptions{})
+				pull, err := cli.ImagePull(ctx, relayPostgresImage, client.ImagePullOptions{})
 				require.NoError(t, err)
 				_, err = io.Copy(io.Discard, pull)
 				require.NoError(t, err)
@@ -182,17 +189,17 @@ func TestDatabaseRelayRealPostgresTLSAndContainment(t *testing.T) {
 			}
 			_, err = runtime.EnsureNetworks(ctx, id, nil)
 			require.NoError(t, err)
-			edge, err := cli.NetworkInspect(ctx, "af-edge-"+id, network.InspectOptions{})
+			edge, err := cli.NetworkInspect(ctx, "af-edge-"+id, client.NetworkInspectOptions{})
 			require.NoError(t, err)
 			databaseCA, err := envcert.Generate("database-"+owner, time.Now())
 			require.NoError(t, err)
 			httpCA, err := envcert.Generate("http-"+owner, time.Now())
 			require.NoError(t, err)
-			upstream := relayPostgres(t, ctx, cli, edge.ID, owner, databaseCA)
+			upstream := relayPostgres(t, ctx, cli, edge.Network.ID, owner, databaseCA)
 			routes := []provider.DatabaseRoute{{Port: 45000, Upstream: net.JoinHostPort(upstream, "5432")}, {Port: 45002, Upstream: net.JoinHostPort(upstream, "5432")}}
 			forgedURL := ""
 			if inspectionCA {
-				forged := relayPostgres(t, ctx, cli, edge.ID, owner, httpCA)
+				forged := relayPostgres(t, ctx, cli, edge.Network.ID, owner, httpCA)
 				routes = append(routes, provider.DatabaseRoute{Port: 45001, Upstream: net.JoinHostPort(forged, "5432")})
 				forgedURL = relayURL(relayFixtureHostname, 45001, "af_relay_app", "verify-full")
 			}
