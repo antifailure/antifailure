@@ -380,7 +380,7 @@ func TestTheHookRefusesADatabaseProviderWhoseControlPlaneIsSomebodyElses(t *test
 			"ship, so the enumeration is broken and this test would check less than it says", registered)
 
 	operatorHosted := map[string]bool{"docker": true, "dblab": true, "pgurl": true}
-	somebodyElses := map[string]bool{"neon": true, "supabase": true}
+	somebodyElses := map[string]bool{"neon": true, "supabase": true, "xata": true}
 
 	refused := func(provider string) {
 		err := airgapped.Hook{}.Check(licensed(license.FeatureAirGapped),
