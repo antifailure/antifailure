@@ -214,6 +214,30 @@ A table with no primary key has its rows matched on their whole content, so an
 update reads as one row removed and one row added. Without a key there is no
 fact about which row on one side corresponds to which row on the other.
 
+A persona's rows are matched by the persona rather than by their key. Both sides
+provision the manifest's personas, each into its own database, so the owner's
+account carries a different generated key on each side. A row the two sides do
+not share by key is matched when a column holds a persona's `email` or `phone`,
+or holds a UUID already matched that way, which is how a membership follows its
+account. The matched row is then compared column by column, so a persona
+provisioned under a different name, or a role a migration rewrote, is still
+reported as a changed row. A match is made only when it is the only one on both
+sides: two sessions for the owner on each side have nothing to say which is
+which, and they are reported as they would be without a persona. Integer keys
+are not followed, because a generated 5 is also every other 5 in the database.
+
+Some columns differ on every build whatever the change did. A password hashed
+under a random salt is written differently by each side, and an audit chain's
+hash over a timestamp is recomputed with each side's own clock. The comparison
+cannot tell a new salt from a broken hash, so it reports the difference, and
+when the column is named like a digest (with `hash`, `salt`, `digest` or `mac`
+as a word of its name) and both values look like random values of the same
+length in hexadecimal or base64, it adds a hint naming the entry that would
+quiet it, such as `$.password_hash`. It never leaves the finding out on its
+own. The entry goes in `oracle.ignore.fields`, and it applies to that column in
+every table and to that field in every response body, so check that nothing
+else by that name matters before adding it.
+
 ## Ignoring a field
 
 `oracle.ignore.fields` takes the subset of JSONPath people actually write:
