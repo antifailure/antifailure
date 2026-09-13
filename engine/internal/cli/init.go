@@ -620,7 +620,13 @@ func renderInitSummary(env *Env, res *detect.Result, assumed map[string]string, 
 		if where == "" {
 			where = "."
 		}
-		rows = append(rows, []string{s.Name, string(s.Kind), port, where, s.Command})
+		command := s.Command
+		// A prebuilt image runs what it was built to run, so an empty command
+		// is not a missing one, and the image is what the reader needs to see.
+		if command == "" && s.Build != nil && s.Build.Strategy == schema.BuildImage {
+			command = "image " + s.Build.Image
+		}
+		rows = append(rows, []string{s.Name, string(s.Kind), port, where, command})
 	}
 	env.Out.Table([]Column{
 		Col("SERVICE"), Col("KIND"), Num("PORT"), Col("PATH"), Flex("COMMAND"),

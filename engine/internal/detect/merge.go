@@ -275,6 +275,9 @@ func mergeServices(findings []Finding, questions *[]Question) []schema.Service {
 				c.contextAmbiguous = f.Extra["context_ambiguous"]
 				c.contextDefault = f.Extra["context_default"]
 			}
+			if f.Value == "image" && f.Extra["image"] != "" {
+				c.build = &schema.Build{Strategy: schema.BuildImage, Image: f.Extra["image"]}
+			}
 			if d := f.Extra["dir"]; d != "" && c.dir == "" {
 				c.dir = d
 			}
@@ -540,6 +543,13 @@ func coalesceServices(byName map[string]*candidate, order []string) []string {
 		// An image may borrow runtime evidence from another source in its
 		// directory. Orphan migrations are resolved separately below.
 		if len(c.declaredBy) == 0 && c.build == nil {
+			continue
+		}
+		// A prebuilt image is built from no directory, so it is never the same
+		// service as whatever is built from the root. Grouping it there is
+		// what folded it into the application or blocked the application's
+		// own fold.
+		if c.build != nil && c.build.Strategy == schema.BuildImage {
 			continue
 		}
 		key := normalizeDir(c.dir) + "\x00" + string(c.kind)
