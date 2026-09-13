@@ -136,6 +136,13 @@ type report struct {
 	unrelated []string
 	// unclear could not be decided, which is neither a pass nor a catch.
 	unclear []string
+	// evidence is what go printed for a package on the run that failed
+	// without ee, keyed by the same names as the lists above. A verdict with
+	// no output beside it cannot be diagnosed from the log, and the log is
+	// the only thing somebody reading a red required context has: the reaper
+	// was reported COULD-NOT-LOOK on #394 with nothing to say which test had
+	// failed or how.
+	evidence map[string]string
 }
 
 func (r report) ok() bool { return len(r.dependent) == 0 && len(r.unclear) == 0 }
@@ -209,16 +216,23 @@ func check(root string, run runner) (report, error) {
 	// test failure, because "it does not compile without ee" and "it does not
 	// compile at all" are the same two answers and only one of them is ours.
 	var failed []string
-	if _, ok := run(mod, "go", "build", "./..."); !ok {
+	evidence := map[string]string{}
+	if out, ok := run(mod, "go", "build", "./..."); !ok {
 		failed = append(failed, buildPseudoPackage)
+		evidence[buildPseudoPackage] = out
 	} else {
 		out, ok := run(mod, "go", "test", testScope, "-short", "-count=1", "-timeout", "15m")
 		if !ok {
 			failed = failedPackages(out)
 			if len(failed) == 0 {
 				// The suite said no and named nothing. That is an instrument
-				// that could not look, not a pass.
-				return report{unclear: []string{"the community suite failed without naming a package"}}, nil
+				// that could not look, not a pass, and what it printed is the
+				// only clue to why.
+				const named = "the community suite failed without naming a package"
+				return report{unclear: []string{named}, evidence: map[string]string{named: out}}, nil
+			}
+			for _, pkg := range failed {
+				evidence[pkg] = packageOutput(out, pkg)
 			}
 		}
 	}
@@ -247,7 +261,7 @@ func check(root string, run runner) (report, error) {
 		}
 	}
 
-	var rep report
+	rep := report{evidence: evidence}
 	for _, pkg := range failed {
 		if withEE[pkg] {
 			rep.unrelated = append(rep.unrelated, pkg)
@@ -261,17 +275,21 @@ func check(root string, run runner) (report, error) {
 			return report{}, fmt.Errorf("could not take ee away for the second look: %w", err)
 		}
 		var again bool
+		var againOut string
 		if pkg == buildPseudoPackage {
-			_, ok := run(mod, "go", "build", "./...")
-			again = !ok
+			out, ok := run(mod, "go", "build", "./...")
+			again, againOut = !ok, out
 		} else {
-			_, ok := run(mod, "go", "test", pkg, "-short", "-count=1", "-timeout", "15m")
-			again = !ok
+			out, ok := run(mod, "go", "test", pkg, "-short", "-count=1", "-timeout", "15m")
+			again, againOut = !ok, out
 		}
 		if err := restore(); err != nil {
 			return report{}, fmt.Errorf("could not put ee back: %w", err)
 		}
 		if again {
+			// The reproduction is the stronger evidence: it ran this package
+			// alone, so nothing else on the run can have caused it.
+			rep.evidence[pkg] = againOut
 			rep.dependent = append(rep.dependent, pkg)
 		} else {
 			rep.unclear = append(rep.unclear, pkg)
@@ -311,6 +329,71 @@ func failedPackages(out string) []string {
 	return pkgs
 }
 
+// packageOutput returns what `go test` printed for one package: every line
+// after the previous package's summary line, up to and including this one's.
+//
+// go test buffers a package's output and prints it whole when the package
+// finishes, so one package's lines are contiguous even when many run at once.
+// Taking the block rather than every line that mentions the package is what
+// keeps a neighbour's failure out of this one's evidence. It returns nothing
+// when the package has no summary line in the output.
+func packageOutput(out, pkg string) string {
+	var block []string
+	for _, line := range strings.Split(out, "\n") {
+		block = append(block, line)
+		name, summary := summaryPackage(line)
+		if !summary {
+			continue
+		}
+		if name == pkg {
+			return strings.Join(block, "\n")
+		}
+		block = nil
+	}
+	return ""
+}
+
+// summaryPackage reports whether a line is a per package summary from go test,
+// and names the package if it is.
+func summaryPackage(line string) (string, bool) {
+	for _, prefix := range []string{"ok  \t", "FAIL\t", "?   \t"} {
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && strings.Contains(fields[1], "/") {
+			return fields[1], true
+		}
+	}
+	return "", false
+}
+
+// maxEvidenceLines bounds what one package prints into the report, so a
+// goroutine dump from a hung suite cannot bury the verdict. What was cut is
+// counted, so a shortened block does not read as the whole of it.
+const maxEvidenceLines = 400
+
+// writeEvidence prints a package's captured output, indented under its name.
+func (r report) writeEvidence(b *strings.Builder, name string) {
+	out := strings.TrimRight(r.evidence[name], "\n")
+	if strings.TrimSpace(out) == "" {
+		b.WriteString("    go printed nothing that could be attributed to it\n")
+		return
+	}
+	lines := strings.Split(out, "\n")
+	shown := lines
+	if len(shown) > maxEvidenceLines {
+		shown = shown[:maxEvidenceLines]
+	}
+	b.WriteString("    what go printed on the run that failed without ee:\n")
+	for _, line := range shown {
+		fmt.Fprintf(b, "      %s\n", line)
+	}
+	if cut := len(lines) - len(shown); cut > 0 {
+		fmt.Fprintf(b, "      (%d further lines not shown)\n", cut)
+	}
+}
+
 // render says which question was answered and which was not, in the words
 // somebody reading a red required context needs.
 func (r report) render() string {
@@ -329,6 +412,7 @@ func (r report) render() string {
 		b.WriteString("that reaches into ee:\n")
 		for _, p := range r.unclear {
 			fmt.Fprintf(&b, "  %s\n", p)
+			r.writeEvidence(&b, p)
 		}
 		b.WriteString("\n")
 	}
@@ -337,6 +421,7 @@ func (r report) render() string {
 		b.WriteString("build needs the enterprise edition, which it does not have:\n")
 		for _, p := range r.dependent {
 			fmt.Fprintf(&b, "  %s\n", p)
+			r.writeEvidence(&b, p)
 		}
 		b.WriteString("\n")
 	}
