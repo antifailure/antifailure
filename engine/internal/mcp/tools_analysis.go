@@ -1398,6 +1398,11 @@ func comparisonFindings(in []oracle.Finding, threshold oracle.Severity) []report
 		if threshold != 0 && f.Severity >= threshold {
 			level = report.LevelFail
 		}
+		fix := "If this difference is the change you meant to make, nothing needs doing. " +
+			"If it is not, it is a regression the baseline did not have."
+		if f.Hint != "" {
+			fix = f.Hint
+		}
 		where, _ := safeIdentifier(f.Where)
 		out = append(out, report.Finding{
 			Rule: "oracle_" + string(f.Kind), Level: level,
@@ -1406,8 +1411,7 @@ func comparisonFindings(in []oracle.Finding, threshold oracle.Severity) []report
 			Detail: comparisonDetail(f) +
 				" The two values are not reproduced here, because they are a response body " +
 				"or a row from a copy of production. Read them with af oracle.",
-			Fix: "If this difference is the change you meant to make, nothing needs doing. " +
-				"If it is not, it is a regression the baseline did not have.",
+			Fix: fix,
 		})
 	}
 	return out

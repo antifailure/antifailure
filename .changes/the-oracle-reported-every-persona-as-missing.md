@@ -16,3 +16,11 @@ The matched row is still compared column by column, so a persona provisioned
 under a different name is reported as a changed row. A match is made only when
 it is the only one on both sides; two rows for one persona on each side are
 reported as before.
+
+A changed row whose differing columns are named like a digest, with `hash`,
+`salt`, `digest` or `mac` as a word of the name, and whose two values look like
+random values of the same length now carries a hint naming the
+`oracle.ignore.fields` entry that would quiet it. A password hashed under each
+side's own salt, or an audit chain's hash over each side's clock, differs on
+every build, and the report used to give no sign of that. The finding is still
+reported; the hint only says what to write if the column is what it looks like.

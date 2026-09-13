@@ -621,6 +621,7 @@ func compareRows(
 				f.Candidate = renderColumns(c, changed)
 				f.Detail = plural(len(changed), "column differs", "columns differ") +
 					": " + strings.Join(changed, ", ")
+				f.Hint = digestHint(b, c, changed)
 				add(f)
 			}
 		}

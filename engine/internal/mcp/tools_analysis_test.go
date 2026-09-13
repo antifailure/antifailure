@@ -1064,3 +1064,19 @@ func TestEvidenceTools_ThePublishedListSaysWhichOfThemOnlyRead(t *testing.T) {
 	require.True(t, hints["inspect_data_masking"], "the read only masking tool must say so")
 	require.False(t, hints["apply_data_masking"], "the irreversible one must not")
 }
+
+func TestCompareReleases_ADigestHintIsWhatToWriteInstead(t *testing.T) {
+	t.Parallel()
+	// A model reading the comparison gets the same line a person reading af
+	// oracle does: the exact ignore entry, in place of the generic advice.
+	f := oracle.Finding{
+		Kind: oracle.KindRowChanged, Severity: oracle.Major, SeverityName: "major",
+		Where: "public.admin_users",
+		Hint:  "password_hash holds values shaped like a salted secret or a chain digest. add `$.password_hash` to oracle.ignore.fields.",
+	}
+	_, body, fault := runComparisonFor(t, oracleManifest("critical"), oracleResultWith(
+		[]oracle.Finding{f}), nil)
+	require.Nil(t, fault)
+
+	require.Contains(t, jsonOf(t, body), "add `$.password_hash` to oracle.ignore.fields")
+}

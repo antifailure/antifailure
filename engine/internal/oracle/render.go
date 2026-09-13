@@ -79,6 +79,17 @@ func (r Result) Markdown() string {
 	if len(r.Findings) > 0 {
 		b.WriteString(findingsTable(r.Findings))
 		b.WriteString("\n")
+		// Below the table rather than inside it. A cell is cut at 160
+		// characters, and the part of a hint that matters, the entry to add, is
+		// at its end: in the table it was the part the reader never saw.
+		for _, f := range r.Findings {
+			if f.Hint != "" {
+				fmt.Fprintf(&b, "- `%s`: %s\n", f.Where, f.Hint)
+			}
+		}
+		if hasHint(r.Findings) {
+			b.WriteString("\n")
+		}
 	}
 
 	if d := r.Database; d != nil {
@@ -171,6 +182,9 @@ func (r Result) Text() string {
 			if f.Detail != "" {
 				fmt.Fprintf(&b, "      %s\n", f.Detail)
 			}
+			if f.Hint != "" {
+				fmt.Fprintf(&b, "      hint: %s\n", f.Hint)
+			}
 			if f.Baseline != "" || f.Candidate != "" {
 				fmt.Fprintf(&b, "      baseline  %s\n", oneLine(f.Baseline))
 				fmt.Fprintf(&b, "      candidate %s\n", oneLine(f.Candidate))
@@ -240,4 +254,13 @@ func KindCounts(findings []Finding) []string {
 		out = append(out, fmt.Sprintf("%d %s", counts[Kind(k)], k))
 	}
 	return out
+}
+
+func hasHint(findings []Finding) bool {
+	for _, f := range findings {
+		if f.Hint != "" {
+			return true
+		}
+	}
+	return false
 }

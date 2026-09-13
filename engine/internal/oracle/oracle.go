@@ -223,6 +223,10 @@ type Finding struct {
 	Phase Phase `json:"phase,omitempty"`
 	// Detail is one sentence where the two values do not say it themselves.
 	Detail string `json:"detail,omitempty"`
+	// Hint is what to write in the manifest when the difference is one a build
+	// always produces, such as a salted hash, rather than one this change made.
+	// It never removes the finding. See digestHint.
+	Hint string `json:"hint,omitempty"`
 	// order is the probe's position in the plan, so findings sort into the
 	// order the requests were sent rather than alphabetically. Unexported
 	// because it is a rendering concern and not part of the output.
