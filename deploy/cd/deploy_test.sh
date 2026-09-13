@@ -548,13 +548,19 @@ stance_text() {
 }
 
 every_mutation_has_a_stance() {
-  local operation tail undeclared=""
+  local operation tail undeclared="" header
+  # Read once, then searched. `stance_text | grep -Fq` under pipefail fails
+  # whenever grep exits on its match before sed has written the rest of the
+  # header: sed dies of SIGPIPE, the pipeline reports 141, and the stance reads
+  # as missing. That only happens once the header is longer than one write,
+  # 4096 bytes, which #384 made it, and then on GNU sed it misses most checks.
+  header="$(stance_text)"
   while read -r operation; do
     [ -z "$operation" ] && continue
     # The last two words, which is how the header names an operation: `job
     # start`, `traffic set`, `revision deactivate`, `containerapp update`.
     tail="$(printf '%s' "$operation" | awk '{ print $(NF - 1), $NF }')"
-    if ! stance_text | grep -Fq "$tail"; then
+    if ! grep -Fq "$tail" <<<"$header"; then
       undeclared="$undeclared $tail"
     fi
   done < <(mutating_call_sites | sort -u)
