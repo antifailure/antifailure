@@ -64,8 +64,11 @@ on every push, and it must never be slow. This one needs a container runtime, a
 database to copy and twenty minutes, and what it produces is a report about the
 product rather than a verdict on the diff.
 
-**On a pull request**, one job against the control plane. A Postgres service
-holds the staging database, `npm run seed --workspace @antifailure/db` migrates
+**On a pull request that is not a draft**, one job against the control plane.
+A draft runs nothing and its comment says so, because the control plane
+starts no check on a draft; marking it ready for review starts the run.
+A Postgres service holds the staging database,
+`npm run seed --workspace @antifailure/db` migrates
 and fills it deterministically, `af mask plan` refuses any column no rule
 classifies, `af golden refresh` copies and masks and verifies and publishes,
 and then `tools/dogfood` runs `af ci`. Verification is not a flag: an
