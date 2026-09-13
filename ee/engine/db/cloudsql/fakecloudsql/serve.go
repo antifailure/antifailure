@@ -204,7 +204,18 @@ func (s *Server) patch(w http.ResponseWriter, r *http.Request, name string) {
 		}
 	}
 	if body.Settings.UserLabels != nil {
-		in.UserLabels = body.Settings.UserLabels
+		labels := map[string]string{}
+		for key, value := range body.Settings.UserLabels {
+			labels[key] = value
+		}
+		// Under InheritedLabelsWin the write is accepted and every key the
+		// clone inherited keeps its inherited value, including a key the
+		// request left out. The response is the same success either way,
+		// which is what makes it dangerous to a provider that never reads back.
+		for key, value := range in.InheritedLabels {
+			labels[key] = value
+		}
+		in.UserLabels = labels
 	}
 	if body.Settings.ActivationPolicy != "" {
 		in.ActivationPolicy = body.Settings.ActivationPolicy
@@ -387,6 +398,19 @@ func (s *Server) clone(w http.ResponseWriter, r *http.Request, source string) {
 	for key, value := range src.DatabaseFlags {
 		flags[key] = value
 	}
+	labels := map[string]string{}
+	var inherited map[string]string
+	if s.opts.LabelInheritance != LabelsNotInherited {
+		for key, value := range src.UserLabels {
+			labels[key] = value
+		}
+	}
+	if s.opts.LabelInheritance == InheritedLabelsWin {
+		inherited = map[string]string{}
+		for key, value := range src.UserLabels {
+			inherited[key] = value
+		}
+	}
 	s.instances[destination] = &fakeInstance{
 		ExtraUsers:       extras,
 		DatabaseFlags:    flags,
@@ -398,7 +422,8 @@ func (s *Server) clone(w http.ResponseWriter, r *http.Request, source string) {
 		DiskType:         src.DiskType,
 		DiskSizeGb:       src.DiskSizeGb,
 		ActivationPolicy: src.ActivationPolicy,
-		UserLabels:       map[string]string{},
+		UserLabels:       labels,
+		InheritedLabels:  inherited,
 		CreateTime:       s.opts.Now().UTC(),
 		// The PASSWORD is inherited, which is the Cloud SQL behaviour the
 		// provider's password reset exists to undo.

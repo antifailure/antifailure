@@ -68,6 +68,7 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 	if err := p.label(ctx, name, map[string]string{
 		labelKey:       labelValue,
 		sourceLabelKey: p.sourceIdentity(),
+		kindLabelKey:   kindCandidate,
 		goldenLabelKey: shortVersion(version),
 	}); err != nil {
 		return provider.GoldenVersion{}, err
@@ -127,8 +128,19 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 		return provider.GoldenVersion{}, err
 	}
 	metadata[versionLabelKey] = encodeValue(version)
+	metadata[kindLabelKey] = kindGolden
 	if err := p.label(ctx, name, metadata); err != nil {
 		return provider.GoldenVersion{}, err
+	}
+	// Read back rather than trusted. A golden whose kind write did not take
+	// would be returned here and then never listed or branched, and nothing
+	// would say why.
+	if in, err := p.api.getInstance(ctx, name); err != nil {
+		return provider.GoldenVersion{}, err
+	} else if !p.isPublishedGolden(in) {
+		return provider.GoldenVersion{}, fmt.Errorf(
+			"cloudsql: golden %q does not read back as a published golden after it was labelled; %s is %q",
+			name, kindLabelKey, kindOf(in))
 	}
 
 	// The golden is masked and verified. Now, and only now, the compute policy
@@ -171,7 +183,9 @@ func (p *Provider) ListGoldens(ctx context.Context) ([]provider.GoldenVersion, e
 		if !p.owns(in) {
 			continue
 		}
-		if in.Settings.UserLabels[goldenLabelKey] == "" {
+		// The kind label and the name, never the golden marker, which a
+		// branch or a clone left by a killed worker may have inherited.
+		if !p.isPublishedGolden(in) {
 			continue
 		}
 		version, ok := decodeValue(in.Settings.UserLabels[versionLabelKey])
@@ -253,10 +267,17 @@ func (p *Provider) branchesFrom(ctx context.Context, version string) ([]string, 
 	var out []string
 	for i := range instances {
 		in := &instances[i]
-		if !p.owns(in) || in.Settings.UserLabels[goldenLabelKey] != "" {
+		// Every owned instance that is not provably a golden is a candidate
+		// reference, including one whose inherited labels say golden. It is
+		// matched by the from marker a branch writes OR by the exact version
+		// label, which a clone left by a killed worker inherited from this
+		// very golden before any label of its own was written. Refusing the
+		// removal and naming that instance is the fail closed answer.
+		if !p.isBranchInstance(in) {
 			continue
 		}
-		if in.Settings.UserLabels[fromLabelKey] == marker {
+		recorded, _ := decodeValue(in.Settings.UserLabels[versionLabelKey])
+		if in.Settings.UserLabels[fromLabelKey] == marker || recorded == version {
 			out = append(out, in.Name)
 		}
 	}
@@ -271,7 +292,7 @@ func (p *Provider) goldenInstance(ctx context.Context, version string) (string, 
 	if err != nil {
 		return "", err
 	}
-	if !p.owns(in) || in.Name != name || in.Settings.UserLabels[goldenLabelKey] != shortVersion(version) {
+	if !p.isGoldenSide(in) || in.Name != name || in.Settings.UserLabels[goldenLabelKey] != shortVersion(version) {
 		return "", fmt.Errorf("cloudsql: instance %q: %w", name, ErrNotOurs)
 	}
 	return name, nil
@@ -283,12 +304,25 @@ func (p *Provider) goldenInstance(ctx context.Context, version string) (string, 
 // the customer's organisation policy put there, and a label somebody's billing
 // export depends on is not ours to remove.
 func (p *Provider) label(ctx context.Context, name string, add map[string]string) error {
+	return p.relabel(ctx, name, add, nil)
+}
+
+// relabel is label that also blanks every existing key blank selects.
+//
+// Blanked rather than omitted, because whether Cloud SQL treats a key missing
+// from a patch as removed or as unchanged is not something this provider has
+// established, and an empty value reads the same to every check here under
+// either answer.
+func (p *Provider) relabel(ctx context.Context, name string, add map[string]string, blank func(string) bool) error {
 	in, err := p.api.getInstance(ctx, name)
 	if err != nil {
 		return err
 	}
 	merged := map[string]string{}
 	for k, v := range in.Settings.UserLabels {
+		if blank != nil && blank(k) {
+			v = ""
+		}
 		merged[k] = v
 	}
 	for k, v := range add {

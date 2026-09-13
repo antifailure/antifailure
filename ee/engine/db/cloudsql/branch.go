@@ -10,6 +10,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 	"github.com/antifailure/antifailure/engine/pkg/secret"
@@ -112,7 +113,10 @@ func (p *Provider) Branch(ctx context.Context, version string, envID string) (br
 	// the ownership marker BEFORE masking and the version label only AFTER
 	// verification returns, so an instance carrying the first and not the
 	// second is precisely a golden whose verification did not complete.
-	if recorded, ok := decodeValue(golden.Settings.UserLabels[versionLabelKey]); !ok || recorded != version {
+	//
+	// And the instance must be a published golden by kind and by name, so a
+	// version label alone, which every branch also carries, publishes nothing.
+	if recorded, ok := decodeValue(golden.Settings.UserLabels[versionLabelKey]); !ok || recorded != version || !p.isPublishedGolden(golden) {
 		return provider.Branch{}, coded(codeUnverifiedGolden, fmt.Sprintf(
 			"the instance holding version %q does not carry the published version label, "+
 				"so its masking pass never completed and it was never verified. "+
@@ -160,20 +164,45 @@ func (p *Provider) Branch(ctx context.Context, version string, envID string) (br
 		return provider.Branch{}, err
 	}
 
-	if err := p.label(ctx, name, map[string]string{
+	// The clone may have inherited every label its golden carries, including
+	// kind golden, the golden marker and the metadata. The kind is rewritten
+	// and every golden only label is blanked, so that nothing reading this
+	// instance can take it for the golden it came from.
+	if err := p.relabel(ctx, name, map[string]string{
 		labelKey:       labelValue,
 		sourceLabelKey: p.sourceIdentity(),
+		kindLabelKey:   kindBranch,
 		envLabelKey:    envID,
 		// The golden this branch came from, so DestroyGolden can refuse to
 		// remove one that is still referenced. Without it a golden with a live
 		// branch is removable and the branch's data disappears underneath a
 		// running environment.
 		fromLabelKey:     shortVersion(version),
-		goldenLabelKey:   "",
 		versionLabelKey:  encodeValue(version),
 		preparedLabelKey: "",
-	}); err != nil {
+	}, isGoldenOnlyLabel); err != nil {
 		return provider.Branch{}, err
+	}
+	// Read back rather than trusted, and before any credential work. A patch
+	// can answer success and leave an inherited label in place; an instance
+	// in that state would be listed and protected as a golden, so it is
+	// refused here and the deferred cleanup removes it.
+	labelled, err := p.api.getInstance(ctx, name)
+	if err != nil {
+		return provider.Branch{}, err
+	}
+	if kind := kindOf(labelled); kind != kindBranch {
+		return provider.Branch{}, fmt.Errorf(
+			"cloudsql: the clone %q still reports %s %q after it was labelled %q. Cloud SQL "+
+				"kept a label the clone inherited from its golden, and an instance whose kind "+
+				"says golden cannot be handed to an environment, so it is refused and removed",
+			name, kindLabelKey, kind, kindBranch)
+	}
+	if kept := goldenOnlyLabelsSet(labelled.Settings.UserLabels); len(kept) > 0 {
+		return provider.Branch{}, fmt.Errorf(
+			"cloudsql: the clone %q still carries its golden's labels %s after they were "+
+				"cleared, so it is refused and removed rather than handed to an environment",
+			name, strings.Join(kept, ", "))
 	}
 
 	// A clone carries the SOURCE's users and passwords, which Google documents.
@@ -237,7 +266,10 @@ func (p *Provider) Destroy(ctx context.Context, b provider.Branch) error {
 		}
 		return err
 	}
-	if !p.owns(in) || in.Settings.UserLabels[goldenLabelKey] != "" ||
+	// Positively a branch by kind, not merely "not marked golden". An
+	// instance whose kind is anything else is refused, which leaves a leak
+	// for Inventory to report rather than risking a golden.
+	if !p.owns(in) || kindOf(in) != kindBranch ||
 		in.Name != p.instanceName(branchPrefix, in.Settings.UserLabels[envLabelKey]) ||
 		(b.EnvID != "" && in.Settings.UserLabels[envLabelKey] != b.EnvID) {
 		return fmt.Errorf("cloudsql: instance %q: %w", name, ErrNotOurs)
@@ -331,7 +363,7 @@ func (p *Provider) Inventory(ctx context.Context) ([]provider.Resource, error) {
 			continue
 		}
 		kind := "branch"
-		if in.Settings.UserLabels[goldenLabelKey] != "" {
+		if p.isGoldenSide(in) {
 			kind = "golden"
 		}
 		out = append(out, provider.Resource{
@@ -384,7 +416,7 @@ func (p *Provider) countBranches(ctx context.Context) (int, error) {
 	count := 0
 	for i := range instances {
 		in := &instances[i]
-		if p.owns(in) && in.Settings.UserLabels[goldenLabelKey] == "" {
+		if p.isBranchInstance(in) {
 			count++
 		}
 	}
