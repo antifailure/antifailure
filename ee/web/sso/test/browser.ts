@@ -1,6 +1,8 @@
 // What the Keycloak end to end test needs from a browser: whether a redirect has
 // reached a given origin, and the text of a value in an HTML form.
 //
+// Not MIT. Covered by the Antifailure Enterprise License; see ee/LICENSE.md.
+//
 // In a module of their own, with a unit test, because keycloak.test.ts runs only
 // against a real Keycloak (AF_KEYCLOAK_URL), which CI does not start. A rule
 // written inside that file is a rule nothing in CI exercises.

@@ -1,5 +1,7 @@
 // The two browser rules the Keycloak end to end test relies on.
 //
+// Not MIT. Covered by the Antifailure Enterprise License; see ee/LICENSE.md.
+//
 // CodeQL #4 and #8. The redirect loop stopped at the first location that
 // started with https://antifailure.test, which is also how
 // https://antifailure.test.evil gets treated as home: a prefix is not an origin.
