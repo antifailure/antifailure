@@ -1,0 +1,43 @@
+{
+  "report": {
+    "scanner": "antifailure/verify/2",
+    "engine": "postgres",
+    "started_at": "2026-09-13T12:00:00Z",
+    "finished_at": "2026-09-13T12:00:04Z",
+    "tables": 2,
+    "columns": 6,
+    "rows_sampled": 4003,
+    "sample_size": 2000,
+    "findings": [
+      {
+        "schema": "public",
+        "table": "users",
+        "column": "email",
+        "detector": "email",
+        "example": "a***@example.com",
+        "rows": 3
+      }
+    ],
+    "skipped": [
+      "public.events.payload: larger than the sample limit"
+    ],
+    "unread": [
+      {
+        "schema": "public",
+        "table": "files",
+        "column": "blob",
+        "type": "bytea",
+        "reason": "binary data is not read as text",
+        "ruled": true
+      }
+    ],
+    "unruled": [
+      "public.users.plan"
+    ]
+  },
+  "golden": "gv_20260913120000000000_c47a6bd6",
+  "rules_hash": "c47a6bd655fef26e",
+  "provenance": "gp1-0123456789abcdef0123",
+  "public_key": "GX9rI+FshTLGq8g4+s1ep4m+DHaykgM0A5v6iz02jWE=",
+  "signature": "5n2kY93vpEByIutHGGAYZ7bBviavbD6DUefFip1Z3gcgz61MRe33qDeMKWSQjX/8Mjo1WRxrAfb4JuhkWCn5BA=="
+}
