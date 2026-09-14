@@ -243,9 +243,16 @@ func TestParse_ReportsAMissingServiceDirectory(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestParse_RejectsAPortCollision(t *testing.T) {
+// Two services on one port is an ordinary manifest, not a collision. A port is
+// what the service listens on inside its own container, and images pick the
+// same few: a Next.js application and PostgREST both listen on 3000. The
+// validator refused the pair, which made a property of placement into a rule of
+// the manifest and made af init refuse a compose file both runtimes run. The
+// runtime conformance suite is where a shared port is checked now, in
+// Up_ServicesOnOnePortAreEachReachable.
+func TestParse_AcceptsTwoServicesOnOnePort(t *testing.T) {
 	t.Parallel()
-	_, err := parse(t, `
+	m, err := parse(t, `
 version: 1
 name: shop
 services:
@@ -254,7 +261,10 @@ services:
   - name: api
     port: 3000
 `)
-	require.Contains(t, messages(problems(t, err)), "both claim port 3000")
+	require.NoError(t, err)
+	require.Len(t, m.Services, 2)
+	require.Equal(t, 3000, m.Services[0].Port)
+	require.Equal(t, 3000, m.Services[1].Port)
 }
 
 func TestParse_RejectsADependencyCycle(t *testing.T) {

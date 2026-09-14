@@ -103,7 +103,15 @@ type Runtime struct {
 	// created records every resource id in creation order, for the same
 	// comparison from the other side.
 	created []string
+	// lastHostPort is the last host port handed to a web service. A service is
+	// reached at an address the runtime allocates, never at the port it listens
+	// on, because two services may listen on the same one.
+	lastHostPort int
 }
+
+// firstHostPort is where the fake starts allocating, below the range an
+// operating system hands out for outgoing connections.
+const firstHostPort = 41000
 
 // NewRuntime returns a runtime that keeps every guarantee.
 func NewRuntime() *Runtime {
@@ -177,7 +185,11 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 			Ready: true, State: "running",
 		}
 		if s.Port != 0 {
-			rs.URL = fmt.Sprintf("http://127.0.0.1:%d", s.Port)
+			if r.lastHostPort == 0 {
+				r.lastHostPort = firstHostPort - 1
+			}
+			r.lastHostPort++
+			rs.URL = fmt.Sprintf("http://127.0.0.1:%d", r.lastHostPort)
 		}
 		env.Services = append(env.Services, rs)
 	}

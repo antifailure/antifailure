@@ -83,6 +83,9 @@ type fakeEnv struct {
 }
 
 type fakeService struct {
+	// port is the container port the service listens on, which a runtime that
+	// shares one address per port would key its placement on.
+	port  int
 	name  string
 	kind  string
 	ready bool
@@ -276,7 +279,7 @@ func (f *fakeRuntime) place(env *fakeEnv, s provider.ServiceSpec) *fakeService {
 		}
 	}
 	svc := &fakeService{
-		name: s.Name, kind: s.Kind, state: "running", instances: s.Instances(),
+		name: s.Name, kind: s.Kind, state: "running", instances: s.Instances(), port: s.Port,
 		milliCPU: s.CPUMillis, memoryBytes: s.MemoryBytes,
 	}
 	// What a process inside would see. "max" where nothing was asked for,
@@ -335,11 +338,25 @@ func (f *fakeRuntime) place(env *fakeEnv, s provider.ServiceSpec) *fakeService {
 		body := serveBody(s.Command)
 		svc.ready = true
 		if !f.is(flawNoURL) {
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				_, _ = w.Write([]byte(body))
-			}))
-			f.state.servers = append(f.state.servers, srv)
-			svc.url = srv.URL
+			if f.is(flawSharesOnePort) {
+				// One address per container port, which is what a runtime that
+				// placed every service in one namespace, or published each on
+				// the port it listens on, would amount to: the second service
+				// on a port is handed the first one's address.
+				for _, other := range env.services {
+					if other.port == s.Port && other.url != "" {
+						svc.url = other.url
+						break
+					}
+				}
+			}
+			if svc.url == "" {
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					_, _ = w.Write([]byte(body))
+				}))
+				f.state.servers = append(f.state.servers, srv)
+				svc.url = srv.URL
+			}
 		}
 	case strings.HasPrefix(strings.TrimSpace(s.Command), "sleep"):
 		svc.ready = true

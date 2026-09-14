@@ -12,11 +12,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+	"gopkg.in/yaml.v3"
 
 	"github.com/antifailure/antifailure/engine/internal/cli"
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/pkg/edition"
+	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
 func TestMain(m *testing.M) { goleak.VerifyTestMain(m) }
@@ -608,36 +610,105 @@ func TestInit_DevNullIsNotATerminal(t *testing.T) {
 	require.FileExists(t, filepath.Join(dir, "antifailure.yaml"))
 }
 
-// Two Dockerfiles in different directories both exposing 3000 is a real
-// repository, not a detection mistake, so the draft is correctly refused. What
-// made the refusal a dead end was that the flag it named reached nothing:
-// detection only raises a question about what it is unsure of, and a port read
-// straight out of an EXPOSE line has no question, so --answer had nothing to
-// bind to and was silently discarded.
-func TestInit_TheRemedyForAnInvalidDraftActuallyChangesTheDraft(t *testing.T) {
-	t.Parallel()
+// twoDockerfilesOnOnePort is two services in different directories that both
+// listen on 3000, which is an ordinary repository.
+func twoDockerfilesOnOnePort(t *testing.T) string {
+	t.Helper()
 	dir := t.TempDir()
-	for name, port := range map[string]string{"a": "3000", "b": "3000"} {
+	for _, name := range []string{"a", "b"} {
 		require.NoError(t, os.MkdirAll(filepath.Join(dir, name), 0o750))
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name, "Dockerfile"),
-			[]byte("FROM alpine\nEXPOSE "+port+"\nCMD [\"/bin/"+name+"\"]\n"), 0o600))
+			[]byte("FROM alpine\nEXPOSE 3000\nCMD [\"/bin/"+name+"\"]\n"), 0o600))
 	}
+	return dir
+}
+
+// writtenPorts reads the port of every service af init wrote, by name.
+func writtenPorts(t *testing.T, dir string) map[string]int {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join(dir, "antifailure.yaml"))
+	require.NoError(t, err, "af init reported success and wrote no manifest")
+	var m schema.Manifest
+	require.NoError(t, yaml.Unmarshal(body, &m))
+	ports := map[string]int{}
+	for _, s := range m.Services {
+		ports[s.Name] = s.Port
+	}
+	return ports
+}
+
+// Two Dockerfiles in different directories both exposing 3000 were refused with
+// AF-DET-005, because the manifest validator refused any two services on one
+// port. A port is what a service listens on inside its own container, neither
+// runtime shares one between services, and the runtime conformance suite now
+// holds that in Up_ServicesOnOnePortAreEachReachable. So this repository is
+// written as it is, with both services keeping the port their EXPOSE line
+// named.
+func TestInit_TwoDockerfilesOnOnePortAreWrittenWithBothPorts(t *testing.T) {
+	t.Parallel()
+	dir := twoDockerfilesOnOnePort(t)
+
+	got := runCLI(t, dir, nil, "init", "--non-interactive")
+	require.Zero(t, got.code, "af init refused:\n%s%s", got.stdout, got.stderr)
+	require.Equal(t, map[string]int{"a": 3000, "b": 3000}, writtenPorts(t, dir))
+
+	// af init must never write a file af up would then refuse.
+	explained := runCLI(t, dir, nil, "explain")
+	require.Zero(t, explained.code, explained.stderr)
+}
+
+// --answer overrides a value detection read with confidence, not only one it
+// asked about. A port read straight out of an EXPOSE line raises no question,
+// so an answer for it has nothing to bind to unless it is applied anyway, and
+// an answer silently discarded is a dead end with no clue what changed.
+func TestInit_AnAnswerOverridesAPortReadFromAnExposeLine(t *testing.T) {
+	t.Parallel()
+	dir := twoDockerfilesOnOnePort(t)
+
+	got := runCLI(t, dir, nil, "init", "--non-interactive", "--answer", "service.b.port=3001")
+	require.Zero(t, got.code, got.stderr)
+	require.Equal(t, map[string]int{"a": 3000, "b": 3001}, writtenPorts(t, dir),
+		"the answer reaches the service it names and no other")
+}
+
+// A draft detection cannot make valid is still refused with AF-DET-005, and
+// what that refusal tells a reader to do has to be something that works.
+//
+// It told them to re-run with --answer service.<name>.port=<port>. That was a
+// real remedy while the validator refused two services on one port, and it is
+// not one now: every refusal a detected draft can still reach is a value
+// detection copied from the repository, and no answer id sets it. vercel.json
+// is the case here. Detection passes a cron schedule through as written, the
+// validator refuses one that is not a cron expression and names the field and
+// the service, and the only fix is the schedule in vercel.json.
+func TestInit_AValueDetectionCopiedIsRefusedWithARemedyThatWorks(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "package.json"),
+		[]byte(`{"name":"acme-web","scripts":{"start":"next start"},"dependencies":{"next":"15.0.0"}}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "vercel.json"),
+		[]byte(`{"crons":[{"path":"/api/digest","schedule":"every hour"}]}`), 0o600))
 
 	refused := runCLI(t, dir, nil, "init", "--non-interactive")
 	require.NotZero(t, refused.code)
 	require.Contains(t, refused.stderr, "AF-DET-005")
 	require.Contains(t, prose(refused.stderr), "nothing was written")
-	require.Contains(t, prose(refused.stderr), "--answer service.<name>.port=<port>")
+	require.Contains(t, prose(refused.stderr), "schedule",
+		"the refusal has to name the field that was refused")
+	require.Contains(t, prose(refused.stderr), "cron-digest",
+		"and the service it belongs to, or the reader cannot find which cron to correct")
+	require.NotContains(t, prose(refused.stderr), "--answer",
+		"no answer id sets a cron schedule, so naming --answer here names a remedy that does nothing")
 	require.NotContains(t, prose(refused.stderr), "Fix the reported line",
 		"there is no file to fix a line in")
 	require.NoFileExists(t, filepath.Join(dir, "antifailure.yaml"))
 
-	// The whole point of naming a remedy is that following it works.
-	fixed := runCLI(t, dir, nil, "init", "--non-interactive", "--answer", "service.b.port=3001")
+	// Following the remedy it does name works.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "vercel.json"),
+		[]byte(`{"crons":[{"path":"/api/digest","schedule":"0 * * * *"}]}`), 0o600))
+	fixed := runCLI(t, dir, nil, "init", "--non-interactive")
 	require.Zero(t, fixed.code, fixed.stderr)
-	body, err := os.ReadFile(filepath.Join(dir, "antifailure.yaml"))
-	require.NoError(t, err)
-	require.Contains(t, string(body), "port: 3001")
+	require.FileExists(t, filepath.Join(dir, "antifailure.yaml"))
 }
 
 // An --answer that binds to nothing used to be dropped in silence, which turns
