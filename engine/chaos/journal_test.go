@@ -275,8 +275,10 @@ func TestAResourceThisBuildCannotDeleteIsReportedRatherThanForgotten(t *testing.
 	requireDocker(t)
 	o, envID, stateDir := newEnvironment(t, "chaos/unknown-kind")
 
+	// A string rather than a declared kind, because no build declares one for
+	// DNS records: this is the record a different build wrote.
 	journalAs(t, stateDir, envID, journal.Record{
-		Provider: "some-future-cloud", Kind: journal.KindDNSRecord,
+		Provider: "some-future-cloud", Kind: journal.Kind("dns.record"),
 		IdemKey: "preview.example.test",
 	})
 
