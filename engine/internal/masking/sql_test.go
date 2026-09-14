@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -117,6 +118,25 @@ func TestGoldenIDsFromThisHelperDoNotCollideWithinASecond(t *testing.T) {
 
 func requireDatabase(t *testing.T) (*pgx.Conn, func()) {
 	t.Helper()
+	return openDatabase(t, schema, func(string, string) {})
+}
+
+// openDatabase makes a golden, branches it, connects and loads ddl, and
+// releases all of it on every way out.
+//
+// The release used to be built on the last line and handed back, so a require
+// between the golden and that line (Branch, ConnString, Connect, the schema)
+// stopped the test holding a golden and a branch that nothing would destroy.
+// Six goldens this helper made were found on a development daemon on
+// 2026-09-13, two with their branch still running, while a normal run of this
+// package was measured destroying all ten goldens it made. So what leaked was
+// the runs that stopped early, and the fix is registering each release the
+// moment its resource exists rather than hoping to reach the end.
+//
+// made is told the id of each golden and branch as it is made, which is how
+// the test below finds exactly these on a daemon other suites share.
+func openDatabase(t testing.TB, ddl string, made func(kind, id string)) (*pgx.Conn, func()) {
+	t.Helper()
 	if os.Getenv("AF_SKIP_DOCKER") != "" {
 		t.Skip("skipped: AF_SKIP_DOCKER is set")
 	}
@@ -139,7 +159,22 @@ func requireDatabase(t *testing.T) (*pgx.Conn, func()) {
 	if err != nil {
 		t.Skipf("skipped: no Docker daemon is reachable: %v", err)
 	}
+
+	// One release, registered before the first resource and extended as each
+	// one is made. It runs newest first and at most once per step, so a caller
+	// that defers it and the test's own cleanup do not destroy anything twice.
+	var undo []func()
+	release := func() {
+		for len(undo) > 0 {
+			last := undo[len(undo)-1]
+			undo = undo[:len(undo)-1]
+			last()
+		}
+	}
+	t.Cleanup(release)
+	undo = append(undo, func() { _ = p.Close() })
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	undo = append(undo, cancel)
 
 	// A UNIQUE rules hash per call, and it has to be unique in its first eight
 	// characters.
@@ -163,10 +198,19 @@ func requireDatabase(t *testing.T) (*pgx.Conn, func()) {
 		Verify: func(context.Context, secrets.Value) (string, error) { return `{"rows":0}`, nil },
 	})
 	if err != nil {
-		cancel()
-		_ = p.Close()
 		t.Skipf("skipped: no golden could be made: %v", err)
 	}
+	made("golden", gv.ID)
+	// An error here is a golden image left on the daemon, and this file used to
+	// discard it.
+	destroyGolden := func() {
+		c, stop := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer stop()
+		if err := p.DestroyGolden(c, gv.ID); err != nil {
+			t.Errorf("the golden %s was left on the daemon: %v", gv.ID, err)
+		}
+	}
+	undo = append(undo, destroyGolden)
 	// Unique per call, for the same reason the rules hash above is.
 	//
 	// That comment fixed half of this. The golden id is unique now, and the
@@ -180,25 +224,162 @@ func requireDatabase(t *testing.T) (*pgx.Conn, func()) {
 	// a suite that takes ten minutes means any control C and any test timeout.
 	// One interrupted run then breaks every later run until somebody finds the
 	// stray container, and the error names a table rather than the cause.
-	branch, err := p.Branch(ctx, gv.ID, fmt.Sprintf("maskingtest%d", time.Now().UnixNano()%1e9))
+	//
+	// The release is registered BEFORE the call and addressed by environment,
+	// because Branch can create the container and then fail, and Destroy treats
+	// a container that does not exist as already destroyed.
+	branch := provider.Branch{EnvID: fmt.Sprintf("maskingtest%d", time.Now().UnixNano()%1e9)}
+	made("branch", branch.EnvID)
+	destroyBranch := func() {
+		c, stop := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer stop()
+		if err := p.Destroy(c, branch); err != nil {
+			t.Errorf("the branch %s was left on the daemon: %v", branch.EnvID, err)
+		}
+	}
+	undo = append(undo, destroyBranch)
+	created, err := p.Branch(ctx, gv.ID, branch.EnvID)
 	require.NoError(t, err)
+	branch = created
 
 	url, err := p.ConnString(ctx, branch, provider.ConnDirect)
 	require.NoError(t, err)
 	conn, err := pgx.Connect(ctx, url.Reveal())
 	require.NoError(t, err)
+	undo = append(undo, func() { _ = conn.Close(context.Background()) })
 
-	_, err = conn.Exec(ctx, schema)
+	_, err = conn.Exec(ctx, ddl)
 	require.NoError(t, err)
 
-	return conn, func() {
-		_ = conn.Close(context.Background())
-		c, cancel2 := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancel2()
-		_ = p.Destroy(c, branch)
-		_ = p.DestroyGolden(c, gv.ID)
-		_ = p.Close()
-		cancel()
+	return conn, release
+}
+
+// TestTheDatabaseHelperLeavesNothingOnTheDaemonHowEverItEnds holds openDatabase
+// to its release on both ways out of it: returning, and stopping half way.
+//
+// The helper runs on a testing.TB whose FailNow ends the helper's goroutine the
+// way the real one ends a test, so a stop at the schema can be watched without
+// failing this test. The daemon is what is checked, by the exact ids the helper
+// made, because other suites share it and a count taken before and after would
+// read their work as this helper's.
+func TestTheDatabaseHelperLeavesNothingOnTheDaemonHowEverItEnds(t *testing.T) {
+	cases := []struct {
+		name  string
+		ddl   string
+		stops bool
+	}{
+		{name: "it returns", ddl: schema},
+		{name: "it stops at the schema", ddl: "THIS IS NOT SQL", stops: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if os.Getenv("AF_SKIP_DOCKER") != "" {
+				t.Skip("skipped: AF_SKIP_DOCKER is set")
+			}
+			var goldens, branches []string
+			made := func(kind, id string) {
+				if kind == "golden" {
+					goldens = append(goldens, id)
+				} else {
+					branches = append(branches, id)
+				}
+			}
+			h := &haltingTB{TB: t}
+			finished := make(chan struct{})
+			go func() {
+				defer close(finished)
+				_, done := openDatabase(h, tc.ddl, made)
+				// What every caller does with it.
+				done()
+			}()
+			<-finished
+			h.runCleanups()
+			if h.skipped {
+				t.Skip(h.skipReason)
+			}
+
+			look, err := dockerdb.New(dockerdb.Options{Version: 17, Clock: clock.New(), PortFrom: freePort(t)})
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = look.Close() })
+			// Anything this test's own helper left is removed here, after the
+			// assertions below have had their say, so a broken helper fails this
+			// test without also leaving its golden for the next person.
+			t.Cleanup(func() {
+				c, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+				defer cancel()
+				for _, env := range branches {
+					_ = look.Destroy(c, provider.Branch{EnvID: env})
+				}
+				for _, id := range goldens {
+					_ = look.DestroyGolden(c, id)
+				}
+			})
+
+			require.Equal(t, tc.stops, h.stopped, "whether the helper stopped half way")
+			require.Len(t, goldens, 1, "the helper made no golden, so there was nothing to check")
+			require.Len(t, branches, 1, "the helper made no branch, so there was nothing to check")
+			t.Logf("checking golden %s and branch %s", goldens[0], branches[0])
+			for _, e := range h.errors {
+				require.NotContains(t, e, "left on the daemon")
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+			inventory, err := look.Inventory(ctx)
+			require.NoError(t, err)
+			for _, r := range inventory {
+				require.NotEqual(t, goldens[0], r.Labels["version"],
+					"the golden %s is still on the daemon", goldens[0])
+				require.NotEqual(t, branches[0], r.EnvID,
+					"the branch %s is still on the daemon", branches[0])
+			}
+		})
+	}
+}
+
+// haltingTB stands in for the test inside openDatabase. FailNow and SkipNow end
+// the goroutine the helper runs on, as the real ones end a test, errors are kept
+// rather than failing the caller, and cleanups run when the caller says.
+type haltingTB struct {
+	testing.TB
+	errors     []string
+	cleanups   []func()
+	stopped    bool
+	skipped    bool
+	skipReason string
+}
+
+func (h *haltingTB) Helper() {}
+
+func (h *haltingTB) Errorf(format string, args ...any) {
+	h.errors = append(h.errors, fmt.Sprintf(format, args...))
+}
+
+func (h *haltingTB) Fatalf(format string, args ...any) {
+	h.Errorf(format, args...)
+	h.FailNow()
+}
+
+func (h *haltingTB) FailNow() {
+	h.stopped = true
+	runtime.Goexit()
+}
+
+func (h *haltingTB) Skip(args ...any) {
+	h.skipped, h.skipReason = true, fmt.Sprint(args...)
+	runtime.Goexit()
+}
+
+func (h *haltingTB) Skipf(format string, args ...any) {
+	h.skipped, h.skipReason = true, fmt.Sprintf(format, args...)
+	runtime.Goexit()
+}
+
+func (h *haltingTB) Cleanup(f func()) { h.cleanups = append(h.cleanups, f) }
+
+func (h *haltingTB) runCleanups() {
+	for i := len(h.cleanups) - 1; i >= 0; i-- {
+		h.cleanups[i]()
 	}
 }
 
@@ -557,7 +738,7 @@ func TestApply_MasksThroughAPartitionedParent(t *testing.T) {
 // which something else could take it. That window is unavoidable without
 // handing the socket to Docker, and it is far smaller than the certainty of a
 // collision that a constant guarantees.
-func freePort(t *testing.T) int {
+func freePort(t testing.TB) int {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
