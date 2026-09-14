@@ -114,7 +114,19 @@ type Options struct {
 	Credentials cloudauth.AWSCredentials
 	// Fault is the single thing broken on purpose, or empty.
 	Fault Fault
+	// PasswordDelay is how long a rotated master password takes to come into
+	// force. Zero means defaultPasswordDelay, because real Aurora is never
+	// instant: it accepts ModifyDBCluster, keeps reporting the cluster
+	// available, and refuses the new password for a while. A fake that applied
+	// it on the spot let a provider connect straight after the call, and that
+	// provider failed against AWS on its first refresh.
+	PasswordDelay time.Duration
 }
+
+// defaultPasswordDelay is long enough that a provider which connects straight
+// after ModifyDBCluster is refused, and short enough that a suite polling every
+// few milliseconds barely notices a provider that waits.
+const defaultPasswordDelay = 250 * time.Millisecond
 
 // Server is a running fake control plane.
 type Server struct {
@@ -148,6 +160,9 @@ type Server struct {
 	port int
 	// pgUser is the Postgres superuser the fake administers with.
 	pgUser string
+	// passwords tracks rotations that have not come into force yet, so Close
+	// does not close the admin connection under one.
+	passwords sync.WaitGroup
 }
 
 type cluster struct {
@@ -283,6 +298,7 @@ func (s *Server) BytesCopied() int64 {
 // Postgres other suites share, and a fake that leaked a database per run would
 // be the thing this repository keeps finding in its own instruments.
 func (s *Server) Close() []error {
+	s.passwords.Wait()
 	s.http.Close()
 	var problems []error
 	s.mu.Lock()
@@ -660,11 +676,20 @@ func (s *Server) describeInstances(w http.ResponseWriter, form url.Values) {
 	defer s.mu.Unlock()
 	in, ok := s.instances[identifier]
 	if !ok {
-		s.faultLocked(w, http.StatusNotFound, "DBInstanceNotFoundFault",
+		s.faultLocked(w, http.StatusNotFound, "DBInstanceNotFound",
 			"DBInstance "+identifier+" not found")
 		return
 	}
-	if !in.stuck && in.pending > 0 {
+	if in.status == "deleting" {
+		if in.pending > 0 {
+			in.pending--
+		} else {
+			delete(s.instances, identifier)
+			s.faultLocked(w, http.StatusNotFound, "DBInstanceNotFound",
+				"DBInstance "+identifier+" not found")
+			return
+		}
+	} else if !in.stuck && in.pending > 0 {
 		in.pending--
 		if in.pending == 0 {
 			in.status = "available"
@@ -791,7 +816,7 @@ func (s *Server) createInstance(w http.ResponseWriter, form url.Values) {
 		return
 	}
 	if _, exists := s.instances[identifier]; exists {
-		s.faultLocked(w, http.StatusBadRequest, "DBInstanceAlreadyExistsFault",
+		s.faultLocked(w, http.StatusBadRequest, "DBInstanceAlreadyExists",
 			"DBInstance "+identifier+" already exists")
 		return
 	}
@@ -835,10 +860,20 @@ func (s *Server) modifyCluster(w http.ResponseWriter, form url.Values) {
 		// carries the owner's privileges on its objects, which is what the
 		// masking and the conformance suite's own writes need, and it leaves
 		// no superuser behind on a server other suites share.
+		//
+		// The role can log in from the start, with a password that is not the
+		// one requested. That is the state AWS is in between accepting the
+		// call and applying it: the master user exists, and the new password
+		// is refused as a wrong password, SQLSTATE 28P01, which is also what
+		// a provider has to recognise as not yet.
 		statements := []string{
 			`DROP ROLE IF EXISTS ` + quoteIdent(role),
+			// The privileges are the ones the suite needs, from #374, and the
+			// password is deliberately NOT the one requested, which is the
+			// state AWS is in between accepting the call and applying it.
 			`CREATE ROLE ` + quoteIdent(role) + ` LOGIN CREATEROLE INHERIT PASSWORD ` +
-				quoteLiteral(password) + ` IN ROLE pg_signal_backend, ` + quoteIdent(s.pgUser),
+				quoteLiteral(password+"-not-yet-in-force") + ` IN ROLE pg_signal_backend, ` +
+				quoteIdent(s.pgUser),
 		}
 		for _, statement := range statements {
 			if _, err := s.admin.Exec(statement); err != nil {
@@ -852,6 +887,25 @@ func (s *Server) modifyCluster(w http.ResponseWriter, form url.Values) {
 		c.status = "modifying"
 		c.pending = 1
 		s.mu.Unlock()
+
+		delay := s.opts.PasswordDelay
+		if delay <= 0 {
+			delay = defaultPasswordDelay
+		}
+		s.passwords.Add(1)
+		time.AfterFunc(delay, func() {
+			defer s.passwords.Done()
+			s.mu.Lock()
+			current, ok := s.clusters[identifier]
+			still := ok && current.master == role && current.password == password
+			s.mu.Unlock()
+			if !still {
+				return
+			}
+			// An error here means the cluster was dropped in the meantime, and
+			// a rotation on a cluster that no longer exists has nothing to do.
+			_, _ = s.admin.Exec(`ALTER ROLE ` + quoteIdent(role) + ` PASSWORD ` + quoteLiteral(password))
+		})
 	}
 
 	s.mu.Lock()
@@ -898,11 +952,18 @@ func (s *Server) deleteInstance(w http.ResponseWriter, form url.Values) {
 	defer s.mu.Unlock()
 	in, ok := s.instances[identifier]
 	if !ok {
-		s.faultLocked(w, http.StatusNotFound, "DBInstanceNotFoundFault",
+		s.faultLocked(w, http.StatusNotFound, "DBInstanceNotFound",
 			"DBInstance "+identifier+" not found")
 		return
 	}
-	delete(s.instances, identifier)
+	if in.status == "deleting" {
+		// What AWS answered on 2026-09-13, spelling included, to a delete of a
+		// writer that an earlier delete had already started on.
+		s.faultLocked(w, http.StatusBadRequest, "InvalidDBInstanceState",
+			"Instance "+identifier+" is already being deleted.")
+		return
+	}
+	s.startDeletingLocked(in)
 	if c, ok := s.clusters[in.cluster]; ok {
 		// One refusal on the way out, which is what a real cluster does while
 		// its last instance is still detaching. Teardown that gave up on the
@@ -911,6 +972,49 @@ func (s *Server) deleteInstance(w http.ResponseWriter, form url.Values) {
 		c.deleteRefusals = 1
 	}
 	writeXML(w, emptyResponse{})
+}
+
+// StartDeletingInstance puts a writer into deleting without going through the
+// provider, which is what an operator's console delete or a teardown killed
+// part way through leaves behind. The provider's next delete of it is then
+// refused the way AWS refuses it.
+func (s *Server) StartDeletingInstance(identifier string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	in, ok := s.instances[identifier]
+	if !ok || in.status == "deleting" {
+		return false
+	}
+	s.startDeletingLocked(in)
+	return true
+}
+
+// startDeletingLocked marks an instance deleting for one step. It is still a
+// member of its cluster until that step passes, so a cluster delete issued
+// straight behind it is refused, as it is on AWS.
+func (s *Server) startDeletingLocked(in *instance) {
+	in.status = "deleting"
+	in.pending = 1
+	in.stuck = false
+}
+
+// reapLocked finishes the deletes that have had their step, and reports how
+// many instances of the cluster are still attached.
+func (s *Server) reapLocked(cluster string) int {
+	attached := 0
+	for _, in := range s.instancesOf(cluster) {
+		if in.status == "deleting" {
+			if in.pending > 0 {
+				in.pending--
+				attached++
+				continue
+			}
+			delete(s.instances, in.id)
+			continue
+		}
+		attached++
+	}
+	return attached
 }
 
 func (s *Server) deleteCluster(w http.ResponseWriter, form url.Values) {
@@ -924,7 +1028,7 @@ func (s *Server) deleteCluster(w http.ResponseWriter, form url.Values) {
 		s.mu.Unlock()
 		return
 	}
-	if len(s.instancesOf(identifier)) > 0 {
+	if s.reapLocked(identifier) > 0 {
 		s.faultLocked(w, http.StatusBadRequest, "InvalidDBClusterStateFault",
 			"DBCluster "+identifier+" still has instances attached")
 		s.mu.Unlock()

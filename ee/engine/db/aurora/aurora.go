@@ -54,6 +54,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -64,6 +65,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the pgx driver
 
 	"github.com/antifailure/antifailure/ee/engine/cloudauth"
@@ -515,7 +517,11 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 		if publish {
 			return
 		}
-		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+		// As long as an instance may take to come up, because removing one
+		// takes as long. On 2026-09-13 AWS took twelve minutes to delete a
+		// failed golden's writer and cluster, and the five minute budget this
+		// had reported the cleanup as failed while the delete was still going.
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), p.readyTimeout)
 		defer cancel()
 		if err := p.destroyCluster(cleanup, cluster); err != nil {
 			result = provider.GoldenVersion{ID: version, ProviderRef: cluster}
@@ -640,13 +646,21 @@ func (p *Provider) provision(ctx context.Context, cluster string) (dbCluster, er
 	// Rotated before anything connects and before anything is published. A
 	// clone inherits the source's master password, so the window in which this
 	// cluster is openable with production's credential is the window between
-	// the clone and this line. The writer can have an endpoint during this
-	// interval; preparation revokes inherited logins and sessions before return.
+	// the clone and this line. The writer already has an endpoint in that
+	// window: on AWS it answered before this call was made. Preparation then
+	// revokes the inherited logins and their sessions before this returns.
 	if err := p.api.setMasterPassword(ctx, cluster, p.passwordFor(cluster)); err != nil {
 		return dbCluster{}, err
 	}
 	live, err := p.waitCluster(ctx, cluster)
 	if err != nil {
+		return dbCluster{}, err
+	}
+	// Before disableInheritedLogins, and that order is the defect this fix
+	// exists for rather than a preference: revoking a login is a statement run
+	// over a connection, so a preparation step that runs while the rotation is
+	// still pending is refused with 28P01 and the refresh publishes nothing.
+	if err := p.waitForPassword(ctx, live); err != nil {
 		return dbCluster{}, err
 	}
 	connection, err := p.connString(live)
@@ -657,6 +671,48 @@ func (p *Provider) provision(ctx context.Context, cluster string) (dbCluster, er
 		return dbCluster{}, err
 	}
 	return live, nil
+}
+
+// waitForPassword returns once the derived master password opens the cluster.
+//
+// ModifyDBCluster with ApplyImmediately is accepted before the password is in
+// force, and the cluster reads available the whole time, so its status is not
+// evidence of anything. On 2026-09-13 a refresh against real Aurora connected
+// one second after the call, was refused with 28P01, and published nothing.
+// What is waited on is therefore the thing that matters, a login with the new
+// password. A refused authentication means not yet. Anything else is returned
+// at once, because a security group that drops the connection will not start
+// accepting it by being asked again.
+func (p *Provider) waitForPassword(ctx context.Context, c dbCluster) error {
+	connection, err := p.connString(c)
+	if err != nil {
+		return err
+	}
+	deadline := p.now().Add(p.readyTimeout)
+	for {
+		err := ping(ctx, connection)
+		if err == nil {
+			return nil
+		}
+		if !authenticationRefused(err) {
+			return err
+		}
+		if p.now().After(deadline) {
+			return fmt.Errorf(
+				"the derived master password for %s was still refused %s after it was set: %w",
+				c.Identifier, p.readyTimeout, err)
+		}
+		if err := sleep(ctx, p.poll); err != nil {
+			return err
+		}
+	}
+}
+
+// authenticationRefused reports whether Postgres refused the password, which
+// is what a rotation that has not landed yet looks like.
+func authenticationRefused(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "28P01"
 }
 
 // ListGoldens returns published versions, newest first.
