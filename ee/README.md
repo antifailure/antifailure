@@ -15,11 +15,14 @@ removed. The MIT-licensed engine masks your data, seals your network, runs
 your agents, and tears everything down, and it does that completely, forever,
 for free, self hosted. What lives here is the set of things a large company
 asks for before a rollout, which is also the set of things a large company is
-willing to pay for: single sign on, SCIM provisioning, custom roles and
-approvals, SIEM streaming of the engine's privileged actions, organization wide
-policy enforcement, customer owned runtime clusters, enterprise secret
-managers, managed cloud database providers, air gapped operation, and compliance
-evidence packs.
+willing to pay for: single sign on, SCIM provisioning, custom roles, SIEM
+streaming of the engine's privileged actions, organization wide policy
+enforcement, customer owned runtime clusters, enterprise secret managers,
+managed cloud database providers, air gapped operation, and compliance evidence
+packs. Custom roles are roles an organization defines and grants at a scope, on
+top of the four built-in ones; the approvals this line named with them are a
+section of the policy file that nothing enforces, and a file carrying one is
+refused rather than stored.
 
 Billing and support tooling were on that list until 2026-09-11 and neither is
 here. `ee/engine/license/license.go` records billing as a name with nothing

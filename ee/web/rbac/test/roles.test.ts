@@ -224,14 +224,14 @@ describe('resolution', () => {
 // ---------------------------------------------------------------------------
 
 describe('the community permission check', () => {
-  it('uses the built-in table when no resolver is installed', () => {
+  it('uses the built-in table when no resolver is installed', async () => {
     setPermissionResolver(null)
     assert.equal(hasPermissionResolver(), false)
-    assert.equal(permits(request({ role: 'viewer', permission: 'environments.create' })), false)
-    assert.equal(permits(request({ role: 'admin', permission: 'environments.create' })), true)
+    assert.equal(await permits(request({ role: 'viewer', permission: 'environments.create' })), false)
+    assert.equal(await permits(request({ role: 'admin', permission: 'environments.create' })), true)
   })
 
-  it('lets a resolver widen a built-in role', () => {
+  it('lets a resolver widen a built-in role', async () => {
     // The whole point: a viewer who has been granted a custom role at one
     // repository can do more there and nothing more anywhere else.
     setPermissionResolver(resolverFor(model({
@@ -241,34 +241,39 @@ describe('the community permission check', () => {
       }],
     })))
     try {
-      assert.equal(permits(request({ role: 'viewer' })), true)
-      assert.equal(permits(request({ role: 'viewer', repository: 'acme/other' })), false)
+      assert.equal(await permits(request({ role: 'viewer' })), true)
+      assert.equal(await permits(request({ role: 'viewer', repository: 'acme/other' })), false)
     } finally {
       setPermissionResolver(null)
     }
   })
 
-  it('falls back to the built-in table when a resolver throws', () => {
+  it('falls back to the built-in table when a resolver throws', async () => {
     // A resolver that fails must not open anything up, and must not take the
     // application down either.
     setPermissionResolver(() => {
       throw new Error('the model could not be loaded')
     })
     try {
-      assert.equal(permits(request({ role: 'admin', permission: 'environments.create' })), true)
-      assert.equal(permits(request({ role: 'viewer', permission: 'environments.create' })), false)
+      assert.equal(await permits(request({ role: 'admin', permission: 'environments.create' })), true)
+      assert.equal(await permits(request({ role: 'viewer', permission: 'environments.create' })), false)
     } finally {
       setPermissionResolver(null)
     }
   })
 
-  it('a resolver cannot take away what a built-in role grants', () => {
+  it('a resolver cannot take away what a built-in role grants', async () => {
     setPermissionResolver(() => false)
     try {
       // Even a resolver that refuses everything leaves the built-in answer
       // intact where it granted, because permits asks the table first and a
-      // resolver's false is only consulted where the table said no.
-      assert.equal(permits(request({ role: 'owner', permission: 'members.manage' })), false)
+      // resolver is only consulted where the table said no.
+      //
+      // This asserted false under that same name and that same comment, which
+      // is what permits did: the resolver's answer replaced the table's. Nothing
+      // installed a resolver in production, so nothing could notice.
+      assert.equal(await permits(request({ role: 'owner', permission: 'members.manage' })), true)
+      assert.equal(await permits(request({ role: 'viewer', permission: 'members.manage' })), false)
     } finally {
       setPermissionResolver(null)
     }

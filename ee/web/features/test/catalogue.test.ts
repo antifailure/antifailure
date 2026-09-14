@@ -49,6 +49,7 @@ import { FEATURES, declared, sites, type Feature } from '../src/index.ts'
 // worse than no check, and it was living inside the file it was checking.
 import '@antifailure-ee/sso'
 import '@antifailure-ee/scim'
+import '@antifailure-ee/rbac'
 // The audit stream's site is declared by the enterprise entry point rather than
 // by ee/web/audit, because forwarding is not a route and the licence question
 // is asked where the forwarder is built, not where the bytes are sent.
@@ -89,9 +90,9 @@ function goFeatures(source: string): string[] {
  * The keys of a named Feature-keyed map in license.go, resolved through the
  * constants.
  *
- * Two maps are read by this file, notShipped and unenforced, and one reader for
- * both is what stops the second from being held by a weaker check than the
- * first. A map name that is not in the file asserts rather than returning
+ * One map is read by this file today, notShipped. A second, unenforced, was
+ * read by the same function until custom roles were gated and it was deleted;
+ * the reader stays general so that map can come back under the same check. A map name that is not in the file asserts rather than returning
  * empty: "the map is gone" and "the map is empty" are different facts and a
  * reader that answered the same for both could not say no about either.
  */
@@ -187,7 +188,7 @@ describe('every declared enforcement site names something that can refuse', () =
     // twelve here would be asserting something false about a different process.
     // What is asserted is that the features enforced HERE say so.
     assert.deepEqual(
-      declared(), ['audit_stream', 'scim', 'sso'] as Feature[],
+      declared(), ['audit_stream', 'rbac', 'scim', 'sso'] as Feature[],
       'the set of features enforced in the control plane changed. If one was added, import ' +
         'its package at the top of this file so the registry can see it and add it here. If ' +
         'one disappeared, a declare() call was removed and a feature is silently free again.',
@@ -258,8 +259,9 @@ describe('every declared enforcement site names something that can refuse', () =
 //
 //   refused    in notShipped, so licensegen will not sign it and Evaluate will
 //              not permit it
-//   unenforced in unenforced, which ships and gates nothing, with the reason
-//              stored beside the name
+//   unenforced a third state, for a feature built and deliberately gated
+//              nowhere. Empty since 2026-09-11, when custom roles were the
+//              last name in it, and deleted with its checks. See license.go.
 //   enforced   at a site this test can find, in either half of the product
 //
 // WHY THE SCANNERS CARRY POSITIVE CONTROLS. A scanner that stops matching
@@ -320,7 +322,7 @@ function communitySites(source: string): Set<string> {
 }
 
 describe('every feature a licence can grant is accounted for somewhere', () => {
-  it('partitions the catalogue into refused, unenforced, and enforced', async () => {
+  it('partitions the catalogue into refused and enforced', async () => {
     const constants = new Map<string, string>()
     for (const line of licenseGo.split('\n')) {
       const m = /^\s*(Feature[A-Za-z]+)\s+Feature\s*=\s*"([a-z_]+)"\s*$/.exec(line)
@@ -329,7 +331,6 @@ describe('every feature a licence can grant is accounted for somewhere', () => {
     assert.ok(constants.size > 0, 'no Feature constants were read, so nothing below can resolve')
 
     const refused = new Set(goFeatureMap(licenseGo, 'notShipped'))
-    const ungated = new Set(goFeatureMap(licenseGo, 'unenforced'))
     const engine = await engineSites(constants)
     const controlPlane = new Set<string>(declared())
     const community = communitySites(entitlementsTs)
@@ -360,7 +361,7 @@ describe('every feature a licence can grant is accounted for somewhere', () => {
     const both: string[] = []
     for (const feature of FEATURES) {
       const enforced = engine.has(feature) || controlPlane.has(feature) || community.has(feature)
-      const recorded = refused.has(feature) || ungated.has(feature)
+      const recorded = refused.has(feature)
       if (!enforced && !recorded) unaccounted.push(feature)
       // Recorded as granting nothing AND enforced somewhere is the other way
       // this can be wrong, and it is the one that goes stale silently: somebody
@@ -374,8 +375,9 @@ describe('every feature a licence can grant is accounted for somewhere', () => {
         `half of the product, and nothing records that. A licence naming one verifies, ` +
         `reports active, prints in af license status, and grants nothing, which is ` +
         `indistinguishable from a working feature from the outside. Either gate it at a real ` +
-        `site, or add it to notShipped in ee/engine/license/license.go so it cannot be sold, ` +
-        `or add it to unenforced there with the reason it is not gated.`,
+        `site, or add it to notShipped in ee/engine/license/license.go so it cannot be sold. ` +
+        `A feature that is built and deliberately gated nowhere needs the unenforced map ` +
+        `license.go describes brought back, with this partition taught its third state.`,
     )
     assert.deepEqual(
       both, [],
@@ -385,36 +387,30 @@ describe('every feature a licence can grant is accounted for somewhere', () => {
     )
   })
 
-  it('the two recorded sets are disjoint and neither is empty', () => {
+  it('the refused set is not empty, and custom roles is not in it', () => {
     const refused = goFeatureMap(licenseGo, 'notShipped')
-    const ungated = goFeatureMap(licenseGo, 'unenforced')
     // Empty would make the partition above pass by having nothing to compare,
     // which is the shape of check this repository keeps finding in its own
     // instruments.
     assert.ok(refused.length > 0, 'notShipped is empty, so the partition proves less than it says')
-    assert.ok(ungated.length > 0, 'unenforced is empty, so the partition proves less than it says')
 
-    const overlap = refused.filter((f) => ungated.includes(f))
-    assert.deepEqual(
-      overlap, [],
-      `${overlap.join(', ')} is in both notShipped and unenforced. Those are different ` +
-        `answers: the first says we did not build it and refuses to sell it, the second ` +
-        `says we built it and do not gate it. They cannot both be true.`,
+    // The third state is gone and this is why. license.go carried an unenforced
+    // map for features that were built and gated nowhere, and rbac was the last
+    // name in it. Custom roles now have a table, routes and an installed
+    // resolver, and the site that asks the entitlement is declared, so the map
+    // was deleted with every check that read it. Asserted, rather than left to
+    // the partition, because a regression that re-added the map would pass the
+    // partition by recording rbac twice.
+    assert.equal(
+      /var unenforced = map\[Feature\]string/.test(licenseGo), false,
+      'license.go has an unenforced map again. Either a feature is built and gated nowhere, in ' +
+        'which case this partition needs its third state back, or the map is a leftover.',
     )
-  })
-
-  it('a feature recorded as unenforced is named as such in the documentation', () => {
-    // The same rule the refused features already carry, and for the same
-    // reason: a page that lists a feature and never says the licence does not
-    // grant it is a page selling the licence rather than the capability.
-    const ungated = goFeatureMap(licenseGo, 'unenforced')
-    assert.ok(ungated.length > 0, 'nothing is recorded as unenforced, so this test proves nothing')
-    for (const feature of ungated) {
-      assert.match(
-        licensingDoc, new RegExp(`not enforced[\\s\\S]*\`${feature}\``),
-        `licensing.md lists ${feature} and never says the licence does not enforce it`,
-      )
-    }
+    assert.ok(
+      sites('rbac').includes('ee/web/rbac/src/enforce.ts:customRoleResolver'),
+      `rbac declares ${JSON.stringify(sites('rbac'))} and not the resolver that asks the ` +
+        'entitlement, so the registry no longer knows custom roles are gated',
+    )
   })
 })
 

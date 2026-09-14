@@ -992,7 +992,12 @@ const membersRouter = router({
         const page = rows.slice(0, input.limit)
         const last = page[page.length - 1]
         return {
-          members: page.map(({ created_text: _text, user_id: _id, ...member }) => member),
+          // user_id is returned, and it used to be stripped here. It is the id a
+          // custom role grant names, and no other route an organization can call
+          // answered it, so a grant could be written only by somebody who already
+          // had a database console. Stripping it hid nothing: nextCursor below
+          // has always carried the last row's user_id to the same caller.
+          members: page.map(({ created_text: _text, ...member }) => member),
           nextCursor:
             rows.length > input.limit && last
               ? `${last.created_text}|${last.user_id}`

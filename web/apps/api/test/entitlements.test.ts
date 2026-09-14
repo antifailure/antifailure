@@ -102,11 +102,11 @@ describe('the entitlement catalogue', () => {
       )
     }
     assert.ok(
-      seen >= 2,
-      `only ${seen} entitlements are marked as living in another edition, and single sign-on ` +
-        `and SCIM are both of them. Custom roles is deliberately not one: the enterprise ` +
-        `edition has the library and nothing stores a role model, so there is no request for ` +
-        `a check to refuse and the entry says so instead. A count that has dropped means one ` +
+      seen >= 4,
+      `only ${seen} entitlements are marked as living in another edition, and single sign-on, ` +
+        `SCIM, the audit stream and custom roles are all of them. Custom roles joined on ` +
+        `2026-09-11, when the enterprise edition gained somewhere to store a model and an ` +
+        `installed resolver that asks this entitlement. A count that has dropped means one ` +
         `stopped being enforced rather than that it moved.`,
     )
   })

@@ -29,7 +29,7 @@ import {
 } from './harness.ts'
 
 interface MemberPage {
-  members: { github_login: string; created_at: string }[]
+  members: { github_login: string; created_at: string; user_id?: unknown }[]
   nextCursor: string | null
 }
 
@@ -85,6 +85,22 @@ describe('members.list and runtimes.list are bounded', {
     const first = page(body)
     assert.equal(first.members.length, 200)
     assert.ok(first.nextCursor, 'two hundred and two members and no cursor for the rest')
+  })
+
+  test('every member row carries the user id, which is what a custom role grant names', async () => {
+    // It was stripped from every row while the cursor carried it anyway, so no
+    // route an organization can call answered the id a grant needs.
+    const { status, body } = await callProcedure(h, owner, 'members.list', 'query', {})
+    assert.equal(status, 200, JSON.stringify(body).slice(0, 300))
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+    const rows = page(body).members
+    for (const m of rows) {
+      assert.match(String(m.user_id), uuid, `${m.github_login} was listed with no user id`)
+    }
+    assert.ok(
+      rows.some((m) => m.user_id === owner.userId),
+      'the owner asking is listed, and not under the id their session carries',
+    )
   })
 
   test('and the cursor reaches every remaining member exactly once', async () => {

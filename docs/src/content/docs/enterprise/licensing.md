@@ -115,7 +115,7 @@ The features a license can name are `air_gapped`, `audit_stream`, `billing`, `cl
 <!-- entitlement-names:end -->
 
 <!-- entitlement-count:start -->
-Of the 14 features a license can carry, **10 are refused when the license does not name them**, 8 by the engine and 3 by the control plane, with some checked by both. The rest are listed here anyway, with what actually happens without each one, because a feature that is sold and never checked is worth knowing about and the number is only useful if it can come back unflattering.
+Of the 14 features a license can carry, **11 are refused when the license does not name them**, 8 by the engine and 4 by the control plane, with some checked by both. The rest are listed here anyway, with what actually happens without each one, because a feature that is sold and never checked is worth knowing about and the number is only useful if it can come back unflattering.
 <!-- entitlement-count:end -->
 
 The table is generated from `ee/engine/feature/catalogue.go`, which is the one
@@ -145,7 +145,7 @@ is where it gets published.
 | `enterprise_secrets` | Declared variables resolved from Vault or a cloud secret manager. | Withheld. `secrets/source.go:Source.Available` asks the license, and the feature is off when the answer is no. |
 | `multi_runtime` | Placing an environment across several runtimes at once, by requirement and by tag. | Withheld. `engine/internal/env/env.go:Orchestrator.placement` asks the license, and the feature is off when the answer is no. |
 | `policy_enforcement` | Organization policy that refuses an environment the manifest would have allowed. | Withheld. `policyenforce/policyenforce.go:Hook.Check` asks the license, and the feature is off when the answer is no. |
-| `rbac` | Roles, and a permission on every route. | Nothing changes. It is implemented and deliberately available to everyone. |
+| `rbac` | Custom roles: a role an organization defines, granted to a member at a scope, on top of the four built-in roles. | Withheld by the control plane. `ee/web/rbac/src/enforce.ts:customRoleResolver` asks the license, and an unlicensed installation is answered 402 naming the feature rather than 404. |
 | `scim` | Directory provisioning, so joiners and leavers arrive from the identity provider. | Withheld by the control plane. `ee/web/scim/src/routes.ts:guard` asks the license, and an unlicensed installation is answered 402 naming the feature rather than 404. |
 | `sso` | Single sign on against the organization's own identity provider. | Withheld by the control plane. `ee/web/sso/src/store.ts:connectionByHandle` asks the license, and an unlicensed installation is answered 402 naming the feature rather than 404. |
 | `support_access` | A supported way for the vendor to see what a customer sees. | Nothing changes. It is implemented and deliberately available to everyone. |
@@ -172,21 +172,24 @@ working feature from every direction and is harder to find than the gap it
 covers. A feature nobody can buy and nobody can be granted cannot be mistaken
 for one that ships.
 
-### One more is not enforced
+### Custom roles were in a third state until 2026-09-11
 
-A third case, and a different one from the two above: `rbac`. It names something
-real, and the license is not what provides it.
+`rbac` named something real that the license did not provide. The custom roles
+library was complete and tested, and nothing stored a role model, so no
+organization could have one. It was reported and not enforced, written down
+rather than gated, because a check on a path nothing reaches is worse than no
+check, and `tools/licensegen` printed a warning naming it beside every key it
+signed.
 
-The custom roles library is complete and tested, and nothing stores a role
-model, so an organization has no way to have one.
-
-It is reported and not enforced, and that is written down rather than gated, for
-the reason the paragraph above gives: a check on a path nothing reaches is worse
-than no check. Unlike `billing` and `enterprise_dashboard` it is not refused at
-issue, because refusing it would refuse a customer a capability they can have.
-`tools/licensegen` prints a warning naming it beside the key it signs instead,
-so that whoever issues it reads what the license does and does not grant before
-a customer asks.
+That stopped being true on 2026-09-11. The enterprise control plane now stores a
+role model per organization, mounts the routes that define one, and installs the
+resolver every permission check asks, and that resolver asks the license and
+then the organization's entitlement before a stored grant widens anything. The
+table above reads Withheld for `rbac`, and the site it names is the one that
+asks. The warning is gone with the state it described. The four built-in roles
+are unchanged and are not what the license sells: every organization on every
+plan has them. [Custom roles](/docs/enterprise/custom-roles) says how a model is
+written, reviewed and applied.
 
 `air_gapped` was in this state and said so nowhere until 2026-09-08. Every
 occurrence of the name in the repository was a copy of the catalogue, the
@@ -200,12 +203,14 @@ code rather than written beside it. The table now reads Withheld for
 `air_gapped`, and the site it names is the one that asks.
 
 All three lists are held to the code by a test rather than by a habit.
-`notShipped` and `unenforced` in `ee/engine/license/license.go` are the single
-place each statement lives, and this page, the generator and the enterprise
-feature registry are all checked against them in both directions. A fourth
-check asks the question none of those could: that every feature a license can
-grant is refused, recorded as unenforced, or gated at a real site in one half of
-the product or the other.
+`notShipped` in `ee/engine/license/license.go` is the single place the refused
+set lives, and this page, the generator and the enterprise feature registry are
+all checked against it in both directions. A fourth check asks the question none
+of those could: that every feature a license can grant is either refused or
+gated at a real site in one half of the product or the other. A third answer,
+built and deliberately gated nowhere, was recorded in a map called `unenforced`
+until custom roles, its last entry, were gated, and `license.go` says how to
+bring it back with its checks if a feature is ever in that state again.
 
 ## Contributing
 
