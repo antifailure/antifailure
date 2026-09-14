@@ -20,7 +20,7 @@
     "@antifailure-ee/scim": "*",
     "@antifailure-ee/server": "*",
     "@antifailure-ee/sso": "*",
-    "@types/node": "^24.0.0",
+    "@types/node": "^24.13.4",
     "postgres": "^3.4.9",
     "typescript": "^5.9.0"
   }
