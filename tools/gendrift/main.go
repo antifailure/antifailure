@@ -79,6 +79,13 @@ var ledger = []generator{
 	{"go run ./tools/schemadoc .", []string{
 		"docs/src/content/docs/reference/schemas",
 	}},
+	// The notices need Node and npm as well as Go. The control plane image
+	// sections come from replaying each image's own npm ci, and the console
+	// section from building the console, in temporary directories that are
+	// removed afterwards. With a warm npm cache that needs no network. Offline
+	// with a cold cache, or with no npm on the path, the generator FAILS and says
+	// which of those it was, rather than writing notices from the lockfiles,
+	// which attribute a different set of packages than the images carry.
 	{"go run ./tools/notices -out THIRD_PARTY_NOTICES.md", []string{
 		"THIRD_PARTY_NOTICES.md",
 	}},

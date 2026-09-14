@@ -116,7 +116,7 @@ func TestTheModuleListIsRenderedSortedAndCounted(t *testing.T) {
 			{Path: "example.com/b", Version: "v2.0.0"},
 		},
 	)
-	if !strings.Contains(out, "## Go modules (2)") {
+	if !strings.Contains(out, "\n### Go modules (2)\n") {
 		t.Errorf("the heading does not count the modules:\n%s", out)
 	}
 	if !strings.Contains(out, "Platforms: linux/amd64.") {
@@ -260,5 +260,16 @@ func TestOutLeavesTheFileAloneUntilTheWholeOfItExists(t *testing.T) {
 	}
 	if len(left) != 1 {
 		t.Errorf("a temporary file was left behind: %v", left)
+	}
+}
+
+func TestAnAbsoluteOutIsWrittenWhereItSaysAndARelativeOneUnderTheRoot(t *testing.T) {
+	abs := filepath.Join(t.TempDir(), "notices.md")
+	if got := outPath(".", abs); got != abs {
+		t.Errorf("outPath(%q, %q) = %q: an absolute -out was moved under the working directory", ".", abs, got)
+	}
+	root := t.TempDir()
+	if got, want := outPath(root, "THIRD_PARTY_NOTICES.md"), filepath.Join(root, "THIRD_PARTY_NOTICES.md"); got != want {
+		t.Errorf("outPath(%q, THIRD_PARTY_NOTICES.md) = %q, want %q", root, got, want)
 	}
 }

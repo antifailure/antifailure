@@ -47,6 +47,13 @@ type module struct {
 	Version  string
 	Indirect bool
 	Main     bool
+	// Dir is where the module cache holds the module, which is where its
+	// licence and NOTICE files are read from. go list reports it with the rest.
+	Dir string
+
+	// Licence and Notices are filled in by attribute, never by go list.
+	Licence string    `json:"-"`
+	Notices []shipped `json:"-"`
 }
 
 // target is one GOOS and GOARCH the release publishes an archive for.
@@ -78,14 +85,35 @@ func main() {
 	if err != nil {
 		fail("%v", err)
 	}
-	notices := render(targets, mods)
+	mods, err = attribute(mods, fileRules)
+	if err != nil {
+		fail("%v", err)
+	}
+	imgs, err := images(*root, "npm")
+	if err != nil {
+		fail("%v", err)
+	}
+	notices := render(targets, mods) + renderImages(imgs)
 	if *out == "" {
 		fmt.Print(notices)
 		return
 	}
-	if err := replace(filepath.Join(*root, *out), notices); err != nil {
+	if err := replace(outPath(*root, *out), notices); err != nil {
 		fail("%v", err)
 	}
+}
+
+// outPath is where -out writes. A relative path is the repository's, which is
+// how the gendrift ledger and the release workflow name it. An absolute path is
+// exactly where it says: filepath.Join would have cleaned "." and
+// "/tmp/notices.md" into "tmp/notices.md", so an absolute -out was written
+// under whatever directory the generator ran in, or refused because that
+// directory did not exist, after every package had already been attributed.
+func outPath(root, out string) string {
+	if filepath.IsAbs(out) {
+		return out
+	}
+	return filepath.Join(root, out)
 }
 
 // replace writes the file only once the whole of it exists.
@@ -259,15 +287,13 @@ func render(targets []target, mods []module) string {
 
 	var b strings.Builder
 	b.WriteString("# Third party notices\n\n")
-	b.WriteString("Antifailure is MIT licensed, except for the `ee/` directory, which is\n")
-	b.WriteString("licensed under the Antifailure Enterprise License. This file lists the\n")
-	b.WriteString("dependencies the binary links, and is generated from them rather than\n")
-	b.WriteString("maintained by hand.\n\n")
-	b.WriteString("The list is the union over every platform a release publishes, because\n")
-	b.WriteString("one release ships all of them and a module can be linked on one platform\n")
-	b.WriteString("and not another. A list taken from a single platform attributes too few\n")
-	b.WriteString("people on every other one.\n\n")
-	b.WriteString(wrap("Platforms: "+strings.Join(names, ", ")+".", 74))
+	b.WriteString(wrap("Antifailure is MIT licensed, except for the `ee/` directory, which is "+
+		"licensed under the Antifailure Enterprise License. This file lists the third party "+
+		"software each artifact carries, in a section per artifact: the af binary, the "+
+		"community control plane image, and what the enterprise control plane image adds. "+
+		"It is generated from what each one actually contains rather than maintained by "+
+		"hand, and it travels inside each of them: in the af release archives, and in both "+
+		"images at /usr/share/doc/antifailure/THIRD_PARTY_NOTICES.md.", 74))
 	b.WriteString("\n")
 	b.WriteString("Run `just generate` to regenerate it. `just _generated` and CI both\n")
 	b.WriteString("regenerate it and fail on a difference, so a stale copy cannot be\n")
@@ -275,11 +301,24 @@ func render(targets []target, mods []module) string {
 	b.WriteString("generator ran only while building a release and nothing compared its\n")
 	b.WriteString("output against this file.\n\n")
 
-	fmt.Fprintf(&b, "## Go modules (%d)\n\n", len(mods))
+	b.WriteString("## The af binary\n\n")
+	b.WriteString("The list is the union over every platform a release publishes, because\n")
+	b.WriteString("one release ships all of them and a module can be linked on one platform\n")
+	b.WriteString("and not another. A list taken from a single platform attributes too few\n")
+	b.WriteString("people on every other one.\n\n")
+	b.WriteString(wrap("Platforms: "+strings.Join(names, ", ")+".", 74))
+	b.WriteString("\n")
+
+	fmt.Fprintf(&b, "### Go modules (%d)\n\n", len(mods))
 	for _, m := range mods {
-		fmt.Fprintf(&b, "- `%s` %s\n", m.Path, m.Version)
+		if m.Licence == "" {
+			fmt.Fprintf(&b, "- `%s` %s\n", m.Path, m.Version)
+			continue
+		}
+		fmt.Fprintf(&b, "- `%s` %s, %s\n", m.Path, m.Version, m.Licence)
 	}
-	b.WriteString("\n## Container images\n\n")
+	renderNotices(&b, mods)
+	b.WriteString("\n### Container images\n\n")
 	b.WriteString("An environment starts an emulator when a manifest asks for one, and an\n")
 	b.WriteString("emulator is somebody else's software running beside the application.\n")
 	b.WriteString("It is not linked into the binary, so the module list above cannot see\n")
@@ -305,7 +344,7 @@ func render(targets []target, mods []module) string {
 		fmt.Fprintf(&b, "  - %s\n", e.Licence.URL)
 	}
 
-	b.WriteString("\n## Node packages\n\n")
+	b.WriteString("\n### Node packages\n\n")
 	b.WriteString("The agent runner depends on Playwright, which is Apache 2.0 licensed,\n")
 	b.WriteString("and on its own transitive dependencies. Run `npm ls --all` inside\n")
 	b.WriteString("`runner/` for the full tree of whatever version is installed.\n")
@@ -354,4 +393,184 @@ func wrapAt(text string, width int) []string {
 		lines = append(lines, w)
 	}
 	return lines
+}
+
+// renderNotices reproduces the NOTICE files and notices documents the modules
+// ship, each inside a fence longer than any it contains.
+//
+// Verbatim, because the obligation is to reproduce the file and a paraphrase
+// does not. Fenced, because the text is somebody else's: its line lengths,
+// punctuation and names are not this repository's prose, and every prose gate
+// that reads this file already leaves a fenced block alone.
+func renderNotices(b *strings.Builder, mods []module) {
+	count := 0
+	for _, m := range mods {
+		count += len(m.Notices)
+	}
+	if count == 0 {
+		return
+	}
+	b.WriteString("\n#### Notices the modules ship\n\n")
+	b.WriteString(wrap("Reproduced as each module ships them, because the Apache License 2.0 "+
+		"asks in section 4(d) that a NOTICE file distributed with a work be carried with "+
+		"any redistribution of it.", 74))
+	for _, m := range mods {
+		for _, n := range m.Notices {
+			fence := fenceFor(n.text)
+			fmt.Fprintf(b, "\n##### `%s` %s\n\n%stext\n%s\n%s\n", m.Path, n.file, fence,
+				strings.TrimRight(n.text, "\n"), fence)
+		}
+	}
+}
+
+// imageNotices is what the two control plane images carry beyond the af binary.
+type imageNotices struct {
+	community  []npmPackage // the community image's own install
+	console    []npmPackage // what the console's static export bundles
+	enterprise []npmPackage // what the enterprise image's installs add to the community set
+}
+
+// images generates the control plane image sections from each image's own
+// installs and from a build of the console.
+//
+// Every temporary directory is removed when this returns, success or not. That
+// is why this is a function returning an error rather than work done in main,
+// whose failure path exits the process and would skip the removals.
+func images(root, npm string) (imageNotices, error) {
+	var in imageNotices
+	install := func(file, stageName string) ([]npmPackage, error) {
+		st, err := parseStage(filepath.Join(root, filepath.FromSlash(file)), stageName)
+		if err != nil {
+			return nil, err
+		}
+		tmp, err := os.MkdirTemp("", "af-notices-")
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = os.RemoveAll(tmp) }()
+		dir, err := replay(root, st, tmp, npm, gitTracked)
+		if err != nil {
+			return nil, err
+		}
+		return installed(dir)
+	}
+
+	community, err := install("deploy/docker/control-plane.Dockerfile", "deps")
+	if err != nil {
+		return in, err
+	}
+	// The enterprise image's first install is read from its own Dockerfile rather
+	// than assumed to match the community one. Today they match; the day they do
+	// not, the additions below say so instead of hiding it.
+	enterpriseWeb, err := install("deploy/docker/control-plane-enterprise.Dockerfile", "deps")
+	if err != nil {
+		return in, err
+	}
+	enterpriseEE, err := install("deploy/docker/control-plane-enterprise.Dockerfile", "eedeps")
+	if err != nil {
+		return in, err
+	}
+
+	tmp, err := os.MkdirTemp("", "af-notices-console-")
+	if err != nil {
+		return in, err
+	}
+	defer func() { _ = os.RemoveAll(tmp) }()
+	console, err := consoleBundle(root, npm, tmp)
+	if err != nil {
+		return in, err
+	}
+
+	in.community = community
+	in.console = console
+	in.enterprise = additions(append(append([]npmPackage{}, enterpriseWeb...), enterpriseEE...), community)
+	return in, nil
+}
+
+// additions returns the packages in pkgs that are not in base, by name and
+// version, once each and sorted.
+func additions(pkgs, base []npmPackage) []npmPackage {
+	have := map[string]bool{}
+	for _, p := range base {
+		have[p.Name+"@"+p.Version] = true
+	}
+	var out []npmPackage
+	for _, p := range pkgs {
+		key := p.Name + "@" + p.Version
+		if have[key] {
+			continue
+		}
+		have[key] = true
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].Version < out[j].Version
+	})
+	return out
+}
+
+// renderImages writes the control plane image sections, each marked with the
+// artifact it describes and saying how its licences were read.
+func renderImages(in imageNotices) string {
+	var b strings.Builder
+	b.WriteString("\n## The community control plane image\n\n")
+	b.WriteString(wrap("What deploy/docker/control-plane.Dockerfile puts into the image, read "+
+		"from what the image actually carries rather than from a lockfile. The npm packages "+
+		"come from replaying the image's own npm ci with the same flags. The console is "+
+		"listed as its static export bundles it, measured from a build with source maps, "+
+		"with every static asset traced to the file it is identical to. A licence is read "+
+		"from the text a package ships, and a package that ships no licence text is "+
+		"attributed from its declaration and says so.", 74))
+	fmt.Fprintf(&b, "\n### npm packages (%d)\n\n", len(in.community))
+	writePackages(&b, in.community)
+	fmt.Fprintf(&b, "\n### The console export (%d)\n\n", len(in.console))
+	writePackages(&b, in.console)
+	writePackageNotices(&b, append(append([]npmPackage{}, in.community...), in.console...))
+
+	b.WriteString("\n## The enterprise control plane image, in addition\n\n")
+	b.WriteString(wrap("The enterprise image carries everything in the community image section "+
+		"above, and its second install, the eedeps stage of "+
+		"deploy/docker/control-plane-enterprise.Dockerfile, adds the packages below. It "+
+		"carries no Go binary of its own: tools/release/build.sh builds only engine/cmd/af, "+
+		"the release workflow builds nothing else, and the enterprise image's dockerignore "+
+		"excludes ee/engine, so there are no enterprise Go modules to attribute.", 74))
+	fmt.Fprintf(&b, "\n### npm packages (%d)\n\n", len(in.enterprise))
+	writePackages(&b, in.enterprise)
+	writePackageNotices(&b, in.enterprise)
+	return b.String()
+}
+
+func writePackages(b *strings.Builder, pkgs []npmPackage) {
+	if len(pkgs) == 0 {
+		b.WriteString("None.\n")
+		return
+	}
+	for _, p := range pkgs {
+		fmt.Fprintf(b, "- `%s` %s, %s", p.Name, p.Version, p.Licence)
+		if p.Declared {
+			b.WriteString(" (declared, no licence file shipped)")
+		}
+		b.WriteString("\n")
+	}
+}
+
+func writePackageNotices(b *strings.Builder, pkgs []npmPackage) {
+	count := 0
+	for _, p := range pkgs {
+		count += len(p.Notices)
+	}
+	if count == 0 {
+		return
+	}
+	b.WriteString("\n### Notices the packages ship\n")
+	for _, p := range pkgs {
+		for _, n := range p.Notices {
+			fence := fenceFor(n.text)
+			fmt.Fprintf(b, "\n#### `%s` %s\n\n%stext\n%s\n%s\n", p.Name, n.file, fence,
+				strings.TrimRight(n.text, "\n"), fence)
+		}
+	}
 }

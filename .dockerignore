@@ -60,6 +60,9 @@ console/out
 **/.env
 **/.env.*
 *.md
+# The one Markdown file the image carries. The notices are copied in because
+# the licences of what the image contains require them to travel with it.
+!THIRD_PARTY_NOTICES.md
 # The manifest. Neither image reads it, and leaving it in the context makes
 # every image's tag depend on it: the tag is derived from the context digest,
 # so editing a workflow expectation or an egress rule changes the digest and

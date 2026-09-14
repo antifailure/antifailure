@@ -31,6 +31,7 @@ on:
       - 'ee/web/**'
       - 'deploy/**'
       - '.dockerignore'
+      - 'THIRD_PARTY_NOTICES.md'
       - '.github/workflows/control-plane-image.yml'
 
   # NO `paths:` FILTER HERE, AND THAT IS THE POINT.
@@ -267,6 +268,42 @@ jobs:
             test -f /app/ee/LICENSE.md
           '
           echo "the entry point, the cross workspace link and the license are in the image"
+
+      # THE NOTICES TRAVEL WITH THE IMAGE, OR FOR SOMEBODY PULLING IT THEY DO
+      # NOT EXIST.
+      #
+      # THIRD_PARTY_NOTICES.md attributes the npm packages and the console this
+      # image carries, and redistributing those is an image pull, not a clone.
+      # Both Dockerfiles copy it to one path and name that path in a label, and
+      # both halves are read here from the image that came out. The two build
+      # contexts can each lose it on their own: the root .dockerignore excludes
+      # *.md and the enterprise image reads its own ignore file instead, so a
+      # dropped negation in either removes the file from that edition only,
+      # and the matrix runs this once per edition for that reason. The byte
+      # comparison is against the checked out file, so an image built from a
+      # different copy fails too.
+      - name: The image carries the notices at the path its label names
+        run: |
+          set -euo pipefail
+          img="${IMAGE}:${{ needs.meta.outputs.tag }}"
+          want=/usr/share/doc/antifailure/THIRD_PARTY_NOTICES.md
+          label=$(docker inspect --format '{{ index .Config.Labels "dev.antifailure.notices" }}' "$img")
+          if [ "$label" != "$want" ]; then
+            echo "FAIL: the dev.antifailure.notices label reads '$label', not $want"
+            exit 1
+          fi
+          if ! docker run --rm --entrypoint cat "$img" "$want" > "$RUNNER_TEMP/notices-in-image.md"; then
+            echo "FAIL: the ${EDITION} image has no $want. Its build context no longer carries"
+            echo "FAIL: THIRD_PARTY_NOTICES.md, or its Dockerfile stopped copying it."
+            exit 1
+          fi
+          if ! cmp "$RUNNER_TEMP/notices-in-image.md" THIRD_PARTY_NOTICES.md; then
+            echo "FAIL: $want in the ${EDITION} image is not the repository's THIRD_PARTY_NOTICES.md"
+            exit 1
+          fi
+          echo "the ${EDITION} image carries the notices, byte for byte, at the path its label names"
+        env:
+          EDITION: ${{ matrix.edition }}
 
       # The image has to be able to do the two things the deployment depends on
       # before it is allowed anywhere near a registry.

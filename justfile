@@ -1863,6 +1863,11 @@ capacityplan cpu memory manifest="antifailure.yaml":
 # for the same reason.
 generate:
     go run ./tools/installcheck . web || npm --prefix web ci --no-audit --no-fund
+    # Needs Node and npm. THIRD_PARTY_NOTICES.md is generated from what each
+    # control plane image actually installs and what the console export actually
+    # bundles, so its generator replays the images' own npm ci and builds the
+    # console in temporary directories. A warm npm cache needs no network; offline
+    # with a cold one, that generator fails and says so instead of guessing.
     npm --prefix web run openapi --workspace apps/api
     # Every Go generator, from the one ledger, in the one order. It is not a
     # list here for the same reason it is not a list in ci.yml: three copies of

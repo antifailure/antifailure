@@ -73,7 +73,11 @@ mkdir -p "$stage/$name/runner"
 # source travelling with the binary is worth nothing if the versions do not.
 cp -R "$root/runner/src" "$root/runner/package.json" "$root/runner/package-lock.json" \
       "$root/runner/tsconfig.json" "$root/runner/README.md" "$stage/$name/runner/"
-cp "$root/LICENSE" "$root/README.md" "$stage/$name/"
+# THIRD_PARTY_NOTICES.md because the licences of the modules linked into af ask
+# that their attribution travel with every copy of the binary, and the archive
+# is the copy a person downloads. The release also publishes it as a separate
+# asset, which is not the same as carrying it.
+cp "$root/LICENSE" "$root/README.md" "$root/THIRD_PARTY_NOTICES.md" "$stage/$name/"
 
 # reltar rather than `tar -czf`. tar takes the mtime of every entry from the
 # filesystem, which cp has just set to now, and gzip writes its own timestamp

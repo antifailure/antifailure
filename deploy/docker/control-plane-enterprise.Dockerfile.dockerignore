@@ -82,5 +82,8 @@ console/out
 # alone.
 *.md
 !ee/LICENSE.md
+# The one Markdown file the image carries. The notices are copied in because
+# the licences of what the image contains require them to travel with it.
+!THIRD_PARTY_NOTICES.md
 antifailure.yaml
 masking.yaml
