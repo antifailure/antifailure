@@ -748,6 +748,16 @@ jobs:
             docker logs af-cp-target; echo "the second postgres never came up"; exit 1
           fi
 
+      - name: The goldens on this runner before the suites
+        # Recorded so the step after the suites can name the goldens they left.
+        # A golden outlives af down by design, so a test that makes one has to
+        # remove it, and until 2026-09-13 two live tests did not. Nothing here
+        # fails, and neither does the step that compares.
+        run: |
+          set +e
+          docker images antifailure/golden --format '{{.Tag}}' | sort > "$RUNNER_TEMP/goldens-before.txt"
+          echo "goldens before the suites: $(grep -c . "$RUNNER_TEMP/goldens-before.txt")"
+
       - name: Test
         # The race detector always. A data race that only shows up under load
         # is the kind of bug this product exists to find, and shipping one
@@ -810,9 +820,11 @@ jobs:
         # resource: goldens and branches are databases on it, several
         # environments share one, and `af down` deliberately leaves it running
         # because starting it costs the better part of a minute and the next
-        # `af up` would pay that again. There is exactly one, under a fixed
-        # name, so it cannot accumulate; every branch and every golden inside
-        # it is still swept by the suites' own leak checks.
+        # `af up` would pay that again. There is exactly one server, under a
+        # fixed name, so the server cannot accumulate. What is inside it can:
+        # this comment used to say every golden on it was swept by the suites'
+        # own leak checks, and one live test had left eighteen golden databases
+        # on a laptop by 2026-09-13. The step after this one prints them.
         # docker ps has no label!= filter, so the kind is formatted out and
         # the one exception is dropped here rather than by the daemon.
         run: |
@@ -826,6 +838,46 @@ jobs:
             printf '%s\n' "$leaked"
             echo "the test run leaked resources"; exit 1
           fi
+
+      - name: The goldens the suites left behind
+        # The check above cannot see a golden. With the Docker provider a
+        # golden is an image, on the managed ClickHouse it is a database, and
+        # either one outlives af down by design. So this names the golden
+        # images that exist now and did not before the suites, and the golden
+        # databases on the managed server, which a fresh runner has none of
+        # until a suite makes one.
+        #
+        # It prints and never fails, for one run on main: that run measures
+        # what a clean engine job leaves. The assertion that it leaves none is
+        # its own pull request, made with that measurement in hand. A listing
+        # that cannot be read says so rather than printing a count of zero.
+        if: always()
+        run: |
+          set +e
+          before="$RUNNER_TEMP/goldens-before.txt"
+          after="$RUNNER_TEMP/goldens-after.txt"
+          if [ ! -f "$before" ]; then
+            echo "golden images: could not compare, no snapshot was taken before the suites"
+          elif ! docker images antifailure/golden --format '{{.Tag}}' > "$after.raw"; then
+            echo "golden images: could not look, docker images failed"
+          else
+            sort "$after.raw" > "$after"
+            left=$(comm -13 "$before" "$after")
+            echo "golden images the suites left: $(printf '%s' "$left" | grep -c .)"
+            printf '%s\n' "$left" | sed '/^$/d; s|^|  antifailure/golden:|'
+          fi
+          if ! docker version > /dev/null 2>&1; then
+            echo "golden databases: could not look, Docker did not answer"
+          elif ! docker inspect af-clickhouse > /dev/null 2>&1; then
+            echo "golden databases: no managed ClickHouse on this runner"
+          elif ! dbs=$(docker exec af-clickhouse clickhouse-client --query \
+              "SELECT name FROM system.databases WHERE name LIKE 'af_golden_%' FORMAT TSV"); then
+            echo "golden databases: could not look, the managed ClickHouse did not answer"
+          else
+            echo "golden databases on the managed ClickHouse: $(printf '%s' "$dbs" | grep -c .)"
+            printf '%s\n' "$dbs" | sed '/^$/d; s|^|  |'
+          fi
+          exit 0
 
   runner:
     name: runner

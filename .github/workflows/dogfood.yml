@@ -473,6 +473,14 @@ jobs:
         # a deliberate product decision nobody has taken.
         run: ./bin/af -C . mask plan
 
+      - name: The goldens on this runner before the refresh
+        # Recorded so the step after the run can say how many goldens this job
+        # left, which should be exactly the one the next step makes on purpose.
+        run: |
+          set +e
+          docker images antifailure/golden --format '{{.Tag}}' | sort > "$RUNNER_TEMP/goldens-before.txt"
+          echo "goldens before the refresh: $(grep -c . "$RUNNER_TEMP/goldens-before.txt")"
+
       - name: Refresh the golden, with the attestation required
         # Copy, mask, verify, publish. Verification is not a flag here: an
         # unverified version cannot be branched, so a golden that reaches the
@@ -613,6 +621,30 @@ jobs:
             echo "::error::the dogfood run leaked resources"
             exit 1
           fi
+
+      - name: The goldens this job left
+        # The check above cannot see a golden, which with the Docker provider
+        # is an image that outlives af down by design. This job makes exactly
+        # one on purpose, in the refresh step, so exactly one new golden image
+        # is what a correct run leaves. It prints and never fails, for one run
+        # on main; the assertion is its own pull request, made once that run
+        # has measured it. A listing that cannot be read says so.
+        if: always()
+        run: |
+          set +e
+          before="$RUNNER_TEMP/goldens-before.txt"
+          if [ ! -f "$before" ]; then
+            echo "golden images: could not compare, no snapshot was taken before the refresh"
+            exit 0
+          fi
+          if ! docker images antifailure/golden --format '{{.Tag}}' > "$RUNNER_TEMP/goldens-after.raw"; then
+            echo "golden images: could not look, docker images failed"
+            exit 0
+          fi
+          left=$(sort "$RUNNER_TEMP/goldens-after.raw" | comm -13 "$before" -)
+          echo "golden images this job left: $(printf '%s' "$left" | grep -c .), expected exactly 1, the one the refresh step made"
+          printf '%s\n' "$left" | sed '/^$/d; s|^|  antifailure/golden:|'
+          exit 0
 
       - name: Keep the record
         if: always()
@@ -1018,6 +1050,14 @@ jobs:
         env:
           AF_MIGRATION_DATABASE_URL: ${{ env.AF_STAGING_DATABASE_URL }}
 
+      - name: The goldens on this runner before the pipeline
+        # Recorded so the step after the run can say how many goldens this leg
+        # left, which should be exactly the one the pipeline refreshes.
+        run: |
+          set +e
+          docker images antifailure/golden --format '{{.Tag}}' | sort > "$RUNNER_TEMP/goldens-before.txt"
+          echo "goldens before the pipeline: $(grep -c . "$RUNNER_TEMP/goldens-before.txt")"
+
       - name: The pipeline, with load
         # --refresh-golden, because there is no golden here to find otherwise.
         # The control plane job above refreshes one in its own step and this
@@ -1049,6 +1089,29 @@ jobs:
             echo "::error::the nightly run leaked resources"
             exit 1
           fi
+
+      - name: The goldens this leg left
+        # The same measurement as the control plane job's: the check above
+        # cannot see a golden, and this leg refreshes exactly one through the
+        # harness, so exactly one new golden image is what a correct run
+        # leaves. It prints and never fails, for one run on main; the assertion
+        # is its own pull request, made once that run has measured it.
+        if: always()
+        run: |
+          set +e
+          before="$RUNNER_TEMP/goldens-before.txt"
+          if [ ! -f "$before" ]; then
+            echo "golden images: could not compare, no snapshot was taken before the pipeline"
+            exit 0
+          fi
+          if ! docker images antifailure/golden --format '{{.Tag}}' > "$RUNNER_TEMP/goldens-after.raw"; then
+            echo "golden images: could not look, docker images failed"
+            exit 0
+          fi
+          left=$(sort "$RUNNER_TEMP/goldens-after.raw" | comm -13 "$before" -)
+          echo "golden images this leg left: $(printf '%s' "$left" | grep -c .), expected exactly 1, the one the pipeline refreshed"
+          printf '%s\n' "$left" | sed '/^$/d; s|^|  antifailure/golden:|'
+          exit 0
 
       - if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
