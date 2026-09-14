@@ -174,12 +174,19 @@ func (r *Runtime) startEmulator(
 		return aferrors.Wrap(err, aferrors.AFRUN040,
 			"detail", fmt.Sprintf("starting the %s emulator: %v", e.Name, err))
 	}
+	// STARTED, not ready, and the distinction is the whole of AF-RUN-049. The
+	// daemon has accepted the container and its first process is running; the
+	// server inside has not bound the port yet, and for a third party emulator
+	// that is seconds to tens of seconds away. This line said "ready" while the
+	// port was closed, so the one message a reader had contradicted the 502 the
+	// application was about to get. waitEmulatorsReady says ready, after
+	// dialling it.
 	if len(e.Companions) == 0 {
-		progress(fmt.Sprintf("%s emulator ready at %s:%d, with no route out",
+		progress(fmt.Sprintf("%s emulator started at %s:%d, with no route out",
 			e.Name, EmulatorAlias(e.Name), e.Port))
 		return nil
 	}
-	progress(fmt.Sprintf("%s emulator ready at %s:%d, with %d %s beside it and no route out",
+	progress(fmt.Sprintf("%s emulator started at %s:%d, with %d %s beside it and no route out",
 		e.Name, EmulatorAlias(e.Name), e.Port,
 		len(e.Companions), plural(len(e.Companions), "companion", "companions")))
 	return nil

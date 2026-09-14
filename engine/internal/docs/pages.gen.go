@@ -9177,6 +9177,18 @@ under this load. The four ` + "`" + `gcloud` + "`" + ` emulators are the expensi
 numbers and they are the four that share one image, so a manifest asking for
 Cloud Storage and Spanner alone pays 41 seconds and 57 MiB.
 
+**` + "`" + `af up` + "`" + ` now pays that time rather than leaving it to the application.** Every
+number in the table above is measured at first bind, which is also what the
+engine waits for: it starts the emulator containers, starts the sidecar, and then
+dials each emulator from inside the environment until it accepts a connection,
+before any service is created. Before that wait existed the application started
+while these ports were still closed, and its first call came back ` + "`" + `502 Bad
+Gateway` + "`" + ` from the sidecar, so the sentence above described what this page assumed
+rather than what the engine did. Each emulator has three minutes to bind, which
+is about three times the slowest figure here, and ` + "`" + `AF_EMULATOR_READY_TIMEOUT` + "`" + `
+moves it. An emulator that never binds stops the run with ` + "`" + `AF-RUN-049` + "`" + ` naming it,
+instead of handing the application a 502 that reads as a routing fault.
+
 **Read those numbers with their caveats or do not read them.** They were taken
 on a laptop at load average 30 with other work running, so the times are an
 upper bound rather than a typical figure. And the memory is read at the moment
@@ -10793,6 +10805,41 @@ services:
     health_path: /healthz
     health_timeout: 300s
 ` + "`" + "`" + "`" + `
+
+## An emulator that never starts listening
+
+` + "`" + "`" + "`" + `
+AF-RUN-049 The probe emulator started but never accepted a connection at af-emu-probe:8080 within 3m0s, so the environment was torn down.
+` + "`" + "`" + "`" + `
+
+An emulator is a third party container, and starting one is not the same thing
+as being able to talk to it. The daemon reports a container started the moment
+its first process is running, while the server inside binds its port some time
+after that: measured on this machine, the Google emulators take between 17.7 and
+51.5 seconds to accept their first connection, and LocalStack spends its own
+seconds loading providers. So ` + "`" + `af up` + "`" + ` starts the emulators, starts the sidecar,
+and then dials each emulator from inside the environment until it answers, before
+any of your services are created.
+
+That dial is the reason for this wait. Without it an application that calls out
+the instant it starts reaches the sidecar, the sidecar forwards to a port nothing
+has bound yet, and the application reads ` + "`" + `502 Bad Gateway` + "`" + ` from its own SDK. That
+502 is the same status the sidecar returns for an emulator the environment is not
+running at all, so the symptom pointed at the manifest while the cause was the
+clock.
+
+Each emulator has three minutes. An environment whose emulator never binds is
+torn down rather than left standing, because every call it would answer is a 502
+and that is the misleading symptom this wait exists to remove. For an emulator
+that genuinely needs longer, say so:
+
+` + "`" + "`" + "`" + `
+AF_EMULATOR_READY_TIMEOUT=6m af up
+` + "`" + "`" + "`" + `
+
+A container that exits instead of binding is usually a command the image does not
+have or a companion container the emulator refuses to start without. ` + "`" + `af logs` + "`" + `
+does not carry an emulator's output, and ` + "`" + `docker logs af-emu-<name>-<env>` + "`" + ` does.
 
 ## A service that exits immediately
 
@@ -21241,6 +21288,18 @@ This runtime cannot place the sizes the manifest asks for: {detail}
 The egress sidecar image could not be obtained: {detail}
 
 **What to do.** A release publishes this image, so an official build fetches it in seconds. Set AF_PROXY_IMAGE_TIMEOUT higher if this machine is slow, or name an image you host in AF_PROXY_IMAGE so nothing is compiled here.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `1` + "`" + ` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [guides/local-runtime](/docs/guides/local-runtime) |
+
+### AF-RUN-049
+
+The {emulator} emulator started but never accepted a connection at {address} within {timeout}, so the environment was torn down: {detail}
+
+**What to do.** Nothing is listening inside that container yet. Run the image by hand and watch how long it takes to bind {address}, then raise AF_EMULATOR_READY_TIMEOUT if it needs longer than the default. A container that exits instead of binding is a wrong command or a missing companion.
 
 | | |
 | --- | --- |

@@ -40,6 +40,7 @@ var sources = []string{
 	"cmd/af-proxy/main.go",
 	"cmd/af-proxy/network_gate.go",
 	"cmd/af-proxy/forward.go",
+	"cmd/af-proxy/dial.go",
 	"cmd/af-proxy/destination.go",
 	"cmd/af-proxy/database.go",
 	"cmd/af-proxy/dns.go",

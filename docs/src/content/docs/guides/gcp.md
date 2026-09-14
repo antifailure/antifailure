@@ -259,6 +259,18 @@ under this load. The four `gcloud` emulators are the expensive half of both
 numbers and they are the four that share one image, so a manifest asking for
 Cloud Storage and Spanner alone pays 41 seconds and 57 MiB.
 
+**`af up` now pays that time rather than leaving it to the application.** Every
+number in the table above is measured at first bind, which is also what the
+engine waits for: it starts the emulator containers, starts the sidecar, and then
+dials each emulator from inside the environment until it accepts a connection,
+before any service is created. Before that wait existed the application started
+while these ports were still closed, and its first call came back `502 Bad
+Gateway` from the sidecar, so the sentence above described what this page assumed
+rather than what the engine did. Each emulator has three minutes to bind, which
+is about three times the slowest figure here, and `AF_EMULATOR_READY_TIMEOUT`
+moves it. An emulator that never binds stops the run with `AF-RUN-049` naming it,
+instead of handing the application a 502 that reads as a routing fault.
+
 **Read those numbers with their caveats or do not read them.** They were taken
 on a laptop at load average 30 with other work running, so the times are an
 upper bound rather than a typical figure. And the memory is read at the moment

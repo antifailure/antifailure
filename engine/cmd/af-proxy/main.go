@@ -93,6 +93,8 @@ func main() {
 	gateControl := flag.String("gate-control", "", "actual sidecar IP and port for the network readiness control")
 	forwardListen := flag.String("forward-listen", "", "run as the ingress forwarder: accept on this address and relay to -forward-to, reading no configuration")
 	forwardTo := flag.String("forward-to", "", "the host and port every connection accepted on -forward-listen is relayed to")
+	dialTarget := flag.String("dial", "", "connect once to this host and port on the environment's own network, and report whether anything is listening")
+	dialTimeout := flag.Duration("dial-timeout", dialDefaultTimeout, "how long the -dial attempt waits")
 	flag.Parse()
 	if *networkGate {
 		if err := networkGateMode(*gateControl); err != nil {
@@ -110,6 +112,19 @@ func main() {
 	if *forwardListen != "" || *forwardTo != "" {
 		if err := forwardMode(*forwardListen, *forwardTo); err != nil {
 			log.Fatalf("af-proxy forward: %v", err)
+		}
+		return
+	}
+	// Also before the configuration, and for a sharper reason than the
+	// forwarder's. This mode runs INSIDE the already running sidecar, as a
+	// second process, while the first one is serving the environment. Reading
+	// proxy.json here would mean a readiness probe that fails when the policy
+	// file is unreadable, and reporting the emulator down because a file the
+	// probe did not need could not be read is the shape of failure this whole
+	// change exists to remove.
+	if *dialTarget != "" {
+		if err := dialMode(*dialTarget, *dialTimeout); err != nil {
+			log.Fatalf("af-proxy dial: %v", err)
 		}
 		return
 	}

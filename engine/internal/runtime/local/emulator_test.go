@@ -70,11 +70,22 @@ func TestEmulator_ContainerHasNoRouteOutAndTheNetworkSaysWhy(t *testing.T) {
 		// sidecar and this container is not behind the sidecar at all.
 		Egress: &schema.Egress{Default: schema.ModeBlock},
 		Emulators: []provider.EmulatorSpec{{
-			Name: "probe", Image: digest, Port: 8080,
+			Name: "probe", Image: digest, Port: emulatorPort,
 			// A command rather than the image's own, because alpine's is a
 			// shell that exits the moment it has no terminal. A real emulator
 			// runs its own server and needs none of this.
-			Command: []string{"/bin/sh", "-c", "sleep 900"},
+			//
+			// It LISTENS, and it has to. This was `sleep 900`, which kept the
+			// container alive and left the declared port closed, and that was
+			// invisible until Up began waiting for each emulator to accept a
+			// connection before starting anything. A container that never binds
+			// is now a refused environment, by design, so a fixture that never
+			// binds was asking this test to prove containment in an environment
+			// the engine correctly refuses to create. Binding costs this test
+			// nothing and makes the stand in resemble the thing it stands in
+			// for: the containment being measured is the network's, and a
+			// listener on the inside does not change what the network permits.
+			Command: emulatorCommand,
 			Env:     map[string]string{"AF_TEST": "1"},
 		}},
 	})
@@ -145,8 +156,12 @@ func TestEmulator_TeardownRemovesTheContainer(t *testing.T) {
 		EnvID:  id,
 		Egress: &schema.Egress{Default: schema.ModeBlock},
 		Emulators: []provider.EmulatorSpec{{
-			Name: "probe", Image: digest, Port: 8080,
-			Command: []string{"/bin/sh", "-c", "sleep 900"},
+			Name: "probe", Image: digest, Port: emulatorPort,
+			// Listening, for the reason given in the containment test above:
+			// Up now waits for the declared port to accept a connection, so an
+			// emulator that never binds is an environment that is never
+			// created, and this test needs one that is.
+			Command: emulatorCommand,
 		}},
 	})
 	require.NoError(t, err)

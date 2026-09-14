@@ -622,6 +622,13 @@ errors:
     docs: guides/local-runtime
     retryable: true
     exit_code: 1
+  - code: AF-RUN-049
+    area: RUN
+    message: "The {emulator} emulator started but never accepted a connection at {address} within {timeout}, so the environment was torn down: {detail}"
+    next_step: "Nothing is listening inside that container yet. Run the image by hand and watch how long it takes to bind {address}, then raise AF_EMULATOR_READY_TIMEOUT if it needs longer than the default. A container that exits instead of binding is a wrong command or a missing companion."
+    docs: guides/local-runtime
+    retryable: true
+    exit_code: 1
   - code: AF-RUN-009
     area: RUN
     message: "No free port was found in the range {range} to publish the environment on."

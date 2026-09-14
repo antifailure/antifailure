@@ -1672,6 +1672,18 @@ The egress sidecar image could not be obtained: {detail}
 | Retryable | Yes. The engine retries automatically where it can. |
 | More | [guides/local-runtime](/docs/guides/local-runtime) |
 
+### AF-RUN-049
+
+The {emulator} emulator started but never accepted a connection at {address} within {timeout}, so the environment was torn down: {detail}
+
+**What to do.** Nothing is listening inside that container yet. Run the image by hand and watch how long it takes to bind {address}, then raise AF_EMULATOR_READY_TIMEOUT if it needs longer than the default. A container that exits instead of binding is a wrong command or a missing companion.
+
+| | |
+| --- | --- |
+| Exit code | `1` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [guides/local-runtime](/docs/guides/local-runtime) |
+
 ## Scheduling
 
 ### AF-SCH-001
