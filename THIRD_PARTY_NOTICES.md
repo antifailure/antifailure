@@ -66,7 +66,7 @@ Platforms: darwin/amd64, darwin/arm64, linux/amd64, linux/arm64.
 - `github.com/google/uuid` v1.6.0, BSD-3-Clause
 - `github.com/jackc/pgpassfile` v1.0.0, MIT
 - `github.com/jackc/pgservicefile` v0.0.0-20240606120523-5a60cdf6a761, MIT
-- `github.com/jackc/pgx/v5` v5.10.0, MIT
+- `github.com/jackc/pgx/v5` v5.11.0, MIT
 - `github.com/jackc/puddle/v2` v2.2.2, MIT
 - `github.com/json-iterator/go` v1.1.12, MIT
 - `github.com/lucasb-eyer/go-colorful` v1.4.0, MIT
@@ -98,13 +98,13 @@ Platforms: darwin/amd64, darwin/arm64, linux/amd64, linux/arm64.
 - `go.opentelemetry.io/otel/trace` v1.46.0, Apache-2.0 AND BSD-3-Clause
 - `go.yaml.in/yaml/v2` v2.4.4, Apache-2.0 AND MIT
 - `go.yaml.in/yaml/v3` v3.0.5, MIT
-- `golang.org/x/crypto` v0.56.0, BSD-3-Clause
+- `golang.org/x/crypto` v0.57.0, BSD-3-Clause
 - `golang.org/x/net` v0.58.0, BSD-3-Clause
 - `golang.org/x/oauth2` v0.36.0, BSD-3-Clause
-- `golang.org/x/sync` v0.22.0, BSD-3-Clause
-- `golang.org/x/sys` v0.47.0, BSD-3-Clause
-- `golang.org/x/term` v0.45.0, BSD-3-Clause
-- `golang.org/x/text` v0.41.0, BSD-3-Clause
+- `golang.org/x/sync` v0.23.0, BSD-3-Clause
+- `golang.org/x/sys` v0.48.0, BSD-3-Clause
+- `golang.org/x/term` v0.46.0, BSD-3-Clause
+- `golang.org/x/text` v0.42.0, BSD-3-Clause
 - `golang.org/x/time` v0.15.0, BSD-3-Clause
 - `google.golang.org/protobuf` v1.36.12, BSD-3-Clause
 - `gopkg.in/evanphx/json-patch.v4` v4.13.0, BSD-3-Clause
