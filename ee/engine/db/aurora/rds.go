@@ -108,16 +108,26 @@ func isCode(err error, code string) bool {
 
 // The fault codes this provider makes decisions on. Every other one is
 // reported as it arrived.
+//
+// These are the codes RDS SENDS, which for five of them is not the name of
+// the fault. RDS's service model gives each error shape a code, and the
+// instance and quota shapes drop the Fault suffix: DBInstanceNotFoundFault
+// arrives as DBInstanceNotFound. Until 2026-09-13 all five were spelled
+// with the suffix, fakerds sent the same spelling, and the suite agreed.
+// AWS did not: a live DeleteDBInstance on a writer already deleting
+// answered InvalidDBInstanceState, the branch that treats that as done
+// never matched, and teardown failed. faults_test.go checks every constant
+// here against the codes in botocore's copy of the model.
 const (
 	faultClusterNotFound    = "DBClusterNotFoundFault"
-	faultInstanceNotFound   = "DBInstanceNotFoundFault"
+	faultInstanceNotFound   = "DBInstanceNotFound"
 	faultClusterExists      = "DBClusterAlreadyExistsFault"
-	faultInstanceExists     = "DBInstanceAlreadyExistsFault"
+	faultInstanceExists     = "DBInstanceAlreadyExists"
 	faultInvalidState       = "InvalidDBClusterStateFault"
-	faultInvalidInstance    = "InvalidDBInstanceStateFault"
+	faultInvalidInstance    = "InvalidDBInstanceState"
 	faultQuotaExceeded      = "DBClusterQuotaExceededFault"
-	faultSnapshotQuota      = "SnapshotQuotaExceededFault"
-	faultStorageQuota       = "StorageQuotaExceededFault"
+	faultSnapshotQuota      = "SnapshotQuotaExceeded"
+	faultStorageQuota       = "StorageQuotaExceeded"
 	faultAccessDenied       = "AccessDenied"
 	faultInvalidRestoreTime = "InvalidRestoreFault"
 )
