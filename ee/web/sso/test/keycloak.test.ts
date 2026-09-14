@@ -41,6 +41,7 @@ import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { available, cookieFrom, dropOrg, membersOf, start, type Harness } from './harness.ts'
 import { cleanupIdps } from './idp.ts'
+import { decodeHtml, isOrigin } from './browser.ts'
 import { parseIdentityProviderMetadata, samlUrls } from '../src/saml/request.ts'
 import { discover } from '../src/oidc/flow.ts'
 
@@ -308,7 +309,7 @@ describe('a real identity provider', { skip }, () => {
       outUrl = new URL(out.headers.get('location')!, outUrl).toString()
       // The last hop is the redirect back to us, which this process serves
       // rather than the network. Stop and hand it back.
-      if (outUrl.startsWith('https://antifailure.test')) return { finalUrl: outUrl, body: '' }
+      if (isOrigin(outUrl, 'https://antifailure.test')) return { finalUrl: outUrl, body: '' }
       out = await fetch(outUrl, { redirect: 'manual', headers: { cookie: cookieHeader() } })
       remember(out)
     }
@@ -384,14 +385,3 @@ describe('a real identity provider', { skip }, () => {
     assert.ok(cookieFrom(callback), 'no session cookie was issued')
   })
 })
-
-/** The handful of entities that appear in a form value in an HTML page. */
-function decodeHtml(value: string): string {
-  return value
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#x27;|&apos;/g, "'")
-    .replace(/&#x2F;/g, '/')
-}
