@@ -13,7 +13,7 @@ a reviewable file format that answer in exactly that resolver's shape. Nothing
 stored a model, so there was nothing to build a resolver from, and nothing
 installed one outside that package's own tests.
 
-What is new is the join: migration 0045 stores a model per organisation under row
+What is new is the join: migration 0046 stores a model per organisation under row
 level security, the enterprise edition mounts four routes that export, preview and
 apply it as a reviewed YAML file, and its entry point installs the resolver. The
 resolver reads the model on every request a built-in role would refuse, per

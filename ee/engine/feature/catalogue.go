@@ -372,7 +372,7 @@ var catalogue = []Entitlement{
 			"roles in web/apps/api/src/permissions.ts are enforced on every request for every " +
 			"plan and consult no licence, and that is unchanged: they were never what a " +
 			"licence naming rbac sold. What it sells is custom roles, stored in the tables " +
-			"migration 0045 creates, defined through the routes ee/web/rbac mounts, and applied " +
+			"migration 0046 creates, defined through the routes ee/web/rbac mounts, and applied " +
 			"by the resolver ee/web/server/src/register.ts installs, which asks the licence key " +
 			"and then the organization's entitlement before a stored grant widens anything. " +
 			"Without it the routes answer 402 or 403 and a stored grant widens nothing, while " +
