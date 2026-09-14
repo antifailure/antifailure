@@ -11,7 +11,7 @@ meant to be written by people outside this repository.
 
 ```yaml
 database:
-  provider: docker   # or neon, supabase, dblab, pgurl, xata, aurora, cloudsql, or azurepg
+  provider: docker   # or neon, supabase, dblab, pgurl, xata, aurora, cloudsql, azurepg, or rds
   version: 17
 ```
 
@@ -28,6 +28,7 @@ database:
 | [`aurora`](/docs/providers/aurora) | A clone of an Amazon Aurora PostgreSQL cluster | Expected to be flat, because a clone shares the source's storage volume. Never timed on AWS | An Aurora PostgreSQL cluster, an IAM role, and the enterprise edition |
 | [`cloudsql`](/docs/providers/cloudsql) | A fast clone of a Google Cloud SQL for PostgreSQL instance | Expected to be flat, because a fast clone is created from an Instant Snapshot. Cloud SQL's other clone workflow is not flat, and the provider is built so it cannot ask for that one. Never timed on Google Cloud | A Cloud SQL instance, a service account, and the enterprise edition |
 | [`azurepg`](/docs/providers/azurepg) | A point in time restore of an Azure Database for PostgreSQL Flexible Server | Expected to grow with the database. The snapshot half is flat and the log replay half is not, so this provider does not claim copy on write. Never timed on Azure | A flexible server, a service principal, and the enterprise edition |
+| [`rds`](/docs/providers/rds) | An instance restored from a snapshot of an Amazon RDS for PostgreSQL instance | Grows with the database, because a restore hydrates a new volume with every byte. One live restore took 5 minutes 4 seconds at 20 GB | An RDS for PostgreSQL instance, an IAM role, and the enterprise edition |
 
 `docker` is the default and needs nothing. Its branch time is flat, measured
 rather than assumed: the conformance suite branches an 8 MiB golden and a 512 MiB
@@ -106,6 +107,14 @@ has not, so here is the split, in the terms the
   server on 2026-09-13: a golden restored, masked and verified over `verify-full`, a
   branch written to without the source changing, the goldens listed, and
   everything torn down. One run at one row is a demonstration rather than proof.
+- **`rds` is proved against a fake, and once against AWS.** A fake RDS control
+  plane with a real Postgres behind it runs every line. One live run on AWS on
+  2026-09-14 published a golden over `verify-full` against RDS's own
+  certificate, branched it, found the branch held the golden's masked rows and
+  nothing written to either side crossed to the other, and tore everything
+  down. Four defects no fake could show were found by live runs and each is
+  fixed and covered by a test. One run at one size decides no timing, so copy
+  on write is recorded as unproven.
 
 `cloudsql` is the one for a production on Google Cloud, and it is in the
 enterprise edition for the same reason `aurora` is. A branch is a Cloud SQL
@@ -131,6 +140,18 @@ golden's first backup. That is fixed cost at one size, recorded in
 [the benchmarks](https://github.com/antifailure/antifailure/tree/main/benchmarks),
 so the growth with the size of the database is still Microsoft's description
 rather than a number anybody here measured.
+
+`rds` is the one for a production on plain RDS for PostgreSQL, which is where
+most Postgres on AWS lives, and it is the slow row of this table on purpose.
+RDS has no clone, so a branch is a snapshot restore: RDS provisions an instance
+and hydrates a new volume from the snapshot, and the volume is every byte of
+the database. It does not claim copy on write and it will not branch from an
+Aurora cluster, where `aurora` is the faster answer. What has been measured is
+the provider's own half: a branch makes the same control plane calls at twenty
+gibibytes and at a tebibyte. One live run timed the first half on AWS, a
+snapshot in 1 minute 11 seconds and a restore in 5 minutes 4 seconds at 20 GB,
+and the [provider page](/docs/providers/rds) says what that does and does not
+show.
 
 A provider named in the manifest and neither built into this binary nor
 registered with it is refused at startup rather than substituted. Falling back

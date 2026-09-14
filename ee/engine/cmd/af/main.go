@@ -222,7 +222,7 @@ func main() {
 	// describes, and the engine's own switch only asks the registry for names
 	// it does not have itself.
 	//
-	// aurora, cloudsql and azurepg, registered through ee/engine/db/managed
+	// aurora, cloudsql, azurepg and rds, registered through ee/engine/db/managed
 	// rather than one statement each here, because a list inside main() is
 	// readable by nothing but this binary. The air gapped hook's refusal test
 	// calls the same function, so every provider added to it is required to be

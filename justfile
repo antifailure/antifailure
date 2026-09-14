@@ -776,6 +776,15 @@ benchmark:
     # is its own module, so GOWORK is off.
     (cd ../ee/engine && AF_BENCHMARK=1 GOWORK=off go test ./db/aurora \
       -run TestBenchmarkBranchIsFlatInTheSizeOfTheVolume -v -count=1 -timeout 30m)
+    # The RDS provider, which answers the same question with a refusal for
+    # half of it. A snapshot restore's wall clock is AWS provisioning an
+    # instance and hydrating a volume, neither of which happens here and no
+    # AWS account was available, so the report prints UNMEASURED for the
+    # numbers the table wants and measures the control plane work and the one
+    # database connection a branch makes instead. Its own module, so GOWORK is
+    # off.
+    (cd ../ee/engine && AF_BENCHMARK=1 GOWORK=off go test ./db/rds \
+      -run TestBenchmarkWhatABranchCosts -v -count=1 -timeout 60m)
     # What one documentation answer costs an agent, against what the whole
     # documentation set would cost it. It is the one benchmark here that needs
     # no database, no daemon and no network: the corpus is compiled into the
