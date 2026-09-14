@@ -1103,6 +1103,17 @@
       "planned": false
     },
     {
+      "code": "AF-MSK-016",
+      "area": "MSK",
+      "areaName": "Masking and verification",
+      "message": "Masking was interrupted before it finished: {detail}",
+      "resolution": "Run it again against a fresh copy: 'af golden refresh' starts again from the source, and a branch that was partly masked has to be recreated with 'af down' and then 'af up' first, because masking a value that is already masked changes it.",
+      "docs": "https://antifailure.dev/docs/concepts/masking",
+      "retryable": true,
+      "exitCode": 9,
+      "planned": false
+    },
+    {
       "code": "AF-NET-001",
       "area": "NET",
       "areaName": "Egress",

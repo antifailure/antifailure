@@ -534,7 +534,7 @@ func TestClickHouseLive_TheStatementsTheDialectCompilesRun(t *testing.T) {
 
 	// The read the dialect compiles, run against the server.
 	d := clickhouse(t)
-	read := d.SelectChunk(tp, "")
+	read := d.SelectChunk(tp, nil)
 	rows, err := ch.rows(context.Background(), read.SQL)
 	require.NoError(t, err, read.SQL)
 	require.Len(t, rows, 2, "the compiled read did not return the rows")
@@ -543,19 +543,24 @@ func TestClickHouseLive_TheStatementsTheDialectCompilesRun(t *testing.T) {
 	// would, with the values computed in Go from a key the server never sees.
 	key := testKey(t)
 	stmt := tp.Compile()
+	width := tp.AddressWidth()
 	for _, row := range rows {
-		params := map[string]string{"p1": string(row[0])}
+		// The address first, one parameter per key column, then the values.
+		params := map[string]string{}
+		for k := 0; k < width; k++ {
+			params[fmt.Sprintf("p%d", k+1)] = string(row[k])
+		}
 		for i, c := range tp.Columns {
 			transform, ok := masking.Lookup(c.Transform)
 			require.True(t, ok, c.Transform)
-			in := string(row[1+i])
+			in := string(row[width+i])
 			out, applyErr := transform.Apply(key, masking.Column{
 				Schema: tp.Table.Schema, Table: tp.Table.Name,
 				Name: c.Column.Name, Link: c.Link,
 			}, &in)
 			require.NoError(t, applyErr)
 			require.NotNil(t, out)
-			params[fmt.Sprintf("p%d", i+2)] = *out
+			params[fmt.Sprintf("p%d", width+i+1)] = *out
 		}
 		ch.exec(t, stmt.SQL, params)
 	}

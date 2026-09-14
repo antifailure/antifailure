@@ -7,9 +7,10 @@
 // Determinism. A transform is a pure function of the project key, the column's
 // identity, and the input value. The same customer therefore maps to the same
 // fake customer in every table and in every refresh, which is what keeps a
-// foreign key joinable and a report reproducible. It is also what makes an
+// foreign key joinable and a report reproducible. It is also what would make an
 // interrupted run resumable: replaying a chunk produces the same output, so a
-// checkpoint is enough.
+// checkpoint is enough. Nothing records one yet, so today an interrupted run
+// starts again from the beginning; see Checkpointer.
 //
 // Format preservation. A masked value has to satisfy the constraints the real
 // one did. An email column with a unique index still needs unique emails; a

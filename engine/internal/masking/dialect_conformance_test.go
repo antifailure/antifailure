@@ -189,14 +189,25 @@ func dialectBehaviours() []dialectBehaviour {
 			},
 		},
 		{
-			Name: "RowKey_AddressesTheFirstKeyColumn",
+			// EVERY key column, in key order. This behaviour used to be
+			// RowKey_AddressesTheFirstKeyColumn, and a dialect satisfied it by
+			// addressing a row by its first key column alone, which for a key of
+			// (tenant_id, id) rewrote every row of a tenant with one row's masked
+			// values and paged past the rest of the tenant.
+			Name: "RowKey_AddressesEveryKeyColumn",
 			Check: func(d Dialect) error {
 				tp := probeTable()
 				got := d.RowKey(tp)
-				if !strings.Contains(got, d.QuoteIdent(tp.OrderBy[0])) {
-					return fmt.Errorf("RowKey is %q and does not name the key column %q, so "+
-						"the statement does not say which row it means",
-						got, tp.OrderBy[0])
+				if len(got) != len(tp.OrderBy) {
+					return fmt.Errorf("RowKey reads %d values and the key has %d columns, so rows "+
+						"that share a first key column share an address: %v",
+						len(got), len(tp.OrderBy), got)
+				}
+				for i, k := range tp.OrderBy {
+					if !strings.Contains(got[i], d.QuoteIdent(k)) {
+						return fmt.Errorf("RowKey value %d is %q and does not read key column %q, "+
+							"so the address is not the key in key order", i, got[i], k)
+					}
 				}
 				return nil
 			},
@@ -240,15 +251,22 @@ func dialectBehaviours() []dialectBehaviour {
 			Check: func(d Dialect) error {
 				tp := probeTable()
 				stmt := d.Update(tp)
-				for n := 1; n <= len(tp.Columns)+1; n++ {
+				for n := 1; n <= tp.AddressWidth()+len(tp.Columns); n++ {
 					if !strings.Contains(stmt.SQL, d.Placeholder(n)) {
 						return fmt.Errorf("the update has no %s, so argument %d has nowhere "+
 							"to land: %s", d.Placeholder(n), n, stmt.SQL)
 					}
 				}
-				if !strings.Contains(stmt.SQL, d.RowKey(tp)) {
-					return fmt.Errorf("the update does not compare the row key, so it "+
-						"rewrites every row of the table at once: %s", stmt.SQL)
+				at := strings.Index(strings.ToUpper(stmt.SQL), " WHERE ")
+				if at < 0 {
+					return fmt.Errorf("the update has no WHERE, so it rewrites every row of the "+
+						"table at once: %s", stmt.SQL)
+				}
+				for _, k := range tp.OrderBy {
+					if !strings.Contains(stmt.SQL[at:], d.QuoteIdent(k)) {
+						return fmt.Errorf("the update does not compare key column %q, so it "+
+							"rewrites every row that shares the rest of the key: %s", k, stmt.SQL)
+					}
 				}
 				return nil
 			},
@@ -257,10 +275,12 @@ func dialectBehaviours() []dialectBehaviour {
 			Name: "SelectChunk_ReadsTheKeyAndEveryPlannedColumn",
 			Check: func(d Dialect) error {
 				tp := probeTable()
-				q := d.SelectChunk(tp, "")
-				if !strings.Contains(q.SQL, d.RowKey(tp)) {
-					return fmt.Errorf("the read does not select the row key, so the update "+
-						"that follows has nothing to address a row with: %s", q.SQL)
+				q := d.SelectChunk(tp, nil)
+				for _, expr := range d.RowKey(tp) {
+					if !strings.Contains(q.SQL, expr) {
+						return fmt.Errorf("the read does not select %s, so the update that "+
+							"follows cannot address the row it read: %s", expr, q.SQL)
+					}
 				}
 				for _, c := range tp.Columns {
 					if !strings.Contains(q.SQL, d.QuoteIdent(c.Column.Name)) {
@@ -283,20 +303,42 @@ func dialectBehaviours() []dialectBehaviour {
 			Name: "SelectChunk_ResumesAfterAKey",
 			Check: func(d Dialect) error {
 				tp := probeTable()
-				const after = "0189-resume-point"
+				after := []string{"0189-resume-point", "tenant-b"}
 				q := d.SelectChunk(tp, after)
-				if len(q.Args) != 1 || q.Args[0] != after {
-					return fmt.Errorf("a resumed read takes %v as arguments and it has to "+
-						"take exactly the resume point, or the bound is interpolated "+
-						"into the text", q.Args)
+				if len(q.Args) != len(after) {
+					return fmt.Errorf("a resumed read takes %v as arguments and it has to take "+
+						"exactly the resume point, one value per key column, or part of the "+
+						"bound is dropped or interpolated into the text", q.Args)
 				}
-				if !strings.Contains(q.SQL, d.Placeholder(1)) {
-					return fmt.Errorf("a resumed read has no %s, so the resume point has "+
-						"nowhere to land: %s", d.Placeholder(1), q.SQL)
+				for i, v := range after {
+					if q.Args[i] != v {
+						return fmt.Errorf("a resumed read's argument %d is %v and the resume "+
+							"point has %q there", i, q.Args[i], v)
+					}
+					if !strings.Contains(q.SQL, d.Placeholder(i+1)) {
+						return fmt.Errorf("a resumed read has no %s, so resume value %d has "+
+							"nowhere to land: %s", d.Placeholder(i+1), i, q.SQL)
+					}
 				}
 				if !strings.Contains(q.SQL, ">") {
 					return fmt.Errorf("a resumed read does not bound the key, so it reads "+
 						"the rows it has already masked again: %s", q.SQL)
+				}
+				where := strings.ToUpper(q.SQL)
+				from := strings.Index(where, " WHERE ")
+				if from < 0 {
+					return fmt.Errorf("a resumed read has no WHERE: %s", q.SQL)
+				}
+				bound := q.SQL[from:]
+				if end := strings.Index(strings.ToUpper(bound), " ORDER BY "); end >= 0 {
+					bound = bound[:end]
+				}
+				for _, k := range tp.OrderBy {
+					if !strings.Contains(bound, d.QuoteIdent(k)) {
+						return fmt.Errorf("a resumed read does not bound key column %q, so a page "+
+							"that ends inside a run of rows sharing the first key column skips "+
+							"the rest of the run: %s", k, q.SQL)
+					}
 				}
 				return nil
 			},
@@ -305,16 +347,25 @@ func dialectBehaviours() []dialectBehaviour {
 			Name: "SelectChunk_OrdersByTheRowKey",
 			Check: func(d Dialect) error {
 				tp := probeTable()
-				q := d.SelectChunk(tp, "")
+				q := d.SelectChunk(tp, nil)
 				at := strings.Index(strings.ToUpper(q.SQL), "ORDER BY")
 				if at < 0 {
 					return fmt.Errorf("the read has no order, so two chunks can return the "+
 						"same row and skip another: %s", q.SQL)
 				}
-				if !strings.Contains(q.SQL[at:], d.RowKey(tp)) {
-					return fmt.Errorf("the read is not ordered by the key it resumes on, so "+
-						"the resume point does not mean what the next chunk assumes: %s",
-						q.SQL)
+				clause := q.SQL[at:]
+				if end := strings.Index(strings.ToUpper(clause), " LIMIT "); end >= 0 {
+					clause = clause[:end]
+				}
+				last := -1
+				for _, k := range tp.OrderBy {
+					pos := strings.Index(clause, d.QuoteIdent(k))
+					if pos < 0 || pos < last {
+						return fmt.Errorf("the read is not ordered by the whole key in key order "+
+							"(%q is missing or out of place), so the resume point does not mean "+
+							"what the next chunk assumes: %s", k, q.SQL)
+					}
+					last = pos
 				}
 				return nil
 			},
@@ -326,7 +377,7 @@ func dialectBehaviours() []dialectBehaviour {
 				if a, b := d.Update(tp).SQL, d.Update(tp).SQL; a != b {
 					return fmt.Errorf("two updates for one plan differ:\n%s\n%s", a, b)
 				}
-				if a, b := d.SelectChunk(tp, "x").SQL, d.SelectChunk(tp, "x").SQL; a != b {
+				if a, b := d.SelectChunk(tp, []string{"x", "y"}).SQL, d.SelectChunk(tp, []string{"x", "y"}).SQL; a != b {
 					return fmt.Errorf("two reads for one plan differ:\n%s\n%s", a, b)
 				}
 				return nil

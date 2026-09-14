@@ -70,10 +70,11 @@ type Dialect interface {
 	QuoteIdent(name string) string
 	// Placeholder renders the nth statement parameter, counting from one.
 	//
-	// The numbering is the executor's contract rather than either engine's:
-	// the row key is always the first argument and the masked values follow in
-	// the plan's column order. Two engines write a parameter differently and
-	// neither gets to reorder them.
+	// The numbering is the executor's contract rather than either engine's: a
+	// row's address is always the first arguments, one per primary key column
+	// in key order, or one ctid, and the masked values follow in the plan's
+	// column order. Two engines write a parameter differently and neither gets
+	// to reorder them.
 	Placeholder(n int) string
 	// Qualify renders a table the way a statement addresses it.
 	Qualify(t Table) string
@@ -83,15 +84,19 @@ type Dialect interface {
 	// identifier says so here, at planning time, because a masking run that
 	// fails halfway leaves a table neither real nor safe.
 	Unaddressable(t Table) string
-	// RowKey is the expression that addresses one row.
-	RowKey(tp TablePlan) string
-	// SelectChunk reads one chunk of a table, resuming after a key when one is
-	// given.
-	SelectChunk(tp TablePlan, after string) Query
-	// Update rewrites the planned columns of one row, with the values as
-	// parameters rather than interpolated: they are computed in Go from a key
-	// the database never sees, and a value carrying a quote must not be able
-	// to change what the statement means.
+	// RowKey is the expressions that read one row's address out of a chunk,
+	// one per primary key column in key order, each rendered as text. A chunk's
+	// first len(RowKey) columns are the address. Every column of the key, never
+	// its first alone: rows that share a first column are different rows.
+	RowKey(tp TablePlan) []string
+	// SelectChunk reads one chunk of a table, resuming after the address of the
+	// last row masked when one is given, one value per key column. It compares
+	// and orders the key as the table stores it, so the key's index serves both.
+	SelectChunk(tp TablePlan, after []string) Query
+	// Update rewrites the planned columns of one row, addressed by its whole
+	// primary key, with the values as parameters rather than interpolated: they
+	// are computed in Go from a key the database never sees, and a value
+	// carrying a quote must not be able to change what the statement means.
 	Update(tp TablePlan) Statement
 }
 

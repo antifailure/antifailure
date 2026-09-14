@@ -21,12 +21,19 @@ type MaskPlanJSON struct {
 	Runnable  bool   `json:"runnable"`
 	// Which database the schema was read from. A plan is about a schema, and
 	// two databases here can differ by the migration somebody is writing.
-	Source       string           `json:"source,omitempty"`
-	Tables       int              `json:"tables"`
-	Columns      int              `json:"columns"`
-	Rows         int64            `json:"rows_estimated"`
-	Assignments  []AssignmentJSON `json:"assignments"`
-	Unclassified []AssignmentJSON `json:"unclassified"`
+	Source  string `json:"source,omitempty"`
+	Tables  int    `json:"tables"`
+	Columns int    `json:"columns"`
+	Rows    int64  `json:"rows_estimated"`
+	// Reviewed counts the columns a preserve rule covers. They are listed among
+	// the assignments with their decision, nothing is written to them, and so
+	// they are not counted in Columns.
+	Reviewed int `json:"reviewed"`
+	// TablesNotWritten counts the tables whose every assigned column is
+	// preserved. Each gets no statement, and none is counted in Tables.
+	TablesNotWritten int              `json:"tables_not_written"`
+	Assignments      []AssignmentJSON `json:"assignments"`
+	Unclassified     []AssignmentJSON `json:"unclassified"`
 	// CopiedUnchanged counts the unclassified columns the default could not
 	// empty, which ship holding exactly what production holds. It is the
 	// number that used to be discoverable only by reading the unclassified
@@ -314,88 +321,108 @@ func newMaskPlanCommand(env *Env) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			plan := res.Plan
-
-			if env.Out.Format == FormatJSON {
-				doc := MaskPlanJSON{
-					RulesHash: res.RulesHash, Runnable: plan.Runnable(), Source: res.Source,
-					Tables: len(plan.Tables), Columns: plan.Columns(), Rows: plan.Rows(),
-					CopiedUnchanged: len(plan.CopiedUnchanged()),
-				}
-				for _, t := range plan.Tables {
-					for _, a := range t.Columns {
-						doc.Assignments = append(doc.Assignments, assignmentJSON(a))
-					}
-				}
-				for _, a := range plan.Unclassified {
-					doc.Unclassified = append(doc.Unclassified, assignmentJSON(a))
-				}
-				for _, a := range plan.Problems {
-					doc.Problems = append(doc.Problems, assignmentJSON(a))
-				}
-				return env.Out.JSON(doc)
-			}
-
-			env.Out.Section("Masking plan")
-			// Which database this describes. A plan read from the source and a
-			// plan read from a branch can differ by exactly the migration
-			// somebody is working on, and a plan that does not say which it is
-			// is a plan that can be trusted for the wrong schema.
-			if res.Source != "" {
-				env.Out.Printf("  Read from %s.\n", res.Source)
-			}
-			env.Out.Printf("  %d columns across %d tables, about %d rows.\n",
-				plan.Columns(), len(plan.Tables), plan.Rows())
-			// The count that matters, at the top, beside the count that
-			// reassures. It used to be discoverable only by reading the
-			// unclassified list at the very end and counting the rows that
-			// did not say emptied, which on this repository was 145 lines
-			// after several hundred lines of assignments.
-			env.Out.Printf("  %d columns have no rule, and %d of those are copied unchanged.\n\n",
-				len(plan.Unclassified), len(plan.CopiedUnchanged()))
-			env.Out.Raw(plan.Explain())
-
-			if len(plan.Unclassified) > 0 {
-				env.Out.Section("Columns no rule covers")
-				// Which of these actually shipped, per row.
-				//
-				// This said "so they ship as they are" about the whole list, and
-				// most of the list is emptied by the default rather than shipped.
-				// The two are genuinely different outcomes and a person reading
-				// their own schema could not tell which had happened to which
-				// column, which is the one thing the list is for.
-				env.Out.Println(env.Out.Wrap(
-					"Nothing decided what happens to these. Each one says what the default did "+
-						"with it. Add a rule for each, or decide that what happened is fine.", 0))
-				env.Out.Println("")
-				for _, a := range plan.Unclassified {
-					did := "COPIED UNCHANGED"
-					if a.Transform != "" {
-						did = "emptied by default (" + a.Transform + ")"
-					}
-					env.Out.Printf("  %s.%s  (%s)  %s\n",
-						a.Table, a.Column.Name, a.Column.Type, did)
-				}
-				env.Out.Println("")
-			}
-			if len(plan.Problems) > 0 {
-				env.Out.Section("Problems")
-				for _, a := range plan.Problems {
-					env.Out.Printf("  %s %s.%s: %s\n",
-						env.Out.S(StyleBad, SymbolFail), a.Table, a.Column.Name, a.Problem)
-				}
-				env.Out.Println("")
-				env.Out.Println(env.Out.Wrap(
-					"This plan will not be run. A masking run that fails partway leaves a table "+
-						"neither real nor safe, with nothing to say which rows are which.", 0))
-				return aferrors.Coded(aferrors.AFMSK010,
-					"detail", masking.DescribeProblems(plan.Problems))
-			}
-			return nil
+			return renderMaskPlan(env, res.Plan, res.RulesHash, res.Source)
 		},
 	}
 	cmd.Flags().StringVar(&branch, "branch", "", "Branch to plan against, defaulting to the checked out one")
 	return cmd
+}
+
+// renderMaskPlan prints a masking plan as text or JSON.
+//
+// Apart from the command so it can be tested on a plan built by hand: the command
+// itself needs a database to read a schema from, and what it prints is decided
+// entirely here.
+func renderMaskPlan(env *Env, plan masking.Plan, rulesHash, source string) error {
+	if env.Out.Format == FormatJSON {
+		doc := MaskPlanJSON{
+			RulesHash: rulesHash, Runnable: plan.Runnable(), Source: source,
+			Tables: len(plan.Tables), Columns: plan.Columns(), Rows: plan.Rows(),
+			Reviewed: len(plan.Reviewed()), TablesNotWritten: len(plan.Unwritten),
+			CopiedUnchanged: len(plan.CopiedUnchanged()),
+		}
+		for _, t := range plan.Tables {
+			for _, a := range t.Columns {
+				doc.Assignments = append(doc.Assignments, assignmentJSON(a))
+			}
+		}
+		// The reviewed columns are decisions too, and a machine reading
+		// the plan sees them with the rest.
+		for _, a := range plan.Reviewed() {
+			doc.Assignments = append(doc.Assignments, assignmentJSON(a))
+		}
+		for _, a := range plan.Unclassified {
+			doc.Unclassified = append(doc.Unclassified, assignmentJSON(a))
+		}
+		for _, a := range plan.Problems {
+			doc.Problems = append(doc.Problems, assignmentJSON(a))
+		}
+		return env.Out.JSON(doc)
+	}
+
+	env.Out.Section("Masking plan")
+	// Which database this describes. A plan read from the source and a
+	// plan read from a branch can differ by exactly the migration
+	// somebody is working on, and a plan that does not say which it is
+	// is a plan that can be trusted for the wrong schema.
+	if source != "" {
+		env.Out.Printf("  Read from %s.\n", source)
+	}
+	env.Out.Printf("  %d columns across %d tables, about %d rows.\n",
+		plan.Columns(), len(plan.Tables), plan.Rows())
+	// Reviewed columns are decisions and are listed below, and nothing
+	// is written to them, so they are counted apart from the rewrites.
+	if reviewed := len(plan.Reviewed()); reviewed > 0 {
+		env.Out.Printf("  %d columns reviewed and found safe, which are not written; "+
+			"%d tables have nothing else and get no statement.\n",
+			reviewed, len(plan.Unwritten))
+	}
+	// The count that matters, at the top, beside the count that
+	// reassures. It used to be discoverable only by reading the
+	// unclassified list at the very end and counting the rows that
+	// did not say emptied, which on this repository was 145 lines
+	// after several hundred lines of assignments.
+	env.Out.Printf("  %d columns have no rule, and %d of those are copied unchanged.\n\n",
+		len(plan.Unclassified), len(plan.CopiedUnchanged()))
+	env.Out.Raw(plan.Explain())
+
+	if len(plan.Unclassified) > 0 {
+		env.Out.Section("Columns no rule covers")
+		// Which of these actually shipped, per row.
+		//
+		// This said "so they ship as they are" about the whole list, and
+		// most of the list is emptied by the default rather than shipped.
+		// The two are genuinely different outcomes and a person reading
+		// their own schema could not tell which had happened to which
+		// column, which is the one thing the list is for.
+		env.Out.Println(env.Out.Wrap(
+			"Nothing decided what happens to these. Each one says what the default did "+
+				"with it. Add a rule for each, or decide that what happened is fine.", 0))
+		env.Out.Println("")
+		for _, a := range plan.Unclassified {
+			did := "COPIED UNCHANGED"
+			if a.Transform != "" {
+				did = "emptied by default (" + a.Transform + ")"
+			}
+			env.Out.Printf("  %s.%s  (%s)  %s\n",
+				a.Table, a.Column.Name, a.Column.Type, did)
+		}
+		env.Out.Println("")
+	}
+	if len(plan.Problems) > 0 {
+		env.Out.Section("Problems")
+		for _, a := range plan.Problems {
+			env.Out.Printf("  %s %s.%s: %s\n",
+				env.Out.S(StyleBad, SymbolFail), a.Table, a.Column.Name, a.Problem)
+		}
+		env.Out.Println("")
+		env.Out.Println(env.Out.Wrap(
+			"This plan will not be run. A masking run that fails partway leaves a table "+
+				"neither real nor safe, with nothing to say which rows are which.", 0))
+		return aferrors.Coded(aferrors.AFMSK010,
+			"detail", masking.DescribeProblems(plan.Problems))
+	}
+	return nil
 }
 
 func newMaskApplyCommand(env *Env) *cobra.Command {

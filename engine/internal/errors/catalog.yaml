@@ -723,6 +723,13 @@ errors:
     docs: concepts/masking
     retryable: false
     exit_code: 1
+  - code: AF-MSK-016
+    area: MSK
+    message: "Masking was interrupted before it finished: {detail}"
+    next_step: "Run it again against a fresh copy: 'af golden refresh' starts again from the source, and a branch that was partly masked has to be recreated with 'af down' and then 'af up' first, because masking a value that is already masked changes it."
+    docs: concepts/masking
+    retryable: true
+    exit_code: 9
   - code: AF-NET-001
     area: NET
     message: "The request to {host} was blocked by rule {rule}."

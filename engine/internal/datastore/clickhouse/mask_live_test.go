@@ -232,22 +232,27 @@ func maskOneRowAtATime(t *testing.T, s *scratch, key *masking.Key, rules *maskin
 	require.NotEmpty(t, plan.Tables)
 
 	for _, tp := range plan.Tables {
-		read := d.SelectChunk(tp, "")
+		read := d.SelectChunk(tp, nil)
 		rows := s.query(read.SQL)
 		stmt := tp.Compile()
+		width := tp.AddressWidth()
 		for _, row := range rows {
-			params := map[string]string{"p1": row[0]}
+			// The address first, one parameter per key column, then the values.
+			params := map[string]string{}
+			for k := 0; k < width; k++ {
+				params[fmt.Sprintf("p%d", k+1)] = row[k]
+			}
 			for i, c := range tp.Columns {
 				transform, ok := masking.Lookup(c.Transform)
 				require.True(t, ok, c.Transform)
-				in := row[1+i]
+				in := row[width+i]
 				out, applyErr := transform.Apply(key, masking.Column{
 					Schema: tp.Table.Schema, Table: tp.Table.Name,
 					Name: c.Column.Name, Link: c.Link,
 				}, &in)
 				require.NoError(t, applyErr)
 				require.NotNil(t, out, "this fixture holds no nulls in a masked column")
-				params[fmt.Sprintf("p%d", i+2)] = *out
+				params[fmt.Sprintf("p%d", width+i+1)] = *out
 			}
 			settings := map[string]string{}
 			for k, v := range params {

@@ -990,7 +990,13 @@ func (freeTextTransform) Apply(k *Key, c Column, in *string) (*string, error) {
 // question.
 type preserveTransform struct{}
 
-func (preserveTransform) Name() string { return "preserve" }
+// PreserveTransform is the name of the transform that leaves a value alone.
+//
+// Named, because the plan treats it unlike every other transform: a preserved
+// column is recorded as reviewed and nothing is written to it.
+const PreserveTransform = "preserve"
+
+func (preserveTransform) Name() string { return PreserveTransform }
 
 func (preserveTransform) Describe() string {
 	return "Leaves the value unchanged. Use it to record that a column was reviewed and found safe, rather than leaving it out."

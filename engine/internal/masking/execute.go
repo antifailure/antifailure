@@ -2,6 +2,7 @@ package masking
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -22,17 +23,23 @@ import (
 // would need the key in the database, and a key in the database is a key in
 // every backup of it.
 //
-// It checkpoints per chunk, so an interrupted run resumes rather than starting
-// over. That matters more than it sounds on a large table: a masking run that
-// cannot resume is one that has to be restarted from the beginning every time
-// somebody's laptop sleeps.
+// It can checkpoint per chunk, through a Checkpointer, so that an interrupted
+// run resumes rather than starting over. That matters more than it sounds on a
+// large table: a masking run that cannot resume is one that has to be restarted
+// from the beginning every time somebody's laptop sleeps.
+//
+// No command passes a Checkpointer yet. `af golden refresh` and `af mask apply`
+// both build executors without one, so an interrupted run of either starts from
+// the beginning, and InterruptedError says so rather than promising a resume.
+// The path is kept, and tested, for the checkpointer that is still to be wired.
 
 // Checkpointer records progress so a run can resume.
 //
 // An interface rather than the state database directly, so the executor can be
 // tested without one and so a hosted runner can put checkpoints somewhere else.
 type Checkpointer interface {
-	// Save records that a table is masked up to a key.
+	// Save records that a table is masked up to a row's address, encoded by
+	// the executor as one value per primary key column.
 	Save(ctx context.Context, table, key string) error
 	// Load returns where a table got to, and whether there is a record.
 	Load(ctx context.Context, table string) (string, bool, error)
@@ -120,6 +127,17 @@ func (e *Executor) Apply(ctx context.Context, conn *pgx.Conn, plan Plan) (Result
 		res.Resumed = res.Resumed || resumed
 		if err != nil {
 			res.Duration = e.clock.Since(started)
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				// Asked of the context and not of the error, because the error
+				// is whatever the store said about the statement in flight. A
+				// cancellation that takes the connection down with it arrives
+				// here as unexpected EOF, with no cancellation in its chain.
+				return res, &InterruptedError{
+					Table: tp.Table.String(), Rows: res.Rows,
+					Resumable: e.checkpoints != nil && len(tp.OrderBy) > 0,
+					cause:     ctxErr, store: err,
+				}
+			}
 			return res, err
 		}
 		res.Tables++
@@ -127,6 +145,49 @@ func (e *Executor) Apply(ctx context.Context, conn *pgx.Conn, plan Plan) (Result
 	res.Duration = e.clock.Since(started)
 	return res, nil
 }
+
+// InterruptedError is what Apply returns when its context ends during a run.
+//
+// It replaces what the store said. A control C during `af golden refresh` used
+// to print "masking: writing public.customers: unexpected EOF", which reads as a
+// broken database and says nothing anybody can act on. What matters is the rows:
+// how many were written, that the chunk in flight was not, and whether running
+// again carries on or starts over. The store's error stays in the chain for
+// anyone who wants it.
+type InterruptedError struct {
+	// Table is the table being rewritten when the run stopped.
+	Table string
+	// Rows is how many rows the run wrote and committed before it stopped.
+	Rows int64
+	// Resumable reports whether progress was being recorded for that table, so
+	// that the next run with the same checkpoints carries on after the last
+	// chunk that committed.
+	Resumable bool
+
+	cause error
+	store error
+}
+
+func (e *InterruptedError) Error() string {
+	stopped := "was interrupted"
+	if errors.Is(e.cause, context.DeadlineExceeded) {
+		stopped = "was interrupted when its deadline passed"
+	}
+	// Neutral about what to do next, because the right answer depends on the
+	// caller: a refresh can simply run again from the source, and a branch that
+	// is now partly masked cannot be masked again, since masking a masked value
+	// changes it. The caller adds that sentence.
+	next := "nothing records where it got to, so a run cannot carry on from here"
+	if e.Resumable {
+		next = "the next run with the same checkpoints resumes after the last chunk that committed"
+	}
+	return fmt.Sprintf("masking %s while rewriting %s, after %d rows were written and committed; "+
+		"the chunk in flight was rolled back, and %s", stopped, e.Table, e.Rows, next)
+}
+
+// Unwrap returns the context's reason and the store's error, so errors.Is finds
+// context.Canceled whatever the store reported.
+func (e *InterruptedError) Unwrap() []error { return []error{e.cause, e.store} }
 
 func describeProblems(problems []Assignment) string {
 	parts := make([]string, 0, len(problems))
@@ -142,7 +203,7 @@ func (e *Executor) applyTable(ctx context.Context, conn *pgx.Conn, tp TablePlan)
 		return 0, false, nil
 	}
 
-	after := ""
+	var after []string
 	resumed := false
 	if e.checkpoints != nil {
 		saved, ok, err := e.checkpoints.Load(ctx, tp.Table.String())
@@ -150,7 +211,10 @@ func (e *Executor) applyTable(ctx context.Context, conn *pgx.Conn, tp TablePlan)
 			return 0, false, err
 		}
 		if ok {
-			after, resumed = saved, true
+			if after, err = decodeCheckpoint(tp, saved); err != nil {
+				return 0, false, err
+			}
+			resumed = true
 		}
 	}
 
@@ -172,7 +236,7 @@ func (e *Executor) applyTable(ctx context.Context, conn *pgx.Conn, tp TablePlan)
 			// re-runs a chunk rather than skipping one. Masking a row twice is
 			// harmless because the transforms are deterministic; skipping one
 			// ships real data.
-			if err := e.checkpoints.Save(ctx, tp.Table.String(), after); err != nil {
+			if err := e.checkpoints.Save(ctx, tp.Table.String(), encodeCheckpoint(after)); err != nil {
 				return total, resumed, err
 			}
 		}
@@ -200,22 +264,24 @@ func (e *Executor) applyTable(ctx context.Context, conn *pgx.Conn, tp TablePlan)
 // transaction that read it, and updating by one from an earlier snapshot would
 // silently match nothing.
 func (e *Executor) applyChunk(
-	ctx context.Context, conn *pgx.Conn, tp TablePlan, after string,
-) (int64, string, error) {
+	ctx context.Context, conn *pgx.Conn, tp TablePlan, after []string,
+) (int64, []string, error) {
 	tx, err := conn.Begin(ctx)
 	if err != nil {
-		return 0, "", fmt.Errorf("masking: starting a transaction for %s: %w", tp.Table, err)
+		return 0, nil, fmt.Errorf("masking: starting a transaction for %s: %w", tp.Table, err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	selectSQL, args := tp.selectChunk(after)
 	rows, err := tx.Query(ctx, selectSQL, args...)
 	if err != nil {
-		return 0, "", fmt.Errorf("masking: reading %s: %w", tp.Table, err)
+		return 0, nil, fmt.Errorf("masking: reading %s: %w", tp.Table, err)
 	}
 
+	// The address is every key column, read as text, and the values follow it.
+	width := tp.AddressWidth()
 	type record struct {
-		key    string
+		key    []string
 		values []*string
 	}
 	var batch []record
@@ -223,17 +289,25 @@ func (e *Executor) applyChunk(
 		vals, scanErr := rows.Values()
 		if scanErr != nil {
 			rows.Close()
-			return 0, "", fmt.Errorf("masking: reading %s: %w", tp.Table, scanErr)
+			return 0, nil, fmt.Errorf("masking: reading %s: %w", tp.Table, scanErr)
 		}
-		r := record{key: fmt.Sprint(vals[0])}
+		if len(vals) != width+len(tp.Columns) {
+			rows.Close()
+			return 0, nil, fmt.Errorf("masking: reading %s: a chunk row has %d columns and the plan "+
+				"expects %d key columns and %d values", tp.Table, len(vals), width, len(tp.Columns))
+		}
+		r := record{key: make([]string, width)}
+		for j := 0; j < width; j++ {
+			r.key[j] = fmt.Sprint(vals[j])
+		}
 		for i := range tp.Columns {
-			r.values = append(r.values, toStringPtr(vals[1+i]))
+			r.values = append(r.values, toStringPtr(vals[width+i]))
 		}
 		batch = append(batch, r)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return 0, "", fmt.Errorf("masking: reading %s: %w", tp.Table, err)
+		return 0, nil, fmt.Errorf("masking: reading %s: %w", tp.Table, err)
 	}
 	if len(batch) == 0 {
 		return 0, after, nil
@@ -242,8 +316,10 @@ func (e *Executor) applyChunk(
 	stmt := tp.Compile()
 	last := after
 	for _, r := range batch {
-		params := make([]any, 0, len(tp.Columns)+1)
-		params = append(params, r.key)
+		params := make([]any, 0, len(tp.Columns)+width)
+		for _, k := range r.key {
+			params = append(params, k)
+		}
 		for i, c := range tp.Columns {
 			col := Column{
 				Schema: tp.Table.Schema, Table: tp.Table.Name,
@@ -251,29 +327,66 @@ func (e *Executor) applyChunk(
 			}
 			transform, ok := Lookup(c.Transform)
 			if !ok {
-				return 0, "", fmt.Errorf("masking: no transform called %s", c.Transform)
+				return 0, nil, fmt.Errorf("masking: no transform called %s", c.Transform)
 			}
 			out, applyErr := transform.Apply(e.key, col, r.values[i])
 			if applyErr != nil {
-				return 0, "", fmt.Errorf("masking: %s.%s: %w", tp.Table, c.Column.Name, applyErr)
+				return 0, nil, fmt.Errorf("masking: %s.%s: %w", tp.Table, c.Column.Name, applyErr)
 			}
 			params = append(params, out)
 		}
 		if _, err := tx.Exec(ctx, stmt.SQL, params...); err != nil {
-			return 0, "", fmt.Errorf("masking: writing %s: %w", tp.Table, err)
+			return 0, nil, fmt.Errorf("masking: writing %s: %w", tp.Table, err)
 		}
 		last = r.key
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return 0, "", fmt.Errorf("masking: committing %s: %w", tp.Table, err)
+		return 0, nil, fmt.Errorf("masking: committing %s: %w", tp.Table, err)
 	}
 	return int64(len(batch)), last, nil
 }
 
 // selectChunk builds the read for one chunk, in the table's own dialect.
-func (tp TablePlan) selectChunk(after string) (string, []any) {
+func (tp TablePlan) selectChunk(after []string) (string, []any) {
 	q := tp.Table.dialect().SelectChunk(tp, after)
 	return q.SQL, q.Args
+}
+
+// checkpointPrefix marks a checkpoint that carries a row's whole address.
+const checkpointPrefix = "keys:"
+
+// encodeCheckpoint records a row's address, one value per primary key column.
+func encodeCheckpoint(address []string) string {
+	b, _ := json.Marshal(address)
+	return checkpointPrefix + string(b)
+}
+
+// decodeCheckpoint reads back an address, and refuses one it cannot trust.
+//
+// A checkpoint without the prefix was written when a row was addressed by the
+// text of its first key column alone and pages were ordered by that text. It is
+// refused rather than read: it names no whole address, and its position in text
+// order is not a position in the key's order, so resuming from it could skip
+// rows, and a skipped row ships what production had. An address with a different
+// number of values than the key has columns means the key changed since it was
+// written, and is refused for the same reason.
+func decodeCheckpoint(tp TablePlan, saved string) ([]string, error) {
+	restart := fmt.Sprintf("clear the masking checkpoints and mask %s from the beginning", tp.Table)
+	if !strings.HasPrefix(saved, checkpointPrefix) {
+		return nil, fmt.Errorf("masking: the checkpoint for %s was written by a version that addressed "+
+			"a row by the text of its first key column alone, and resuming from it could skip rows; %s",
+			tp.Table, restart)
+	}
+	var address []string
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(saved, checkpointPrefix)), &address); err != nil {
+		return nil, fmt.Errorf("masking: the checkpoint for %s cannot be read (%w); %s", tp.Table, err, restart)
+	}
+	if len(tp.OrderBy) == 0 || len(address) != len(tp.OrderBy) {
+		return nil, fmt.Errorf("masking: the checkpoint for %s names %d key values and the table's "+
+			"primary key has %d columns, so the key changed since it was written; %s",
+			tp.Table, len(address), len(tp.OrderBy), restart)
+	}
+	return address, nil
 }
 
 // toStringPtr converts a scanned value to the shape a transform takes.
@@ -314,7 +427,7 @@ func Preview(
 ) ([][]PreviewRow, error) {
 	limited := tp
 	limited.ChunkSize = rows
-	selectSQL, args := limited.selectChunk("")
+	selectSQL, args := limited.selectChunk(nil)
 
 	result, err := conn.Query(ctx, selectSQL, args...)
 	if err != nil {
@@ -330,7 +443,7 @@ func Preview(
 		}
 		var row []PreviewRow
 		for i, c := range tp.Columns {
-			before := toStringPtr(vals[1+i])
+			before := toStringPtr(vals[tp.AddressWidth()+i])
 			col := Column{
 				Schema: tp.Table.Schema, Table: tp.Table.Name,
 				Name: c.Column.Name, Link: c.Link,

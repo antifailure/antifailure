@@ -1258,6 +1258,18 @@ The cross store check did not compare every store it was given: {detail}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/masking](/docs/concepts/masking) |
 
+### AF-MSK-016
+
+Masking was interrupted before it finished: {detail}
+
+**What to do.** Run it again against a fresh copy: 'af golden refresh' starts again from the source, and a branch that was partly masked has to be recreated with 'af down' and then 'af up' first, because masking a value that is already masked changes it.
+
+| | |
+| --- | --- |
+| Exit code | `9` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [concepts/masking](/docs/concepts/masking) |
+
 ## Egress
 
 ### AF-NET-001
