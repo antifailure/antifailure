@@ -183,6 +183,7 @@ import {
 } from './failures.ts'
 import { apiNotFound } from './notfound.ts'
 import { engagedReason } from './admin/controls.ts'
+import { trimTrailingSlashes } from './trailingslash.ts'
 import {
   HOSTED_ACCESS_MESSAGE,
   hasHostedAccess,
@@ -2571,7 +2572,7 @@ export function createServer(options: ServerOptions) {
   // -------------------------------------------------------------------------
 
   const actionsKeys = options.actionsKeys ?? new ActionsKeys(clock)
-  const consoleBase = options.appBaseUrl ? options.appBaseUrl.replace(/\/+$/, '') : null
+  const consoleBase = options.appBaseUrl ? trimTrailingSlashes(options.appBaseUrl) : null
   const githubApi = options.githubApi ?? null
 
   // The other way to get an engine token, and the one a customer in CI should

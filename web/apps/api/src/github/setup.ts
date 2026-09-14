@@ -48,6 +48,7 @@ import { sql } from 'drizzle-orm'
 import type { Db, Pool } from '@antifailure/db'
 import type { Clock } from '../clock.ts'
 import { GitHubApiError, GitHubPermissionError, type RepositoryApi } from './api.ts'
+import { trimTrailingSlashes } from '../trailingslash.ts'
 
 /** How many times a setup is attempted before it is given up on and said so. */
 export const SETUP_ATTEMPTS = 5
@@ -152,7 +153,7 @@ export const WORKFLOW_NAME = ((): string => {
  * concludes, which is the defect the default exists to remove.
  */
 export function renderWorkflow(controlPlane: string | null): string {
-  const base = controlPlane ? controlPlane.replace(/\/+$/, '') : null
+  const base = controlPlane ? trimTrailingSlashes(controlPlane) : null
   const expression =
     base === null
       ? `\${{ vars.${CONTROL_PLANE_VARIABLE} }}`
@@ -510,7 +511,7 @@ async function attemptSetup(deps: SetupDeps, setup: ClaimedSetup): Promise<Setup
   const { api } = deps
   const installationId = setup.installationId
   const repository = setup.repository
-  const controlPlane = deps.consoleBase ? deps.consoleBase.replace(/\/+$/, '') : null
+  const controlPlane = deps.consoleBase ? trimTrailingSlashes(deps.consoleBase) : null
   try {
     if (await api.fileExists(installationId, repository, WORKFLOW_PATH, setup.defaultBranch)) {
       return { state: 'present', error: null, ...none }

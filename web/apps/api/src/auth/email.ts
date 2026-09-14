@@ -16,6 +16,7 @@ import type { Pool } from '@antifailure/db'
 import type { Clock } from '../clock.ts'
 import type { Mailer } from './mail.ts'
 import { safeRedirect } from './signin.ts'
+import { trimTrailingSlashes } from '../trailingslash.ts'
 
 /** How long somebody has to open the link. */
 export const LINK_TTL_MS = 15 * 60 * 1000
@@ -86,7 +87,7 @@ export async function beginEmailSignIn(
     { emailTokenHash: tokenHash },
   )
 
-  const link = `${config.baseUrl.replace(/\/+$/, '')}/auth/email/callback?token=${encodeURIComponent(token)}`
+  const link = `${trimTrailingSlashes(config.baseUrl)}/auth/email/callback?token=${encodeURIComponent(token)}`
   const product = config.productName ?? 'Antifailure'
   return {
     send: () =>
