@@ -557,3 +557,102 @@ func TestFeatureIsDeclaredSoItCannotBeSoldAndNeverChecked(t *testing.T) {
 	require.Equal(t, feature.StateGated, entry.State)
 	require.Contains(t, feature.Sites(license.FeaturePolicy), entry.EnforcedAt)
 }
+
+// ---------------------------------------------------------------------------
+// The default, which is the mode every host no rule names is given
+// ---------------------------------------------------------------------------
+//
+// A manifest needs no rules at all to reach the internet. `egress: {default:
+// synth}` with an empty rule list is valid: the community validator refuses an
+// allow, an emulate and a sandbox default and accepts that one, and the policy
+// engine hands every unnamed host the default. EgressHosts and EgressModes are
+// built from the rules, so they are both empty for such a manifest and every
+// rule in this package used to find nothing to refuse. An organization's deny
+// list, its permitted modes and its approval requirement were all evaded by one
+// line that names no host.
+
+// defaultOnly is the manifest shape this whole section is about: a default and
+// no rules.
+func defaultOnly(mode string) extension.EnvironmentRequest {
+	req := request()
+	req.EgressHosts = nil
+	req.EgressModes = nil
+	req.EgressDefault = mode
+	return req
+}
+
+func TestASynthDefaultWithNoRulesNeedsTheApprovalARuleWouldNeed(t *testing.T) {
+	t.Parallel()
+	hook := policyenforce.NewHook(policyenforce.Policy{SynthRequiresApproval: true}, nil)
+
+	err := hook.Check(licensed(t), defaultOnly("synth"))
+	require.Error(t, err, "a synth default reached a model for every host and no approval was asked for")
+	require.Contains(t, err.Error(), "unverified")
+	require.Contains(t, err.Error(), "every host no rule names")
+
+	approved := policyenforce.NewHook(
+		policyenforce.Policy{SynthRequiresApproval: true},
+		func(string) policyenforce.Approval { return policyenforce.Approval{Synth: true, By: "ada"} },
+	)
+	require.NoError(t, approved.Check(licensed(t), defaultOnly("synth")),
+		"an approved environment is permitted whether synth came from a rule or the default")
+}
+
+func TestASynthDefaultIsRefusedByAllowedModesThatExcludeIt(t *testing.T) {
+	t.Parallel()
+	hook := policyenforce.NewHook(policyenforce.Policy{
+		AllowedModes: []string{"block", "capture", "mock"},
+	}, nil)
+
+	err := hook.Check(licensed(t), defaultOnly("synth"))
+	require.Error(t, err, "a mode the organization does not permit was used for every unnamed host")
+	require.Contains(t, err.Error(), "permits only block, capture, mock")
+}
+
+func TestAReachingDefaultCannotHonourADenyList(t *testing.T) {
+	t.Parallel()
+	// The deny list is written as patterns so that it covers hosts nobody has
+	// thought of yet, so a reaching default cannot be rescued by naming the
+	// denied hosts in rules: the manifest would have to block every host the
+	// patterns will ever match.
+	hook := policyenforce.NewHook(policyenforce.Policy{
+		DeniedHosts: []string{"*.evil.example"},
+	}, nil)
+
+	err := hook.Check(licensed(t), defaultOnly("synth"))
+	require.Error(t, err, "a denied host was reachable through the default")
+	require.Contains(t, err.Error(), "deny list")
+}
+
+func TestADefaultThatAnswersLocallyDoesNotBreachADenyList(t *testing.T) {
+	t.Parallel()
+	// The control against over refusing. capture answers with the provider's
+	// documented success shape and mock answers from a fixture, so neither
+	// contacts the denied host and neither is a breach. A check that refused
+	// these would refuse most of the product's own examples.
+	hook := policyenforce.NewHook(policyenforce.Policy{
+		DeniedHosts: []string{"*.evil.example"},
+	}, nil)
+
+	for _, mode := range []string{"capture", "mock", "emulate"} {
+		require.NoErrorf(t, hook.Check(licensed(t), defaultOnly(mode)),
+			"a %s default reaches no host, so it cannot breach a deny list", mode)
+	}
+}
+
+func TestABlockDefaultIsNotAModeTheOrganizationHasToPermit(t *testing.T) {
+	t.Parallel()
+	// block is the engine's own floor rather than something an author chose:
+	// engine/pkg/extension documents an empty default as block and the
+	// normalizer writes it. A policy naming only capture must not refuse every
+	// manifest in the product for having one.
+	hook := policyenforce.NewHook(policyenforce.Policy{
+		AllowedModes: []string{"capture"},
+		DeniedHosts:  []string{"*.evil.example"},
+	}, nil)
+
+	require.NoError(t, hook.Check(licensed(t), defaultOnly("")),
+		"an empty default is block, which no organization has to name")
+	require.NoError(t, hook.Check(licensed(t), defaultOnly("block")),
+		"an explicit block default is the same answer as an empty one")
+}
