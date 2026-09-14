@@ -319,7 +319,7 @@ describe('spending a key against a budget', {
     await ready(100)
     const res = await call(await engineToken(), { model: 'test-model', stream: true, messages: [] })
     assert.equal(res.status, 400)
-    assert.match(res.text, /Streaming is not supported/)
+    assert.match(res.text, /budgeted key is non-streaming by design/)
     assert.equal(seen.length, 0)
   })
 
