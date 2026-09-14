@@ -131,6 +131,9 @@ type Options struct {
 	// PollInterval and PollTimeout bound waiting for a branch to become ready.
 	PollInterval time.Duration
 	PollTimeout  time.Duration
+	// ProgressEvery is how often a wait for a branch that is still going says
+	// so. Zero means thirty seconds.
+	ProgressEvery time.Duration
 }
 
 // New builds a provider.
@@ -159,13 +162,14 @@ func New(opts Options) (*Provider, error) {
 	}
 	return &Provider{
 		client: &Client{
-			BaseURL:      opts.BaseURL,
-			Key:          opts.APIKey,
-			OrgID:        opts.OrgID,
-			ProjectID:    opts.ProjectID,
-			Sleep:        c.Sleep,
-			PollInterval: opts.PollInterval,
-			PollTimeout:  opts.PollTimeout,
+			BaseURL:       opts.BaseURL,
+			Key:           opts.APIKey,
+			OrgID:         opts.OrgID,
+			ProjectID:     opts.ProjectID,
+			Sleep:         c.Sleep,
+			PollInterval:  opts.PollInterval,
+			PollTimeout:   opts.PollTimeout,
+			ProgressEvery: opts.ProgressEvery,
 		},
 		clock:       c,
 		seedSQL:     opts.SeedSQL,
@@ -231,6 +235,19 @@ func (p *Provider) Capabilities() provider.Caps {
 		// only bounds what reaches that question.
 		SupportedVersions: []int{14, 15, 16, 17, 18},
 	}
+}
+
+// ReportProgressTo is provider.ProgressReporting, and the engine calls it once,
+// after opening the provider, with the function that publishes a line as an
+// engine.progress event and prints it.
+//
+// It exists because a Xata branch is created asynchronously and this provider
+// waits for it to report ready for up to five minutes, once for every golden
+// candidate and once for every environment branch, and until now that wait was
+// silent: a first af up sat on a line that did not move for as long as Xata took.
+// The lines are written by the client's AwaitReady, which is where the wait is.
+func (p *Provider) ReportProgressTo(report func(line string)) {
+	p.client.Progress = report
 }
 
 // Close releases nothing: the client holds no pool of its own.

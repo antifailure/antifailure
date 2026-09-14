@@ -106,11 +106,11 @@ func TestTheFakeControlPlaneReallyCopies(t *testing.T) {
 	gv, err := p.RefreshGolden(ctx, provider.GoldenSpec{Version: localMajor(t, admin), RulesHash: "copies01"})
 	require.NoError(t, err)
 
-	f.resetCounter()
+	f.ResetBytesCopied()
 	_, err = p.Branch(ctx, gv.ID, "env_really_copies")
 	require.NoError(t, err)
 
-	require.Positive(t, f.copied(),
+	require.Positive(t, f.BytesCopied(),
 		"this fake control plane branched without moving a byte, so the reason "+
 			"TestConformance leaves conformance.Options.RealService empty no longer holds. "+
 			"Either the fake stopped copying, in which case the copy on write behaviour "+
@@ -127,7 +127,7 @@ func TestTheFakeControlPlaneReallyCopies(t *testing.T) {
 func TestTheConformanceRunDoesNotAssertARealService(t *testing.T) {
 	require.Empty(t, conformanceOptions().RealService,
 		"the fake backed suite claims to drive a real service. The control plane it "+
-			"drives is fake_test.go and the Postgres under it is local, so every service "+
+			"drives is fakexata and the Postgres under it is local, so every service "+
 			"owned behaviour would be decided by a measurement of that Postgres and "+
 			"published as a measurement of Xata")
 }

@@ -71,6 +71,12 @@ type Client struct {
 	// PollInterval and PollTimeout bound waiting for a branch to become ready.
 	PollInterval time.Duration
 	PollTimeout  time.Duration
+	// Progress receives a line when a wait for a branch starts, while it lasts,
+	// and when it ends. Nil reports nothing.
+	Progress func(line string)
+	// ProgressEvery is how often a wait that is still going says so. Zero means
+	// thirty seconds.
+	ProgressEvery time.Duration
 }
 
 // Branch is one Xata branch, in the fields this provider reads.
@@ -412,6 +418,19 @@ func (c *Client) pollTimeout() time.Duration {
 	return 5 * time.Minute
 }
 
+func (c *Client) progressEvery() time.Duration {
+	if c.ProgressEvery > 0 {
+		return c.ProgressEvery
+	}
+	return 30 * time.Second
+}
+
+func (c *Client) report(line string) {
+	if c.Progress != nil {
+		c.Progress(line)
+	}
+}
+
 func (c *Client) sleep(ctx context.Context, d time.Duration) error {
 	if c.Sleep != nil {
 		return c.Sleep(ctx, d)
@@ -434,9 +453,19 @@ func (c *Client) sleep(ctx context.Context, d time.Duration) error {
 // that never leaves creating is a different problem from one that is ready and
 // refusing connections, and a provider that only tried to connect would report
 // both as a timeout.
+//
+// A wait of up to five minutes is also one nobody watching af up can see, so it
+// is REPORTED: a line when the branch is first found not ready, a line every
+// ProgressEvery while it stays that way, and a line when it becomes ready. A
+// branch ready on the first poll reports nothing, because there was no wait and
+// a line about one would be noise on every branch. No line carries anything but
+// the branch identifier, the elapsed time and the status Xata reported.
 func (c *Client) AwaitReady(ctx context.Context, id string) (Branch, error) {
-	deadline := time.Now().Add(c.pollTimeout())
+	start := time.Now()
+	deadline := start.Add(c.pollTimeout())
 	var last Branch
+	waiting := false
+	lastReport := start
 	for {
 		b, err := c.GetBranch(ctx, id)
 		if err != nil {
@@ -444,7 +473,22 @@ func (c *Client) AwaitReady(ctx context.Context, id string) (Branch, error) {
 		}
 		last = b
 		if b.Status.Ready() {
+			if waiting {
+				c.report(fmt.Sprintf("xata: branch %s is ready after %s",
+					id, time.Since(start).Round(time.Second)))
+			}
 			return b, nil
+		}
+		switch now := time.Now(); {
+		case !waiting:
+			waiting = true
+			lastReport = now
+			c.report(fmt.Sprintf("xata: waiting for branch %s to become ready, Xata reports it %s",
+				id, describeStatus(b.Status)))
+		case now.Sub(lastReport) >= c.progressEvery():
+			lastReport = now
+			c.report(fmt.Sprintf("xata: still waiting for branch %s after %s, Xata reports it %s",
+				id, now.Sub(start).Round(time.Second), describeStatus(b.Status)))
 		}
 		if time.Now().After(deadline) {
 			return last, fmt.Errorf(
