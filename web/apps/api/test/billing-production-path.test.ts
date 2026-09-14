@@ -364,7 +364,12 @@ describe('the production billing path', { skip: !hasDatabase }, () => {
         successUrl: 'https://app.test/billing/done',
         cancelUrl: 'https://app.test/billing',
       })
-      assert.equal(bought.status, 200, JSON.stringify(bought.body))
+      // REFUSED, and this asserted 200. The early delivery names a live
+      // subscription for the very customer the checkout just attached, and the
+      // attach applies it. Opening a page after that sells a second plan beside
+      // a live one, which is the ordering the unmerged 2026-09-04 attempt
+      // refused. The delivery is still parked and still resolved, below.
+      assert.equal(bought.status, 412, JSON.stringify(bought.body))
 
       // The early delivery was ACCEPTED and PARKED. Accepted, because refusing
       // it would make Stripe retry a delivery that is not wrong; parked,

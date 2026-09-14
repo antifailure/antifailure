@@ -76,9 +76,26 @@
         "subscription": null, "payment_intent": null,
         "payment_status": "unpaid", "currency": "usd", "amount_total": 0,
         "expires_at": 1769904000,
-        "metadata": {"org_id": "{request.metadata[org_id]}"},
+        "metadata": {"org_id": "{request.metadata[org_id]}",
+                     "checkout_attempt": "{request.metadata[checkout_attempt]}"},
         "success_url": "{request.success_url}", "cancel_url": "{request.cancel_url}",
         "url": "https://checkout.stripe.com/c/pay/{id:cs_}"
+      }
+    },
+    {
+      "method": "GET", "path": "/v1/checkout/sessions", "list": "checkout_sessions",
+      "body": {
+        "object": "list", "url": "/v1/checkout/sessions", "has_more": false, "data": "{items}"
+      }
+    },
+    {
+      "method": "POST", "path": "/v1/checkout/sessions/{id}/expire", "merge": "checkout_sessions",
+      "body": {"id": "{id}", "object": "checkout.session", "status": "expired", "url": null},
+      "not_found": {
+        "error": {
+          "type": "invalid_request_error", "code": "resource_missing",
+          "message": "No such checkout session to expire in this environment's mock pack."
+        }
       }
     },
     {

@@ -90,13 +90,31 @@ describe('two checkouts at the same instant', {
     // race would take a real payment onto an object this database does not
     // know about, and the subscription webhook for it would arrive naming a
     // customer no organization claims.
+    //
+    // NOT a count of sessions. This asserted exactly two, which was the defect:
+    // each press opened its own payable page. The two presses now share one
+    // purchase attempt, and whether one or both reach this transport depends
+    // on how they interleave, because this transport does not model Stripe
+    // returning the saved session for a repeated key. What is deterministic,
+    // and what makes real Stripe answer both with one page, is that every
+    // session carries the SAME attempt. The page itself being shared under a
+    // provider that does model it is the same instant cell in
+    // checkout-lifecycle.test.ts.
     const sessions = posted.filter((p) => p.path === '/v1/checkout/sessions')
-    assert.equal(sessions.length, 2, `expected two checkout sessions, saw ${sessions.length}`)
+    assert.ok(sessions.length >= 1, 'neither checkout opened a session')
+    const [attempt] = await h.admin<{ attempt_id: string }[]>`
+      SELECT attempt_id FROM billing_checkout_attempts WHERE org_id = ${org.orgId}`
+    assert.ok(attempt, 'the checkouts recorded no purchase attempt')
     for (const session of sessions) {
       assert.equal(
         session.body.get('customer'),
         customerId,
         'a checkout session was opened against a customer this organization is not attached to',
+      )
+      assert.equal(
+        session.body.get('metadata[checkout_attempt]'),
+        attempt.attempt_id,
+        'two concurrent presses reached Stripe as two different purchases',
       )
     }
   })
@@ -159,5 +177,13 @@ describe('two checkouts at the same instant', {
     for (const session of posted.filter((p) => p.path === '/v1/checkout/sessions')) {
       assert.equal(session.body.get('customer'), existing!.stripe_customer_id)
     }
+    // Both presses are handed the page the first one opened. The loop above
+    // runs over the sessions CREATED, and the fix is that none are, so on its
+    // own it would pass having asserted nothing.
+    const page = (body: unknown) =>
+      (body as { result?: { data?: { sessionId?: string } } }).result?.data?.sessionId ?? null
+    assert.ok(page(warm.body), 'the first checkout returned no page')
+    assert.equal(page(a.body), page(warm.body), 'a concurrent press was given a page of its own')
+    assert.equal(page(b.body), page(warm.body), 'a concurrent press was given a page of its own')
   })
 })

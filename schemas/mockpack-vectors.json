@@ -125,6 +125,7 @@
         "id": "cs_mock00000000000002",
         "livemode": false,
         "metadata": {
+          "checkout_attempt": "",
           "org_id": ""
         },
         "mode": "subscription",
@@ -155,6 +156,7 @@
         "id": "cs_mock00000000000002",
         "livemode": false,
         "metadata": {
+          "checkout_attempt": "",
           "org_id": ""
         },
         "mode": "subscription",

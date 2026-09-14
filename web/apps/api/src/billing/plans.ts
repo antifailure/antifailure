@@ -214,9 +214,47 @@ const ENDED_STATUSES: readonly string[] = [
   'canceled', 'unpaid', 'incomplete', 'incomplete_expired', 'paused',
 ]
 
-/** A subscription in one of these exists at Stripe and is being charged for,
- *  or is about to be. What subscriptions.checkout refuses to start a second
- *  one alongside. */
+/**
+ * A subscription in one of these still exists as far as the customer's money is
+ * concerned. What subscriptions.checkout refuses to start a second one
+ * alongside, what a deletion has to cancel before it purges, and what
+ * subscriptions.cancel will act on.
+ *
+ * `paused` IS HERE AND IT IS NOT CHARGED FOR ANYTHING TODAY. That reads like a
+ * contradiction with ENDED_STATUSES above, which also names it, and the two are
+ * answering different questions. A paused subscription entitles nothing, so it
+ * is ended for the purposes of a plan. But Stripe reaches `paused` when a trial
+ * ends with no payment method on file, and the customer resumes it by adding
+ * one, so it is a subscription that can start charging again without anybody
+ * buying anything. Selling a second plan alongside it means that the day the
+ * customer adds a card they are paying twice, and the first of the two is the
+ * one nobody remembers agreeing to. `unpaid` and `incomplete` are in both lists
+ * for the same reason and have been since this file was written.
+ *
+ * https://docs.stripe.com/api/subscriptions/object gives the transition:
+ * "A subscription can only enter a paused status when a trial ends without a
+ * payment method." Pausing COLLECTION is a different thing that leaves the
+ * status alone. Checkout here opens no trial, but an operator can extend one
+ * from the admin surface (extendTrial in admin/money.ts), and whether a trial
+ * that ends with no card pauses is configured at Stripe rather than here, so
+ * this code has to assume it can.
+ */
 export const LIVE_STATUSES: readonly string[] = [
-  ...ENTITLING_STATUSES, 'unpaid', 'incomplete',
+  ...ENTITLING_STATUSES, 'unpaid', 'incomplete', 'paused',
 ]
+
+/**
+ * A subscription in one of these is over and cannot come back.
+ *
+ * The narrow end of the vocabulary, and the only list that may permit a NEW
+ * purchase. Stripe can move a subscription out of every other status, including
+ * out of `paused` and out of `unpaid`, so treating any of those as finished is
+ * how an organization ends up holding two.
+ *
+ * Exported for billing/checkout.ts, which asks it about the subscription a
+ * completed checkout created before it will let another checkout replace that
+ * checkout. It is deliberately not the complement of LIVE_STATUSES: a status
+ * Stripe adds tomorrow belongs to neither list, and the test in
+ * test/checkout-lifecycle.test.ts holds the two apart.
+ */
+export const TERMINAL_STATUSES: readonly string[] = ['canceled', 'incomplete_expired']
