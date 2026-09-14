@@ -238,8 +238,18 @@ type Assignment struct {
 	Problem string
 }
 
-// Masked reports whether anything happens to this column.
+// Masked reports whether a rule decided this column, including a decision that
+// it is fine as it is.
 func (a Assignment) Masked() bool { return a.Transform != "" && a.Problem == "" }
+
+// Rewrites reports whether masking writes this column.
+//
+// preserve is a decision and not a rewrite. It records that somebody reviewed
+// the column and found it safe, and its transform returns the value it was
+// given. Writing that value back is a new version of every row and a new entry
+// in every index on the column, for no change, so a preserved column is never
+// written, never addressed, and never a reason a plan cannot run.
+func (a Assignment) Rewrites() bool { return a.Masked() && a.Transform != PreserveTransform }
 
 // Assign classifies every column of every table.
 func (rs *RuleSet) Assign(tables []Table) []Assignment {
@@ -380,7 +390,7 @@ func (rs *RuleSet) Assign(tables []Table) []Assignment {
 				a.Link = a.Transform
 			}
 			a = checkFeasible(a)
-			if a.Problem == "" && a.Masked() && unaddressable != "" {
+			if a.Problem == "" && a.Rewrites() && unaddressable != "" {
 				// The engine cannot say which row a statement means, so the
 				// rewrite cannot be carried out. Refused here with every other
 				// infeasible assignment rather than discovered by the executor,
@@ -400,7 +410,8 @@ func (rs *RuleSet) Assign(tables []Table) []Assignment {
 // halfway leaves a table partly masked, which is worse than not starting: the
 // data is neither real nor safe, and nothing says which rows are which.
 func checkFeasible(a Assignment) Assignment {
-	if a.Transform == "" {
+	if a.Transform == "" || a.Transform == PreserveTransform {
+		// Nothing is written, so nothing about writing it can be infeasible.
 		return a
 	}
 	if a.Column.Generated {

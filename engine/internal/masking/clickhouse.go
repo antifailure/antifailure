@@ -179,19 +179,51 @@ func (clickhouseDialect) Unaddressable(t Table) string {
 	return ""
 }
 
-// RowKey addresses one row through the first column of the sorting key.
+// RowKey reads a row's address out of a chunk: every column of the sorting
+// key, in key order, each rendered through toString on the way out.
 //
-// Rendered through toString for the same reason Postgres casts to text: one
-// comparison covers an integer key, a UUID and whatever else somebody sorted
-// on, and the order only has to be total and stable rather than natural.
-func (d clickhouseDialect) RowKey(tp TablePlan) string {
+// Every column, for the reason the Postgres dialect gives: rows that share the
+// first column of the key are different rows, and addressing them by it
+// rewrites all of them with one row's values. The comparisons below use the
+// columns as stored, not toString of them.
+func (d clickhouseDialect) RowKey(tp TablePlan) []string {
 	if len(tp.OrderBy) == 0 {
 		// Unreachable through a plan, because Unaddressable refuses the table
 		// before one is built. Written rather than left to panic, because a
 		// TablePlan is a public value somebody can build by hand.
-		return "toString(tuple())"
+		return []string{"toString(tuple())"}
 	}
-	return "toString(" + d.QuoteIdent(tp.OrderBy[0]) + ")"
+	out := make([]string, len(tp.OrderBy))
+	for i, k := range tp.OrderBy {
+		out[i] = "toString(" + d.QuoteIdent(k) + ")"
+	}
+	return out
+}
+
+// keyColumns renders the sorting key as the table stores it: one column, or a
+// tuple, which ClickHouse compares element by element in order.
+func (d clickhouseDialect) keyColumns(tp TablePlan) string {
+	names := make([]string, len(tp.OrderBy))
+	for i, k := range tp.OrderBy {
+		names[i] = d.QuoteIdent(k)
+	}
+	if len(names) == 1 {
+		return names[0]
+	}
+	return "(" + strings.Join(names, ", ") + ")"
+}
+
+// keyParameters renders one parameter per key column, numbered from first, each
+// cast to the column's own type, so the comparison is on the value as stored.
+func (d clickhouseDialect) keyParameters(tp TablePlan, first int) string {
+	params := make([]string, len(tp.OrderBy))
+	for i, k := range tp.OrderBy {
+		params[i] = clickhouseValue(tp.Table.ColumnNamed(k), first+i)
+	}
+	if len(params) == 1 {
+		return params[0]
+	}
+	return "(" + strings.Join(params, ", ") + ")"
 }
 
 // SelectChunk reads one chunk of a table, every column rendered as text.
@@ -208,10 +240,9 @@ func (d clickhouseDialect) RowKey(tp TablePlan) string {
 // transform still sees the absence rather than an empty string. That is the
 // first of the three properties this package is built on and it does not get to
 // change per engine.
-func (d clickhouseDialect) SelectChunk(tp TablePlan, after string) Query {
-	key := d.RowKey(tp)
-	cols := make([]string, 0, len(tp.Columns)+1)
-	cols = append(cols, key)
+func (d clickhouseDialect) SelectChunk(tp TablePlan, after []string) Query {
+	cols := make([]string, 0, len(tp.Columns)+len(tp.OrderBy))
+	cols = append(cols, d.RowKey(tp)...)
 	for _, c := range tp.Columns {
 		cols = append(cols, "toString("+d.QuoteIdent(c.Column.Name)+")")
 	}
@@ -219,11 +250,19 @@ func (d clickhouseDialect) SelectChunk(tp TablePlan, after string) Query {
 	var b strings.Builder
 	fmt.Fprintf(&b, "SELECT %s FROM %s", strings.Join(cols, ", "), d.Qualify(tp.Table))
 	var args []any
-	if after != "" {
-		fmt.Fprintf(&b, " WHERE %s > %s", key, (clickhouseDialect{}).Placeholder(1))
-		args = append(args, after)
+	if len(tp.OrderBy) > 0 && len(after) == len(tp.OrderBy) {
+		fmt.Fprintf(&b, " WHERE %s > %s", d.keyColumns(tp), d.keyParameters(tp, 1))
+		for _, v := range after {
+			args = append(args, v)
+		}
 	}
-	fmt.Fprintf(&b, " ORDER BY %s", key)
+	order := make([]string, len(tp.OrderBy))
+	for i, k := range tp.OrderBy {
+		order[i] = d.QuoteIdent(k)
+	}
+	if len(order) > 0 {
+		fmt.Fprintf(&b, " ORDER BY %s", strings.Join(order, ", "))
+	}
 	if tp.ChunkSize > 0 {
 		fmt.Fprintf(&b, " LIMIT %d", tp.ChunkSize)
 	}
@@ -233,20 +272,26 @@ func (d clickhouseDialect) SelectChunk(tp TablePlan, after string) Query {
 // Update rewrites the planned columns of one row.
 //
 // The parameters are numbered the way the Postgres statement numbers them, the
-// row key first and the values after it in column order, because that ordering
-// is the executor's contract rather than either engine's.
+// row's address first, one per key column, and the values after it in column
+// order, because that ordering is the executor's contract rather than either
+// engine's.
 func (d clickhouseDialect) Update(tp TablePlan) Statement {
+	width := tp.AddressWidth()
 	names := make([]string, 0, len(tp.Columns))
 	sets := make([]string, 0, len(tp.Columns))
 	for i, c := range tp.Columns {
 		names = append(names, c.Column.Name)
 		sets = append(sets, fmt.Sprintf("%s = %s",
-			d.QuoteIdent(c.Column.Name), clickhouseValue(c.Column, i+2)))
+			d.QuoteIdent(c.Column.Name), clickhouseValue(c.Column, width+i+1)))
 	}
 
+	where := "toString(tuple()) = " + d.Placeholder(1)
+	if len(tp.OrderBy) > 0 {
+		where = d.keyColumns(tp) + " = " + d.keyParameters(tp, 1)
+	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "ALTER TABLE %s UPDATE %s WHERE %s = %s",
-		d.Qualify(tp.Table), strings.Join(sets, ", "), d.RowKey(tp), (clickhouseDialect{}).Placeholder(1))
+	fmt.Fprintf(&b, "ALTER TABLE %s UPDATE %s WHERE %s",
+		d.Qualify(tp.Table), strings.Join(sets, ", "), where)
 	return Statement{
 		SQL: b.String(), Table: tp.Table.String(), Columns: names,
 		Keyed: len(tp.OrderBy) > 0,

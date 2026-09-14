@@ -326,6 +326,8 @@ const (
 	// The cross store check did not compare every store it was given:
 	// {detail}
 	AFMSK015 Code = "AF-MSK-015"
+	// Masking was interrupted before it finished: {detail}
+	AFMSK016 Code = "AF-MSK-016"
 
 	// Egress
 	// The request to {host} was blocked by rule {rule}.
@@ -1567,6 +1569,15 @@ var catalog = map[Code]Entry{
 		Docs:      "concepts/masking",
 		Retryable: false,
 		ExitCode:  ExitFailure,
+	},
+	AFMSK016: {
+		Code:      AFMSK016,
+		Area:      "MSK",
+		Message:   "Masking was interrupted before it finished: {detail}",
+		NextStep:  "Run it again against a fresh copy: 'af golden refresh' starts again from the source, and a branch that was partly masked has to be recreated with 'af down' and then 'af up' first, because masking a value that is already masked changes it.",
+		Docs:      "concepts/masking",
+		Retryable: true,
+		ExitCode:  ExitInterruptedClean,
 	},
 	AFNET001: {
 		Code:      AFNET001,

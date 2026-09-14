@@ -181,11 +181,15 @@ type maskingPlanDoc struct {
 	// safe and nothing says which rows are which.
 	Runnable bool `json:"runnable"`
 
-	Tables       []maskedTableDoc `json:"tables"`
-	TablesTotal  int              `json:"tables_total"`
-	TablesShown  int              `json:"tables_shown"`
-	ColumnsTotal int              `json:"columns_total"`
-	RowsEstimate int64            `json:"rows_estimated"`
+	Tables []maskedTableDoc `json:"tables"`
+	// TablesNotWritten are the tables whose every assigned column is
+	// preserved. They get no statement, and they are listed so the review is
+	// visible rather than the table simply absent.
+	TablesNotWritten []maskedTableDoc `json:"tables_not_written,omitempty"`
+	TablesTotal      int              `json:"tables_total"`
+	TablesShown      int              `json:"tables_shown"`
+	ColumnsTotal     int              `json:"columns_total"`
+	RowsEstimate     int64            `json:"rows_estimated"`
 
 	// Unclassified are columns no rule named. They are not a failure on their
 	// own; they are the list somebody has to answer.
@@ -207,11 +211,14 @@ type maskedTableDoc struct {
 	Rows    int64             `json:"rows_estimated"`
 	Columns []maskedColumnDoc `json:"columns"`
 	Total   int               `json:"columns_total"`
-	// Chunked reports whether the rewrite is done in resumable chunks. A table
-	// with no primary key is masked in one statement instead, because without
-	// a key there is no stable order to resume from.
+	// Chunked reports whether the rewrite is done in chunks. A table with no
+	// primary key is masked in one statement instead, because without a key
+	// there is no stable order to page through.
 	Chunked bool   `json:"chunked"`
 	Skipped string `json:"skipped,omitempty"`
+	// Reviewed are the columns a preserve rule covers: decided, reported with
+	// the decision, and never written.
+	Reviewed []maskedColumnDoc `json:"reviewed_columns,omitempty"`
 }
 
 type maskedColumnDoc struct {
@@ -272,20 +279,25 @@ func maskingPlan(ctx context.Context, readers maskingReaders) (any, *Fault) {
 			Chunked: tp.ChunkSize > 0, Skipped: safeProse(tp.Skipped, 200),
 			Columns: []maskedColumnDoc{},
 		}
-		for j, a := range tp.Columns {
-			if j >= maxMaskedColumnsPerTable {
-				break
-			}
-			column, _ := safeIdentifier(a.Column.Name)
-			doc.Columns = append(doc.Columns, maskedColumnDoc{
-				Column: column, Type: neutralize(a.Column.Type, 64),
-				Transform: neutralize(a.Transform, 64), FromDefault: a.FromDefault,
-				Why: safeProse(a.Why, 200),
-			})
-		}
+		doc.Columns = append(doc.Columns, maskedColumnDocs(tp.Columns)...)
+		doc.Reviewed = maskedColumnDocs(tp.Reviewed)
 		out.Tables = append(out.Tables, doc)
 	}
 	out.TablesShown = len(out.Tables)
+
+	// A table whose every column is preserved gets no statement, and is still
+	// reported: that it was reviewed and found safe is the decision somebody made.
+	for i, tp := range plan.Unwritten {
+		if i >= maxMaskedTablesReported {
+			break
+		}
+		table, _ := safeIdentifier(tp.Table.String())
+		out.TablesNotWritten = append(out.TablesNotWritten, maskedTableDoc{
+			Table: table, Rows: tp.Rows(), Columns: []maskedColumnDoc{},
+			Skipped:  "every column a rule names here is preserved, so nothing is written and there is no statement",
+			Reviewed: maskedColumnDocs(tp.Reviewed),
+		})
+	}
 
 	out.Unclassified = describeUnmasked(plan.Unclassified, maxUnclassifiedColumns)
 	out.Problems = describeUnmasked(plan.Problems, maxUnclassifiedColumns)
@@ -1083,4 +1095,22 @@ func oneLineOf(s string) string {
 		return s[:i]
 	}
 	return s
+}
+
+// maskedColumnDocs describes a table's columns for the plan document, up to the
+// per table limit.
+func maskedColumnDocs(assignments []masking.Assignment) []maskedColumnDoc {
+	out := []maskedColumnDoc{}
+	for j, a := range assignments {
+		if j >= maxMaskedColumnsPerTable {
+			break
+		}
+		column, _ := safeIdentifier(a.Column.Name)
+		out = append(out, maskedColumnDoc{
+			Column: column, Type: neutralize(a.Column.Type, 64),
+			Transform: neutralize(a.Transform, 64), FromDefault: a.FromDefault,
+			Why: safeProse(a.Why, 200),
+		})
+	}
+	return out
 }

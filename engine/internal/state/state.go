@@ -1,9 +1,10 @@
 // Package state is the engine's crash safe local store.
 //
 // Everything the engine needs to survive a crash lives here: the journal of
-// external resources it created, masking checkpoints so an interrupted run
-// resumes rather than restarts, environment records, and golden reference
-// counts. It is SQLite in write ahead logging mode under .antifailure, opened
+// external resources it created, a checkpoints table for resumable work,
+// environment records, and golden reference counts. Nothing writes a masking
+// checkpoint to it yet, so an interrupted masking run starts from the
+// beginning. It is SQLite in write ahead logging mode under .antifailure, opened
 // with a pure Go driver so that the shipped binary needs no C toolchain and
 // keeps CGO_ENABLED=0.
 //
@@ -126,8 +127,9 @@ CREATE TABLE golden_refs (
     PRIMARY KEY (version, env)
 ) STRICT;
 
--- Resumable work. A masking run checkpoints per chunk so an interruption
--- resumes rather than starting a twenty gigabyte rewrite again.
+-- Resumable work, for a run that records its progress as it goes. Nothing
+-- writes a masking checkpoint here yet, so an interrupted masking run starts
+-- again from the beginning.
 CREATE TABLE checkpoints (
     scope      TEXT NOT NULL,
     key        TEXT NOT NULL,

@@ -18,6 +18,10 @@ import (
 type Plan struct {
 	// Tables are the updates to run, in the order they run.
 	Tables []TablePlan
+	// Unwritten are the tables whose every assigned column is preserved. They
+	// get no statement at all, and they are kept here rather than dropped so
+	// the plan still shows that each one was reviewed and found safe.
+	Unwritten []TablePlan
 	// Unclassified are columns no rule covered that look like they hold
 	// something. They are not a failure on their own; they are the list
 	// somebody has to answer.
@@ -37,10 +41,15 @@ type TablePlan struct {
 	Table Table
 	// Columns are the columns being rewritten, in a stable order.
 	Columns []Assignment
+	// Reviewed are the columns a preserve rule covers, in a stable order. They
+	// were decided and the plan shows the decision, and nothing is written to
+	// them: the transform returns the value it was given, and writing that back
+	// is a new version of every row for no change.
+	Reviewed []Assignment
 	// ChunkSize is how many rows one statement covers.
 	ChunkSize int
 	// OrderBy is the primary key, which chunking needs to make progress
-	// deterministic and resumable.
+	// deterministic, and which a checkpoint needs to name a position.
 	OrderBy []string
 	// Skipped, when set, says why this table is not being touched.
 	Skipped string
@@ -48,6 +57,16 @@ type TablePlan struct {
 
 // Rows is the estimated row count for this table.
 func (tp TablePlan) Rows() int64 { return tp.Table.Rows }
+
+// AddressWidth is how many values address one row: one per primary key column,
+// or one ctid for a table with none. A chunk's first AddressWidth columns are
+// the address, and so are an update's first AddressWidth parameters.
+func (tp TablePlan) AddressWidth() int {
+	if len(tp.OrderBy) > 0 {
+		return len(tp.OrderBy)
+	}
+	return 1
+}
 
 // Chunks estimates how many statements this table takes.
 func (tp TablePlan) Chunks() int64 {
@@ -69,12 +88,18 @@ const DefaultChunkSize = 20_000
 // BuildPlan turns assignments into an ordered plan.
 func BuildPlan(tables []Table, assignments []Assignment, rulesHash string) Plan {
 	byTable := map[string][]Assignment{}
+	reviewed := map[string][]Assignment{}
 	for _, a := range assignments {
-		if !a.Masked() {
-			continue
-		}
 		key := a.Table.String()
-		byTable[key] = append(byTable[key], a)
+		switch {
+		case a.Rewrites():
+			byTable[key] = append(byTable[key], a)
+		case a.Masked():
+			// Preserved: reviewed and found safe. Recorded beside the table's
+			// rewrites so the plan still shows the decision, and never
+			// compiled into a statement.
+			reviewed[key] = append(reviewed[key], a)
+		}
 	}
 
 	plan := Plan{
@@ -85,15 +110,27 @@ func BuildPlan(tables []Table, assignments []Assignment, rulesHash string) Plan 
 
 	SortTables(tables)
 	for _, t := range tables {
-		cols := byTable[t.String()]
-		if len(cols) == 0 {
+		cols, kept := byTable[t.String()], reviewed[t.String()]
+		if len(cols) == 0 && len(kept) == 0 {
 			continue
 		}
 		// A stable column order, so two plans for the same schema produce the
 		// same statements and a diff between them means something.
 		sort.Slice(cols, func(i, j int) bool { return cols[i].Column.Name < cols[j].Column.Name })
+		sort.Slice(kept, func(i, j int) bool { return kept[i].Column.Name < kept[j].Column.Name })
 
-		tp := TablePlan{Table: t, Columns: cols, ChunkSize: DefaultChunkSize, OrderBy: t.PrimaryKey}
+		tp := TablePlan{
+			Table: t, Columns: cols, Reviewed: kept,
+			ChunkSize: DefaultChunkSize, OrderBy: t.PrimaryKey,
+		}
+		if len(cols) == 0 {
+			// Every column a rule names here is preserved, so there is nothing
+			// to write and no statement. Such a table used to be rewritten in
+			// full with the values it already held.
+			tp.ChunkSize = 0
+			plan.Unwritten = append(plan.Unwritten, tp)
+			continue
+		}
 		if len(t.PrimaryKey) == 0 {
 			// Without a key there is no stable order, so there is no way to
 			// resume and no way to be sure every row was covered exactly once.
@@ -166,8 +203,8 @@ type Statement struct {
 	Table string
 	// Columns are the columns it rewrites.
 	Columns []string
-	// Keyed reports whether it is chunked, which decides whether the executor
-	// can resume it.
+	// Keyed reports whether it is chunked, which decides whether a checkpoint
+	// can name a position in it.
 	Keyed bool
 }
 
@@ -186,27 +223,63 @@ func (tp TablePlan) Compile() Statement {
 	return tp.Table.dialect().Update(tp)
 }
 
+// Reviewed returns every column a preserve rule covers, beside a table's
+// rewrites or on a table with nothing else. None of them is written.
+func (p Plan) Reviewed() []Assignment {
+	var out []Assignment
+	for _, t := range p.Tables {
+		out = append(out, t.Reviewed...)
+	}
+	for _, t := range p.Unwritten {
+		out = append(out, t.Reviewed...)
+	}
+	return out
+}
+
+// reviewedNote is how a preserved column reads in a plan.
+const reviewedNote = "preserve, reviewed and found safe, not written"
+
+// explainColumn renders one column's decision.
+func explainColumn(b *strings.Builder, c Assignment, decision string) {
+	source := ""
+	if c.FromDefault {
+		source = " (default rule)"
+	}
+	link := ""
+	if c.Link != "" && c.Transform != PreserveTransform {
+		link = ", linked to " + c.Link
+	}
+	fmt.Fprintf(b, "  %-24s %s%s%s\n", c.Column.Name, decision, link, source)
+	if c.Why != "" {
+		fmt.Fprintf(b, "  %-24s %s\n", "", c.Why)
+	}
+}
+
 // Explain renders a plan for a person.
+//
+// A preserved column is shown with its decision and marked as not written, and a
+// table with nothing else is shown with no statement, so the review stays
+// visible where no work happens.
 func (p Plan) Explain() string {
 	var b strings.Builder
-	if len(p.Tables) == 0 {
+	if len(p.Tables) == 0 && len(p.Unwritten) == 0 {
 		b.WriteString("Nothing to mask. No column in this database matched a rule.\n")
+	}
+	for _, t := range p.Unwritten {
+		fmt.Fprintf(&b, "%s\n", t.Table)
+		for _, c := range t.Reviewed {
+			explainColumn(&b, c, reviewedNote)
+		}
+		fmt.Fprintf(&b, "  %-24s no statement: every column a rule names here was reviewed and found safe\n", "")
+		b.WriteString("\n")
 	}
 	for _, t := range p.Tables {
 		fmt.Fprintf(&b, "%s\n", t.Table)
 		for _, c := range t.Columns {
-			source := ""
-			if c.FromDefault {
-				source = " (default rule)"
-			}
-			link := ""
-			if c.Link != "" {
-				link = ", linked to " + c.Link
-			}
-			fmt.Fprintf(&b, "  %-24s %s%s%s\n", c.Column.Name, c.Transform, link, source)
-			if c.Why != "" {
-				fmt.Fprintf(&b, "  %-24s %s\n", "", c.Why)
-			}
+			explainColumn(&b, c, c.Transform)
+		}
+		for _, c := range t.Reviewed {
+			explainColumn(&b, c, reviewedNote)
 		}
 		if t.ChunkSize > 0 {
 			fmt.Fprintf(&b, "  %-24s about %d rows in %d chunks\n", "", t.Rows(), t.Chunks())

@@ -785,7 +785,7 @@ func (o *Orchestrator) maskDatabase(
 	}
 	res, err := exec.Apply(ctx, conn, plan)
 	if err != nil {
-		return res.Rows, res.Tables, aferrors.Wrap(err, aferrors.AFMSK010, "detail", err.Error())
+		return res.Rows, res.Tables, maskingFailure(err, interruptedRefresh)
 	}
 	o.event(s, events.MaskApplied,
 		fmt.Sprintf("masked %d rows across %d tables", res.Rows, res.Tables),
@@ -1121,8 +1121,44 @@ func (o *Orchestrator) MaskApply(ctx context.Context) (masking.Result, error) {
 	if err != nil {
 		return masking.Result{}, err
 	}
-	return exec.Apply(ctx, conn, plan)
+	res, err := exec.Apply(ctx, conn, plan)
+	var interrupted *masking.InterruptedError
+	if aferrors.As(err, &interrupted) {
+		return res, applyFailure(err)
+	}
+	return res, err
 }
+
+// maskingFailure codes an error out of the masking executor.
+//
+// An interrupted run is AF-MSK-016 and exits as interrupted. It used to be
+// AF-MSK-010, "Masking could not run", which exits 3 as a configuration error: a
+// control C during `af golden refresh` printed that with "unexpected EOF" after
+// it, and neither the configuration nor the database was wrong.
+//
+// advice is the sentence about what to do next, and it differs by command. A
+// refresh that is run again starts from a fresh copy of the source, so running
+// it again is the answer. A branch that was interrupted is partly masked, and
+// masking it again masks the rows already written a second time: the transforms
+// are deterministic, so a value masked twice no longer matches the same value
+// masked once in every other table, and every join across them breaks quietly.
+func maskingFailure(err error, advice string) error {
+	var interrupted *masking.InterruptedError
+	if aferrors.As(err, &interrupted) {
+		return aferrors.Wrap(err, aferrors.AFMSK016, "detail", interrupted.Error()+". "+advice)
+	}
+	return aferrors.Wrap(err, aferrors.AFMSK010, "detail", err.Error())
+}
+
+// interruptedRefresh and interruptedApply are what an interrupted refresh and an
+// interrupted af mask apply say to do next.
+const (
+	interruptedRefresh = "The golden candidate is discarded, and running the refresh again starts from a fresh copy of the source"
+	interruptedApply   = "This branch is now partly masked: recreate it before masking again, with 'af down' and then 'af up', because masking a value that is already masked changes it"
+)
+
+// applyFailure codes an error out of the executor for af mask apply.
+func applyFailure(err error) error { return maskingFailure(err, interruptedApply) }
 
 // MaskVerify reads the environment's branch back and reports what still looks
 // real.

@@ -214,7 +214,10 @@ func TestClickHouse_StatementsAreClickHouseAndNotPostgres(t *testing.T) {
 		"a ClickHouse rewrite is a mutation, not an UPDATE statement")
 	require.NotContains(t, stmt.SQL, "$1", "the Postgres parameter shape reached ClickHouse")
 	require.Contains(t, stmt.SQL, "{p1:String}")
-	require.Contains(t, stmt.SQL, "WHERE toString(`uuid`) = {p1:String}")
+	// The key compared as the column stores it, against a parameter cast to the
+	// column's type, never toString of the column, which no index serves.
+	require.Contains(t, stmt.SQL, "WHERE `uuid` = CAST({p1:String} AS UUID)")
+	require.NotContains(t, stmt.SQL, "WHERE toString(", "the key column is compared through toString")
 	// The plan orders columns by name, so email is the second argument and
 	// person_id the third.
 	require.Contains(t, stmt.SQL, "`email` = {p2:String}")
@@ -222,7 +225,7 @@ func TestClickHouse_StatementsAreClickHouseAndNotPostgres(t *testing.T) {
 	require.Contains(t, stmt.SQL, "CAST({p3:String} AS Nullable(UUID))",
 		"a String going into a UUID column needs the cast Postgres infers for itself")
 
-	read := d.SelectChunk(plan.Tables[0], "")
+	read := d.SelectChunk(plan.Tables[0], nil)
 	require.Contains(t, read.SQL, "SELECT toString(`uuid`)")
 	require.NotContains(t, read.SQL, "::text", "the Postgres cast reached ClickHouse")
 }

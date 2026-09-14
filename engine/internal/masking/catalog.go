@@ -63,6 +63,12 @@ type ColumnInfo struct {
 	Name string
 	// Type is the Postgres type name, such as text or timestamptz.
 	Type string
+	// SQLType is the type the way a cast accepts it, from format_type with the
+	// column's length or precision. Type is information_schema's name, which is
+	// USER-DEFINED for an enum or a domain and ARRAY for an array, and no cast
+	// accepts either. It is what a key parameter is cast to, so the comparison
+	// is on the column as stored and the key's index serves it.
+	SQLType string
 	// Nullable reports whether the column accepts null, which decides whether
 	// nullify is available for it.
 	Nullable bool
@@ -106,6 +112,7 @@ func ReadCatalog(ctx context.Context, conn *pgx.Conn) ([]Table, error) {
 	// not: a partition may be called anything.
 	const query = `
 SELECT c.table_schema, c.table_name, c.column_name, c.data_type,
+       format_type(att.atttypid, att.atttypmod) AS sql_type,
        c.is_nullable = 'YES' AS nullable,
        c.is_generated <> 'NEVER' OR c.identity_generation IS NOT NULL AS generated,
        c.ordinal_position
@@ -114,6 +121,7 @@ JOIN information_schema.tables t
   ON t.table_schema = c.table_schema AND t.table_name = c.table_name
 JOIN pg_namespace ns ON ns.nspname = c.table_schema
 JOIN pg_class cl ON cl.relname = c.table_name AND cl.relnamespace = ns.oid
+JOIN pg_attribute att ON att.attrelid = cl.oid AND att.attname = c.column_name
 WHERE t.table_type = 'BASE TABLE'
   AND NOT cl.relispartition
   AND c.table_schema NOT IN ('pg_catalog', 'information_schema')
@@ -129,10 +137,10 @@ ORDER BY c.table_schema, c.table_name, c.ordinal_position`
 	byTable := map[string]*Table{}
 	var order []string
 	for rows.Next() {
-		var schema, table, column, dataType string
+		var schema, table, column, dataType, sqlType string
 		var nullable, generated bool
 		var position int
-		if err := rows.Scan(&schema, &table, &column, &dataType, &nullable, &generated, &position); err != nil {
+		if err := rows.Scan(&schema, &table, &column, &dataType, &sqlType, &nullable, &generated, &position); err != nil {
 			return nil, fmt.Errorf("masking: reading the catalog: %w", err)
 		}
 		key := schema + "." + table
@@ -144,7 +152,7 @@ ORDER BY c.table_schema, c.table_name, c.ordinal_position`
 			order = append(order, key)
 		}
 		byTable[key].Columns = append(byTable[key].Columns, ColumnInfo{
-			Name: column, Type: dataType, Nullable: nullable, Generated: generated,
+			Name: column, Type: dataType, SQLType: sqlType, Nullable: nullable, Generated: generated,
 		})
 	}
 	if err := rows.Err(); err != nil {

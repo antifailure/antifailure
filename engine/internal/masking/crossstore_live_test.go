@@ -148,23 +148,29 @@ func maskClickHouse(t *testing.T, ch *chServer, plan masking.Plan, key *masking.
 	d, err := masking.DialectFor("clickhouse")
 	require.NoError(t, err)
 	for _, tp := range plan.Tables {
-		read := d.SelectChunk(tp, "")
+		read := d.SelectChunk(tp, nil)
 		rows, rowsErr := ch.rows(context.Background(), read.SQL)
 		require.NoError(t, rowsErr, read.SQL)
 		stmt := tp.Compile()
+		width := tp.AddressWidth()
 		for _, row := range rows {
-			params := map[string]string{"p1": string(row[0])}
+			// The row's address is the first width parameters, one per key
+			// column, and the values follow it: the executor's contract.
+			params := map[string]string{}
+			for k := 0; k < width; k++ {
+				params[fmt.Sprintf("p%d", k+1)] = string(row[k])
+			}
 			for i, c := range tp.Columns {
 				transform, ok := masking.Lookup(c.Transform)
 				require.True(t, ok, c.Transform)
-				in := string(row[1+i])
+				in := string(row[width+i])
 				out, applyErr := transform.Apply(key, masking.Column{
 					Schema: tp.Table.Schema, Table: tp.Table.Name,
 					Name: c.Column.Name, Link: c.Link,
 				}, &in)
 				require.NoError(t, applyErr)
 				require.NotNil(t, out, "this fixture holds no nulls")
-				params[fmt.Sprintf("p%d", i+2)] = *out
+				params[fmt.Sprintf("p%d", width+i+1)] = *out
 			}
 			ch.exec(t, stmt.SQL, params)
 		}

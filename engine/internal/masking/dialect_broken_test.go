@@ -23,8 +23,8 @@ type brokenDialect struct {
 	quoteIdent  func(string) string
 	placeholder func(int) string
 	qualify     func(Table) string
-	rowKey      func(TablePlan) string
-	selectChunk func(TablePlan, string) Query
+	rowKey      func(TablePlan) []string
+	selectChunk func(TablePlan, []string) Query
 	update      func(TablePlan) Statement
 	addressable func(Table) string
 }
@@ -64,14 +64,14 @@ func (b brokenDialect) Qualify(t Table) string {
 	return b.Dialect.Qualify(t)
 }
 
-func (b brokenDialect) RowKey(tp TablePlan) string {
+func (b brokenDialect) RowKey(tp TablePlan) []string {
 	if b.rowKey != nil {
 		return b.rowKey(tp)
 	}
 	return b.Dialect.RowKey(tp)
 }
 
-func (b brokenDialect) SelectChunk(tp TablePlan, after string) Query {
+func (b brokenDialect) SelectChunk(tp TablePlan, after []string) Query {
 	if b.selectChunk != nil {
 		return b.selectChunk(tp, after)
 	}
@@ -100,9 +100,10 @@ func sound() Dialect { return postgresDialect{} }
 // The `also` column is exact rather than a note. The self test requires the set
 // of behaviours that went red to be precisely the named one plus these, so an
 // overlap is something a reader can see rather than something the table quietly
-// tolerates. Three defects red more than one behaviour because the row key
-// appears in every statement built from it, and a dialect that addresses the
-// wrong row writes the wrong statement everywhere.
+// tolerates. Each shortcut of addressing a row by its first key column alone is
+// its own control, on the read, the update, the bound and the order separately,
+// because each is a place the whole key has to reach and a dialect can drop it
+// in any one of them.
 var dialectControls = []struct {
 	flaw      string
 	behaviour string
@@ -162,18 +163,61 @@ var dialectControls = []struct {
 		}},
 	},
 	{
-		flaw:      "a row addressed by the second key column instead of the first",
-		behaviour: "RowKey_AddressesTheFirstKeyColumn",
-		also: []string{
-			// The row key is what every statement compares and orders on, so a
-			// dialect whose RowKey disagrees with its own statements disagrees
-			// with them everywhere at once.
-			"Update_SendsEveryValueAsAParameter",
-			"SelectChunk_ReadsTheKeyAndEveryPlannedColumn",
-			"SelectChunk_OrdersByTheRowKey",
-		},
-		dialect: brokenDialect{Dialect: sound(), rowKey: func(tp TablePlan) string {
-			return sound().QuoteIdent(tp.OrderBy[1])
+		flaw:      "a row's address read from its first key column alone",
+		behaviour: "RowKey_AddressesEveryKeyColumn",
+		dialect: brokenDialect{Dialect: sound(), rowKey: func(tp TablePlan) []string {
+			return sound().RowKey(tp)[:1]
+		}},
+	},
+	{
+		flaw:      "a row's address read with its key columns out of order",
+		behaviour: "RowKey_AddressesEveryKeyColumn",
+		dialect: brokenDialect{Dialect: sound(), rowKey: func(tp TablePlan) []string {
+			keys := sound().RowKey(tp)
+			return []string{keys[1], keys[0]}
+		}},
+	},
+	{
+		flaw:      "an update that addresses a row by its first key column alone",
+		behaviour: "Update_SendsEveryValueAsAParameter",
+		dialect: brokenDialect{Dialect: sound(), update: func(tp TablePlan) Statement {
+			first := tp
+			first.OrderBy = tp.OrderBy[:1]
+			return sound().Update(first)
+		}},
+	},
+	{
+		flaw:      "a read that selects only its first key column",
+		behaviour: "SelectChunk_ReadsTheKeyAndEveryPlannedColumn",
+		dialect: brokenDialect{Dialect: sound(), selectChunk: func(tp TablePlan, after []string) Query {
+			q := sound().SelectChunk(tp, after)
+			q.SQL = strings.Replace(q.SQL, sound().RowKey(tp)[1]+", ", "", 1)
+			return q
+		}},
+	},
+	{
+		flaw:      "a resumed read that bounds its first key column alone",
+		behaviour: "SelectChunk_ResumesAfterAKey",
+		dialect: brokenDialect{Dialect: sound(), selectChunk: func(tp TablePlan, after []string) Query {
+			q := sound().SelectChunk(tp, after)
+			if len(after) == len(tp.OrderBy) {
+				d := postgresDialect{}
+				whole := d.keyColumns(tp) + " > " + d.keyParameters(tp, 1)
+				first := quoteIdent(tp.OrderBy[0]) + " > " + d.Placeholder(1)
+				q.SQL = strings.Replace(q.SQL, whole, first, 1)
+				q.Args = q.Args[:1]
+			}
+			return q
+		}},
+	},
+	{
+		flaw:      "a read ordered by its first key column alone",
+		behaviour: "SelectChunk_OrdersByTheRowKey",
+		dialect: brokenDialect{Dialect: sound(), selectChunk: func(tp TablePlan, after []string) Query {
+			q := sound().SelectChunk(tp, after)
+			second := postgresDialect{}.Qualify(tp.Table) + "." + quoteIdent(tp.OrderBy[1])
+			q.SQL = strings.Replace(q.SQL, ", "+second+" LIMIT", " LIMIT", 1)
+			return q
 		}},
 	},
 	{
@@ -201,7 +245,7 @@ var dialectControls = []struct {
 		behaviour: "Update_SendsEveryValueAsAParameter",
 		dialect: brokenDialect{Dialect: sound(), update: func(tp TablePlan) Statement {
 			s := sound().Update(tp)
-			last := sound().Placeholder(len(tp.Columns) + 1)
+			last := sound().Placeholder(tp.AddressWidth() + len(tp.Columns))
 			s.SQL = strings.Replace(s.SQL, last, "'a literal'", 1)
 			return s
 		}},
@@ -209,7 +253,7 @@ var dialectControls = []struct {
 	{
 		flaw:      "a read with no chunk limit, which takes the whole table at once",
 		behaviour: "SelectChunk_ReadsTheKeyAndEveryPlannedColumn",
-		dialect: brokenDialect{Dialect: sound(), selectChunk: func(tp TablePlan, after string) Query {
+		dialect: brokenDialect{Dialect: sound(), selectChunk: func(tp TablePlan, after []string) Query {
 			q := sound().SelectChunk(tp, after)
 			q.SQL = strings.Replace(q.SQL, fmt.Sprintf(" LIMIT %d", tp.ChunkSize), "", 1)
 			return q
@@ -218,10 +262,10 @@ var dialectControls = []struct {
 	{
 		flaw:      "a resume point interpolated into the text instead of sent as an argument",
 		behaviour: "SelectChunk_ResumesAfterAKey",
-		dialect: brokenDialect{Dialect: sound(), selectChunk: func(tp TablePlan, after string) Query {
+		dialect: brokenDialect{Dialect: sound(), selectChunk: func(tp TablePlan, after []string) Query {
 			q := sound().SelectChunk(tp, after)
-			if after != "" {
-				q.SQL = strings.Replace(q.SQL, sound().Placeholder(1), "'"+after+"'", 1)
+			if len(after) > 0 {
+				q.SQL = strings.Replace(q.SQL, sound().Placeholder(1), "'"+after[0]+"'", 1)
 				q.Args = nil
 			}
 			return q
@@ -230,7 +274,7 @@ var dialectControls = []struct {
 	{
 		flaw:      "a read in no order, which can visit one row twice and another never",
 		behaviour: "SelectChunk_OrdersByTheRowKey",
-		dialect: brokenDialect{Dialect: sound(), selectChunk: func(tp TablePlan, after string) Query {
+		dialect: brokenDialect{Dialect: sound(), selectChunk: func(tp TablePlan, after []string) Query {
 			q := sound().SelectChunk(tp, after)
 			if at := strings.Index(q.SQL, " ORDER BY "); at >= 0 {
 				end := strings.Index(q.SQL[at+1:], " LIMIT ")

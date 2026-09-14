@@ -945,8 +945,7 @@ This directory is local state, and it is not committed.
 
 It holds the journal, which records every external resource an environment
 created before it was created, so that a crash at any point leaves something
-'af down' can clean up. It also holds environment records, masking checkpoints
-so an interrupted run resumes rather than restarts, and the event log.
+'af down' can clean up. It also holds environment records and the event log.
 
 It never holds a secret, and it never holds customer data.
 
