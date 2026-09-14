@@ -162,6 +162,50 @@ func TestUpLive_AnEnvironmentHoldsAMaskedPostgresAndAMaskedClickHouse(t *testing
 	})
 	require.NoError(t, err)
 
+	// What this test refreshes, it takes away.
+	//
+	// `af down` removes what an environment made, and a golden is not that: a
+	// refresh makes one on purpose so the next `af up` can branch it, and it
+	// outlives the environment by design. So Down alone left a Postgres image
+	// and a ClickHouse database behind on every run of this test. One laptop
+	// held fourteen of the images and eighteen of the databases by 2026-09-13,
+	// about 170 MB of image each, and nothing in CI could see it because the
+	// leak check there counts containers and networks.
+	//
+	// The versions are recorded as the refresh makes them, and this cleanup is
+	// registered before Down's so that it runs after it, when no branch holds
+	// them any more and DestroyGolden has nothing to refuse. Then the check
+	// that can say no: nothing made for this project is left that was not on
+	// the machine before the test began. What was already there is not this
+	// run's to judge, because an interrupted earlier run leaves its own.
+	identity, err := o.GoldenIdentity()
+	require.NoError(t, err)
+	eventsIdentity := identity + ":events"
+	events, err := clickhouse.New(clickhouse.Options{
+		ServerURL: chServer.URL, Name: "events", Clock: clock.New(),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = events.Close() })
+	postgresBefore := goldensMadeFor(t, ctx, o.Goldens, identity)
+	eventsBefore := goldensMadeFor(t, ctx, events.ListGoldens, eventsIdentity)
+	var madePostgres, madeEvents []string
+	t.Cleanup(func() {
+		c, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		for _, id := range madePostgres {
+			if err := o.DestroyGolden(c, id); err != nil {
+				t.Errorf("the Postgres golden %s this test refreshed could not be removed: %v", id, err)
+			}
+		}
+		for _, id := range madeEvents {
+			if err := events.DestroyGolden(c, id); err != nil {
+				t.Errorf("the ClickHouse golden %s this test refreshed could not be removed: %v", id, err)
+			}
+		}
+		requireNothingNewMadeFor(t, c, "Postgres", o.Goldens, identity, postgresBefore)
+		requireNothingNewMadeFor(t, c, "ClickHouse", events.ListGoldens, eventsIdentity, eventsBefore)
+	})
+
 	t.Cleanup(func() {
 		down, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
@@ -179,6 +223,19 @@ func TestUpLive_AnEnvironmentHoldsAMaskedPostgresAndAMaskedClickHouse(t *testing
 	// to do for them: a golden is a copy of production and reading production
 	// is not something an ordinary up does behind somebody's back.
 	golden, err := o.RefreshGolden(ctx)
+	// Recorded before the error check. A refresh that fails partway can already
+	// have committed the Postgres image, and one that fails in the second store
+	// has committed the first.
+	if golden != nil {
+		if golden.Version != "" {
+			madePostgres = append(madePostgres, golden.Version)
+		}
+		for _, d := range golden.Datastores {
+			if d.Version != "" {
+				madeEvents = append(madeEvents, d.Version)
+			}
+		}
+	}
 	require.NoError(t, err)
 	require.NotEmpty(t, golden.Version, "the primary database has no golden")
 	require.Len(t, golden.Datastores, 1,
@@ -386,6 +443,53 @@ CREATE TABLE events (
   ('01890fa1-9e40-7d3c-8b9a-2f5c6d7e8a03', 'click', 'alan@turing-labs.net',
    '{"plan":"team"}', '2026-09-07 10:02:00')`)
 	return source, server
+}
+
+// goldensMadeFor lists the versions a provider holds for one project identity.
+//
+// By identity rather than all of them, because the image store and the
+// ClickHouse server are shared with every other suite on the machine, and a
+// golden another package is using at this moment is not this test's business.
+func goldensMadeFor(
+	t *testing.T, ctx context.Context,
+	list func(context.Context) ([]provider.GoldenVersion, error), identity string,
+) map[string]bool {
+	t.Helper()
+	all, err := list(ctx)
+	require.NoError(t, err)
+	out := map[string]bool{}
+	for _, g := range all {
+		if g.Provenance == identity {
+			out[g.ID] = true
+		}
+	}
+	return out
+}
+
+// requireNothingNewMadeFor fails when a provider holds a version for this
+// identity that it did not hold before the test began.
+//
+// It runs inside a cleanup, so it reports with Errorf rather than stopping: the
+// other store's check still has to run, and a listing that cannot be read is
+// said as unknown rather than taken as nothing left behind.
+func requireNothingNewMadeFor(
+	t *testing.T, ctx context.Context, store string,
+	list func(context.Context) ([]provider.GoldenVersion, error),
+	identity string, before map[string]bool,
+) {
+	t.Helper()
+	all, err := list(ctx)
+	if err != nil {
+		t.Errorf("the %s goldens could not be listed after the test, so whether it left one "+
+			"behind is unknown: %v", store, err)
+		return
+	}
+	for _, g := range all {
+		if g.Provenance == identity && !before[g.ID] {
+			t.Errorf("the test left the %s golden %s behind. A golden outlives af down by "+
+				"design, so a test that makes one has to remove it", store, g.ID)
+		}
+	}
 }
 
 // chDatabaseURL points a server URL at one database.
