@@ -28,10 +28,10 @@
     "@hono/trpc-server": "^0.4.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@trpc/server": "^11.18.0",
-    "hono": "^4.13.5",
+    "hono": "^4.13.7",
     "postgres": "^3.4.9",
-    "posthog-node": "^5.51.6",
-    "zod": "^4.0.0"
+    "posthog-node": "^5.52.1",
+    "zod": "^4.6.2"
   },
   "devDependencies": {
     "@types/node": "^24.13.4",
