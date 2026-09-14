@@ -62,6 +62,16 @@ EXPOSE 3128
 ENTRYPOINT ["/af-proxy"]
 `
 
+// BinaryPath is where the sidecar's binary sits inside the image.
+//
+// Exported because the engine execs it: the emulator readiness probe runs this
+// same binary as a second process inside the running sidecar, and a scratch
+// image has no shell to find it with, so the path has to be known rather than
+// searched for. TestTheEntrypointIsTheBinaryPath holds the two together, since
+// a rename in the Dockerfile above would otherwise turn every probe into "no
+// such file or directory" and read as an emulator that never came up.
+const BinaryPath = "/af-proxy"
+
 // epoch is the modification time every entry carries, so that the same sources
 // produce the same archive and the same tag on every machine.
 var epoch = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)

@@ -238,7 +238,10 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 		ca = &envcert.Authority{CertPEM: spec.CACertPEM, KeyPEM: spec.CAKeyPEM}
 	}
 	// Before the sidecar, so that the sidecar reporting ready means every
-	// address an outbound call can be answered from already resolves.
+	// address an outbound call can be answered from already resolves. Resolves,
+	// not answers: this returns when the containers are started, and waiting
+	// for the servers inside them to accept a connection is a separate step
+	// below, because the thing that can dial them is the sidecar.
 	if err := r.startEmulators(ctx, spec.EnvID, spec.Emulators, nets, journal, progress); err != nil {
 		return env, err
 	}
@@ -249,6 +252,18 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 		return env, err
 	}
 	env.ProxyReady = true
+	// After the sidecar, because the sidecar is the only container on the inner
+	// network this process can reach, so it is what dials. Before any service,
+	// because the service is who the 502 was served to: an application that
+	// starts while the emulator's port is still closed gets one from the
+	// sidecar on its first call, and it is indistinguishable from the refusal
+	// for an emulator this environment is not running at all.
+	if err := r.waitEmulatorsReady(ctx, spec.EnvID, spec.Emulators, progress); err != nil {
+		// The environment is gone if the teardown worked, so what comes back
+		// carries the id and nothing else. Reporting the network and a ready
+		// sidecar here would name two things that no longer exist.
+		return provider.Env{EnvID: spec.EnvID}, r.tearDownAfterEmulator(ctx, spec.EnvID, err)
+	}
 	// Reserved before anything starts, because a service has to be told its
 	// own public address before it runs, and the ingress that publishes it is
 	// created after the service it forwards to.

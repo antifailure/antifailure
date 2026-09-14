@@ -65,6 +65,7 @@ var exempt = map[string]string{
 	"engine/cmd/af-proxy/internal.go":     "the sidecar cannot import engine/pkg",
 	"engine/cmd/af-proxy/network_gate.go": "trusted pod startup probes must attempt direct sockets to detect a policy that is not enforced; fixed public endpoints carry no customer data",
 	"engine/cmd/af-proxy/forward.go":      "the sidecar cannot import engine/pkg, and the ingress forwarder dials only the one service address inside the environment it was started with",
+	"engine/cmd/af-proxy/dial.go":         "the sidecar cannot import engine/pkg, and the readiness probe dials one emulator address on the environment's inner network, which Docker created with no route out",
 
 	// The application's own image. What a docker build fetches is a base image
 	// and whatever the repository's package manager resolves, all of it inside

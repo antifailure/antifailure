@@ -210,3 +210,51 @@ func engineRoot(t *testing.T) string {
 	// From internal/proxyimage up to engine.
 	return filepath.Dir(filepath.Dir(wd))
 }
+
+// TestBinaryPath_IsWhereTheImagePutsTheBinaryAndWhatItRuns holds the exported
+// path to the Dockerfile that creates it.
+//
+// The engine execs this path inside a RUNNING sidecar to ask whether an
+// emulator is listening yet. The image is scratch, so there is no shell to
+// search a PATH: the path is either exactly right or the probe fails with "no
+// such file or directory" on every attempt, and that failure arrives as an
+// emulator which never became ready. A rename in the COPY line above is one
+// word, it compiles, every other test here passes, and the only symptom is
+// AF-RUN-049 on a perfectly healthy emulator three minutes later.
+//
+// Both lines, because they can disagree in two different ways: COPY decides
+// where the file IS and ENTRYPOINT decides what the container RUNS, and a probe
+// needs the first while the sidecar needs the second.
+func TestBinaryPath_IsWhereTheImagePutsTheBinaryAndWhatItRuns(t *testing.T) {
+	t.Parallel()
+	tr := tar.NewReader(proxyimage.BuildContext())
+	for {
+		h, err := tr.Next()
+		require.NoError(t, err, "the archive carries no Dockerfile")
+		if h.Name != "Dockerfile" {
+			continue
+		}
+		body, err := io.ReadAll(tr)
+		require.NoError(t, err)
+		var copied, entrypoint string
+		for _, line := range strings.Split(string(body), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) == 0 {
+				continue
+			}
+			switch fields[0] {
+			case "COPY":
+				copied = fields[len(fields)-1]
+			case "ENTRYPOINT":
+				entrypoint = strings.Trim(strings.Join(fields[1:], " "), `[]"`)
+			}
+		}
+		require.Equal(t, proxyimage.BinaryPath, copied,
+			"the Dockerfile puts the binary somewhere else, so the readiness probe the "+
+				"engine execs at %s runs nothing", proxyimage.BinaryPath)
+		require.Equal(t, proxyimage.BinaryPath, entrypoint,
+			"the image runs something other than %s, so the constant names a file that is "+
+				"present and is not the sidecar", proxyimage.BinaryPath)
+		return
+	}
+}

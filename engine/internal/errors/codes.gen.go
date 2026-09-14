@@ -425,6 +425,10 @@ const (
 	AFRUN047 Code = "AF-RUN-047"
 	// The egress sidecar image could not be obtained: {detail}
 	AFRUN048 Code = "AF-RUN-048"
+	// The {emulator} emulator started but never accepted a connection at
+	// {address} within {timeout}, so the environment was torn down:
+	// {detail}
+	AFRUN049 Code = "AF-RUN-049"
 
 	// Scheduling
 	// No runtime satisfies the placement requirement {requirement}.
@@ -1920,6 +1924,15 @@ var catalog = map[Code]Entry{
 		Area:      "RUN",
 		Message:   "The egress sidecar image could not be obtained: {detail}",
 		NextStep:  "A release publishes this image, so an official build fetches it in seconds. Set AF_PROXY_IMAGE_TIMEOUT higher if this machine is slow, or name an image you host in AF_PROXY_IMAGE so nothing is compiled here.",
+		Docs:      "guides/local-runtime",
+		Retryable: true,
+		ExitCode:  ExitFailure,
+	},
+	AFRUN049: {
+		Code:      AFRUN049,
+		Area:      "RUN",
+		Message:   "The {emulator} emulator started but never accepted a connection at {address} within {timeout}, so the environment was torn down: {detail}",
+		NextStep:  "Nothing is listening inside that container yet. Run the image by hand and watch how long it takes to bind {address}, then raise AF_EMULATOR_READY_TIMEOUT if it needs longer than the default. A container that exits instead of binding is a wrong command or a missing companion.",
 		Docs:      "guides/local-runtime",
 		Retryable: true,
 		ExitCode:  ExitFailure,

@@ -1477,6 +1477,17 @@
       "planned": false
     },
     {
+      "code": "AF-RUN-049",
+      "area": "RUN",
+      "areaName": "Runtime",
+      "message": "The {emulator} emulator started but never accepted a connection at {address} within {timeout}, so the environment was torn down: {detail}",
+      "resolution": "Nothing is listening inside that container yet. Run the image by hand and watch how long it takes to bind {address}, then raise AF_EMULATOR_READY_TIMEOUT if it needs longer than the default. A container that exits instead of binding is a wrong command or a missing companion.",
+      "docs": "https://antifailure.dev/docs/guides/local-runtime",
+      "retryable": true,
+      "exitCode": 1,
+      "planned": false
+    },
+    {
       "code": "AF-SCH-001",
       "area": "SCH",
       "areaName": "Scheduling",
