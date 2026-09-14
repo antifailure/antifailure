@@ -203,9 +203,11 @@ func (o *Orchestrator) observeDatabase(
 
 // observeAttestation reads back the golden's signed statement.
 //
-// The signature is checked here rather than trusted, which is the only reason
-// the attestation is worth reporting at all: a claim the producing process can
-// also forge says nothing to the reviewer reading it.
+// The signature is checked here rather than trusted, which is what makes the
+// attestation worth reporting at all: this process did not sign it, and a
+// document that no longer matches its own signature was edited after it was
+// written. It says nothing about WHO signed it, because verify.Sign generates a
+// key per signature and puts the public half inside the document.
 func (o *Orchestrator) observeAttestation(
 	ctx context.Context, s *session, version string, obs *fidelity.Observation,
 ) {

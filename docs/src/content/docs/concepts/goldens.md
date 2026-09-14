@@ -211,9 +211,9 @@ verification scan runs again, on the machine that pulled it, against the
 database that actually arrived. Skipping that would make the store a way to get
 an unverified database branched, which is the one thing the product refuses.
 
-Nor is it trusted to be yours. The attestation carries the project the golden
-was made for, signed along with everything else, and a version made for another
-project is refused before any of it is restored:
+Nor is it assumed to be yours. The attestation carries the project the golden
+was made for, and a version made for another project is refused before any of
+it is restored:
 
 ```
 AF-DB-015 The published golden gv_20260901033741_74234e98 in the local store at
@@ -225,6 +225,17 @@ AF-DB-015 The published golden gv_20260901033741_74234e98 in the local store at
 That matters most for `af golden pull` with no version named, which takes the
 newest complete object in the store. In a bucket several projects publish to,
 the newest object is not necessarily yours.
+
+That check is against an accidental collision, not against an attacker. The
+pull reads the project identity out of the attestation and compares it. It does
+not check the attestation's signature, and checking it would not settle the
+question anyway: a signature proves the document was not changed after it was
+signed, not who signed it, because the verifying key is generated for each
+signature and travels inside the document. What protects the data in a pulled
+golden is the scan above, which runs again on whatever actually arrived. Who
+may publish at all is decided by the store rather than by anything here, so the
+store's credentials and its bucket policy are the trust boundary.
+[Golden stores](/docs/providers/stores) says that plainly.
 
 The local copy gets a new version identifier, because an identifier carries when
 the version was made and this copy was made now. `af golden pull` prints both.

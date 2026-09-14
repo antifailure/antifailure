@@ -553,9 +553,11 @@ func quoteIdent(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`)
 // Attestation is a signed statement that a golden was verified.
 //
 // Signed so that the claim can be checked by something that did not produce
-// it: a CI job, a reviewer, a control plane. An unsigned report is a claim the
-// thing making it can also forge, which is exactly the property that matters
-// least when it comes from the same process that did the masking.
+// it: a CI job, a reviewer, a control plane. What Verify proves is that the
+// document was not changed after it was signed, and not who signed it: Sign
+// generates a key per signature and puts the public half inside the document,
+// so anyone who can write an attestation can sign a new one. This is tamper
+// evidence on a document that travelled, not an identity.
 type Attestation struct {
 	// Report is what was found.
 	Report Report `json:"report"`
