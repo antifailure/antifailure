@@ -206,6 +206,11 @@ export function registerEnterprise(options: RegisterOptions): Registered {
       clock: options.clock,
       baseUrl: options.baseUrl,
       defaultRole: 'member',
+      // The licence's seat limit, which this path never had. ssoExtension has
+      // been handed it since the seat limit was wired, and provisioning through
+      // a directory had no limit at all, so an organisation on a twenty seat
+      // licence could sync two hundred members and nothing would refuse one.
+      seats: async () => seatsFrom(gate.claims),
       log: options.log,
     }),
     'scim',

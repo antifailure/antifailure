@@ -260,6 +260,7 @@ export async function createUser(
   input: UserInput,
   now: Date,
   defaultRole: string,
+  seats: number | null,
 ): Promise<UserRecord> {
   const userName = input.userName.trim().toLowerCase()
   if (!userName.includes('@')) {
@@ -294,8 +295,16 @@ export async function createUser(
 
     const resource = toUser(created[0]!)
 
-    if (active) await grantMembership(db, caller.orgId, userId, defaultRole, now)
-    else await revokeAccess(db, caller.orgId, userId, now)
+    // The seat check, before the membership and not after it, so a refusal
+    // leaves the directory's view and ours agreeing that this person was not
+    // added. An inactive resource takes no seat: it is a profile the directory
+    // owns and not somebody who can sign in.
+    if (active) {
+      await refuseWithoutASeat(db, caller.orgId, seats, userName)
+      await grantMembership(db, caller.orgId, userId, defaultRole, now)
+    } else {
+      await revokeAccess(db, caller.orgId, userId, now)
+    }
 
     // The ordering this exists for. A group that named this person before they
     // existed now has a member to point at.
@@ -325,6 +334,7 @@ export async function updateUser(
   update: UserUpdate,
   now: Date,
   defaultRole: string,
+  seats: number | null,
 ): Promise<UserRecord> {
   if (!isUuid(id)) throw new ScimError(404, 'No such user.')
 
@@ -367,6 +377,11 @@ export async function updateUser(
       // match no rows and report success. Deactivation is the mirror image and
       // is handled below, after the profile is written.
       if (active && !(before.active as boolean)) {
+        // Reactivation adds a member, so it is an addition the seat limit is
+        // about. A directory that deactivates somebody and reactivates them
+        // after the seats filled up must be refused here, or the limit is one
+        // PATCH away from meaning nothing.
+        await refuseWithoutASeat(db, caller.orgId, seats, (before.user_name as string | null) ?? id)
         await grantMembership(db, caller.orgId, localUserId, defaultRole, now)
       }
       // COALESCE rather than an overwrite: a PATCH that says nothing about the
@@ -512,6 +527,48 @@ async function upsertLocalUser(
     INSERT INTO users (id, email, name, identity_source, created_at, updated_at)
     VALUES (${id}, ${userName}, ${name || null}, 'scim', ${now.toISOString()}, ${now.toISOString()})`)
   return id
+}
+
+/**
+ * Refuses an addition when the licence's seats are all in use.
+ *
+ * WHY THIS EXISTS, and it is the same gap ee/web/sso/src/provision.ts closed for
+ * single sign-on. That package has taken a seat limit since AF-EE-004 was
+ * written, and the enterprise entry point hands it the licence's own number.
+ * scimExtension was never given one, and "seat" appeared nowhere in this package
+ * at all, so a directory sync could add members without bound on a licence sold
+ * with a seat count. A limit one of two provisioning paths enforces is not a
+ * limit, it is a limit with a documented way around it.
+ *
+ * The direction is provision.ts's, deliberately and not by accident: the refusal
+ * is on the ADDITION, always. A product that makes room by evicting somebody has
+ * turned a billing question into an outage for a person who did nothing, and the
+ * person it evicts is whoever the query happened to sort last.
+ *
+ * Null seats means unlimited, which is what a licence with no seat count means
+ * and what the Go side already reads zero seats as.
+ */
+async function refuseWithoutASeat(
+  db: Db,
+  orgId: string,
+  seats: number | null,
+  who: string,
+): Promise<void> {
+  if (seats === null || seats === undefined) return
+  const used = await db.execute<{ n: string }>(
+    sql`SELECT count(*) AS n FROM members WHERE org_id = ${orgId}`,
+  )
+  const inUse = Number(used[0]?.n ?? 0)
+  if (inUse < seats) return
+  // 403 rather than 409: a provider retries a conflict and reconciles it, and
+  // there is nothing here to reconcile until somebody buys a seat or removes a
+  // member, so a retry loop would be the only thing this achieved.
+  throw new ScimError(
+    403,
+    `AF-EE-004: the license covers ${seats} seats and they are all in use, so ${who} was not ` +
+      `added. Remove an inactive member, or ask for more seats at https://antifailure.dev/contact. ` +
+      `No existing member was removed.`,
+  )
 }
 
 async function grantMembership(
