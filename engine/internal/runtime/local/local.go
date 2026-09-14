@@ -756,7 +756,21 @@ func (r *Runtime) Logs(ctx context.Context, envID, service string, tail int) ([]
 
 	var out []LogLine
 	for _, c := range containers.Items {
-		if c.Labels[dockerutil.LabelKind] != dockerutil.KindService {
+		kind := c.Labels[dockerutil.LabelKind]
+		// The sidecar is included only when it is asked for BY NAME. It is not
+		// a service, so a request for all of them stays the application's log
+		// and nothing else, which is what anybody reading `af logs` wants.
+		//
+		// Asked for by name it is the only place the reason for a refusal or a
+		// 502 is written down, and until now it answered every such caller with
+		// zero lines and no error. There was already one caller: the emulate
+		// end to end test ends its failure message with the sidecar's log, and
+		// on a real 502 it printed the word "sidecar:" followed by nothing, on
+		// the one failure it existed to explain. A diagnostic that cannot fail
+		// and cannot answer is worse than none, because its silence reads as
+		// the sidecar having had nothing to say.
+		sidecarByName := kind == dockerutil.KindSidecar && service == ProxyAlias
+		if kind != dockerutil.KindService && !sidecarByName {
 			continue
 		}
 		name := c.Labels[dockerutil.LabelService]
