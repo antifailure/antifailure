@@ -23,7 +23,7 @@ import {
   Thresholds,
 } from "@/components/load/results";
 import { Command, LoadError, PartialNotice, RunSkeleton } from "@/components/load/states";
-import { StaleNotice, useInterval, useLive } from "@/components/load/polling";
+import { POLL_MS, StaleNotice, useInterval, useLive } from "@/components/load/polling";
 import {
   COMMAND_FACTS,
   KIND_FACTS,
@@ -40,15 +40,6 @@ import {
   type RunDetail,
 } from "@/lib/load";
 
-/**
- * How often a run still in flight is asked about again.
- *
- * Six seconds rather than one. A run is minutes long, so a second would be
- * sixty requests a minute per open tab to learn something that moves on the
- * order of tens of seconds, and every one of those costs the same tenant's
- * database the run is already competing with.
- */
-const POLL_MS = 6000;
 
 /** Whether this kind of run measures traffic, which decides whether a latency
  *  ladder and an error breakdown are tables that apply or tables of dashes. */

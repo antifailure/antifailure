@@ -119,6 +119,21 @@ export function useLive<T>(fetcher: () => Promise<T>, deps: unknown[] = []): Liv
  * backgrounded tab does not need the answer and browsers already throttle the
  * timer, so this only has to avoid making the request.
  */
+/**
+ * How often a run still in flight is asked about again.
+ *
+ * Six seconds rather than one. A run is minutes long, so a second would be
+ * sixty requests a minute per open tab to learn something that moves on the
+ * order of tens of seconds, and every one of those costs the same tenant's
+ * database the run is already competing with.
+ *
+ * It lives here, beside `useInterval`, rather than in the one screen that first
+ * needed it. The tenant runs page polls on the same cadence for the same
+ * reason, and two screens of one product disagreeing about how often "live"
+ * means is a difference a reader can see and nobody can explain.
+ */
+export const POLL_MS = 6000;
+
 export function useInterval(active: boolean, ms: number, tick: () => void) {
   const fn = useRef(tick);
   fn.current = tick;
