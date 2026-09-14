@@ -1067,11 +1067,13 @@ export const securityRouter = router({
  */
 const ERASURE_STATEMENT = {
   perSubject:
-    'Not implemented. No code path in this product removes a row from the accounts table, so ' +
-    'there is no operation to run and nothing here should be read as one. It would need a ' +
-    'deletion that walks the locations listed above in foreign key order, a decision about ' +
-    'every reference whose on-delete is "set null" rather than "cascade", and an answer for ' +
-    'the audit chains, which cannot be rewritten without breaking their hashes.',
+    'Not offered, by architecture. No code path in this product removes a row from the ' +
+    'accounts table, and none is meant to: the audit chains hash each entry into the next, ' +
+    'so a deletion that reached them could not rewrite them without breaking the tamper ' +
+    'evidence the compliance record itself depends on. The operation this product runs is ' +
+    'organization erasure, described below, which cascades every table scoped to the ' +
+    'organization. This is a statement of what the code does and why, not a policy and not a ' +
+    'promise to add per person deletion.',
   perOrganization:
     'Implemented and running. An organization can be erased through the deletion pipeline: it ' +
     'stops work, cancels the subscription, waits out the paid period, revokes every credential, ' +

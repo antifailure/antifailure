@@ -49,8 +49,9 @@ import {
  * THREE QUESTIONS, IN THE ORDER THEY ARE ASKED. What do you hold about this
  * person, where is it, and how do I make it go away. The first two are
  * answerable today and this page answers them precisely. The third is answered
- * honestly, which means saying that organization erasure works, per person
- * erasure does not exist, and naming what would be needed to build it.
+ * honestly, which means saying that organization erasure works, per person row
+ * deletion is not offered, and why: the append-only audit chains cannot be
+ * rewritten to remove a subject without breaking their tamper evidence.
  *
  * WHY THERE IS NO COMPLIANCE DASHBOARD HERE. There is no retention policy
  * table, no data residency table, no consent record and no subject request
@@ -724,8 +725,8 @@ function NotWired() {
           <dl className="grid gap-4 px-4 py-4">
             <Statement
               term="Erasing one person"
-              tone="fail"
-              state="Not implemented"
+              tone="neutral"
+              state="Not offered by architecture"
               body={data.erasure.perSubject}
             />
             <Statement

@@ -93,12 +93,13 @@ export interface ProxyResult {
  * Forwards one request, with the budget checked on the way in and the spend
  * recorded on the way out.
  *
- * Streaming is refused rather than passed through. Not an oversight: neither
- * caller in this repository streams, and a pass-through that could not read the
- * usage out of the stream would record no spend, which is a request that
- * costs money and charges nothing. Refusing says so; supporting it properly
- * means parsing the provider's event stream, which is worth doing when
- * something actually streams.
+ * Streaming is refused rather than passed through, by design. A budgeted key is
+ * non-streaming: the budget is a per-token spend limit, and a streamed response
+ * carries no total token count until it has finished, so there is no figure to
+ * meter the spend against while the tokens are on the wire. A pass-through that
+ * could not read the usage out of the stream would record no spend, which is a
+ * request that costs money and charges nothing. Refusing is the fail-closed
+ * answer, and it is the correct one.
  */
 export async function forward(
   options: ProxyOptions,
@@ -119,9 +120,10 @@ export async function forward(
   if (!model) throw new ProxyError('The request body names no model.', 400)
   if (parsed.stream === true) {
     throw new ProxyError(
-      'Streaming is not supported through a budgeted key yet. A streamed response ' +
-        'whose usage this cannot read would cost money and record no spend, so it is ' +
-        'refused rather than charged as free. Send the request without "stream": true.',
+      'A budgeted key is non-streaming by design. A streamed response carries no ' +
+        'total token count until it finishes, so its spend cannot be metered against ' +
+        'the budget; it is refused rather than charged as free. Send the request ' +
+        'without "stream": true.',
       400,
     )
   }

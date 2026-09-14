@@ -320,7 +320,7 @@ describe('security and governance', { skip: hasDb ? false : 'no Postgres at AF_T
       // put a person in the operator log.
       const { caller } = await callerFor('support')
       const answer = await caller.admin.security.erasure()
-      assert.match(answer.erasure.perSubject, /Not implemented/)
+      assert.match(answer.erasure.perSubject, /Not offered, by architecture/)
       assert.match(answer.erasure.perOrganization, /Implemented/)
       assert.ok(answer.retained.some((r) => r.table === 'audit_entries'))
       assert.equal(typeof answer.countCeiling, 'number')
@@ -491,7 +491,7 @@ describe('security and governance', { skip: hasDb ? false : 'no Postgres at AF_T
       }
       assert.equal(parsed.subject.githubLogin, subject.login)
       assert.ok(parsed.locations.length > 0, 'the exported map located nothing at all')
-      assert.match(parsed.erasure.perSubject, /Not implemented/)
+      assert.match(parsed.erasure.perSubject, /Not offered, by architecture/)
       assert.ok(
         parsed.retainedByDesign.some((r) => r.table === 'admin_audit_entries'),
         'the document does not say the operator chain keeps the label',

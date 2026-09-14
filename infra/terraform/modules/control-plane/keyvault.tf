@@ -465,12 +465,21 @@ data "azurerm_key_vault_secret" "resend_api_key" {
 # which might be months later, and in between the vault says one thing and the
 # configuration says another.
 #
-# WHAT WOULD MAKE IT REAL, which is the trigger to revisit rather than a date
-# picked to look responsible. Key Vault raises SecretNearExpiry and
-# SecretExpired through Event Grid, and modules/alerting already owns this
-# stack's action groups. An expiry wired to those is a rotation reminder for
-# github-client-secret and worth having. An expiry with nothing watching it is a
-# date in a portal.
+# AND NO ALERT IS WIRED FOR ONE. That is the decision, not an omission. An
+# expiry date would mean something only if something watched it, and the only
+# watcher Azure offers for a secret is Event Grid: Key Vault raises
+# SecretNearExpiry and SecretExpired as Event Grid events, never as the Azure
+# Monitor metrics that modules/alerting is built on. Every alert in that
+# module is an azurerm_monitor_metric_alert firing the action group, and an
+# Event Grid event reaches neither a metric nor an action group without a new
+# subsystem in front of it: a system topic, an event subscription, and a bridge
+# such as a Function or Logic App, because an event subscription cannot target a
+# Monitor action group directly. That is a larger change than a secret's expiry
+# field warrants, and it would still leave both harms above, because the alert
+# needs a date to fire on and both ways of writing that date are worse than
+# none. Rotation of github-client-secret stays an operator procedure in
+# self-hosting/control-plane.md, on the operator's own calendar, not a date in
+# this file with nothing behind it.
 #tfsec:ignore:azure-keyvault-ensure-secret-expiry:exp:2027-03-03
 resource "azurerm_key_vault_secret" "seeded" {
   for_each     = local.seeded_secrets
