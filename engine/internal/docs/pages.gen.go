@@ -15892,7 +15892,7 @@ you are given can be connected to. None of those is true.
 title: Xata
 description: Copy on write branches of a masked, verified golden on Xata, and what has not been measured about them.
 sidebar:
-  order: 16
+  order: 17
 ---
 
 Xata is a Postgres platform whose branches are copy on write snapshots at the
