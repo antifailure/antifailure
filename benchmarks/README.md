@@ -36,7 +36,7 @@ that is real for nothing.
 | `aurora` | unproven | not measured yet, L2.2 | | | |
 | `rds` | unproven | not measured yet, L2.3 | | | |
 | `cloudsql` | unproven | not measured yet, L2.4 | | | |
-| `azure-pg` | unproven | not measured yet, L2.5 | | | |
+| `azurepg` | unproven | 420.3 s fixed cost at one row, not a rate | 518.3 s at one row, including the first backup wait | not measured | `2026-09-13-azurepg-live` |
 | `alloydb` | unproven | not measured yet, L2.6 | | | |
 | `xata` | unproven | not measured yet, no account | | | |
 

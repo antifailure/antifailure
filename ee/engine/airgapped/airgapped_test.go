@@ -4,10 +4,12 @@ package airgapped_test
 
 import (
 	"context"
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/ee/engine/airgapped"
+	"github.com/antifailure/antifailure/ee/engine/db/managed"
 	"github.com/antifailure/antifailure/ee/engine/feature"
 	"github.com/antifailure/antifailure/ee/engine/license"
 	"github.com/antifailure/antifailure/engine/pkg/airgap"
@@ -307,19 +310,109 @@ func TestTheLicenceItselfCannotPhoneHome(t *testing.T) {
 		len(found), found)
 }
 
+// builtinDatabaseProviders reads the names the engine's own switch answers to
+// from the DBProvider constants in engine/pkg/schema, which is where the
+// engine takes them from. Parsed rather than written out, so a built in
+// provider added to the engine is classified here without anybody editing
+// this file.
+func builtinDatabaseProviders(t *testing.T) []string {
+	t.Helper()
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, filepath.Join("..", "..", "..", "engine", "pkg", "schema", "manifest.go"), nil, 0)
+	require.NoError(t, err)
+	var names []string
+	ast.Inspect(file, func(n ast.Node) bool {
+		spec, ok := n.(*ast.ValueSpec)
+		if !ok {
+			return true
+		}
+		typ, ok := spec.Type.(*ast.Ident)
+		if !ok || typ.Name != "DBProvider" {
+			return true
+		}
+		for _, v := range spec.Values {
+			if lit, ok := v.(*ast.BasicLit); ok && lit.Kind == token.STRING {
+				name, err := strconv.Unquote(lit.Value)
+				require.NoError(t, err)
+				names = append(names, name)
+			}
+		}
+		return true
+	})
+	return names
+}
+
+// registeredDatabaseProviders is what the enterprise binary registers, read by
+// calling the function main.go calls.
+func registeredDatabaseProviders() []string {
+	reg := extension.NewRegistry()
+	managed.Register(reg)
+	return reg.DatabaseProviderNames()
+}
+
+// The largest outbound path the process guard cannot see. A Postgres
+// connection goes wherever its URL points, and a managed branch's URL points at
+// somebody else's cloud, through a driver no dialer here sits on. So in a sealed
+// installation the hook has to refuse every provider whose control plane is not
+// the operator's own.
+//
+// This ENUMERATES rather than naming providers, because the list it replaced
+// named aurora and cloudsql and not azurepg, and nothing noticed. Both sides are
+// asserted. Every provider that arrives through the registry is a managed cloud
+// provider, which is how main.go and cloudgate define cloud, and each one must be
+// refused by name. Every built in provider must land on the side this test
+// states, and a built in provider on neither side fails until somebody decides.
 func TestTheHookRefusesADatabaseProviderWhoseControlPlaneIsSomebodyElses(t *testing.T) {
 	clean(t)
 	airgap.Seal("a test")
 
-	// The largest outbound path the process guard cannot see. A Postgres
-	// connection goes wherever its URL points, and a Neon branch's URL points
-	// at neon.tech, through a driver no dialer here sits on.
-	for _, provider := range []string{"neon", "supabase", "Neon", "aurora", "cloudsql"} {
+	builtin := builtinDatabaseProviders(t)
+	registered := registeredDatabaseProviders()
+
+	// The enumeration is a control before it is a source of cases: a parse
+	// that found nothing, or a registration that registered nothing, would
+	// make every loop below pass by iterating over an empty list.
+	require.Subsetf(t, builtin, []string{"docker", "neon", "supabase", "dblab", "pgurl"},
+		"the schema constants read as %v, which is missing providers the engine is known to "+
+			"build, so the enumeration is broken and this test would check less than it says", builtin)
+	require.Subsetf(t, registered, []string{"aurora", "cloudsql", "azurepg"},
+		"managed.Register registered %v, which is missing providers this edition is known to "+
+			"ship, so the enumeration is broken and this test would check less than it says", registered)
+
+	operatorHosted := map[string]bool{"docker": true, "dblab": true, "pgurl": true}
+	somebodyElses := map[string]bool{"neon": true, "supabase": true, "xata": true}
+
+	refused := func(provider string) {
 		err := airgapped.Hook{}.Check(licensed(license.FeatureAirGapped),
 			extension.EnvironmentRequest{Provider: provider})
-		require.Errorf(t, err, "%s reaches a control plane outside the network", provider)
+		require.Errorf(t, err, "%s reaches a control plane outside the network and a sealed "+
+			"installation accepted it", provider)
 		require.Containsf(t, err.Error(), "air gapped", "%s", provider)
+		require.Containsf(t, err.Error(), strings.ToLower(provider), "the refusal for %s does not name it", provider)
 	}
+
+	for _, provider := range registered {
+		require.Falsef(t, operatorHosted[provider] || somebodyElses[provider],
+			"%s is registered through the extension registry and is also a built in name", provider)
+		refused(provider)
+	}
+	for _, provider := range builtin {
+		switch {
+		case operatorHosted[provider]:
+			require.NoErrorf(t, airgapped.Hook{}.Check(licensed(license.FeatureAirGapped),
+				extension.EnvironmentRequest{Provider: provider}),
+				"%s is the operator's own and refusing it would make the mode unusable", provider)
+		case somebodyElses[provider]:
+			refused(provider)
+		default:
+			t.Errorf("%s is a built in database provider this test does not classify. Decide "+
+				"whether its control plane is the operator's own, and put it on that side here "+
+				"and in localProviders", provider)
+		}
+	}
+
+	// Case is not a way around it.
+	refused("Neon")
 }
 
 func TestTheHookPermitsADatabaseTheOperatorHosts(t *testing.T) {

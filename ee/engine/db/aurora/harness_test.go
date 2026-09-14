@@ -149,8 +149,36 @@ func options(t *testing.T, server *fakerds.Server) aurora.Options {
 
 func newProvider(t *testing.T, server *fakerds.Server) *aurora.Provider {
 	t.Helper()
-	p, err := aurora.New(context.Background(), options(t, server))
+	p, err := scopedNew(context.Background(), options(t, server))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = p.Close() })
 	return p
+}
+
+// A fake cluster owns only roles prefixed with its selected administrator.
+// All other cluster roles live on the same physical fixture and are excluded.
+func scopedNew(ctx context.Context, opts aurora.Options) (*aurora.Provider, error) {
+	p, err := aurora.New(ctx, opts)
+	if err == nil {
+		aurora.SetLoginCatalogForTest(p, scopedLogins)
+	}
+	return p, err
+}
+func scopedLogins(ctx context.Context, db *sql.DB) ([]string, error) {
+	rows, err := db.QueryContext(ctx, `SELECT rolname FROM pg_catalog.pg_roles
+ WHERE starts_with(rolname,current_user::text || '_x') AND
+ (rolcanlogin OR EXISTS(SELECT 1 FROM pg_catalog.pg_stat_activity WHERE usename=rolname)) ORDER BY rolname`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		out = append(out, name)
+	}
+	return out, rows.Err()
 }

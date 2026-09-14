@@ -608,6 +608,8 @@ func (s *Server) advance(c *cluster) {
 
 func (s *Server) render(c *cluster) clusterXML {
 	out := clusterXML{
+		Subnet: "fixture-subnet", SecurityGroups: []securityGroupXML{{ID: "sg-fixture"}},
+		ARN:        "arn:aws:rds:" + s.region + ":123456789012:cluster:" + c.id,
 		Identifier: c.id, Status: c.status, Engine: c.engine,
 		EngineVersion: c.engineVersion, MasterUsername: c.master,
 		DatabaseName: c.database, Port: s.port,
@@ -678,6 +680,11 @@ func (s *Server) restore(w http.ResponseWriter, form url.Values) {
 	source := form.Get("SourceDBClusterIdentifier")
 	target := form.Get("DBClusterIdentifier")
 	restoreType := form.Get("RestoreType")
+	tags, err := tagsFrom(form)
+	if err != nil {
+		writeFault(w, http.StatusBadRequest, "InvalidParameterValue", err.Error())
+		return
+	}
 
 	if restoreType != "copy-on-write" {
 		// Refused rather than tolerated. This provider's whole claim is that a
@@ -748,7 +755,7 @@ func (s *Server) restore(w http.ResponseWriter, form url.Values) {
 		engine: parent.engine, engineVersion: parent.engineVersion,
 		master: parentMaster, password: parentPassword,
 		database: database, storageGB: parentStorage,
-		created: time.Now().UTC(), tags: tagsFrom(form), source: source,
+		created: time.Now().UTC(), tags: tags, source: source,
 		// One describe in creating, so the provider's wait actually waits.
 		pending: 1,
 	}
@@ -830,8 +837,8 @@ func (s *Server) modifyCluster(w http.ResponseWriter, form url.Values) {
 		// no superuser behind on a server other suites share.
 		statements := []string{
 			`DROP ROLE IF EXISTS ` + quoteIdent(role),
-			`CREATE ROLE ` + quoteIdent(role) + ` LOGIN INHERIT PASSWORD ` +
-				quoteLiteral(password) + ` IN ROLE ` + quoteIdent(s.pgUser),
+			`CREATE ROLE ` + quoteIdent(role) + ` LOGIN CREATEROLE INHERIT PASSWORD ` +
+				quoteLiteral(password) + ` IN ROLE pg_signal_backend, ` + quoteIdent(s.pgUser),
 		}
 		for _, statement := range statements {
 			if _, err := s.admin.Exec(statement); err != nil {
@@ -853,6 +860,11 @@ func (s *Server) modifyCluster(w http.ResponseWriter, form url.Values) {
 }
 
 func (s *Server) addTags(w http.ResponseWriter, form url.Values) {
+	tags, err := tagsFrom(form)
+	if err != nil {
+		writeFault(w, http.StatusBadRequest, "InvalidParameterValue", err.Error())
+		return
+	}
 	name := form.Get("ResourceName")
 	identifier := name
 	if i := strings.LastIndex(name, ":"); i >= 0 {
@@ -868,7 +880,7 @@ func (s *Server) addTags(w http.ResponseWriter, form url.Values) {
 		return
 	}
 	if s.opts.Fault != FaultTagsAreNotRecorded {
-		for k, v := range tagsFrom(form) {
+		for k, v := range tags {
 			if len(v) > 256 {
 				s.faultLocked(w, http.StatusBadRequest, "InvalidParameterValue",
 					"the tag "+k+" is longer than the 256 characters AWS allows")
@@ -981,17 +993,30 @@ func (s *Server) dropCluster(identifier string) error {
 	return nil
 }
 
-// tagsFrom reads the query API's Tags.member.N form back into a map.
-func tagsFrom(form url.Values) map[string]string {
+// tagsFrom reads the query API's Tags.Tag.N form back into a map, and refuses
+// the Tags.member.N spelling.
+//
+// Refused rather than tolerated, because this fake used to parse exactly the
+// member spelling the provider sent, so the suite agreed with the provider and
+// could not say no. No AWS SDK sends it: RDS's service model names TagList's
+// member Tag. Whether AWS itself would accept it is not known here, and a fake
+// that accepts what no official client sends is the wrong side to be wrong on.
+func tagsFrom(form url.Values) (map[string]string, error) {
+	for k := range form {
+		if strings.HasPrefix(k, "Tags.member.") {
+			return nil, fmt.Errorf("fakerds refuses a tag list spelled Tags.member.N; RDS's " +
+				"service model names TagList's member Tag, so every AWS SDK sends Tags.Tag.N")
+		}
+	}
 	out := map[string]string{}
 	for i := 1; ; i++ {
-		key := form.Get("Tags.member." + strconv.Itoa(i) + ".Key")
+		key := form.Get("Tags.Tag." + strconv.Itoa(i) + ".Key")
 		if key == "" {
 			break
 		}
-		out[key] = form.Get("Tags.member." + strconv.Itoa(i) + ".Value")
+		out[key] = form.Get("Tags.Tag." + strconv.Itoa(i) + ".Value")
 	}
-	return out
+	return out, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -1033,19 +1058,22 @@ type emptyResponse struct {
 }
 
 type clusterXML struct {
-	Identifier        string      `xml:"DBClusterIdentifier"`
-	Status            string      `xml:"Status"`
-	Engine            string      `xml:"Engine"`
-	EngineVersion     string      `xml:"EngineVersion"`
-	MasterUsername    string      `xml:"MasterUsername"`
-	DatabaseName      string      `xml:"DatabaseName"`
-	Endpoint          string      `xml:"Endpoint,omitempty"`
-	ReaderEndpoint    string      `xml:"ReaderEndpoint,omitempty"`
-	Port              int         `xml:"Port"`
-	AllocatedStorage  int64       `xml:"AllocatedStorage"`
-	ClusterCreateTime string      `xml:"ClusterCreateTime"`
-	Members           []memberXML `xml:"DBClusterMembers>DBClusterMember"`
-	Tags              []tagXML    `xml:"TagList>Tag"`
+	Subnet            string             `xml:"DBSubnetGroup"`
+	SecurityGroups    []securityGroupXML `xml:"VpcSecurityGroups>VpcSecurityGroupMembership"`
+	ARN               string             `xml:"DBClusterArn"`
+	Identifier        string             `xml:"DBClusterIdentifier"`
+	Status            string             `xml:"Status"`
+	Engine            string             `xml:"Engine"`
+	EngineVersion     string             `xml:"EngineVersion"`
+	MasterUsername    string             `xml:"MasterUsername"`
+	DatabaseName      string             `xml:"DatabaseName"`
+	Endpoint          string             `xml:"Endpoint,omitempty"`
+	ReaderEndpoint    string             `xml:"ReaderEndpoint,omitempty"`
+	Port              int                `xml:"Port"`
+	AllocatedStorage  int64              `xml:"AllocatedStorage"`
+	ClusterCreateTime string             `xml:"ClusterCreateTime"`
+	Members           []memberXML        `xml:"DBClusterMembers>DBClusterMember"`
+	Tags              []tagXML           `xml:"TagList>Tag"`
 }
 
 type memberXML struct {
@@ -1098,4 +1126,27 @@ func quoteIdent(name string) string {
 
 func quoteLiteral(value string) string {
 	return `'` + strings.ReplaceAll(value, `'`, `''`) + `'`
+}
+
+// SetTags alters control-plane metadata for boundary tests.
+func (s *Server) SetTags(identifier string, tags map[string]string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if c := s.clusters[identifier]; c != nil {
+		for k, v := range tags {
+			c.tags[k] = v
+		}
+	}
+}
+
+// SetEndpoint makes the database connection traverse the real TLS fixture.
+func (s *Server) SetEndpoint(host string, port int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.host = host
+	s.port = port
+}
+
+type securityGroupXML struct {
+	ID string `xml:"VpcSecurityGroupId"`
 }

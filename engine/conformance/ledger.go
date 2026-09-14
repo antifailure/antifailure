@@ -22,10 +22,10 @@ package conformance
 // surface may print. The Because line is what tells the two apart, and it is why
 // the ledger records prose rather than a boolean.
 //
-// This is deliberately uncomfortable reading. Four of the six providers that
-// declare copy on write in this repository have no recorded verdict, and
-// writing that down is the point: before this file the same four looked
-// exactly like a provider that had been measured, because nothing anywhere
+// This is deliberately uncomfortable reading. Five of the six providers that
+// declare copy on write in this repository have no proved verdict, and writing
+// that down is the point: before this file a declaration nobody had measured
+// looked exactly like a provider that had been, because nothing anywhere
 // distinguished them.
 
 // LedgerEntry is what this repository can say about one provider's copy on
@@ -127,6 +127,40 @@ var CopyOnWriteLedger = map[string]LedgerEntry{
 			"is Xata's published claim, from its branching page, and settling it needs a " +
 			"run of TestConformanceAgainstXata with an account.",
 		Evidence: "engine/internal/db/xata/conformance_test.go",
+	},
+	"cloudsql": {
+		Declared: true,
+		Verdict:  Unproven,
+		Because: "the instrument was fired for this provider and reported UNPROVEN, for the " +
+			"same reason as aurora's entry above: the conformance test drives fakecloudsql " +
+			"over one local Postgres, where a branch carrying the golden's data can only be " +
+			"handed back with CREATE DATABASE ... TEMPLATE, so the stopwatch would time " +
+			"Postgres copying files whatever Cloud SQL's fast clone does. The run on " +
+			"2026-09-12 passed 24 behaviours, skipped reset and pooled endpoints by name, " +
+			"and recorded this behaviour as not decided. What the suite does settle without " +
+			"an account is that the provider only ever requests the fast clone shape, which " +
+			"fastclone_test.go proves, and that is a claim about the request rather than " +
+			"about Google's storage. Settling this one needs a run against real Cloud SQL, " +
+			"and the only Google billing account available to this repository is closed. " +
+			"ee/engine/db/cloudsql/verdict_test.go requires the fake's byte counter to move " +
+			"across one branch, so the reason is a test rather than a comment.",
+		Evidence: "ee/engine/db/cloudsql/conformance_test.go",
+	},
+	"azurepg": {
+		Declared: false,
+		Verdict:  Unproven,
+		Because: "the instrument was fired for this provider and reported UNPROVEN, and the " +
+			"reason is the mirror image of aurora's and cloudsql's. This provider declares " +
+			"copy on write FALSE, so the suite would require branch time to GROW with the " +
+			"data, and against fakeazurepg it would, because CREATE DATABASE ... TEMPLATE " +
+			"copies every byte. That pass would be a measurement of Postgres file copying " +
+			"published as one of an Azure point in time restore, so the run asserts no real " +
+			"service and the behaviour is not decided. The run on 2026-09-12 passed 24 " +
+			"behaviours and skipped reset and pooled endpoints by name. A fake that confirms " +
+			"a false declaration is the more dangerous case, because nobody asks why a " +
+			"passing assertion passed. ee/engine/db/azurepg/verdict_test.go requires the " +
+			"fake's byte counter to move, so the reason is a test rather than a comment.",
+		Evidence: "ee/engine/db/azurepg/conformance_test.go",
 	},
 	"supabase": {
 		Declared: false,

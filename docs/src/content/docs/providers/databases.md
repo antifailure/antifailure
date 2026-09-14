@@ -11,7 +11,7 @@ meant to be written by people outside this repository.
 
 ```yaml
 database:
-  provider: docker   # or neon, supabase, dblab, pgurl, xata, or aurora
+  provider: docker   # or neon, supabase, dblab, pgurl, xata, aurora, cloudsql, or azurepg
   version: 17
 ```
 
@@ -26,6 +26,8 @@ database:
 | [`pgurl`](/docs/providers/pgurl) | A database on any Postgres server you name | Grows with the database, because a branch is a server side file copy | A reachable Postgres and a role that may create databases |
 | [`xata`](/docs/providers/xata) | A branch of a Xata project | Expected to be flat, because Xata documents its branches as copy on write snapshots. Never timed on Xata | A Xata project and an API key |
 | [`aurora`](/docs/providers/aurora) | A clone of an Amazon Aurora PostgreSQL cluster | Expected to be flat, because a clone shares the source's storage volume. Never timed on AWS | An Aurora PostgreSQL cluster, an IAM role, and the enterprise edition |
+| [`cloudsql`](/docs/providers/cloudsql) | A fast clone of a Google Cloud SQL for PostgreSQL instance | Expected to be flat, because a fast clone is created from an Instant Snapshot. Cloud SQL's other clone workflow is not flat, and the provider is built so it cannot ask for that one. Never timed on Google Cloud | A Cloud SQL instance, a service account, and the enterprise edition |
+| [`azurepg`](/docs/providers/azurepg) | A point in time restore of an Azure Database for PostgreSQL Flexible Server | Expected to grow with the database. The snapshot half is flat and the log replay half is not, so this provider does not claim copy on write. Never timed on Azure | A flexible server, a service principal, and the enterprise edition |
 
 `docker` is the default and needs nothing. Its branch time is flat, measured
 rather than assumed: the conformance suite branches an 8 MiB golden and a 512 MiB
@@ -95,6 +97,40 @@ has not, so here is the split, in the terms the
   checked against bytes. What it cannot show is that AWS accepts those
   requests, or how long a clone and its writer take, because no test in this
   repository may need a cloud account.
+- **`cloudsql` and `azurepg` are proved against fakes, and not against Google
+  or Azure.** The same arrangement as `aurora`: every line of each provider
+  runs on every pull request, against a fake Cloud SQL Admin API and a fake
+  Azure Resource Manager, each with a real Postgres behind it. `cloudsql` has
+  never met Google Cloud, because the only Google billing account available is
+  closed. `azurepg` has completed one private run against a real flexible
+  server on 2026-09-13: a golden restored, masked and verified over `verify-full`, a
+  branch written to without the source changing, the goldens listed, and
+  everything torn down. One run at one row is a demonstration rather than proof.
+
+`cloudsql` is the one for a production on Google Cloud, and it is in the
+enterprise edition for the same reason `aurora` is. A branch is a Cloud SQL
+FAST clone, created from an Instant Snapshot, which Google documents as moving
+no data whatever the size. That is Google's claim rather than a measurement:
+nobody who wrote this provider has run a clone on Google Cloud, so the table's
+"flat" is an expectation. The thing to know before choosing it is that Cloud
+SQL also has a slower clone whose duration scales with the database, it picks
+between the two from the shape of the request rather than from anything you ask
+for, and it tells you nothing about which you got. The provider is built so it
+cannot ask for the slow one, and its page explains the three conditions that
+would have selected it.
+
+`azurepg` is the one for a production on Azure, and it is the only provider here
+that does NOT claim flat branch time. A branch is a point in time restore, whose
+snapshot half is flat in the size of the data and whose log replay half is not,
+so the honest number is one that grows. Microsoft gives the overall recovery as
+a few minutes up to a few hours. Its page says why claiming otherwise would be
+quoting the fast half of that. One complete run has been timed on Azure, in
+`centralus` on a `Standard_B1ms` server with one synthetic row: the golden took
+420.3 seconds and the branch 518.3 seconds, the branch including the wait for the
+golden's first backup. That is fixed cost at one size, recorded in
+[the benchmarks](https://github.com/antifailure/antifailure/tree/main/benchmarks),
+so the growth with the size of the database is still Microsoft's description
+rather than a number anybody here measured.
 
 A provider named in the manifest and neither built into this binary nor
 registered with it is refused at startup rather than substituted. Falling back

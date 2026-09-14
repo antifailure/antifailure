@@ -33,7 +33,7 @@ import (
 	"github.com/antifailure/antifailure/ee/engine/auditsink"
 	"github.com/antifailure/antifailure/ee/engine/cloudgate"
 	"github.com/antifailure/antifailure/ee/engine/compliance"
-	"github.com/antifailure/antifailure/ee/engine/db/aurora"
+	"github.com/antifailure/antifailure/ee/engine/db/managed"
 	"github.com/antifailure/antifailure/ee/engine/feature"
 	"github.com/antifailure/antifailure/ee/engine/license"
 	"github.com/antifailure/antifailure/ee/engine/policyenforce"
@@ -222,12 +222,12 @@ func main() {
 	// describes, and the engine's own switch only asks the registry for names
 	// it does not have itself.
 	//
-	// Unconditional rather than gated on the licence. Selecting one is a
-	// manifest saying database.provider is aurora, and a build whose licence
-	// lapsed should refuse at the point of use with a sentence about the
-	// licence rather than disappear from the list of providers this build has
-	// and answer "which this build does not have".
-	aurora.Register(extension.Default)
+	// aurora, cloudsql and azurepg, registered through ee/engine/db/managed
+	// rather than one statement each here, because a list inside main() is
+	// readable by nothing but this binary. The air gapped hook's refusal test
+	// calls the same function, so every provider added to it is required to be
+	// refused in a sealed installation without anybody editing that test.
+	managed.Register(extension.Default)
 
 	// The licence gate on the managed cloud providers, and it goes LAST,
 	// after every registration above, because it wraps what is registered at

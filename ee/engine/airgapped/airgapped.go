@@ -109,9 +109,10 @@ var reachingModes = map[string]string{
 // operator put it. pgurl is a connection string the operator supplied, which is
 // their own decision in the same way a kubeconfig is.
 //
-// neon and supabase are refused because reaching them means api.supabase.com
-// and console.neon.tech, which are somebody else's servers on the public
-// internet, and there is no configuration that changes that.
+// neon, supabase and xata are refused because reaching them means
+// api.supabase.com, console.neon.tech and api.xata.tech, which are somebody
+// else's servers on the public internet, and there is no configuration that
+// changes that.
 var localProviders = map[string]string{
 	"docker": "a container on this machine",
 	"dblab":  "a Database Lab Engine you host",
