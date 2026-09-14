@@ -863,7 +863,7 @@ func (p *Provider) DestroyGolden(ctx context.Context, version string) error {
 	}
 	for _, in := range instances {
 		tags := tagMap(in.Tags)
-		if p.ownsInstance(in) && tags[tagKind] == kindBranch && tags[tagVersion] == version {
+		if p.ownsInstance(in) && !onItsWayOut(in) && tags[tagKind] == kindBranch && tags[tagVersion] == version {
 			return coded(codeGoldenReferenced, fmt.Sprintf(
 				"the golden %s is still branched by the environment %s. Tear that "+
 					"environment down first", version, tags[tagEnv]))
@@ -1071,6 +1071,20 @@ func (p *Provider) Branch(ctx context.Context, version, envID string) (provider.
 	return handle, nil
 }
 
+// onItsWayOut reports whether RDS has accepted a delete for this instance, so it
+// is not a live resource even though a listing still returns it, with its tags,
+// for minutes afterwards.
+//
+// RDS deletes asynchronously. On a live run on 2026-09-14 this provider
+// destroyed a branch, and DestroyGolden 0.5 seconds later refused the golden
+// because the branch instance was still listed as deleting and still carried
+// antifailure:kind=branch. The refusal told the operator to tear down an
+// environment they had just torn down. The fake deleted inside the call, so no
+// test could show it.
+func onItsWayOut(in dbInstance) bool {
+	return in.Status == "deleting" || in.Status == "deleted"
+}
+
 // countBranches is how many branch instances this provider currently holds.
 func (p *Provider) countBranches(ctx context.Context) (int, error) {
 	instances, err := p.api.listInstances(ctx)
@@ -1079,7 +1093,7 @@ func (p *Provider) countBranches(ctx context.Context) (int, error) {
 	}
 	n := 0
 	for _, in := range instances {
-		if p.ownsInstance(in) && tagMap(in.Tags)[tagKind] == kindBranch {
+		if p.ownsInstance(in) && !onItsWayOut(in) && tagMap(in.Tags)[tagKind] == kindBranch {
 			n++
 		}
 	}

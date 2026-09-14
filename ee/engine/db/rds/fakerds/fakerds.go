@@ -146,6 +146,12 @@ type Options struct {
 	// nothing cannot show the difference.
 	RestoreCopiesSnapshotTags  TagCopy
 	SnapshotCopiesInstanceTags TagCopy
+	// DeleteLingers is how many describes a deleted instance stays in the
+	// listing as deleting, with its tags, before it disappears. Zero deletes it
+	// inside the call, which is what every test did before a live run showed
+	// that RDS does not.
+	DeleteLingers int
+
 	// PasswordLag is how many describes of an instance, after ModifyDBInstance
 	// sets its master password, still find the OLD credential in force. Zero
 	// applies the password inside the call.
@@ -279,6 +285,9 @@ type instance struct {
 	// is how a provider's polling loop is actually exercised rather than
 	// assumed.
 	pending int
+	// deletingFor counts describes remaining before a deleted instance leaves
+	// the listing. See Options.DeleteLingers.
+	deletingFor int
 	// copying is set while the restore's data copy is still running in the
 	// background. See the comment on Server.copies.
 	copying bool
@@ -876,6 +885,16 @@ func (s *Server) page(ids []string, form url.Values) ([]string, string) {
 // provider skip its own polling loop and nobody would notice until a real
 // restore took twelve minutes.
 func (s *Server) advanceInstance(in *instance) {
+	if in.deletingFor > 0 {
+		in.deletingFor -= 1
+		if in.deletingFor == 0 {
+			// Out of the listing. Called with s.mu held, so the map is touched
+			// here rather than through dropInstance, which takes the lock; the
+			// fake's databases go when the server closes.
+			delete(s.instances, in.id)
+		}
+		return
+	}
 	if in.passwordLag > 0 {
 		in.passwordLag -= 1
 		if in.passwordLag > 0 {
@@ -1303,6 +1322,16 @@ func (s *Server) deleteInstance(w http.ResponseWriter, form url.Values) {
 		writeFault(w, http.StatusBadRequest, "InvalidDBInstanceState",
 			"DBInstance "+id+" is busy and cannot be deleted yet")
 		s.mu.Unlock()
+		return
+	}
+	if s.opts.DeleteLingers > 0 && in.deletingFor == 0 {
+		// What RDS does: the delete is accepted and the instance stays in the
+		// listing as deleting, carrying its tags, for minutes.
+		in.status = "deleting"
+		in.deletingFor = s.opts.DeleteLingers
+		lingering := s.renderInstance(in)
+		s.mu.Unlock()
+		writeXML(w, deleteInstanceResponse{Instance: lingering})
 		return
 	}
 	rendered := s.renderInstance(in)
