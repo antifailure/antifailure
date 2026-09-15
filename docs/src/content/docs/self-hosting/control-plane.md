@@ -34,8 +34,8 @@ teardown reads the local journal rather than the control plane.
 
 ### Which tag to run
 
-`main-b53906a` is a published image, and the tag names the commit it was built
-from. Every push to `main` publishes `main-<short sha>`, so a newer one is
+`main-fa6c8aa` is a published image, and the tag names the commit it was built
+from. Every release publishes `main-<short sha>`, so a newer one is
 usually available; list what exists with
 
 ```sh
@@ -45,14 +45,11 @@ curl -s "https://ghcr.io/token?scope=repository:antifailure/control-plane:pull&s
     https://ghcr.io/v2/antifailure/control-plane/tags/list
 ```
 
-**Do not run `:latest` or `:v0.1.1`.** They are the same image, and it predates
-this page. The `v0.1.1` git tag was cut for a CLI release before the Dockerfile
-existed, so the image under that name was published later from a different
-commit; it has no `/readyz`, and `apps/api/src/backup-cli.ts` is not in it, so
-steps 3 and 4 below cannot run against it. A tag that names its commit is the
-only one this project can hold itself to, and `tools/claimcheck` fails the build
-if the tag pinned on this page is one whose commit does not carry every file the
-page tells you to run.
+**Pin a `main-<sha>` tag, not `:latest` or a version tag.** A sha tag names the
+commit it was built from, which is what lets `tools/claimcheck` fail the build
+if the pinned image cannot run the steps below. `:latest` moves, and the
+`:v0.1.1` image was published from a different commit than the `v0.1.1` git tag,
+so neither names anything checkable.
 
 
 Four steps, and the order is not optional. The first two stand the server up.
@@ -67,7 +64,7 @@ organization, no page in the console can be reached, and nothing explains why.
 docker run --rm \
   -e AF_MIGRATION_DATABASE_URL=postgres://owner:...@db:5432/antifailure \
   -e AF_DATABASE_URL=postgres://af_app:...@db:5432/antifailure \
-  ghcr.io/antifailure/control-plane:main-b53906a node bootstrap.mjs
+  ghcr.io/antifailure/control-plane:main-fa6c8aa node bootstrap.mjs
 
 # 2. Serve. Note what is absent: no migration credential, and no AF_MIGRATE.
 docker run \
@@ -75,7 +72,7 @@ docker run \
   -e AF_GITHUB_CLIENT_ID=... \
   -e AF_GITHUB_CLIENT_SECRET=... \
   -e AF_GITHUB_REDIRECT_URI=https://cp.example.com/auth/github/callback \
-  -p 8080:8080 ghcr.io/antifailure/control-plane:main-b53906a
+  -p 8080:8080 ghcr.io/antifailure/control-plane:main-fa6c8aa
 ```
 
 ```sh
@@ -134,6 +131,15 @@ maintenance that keeps the events table partitioned.
 On Kubernetes, use the chart in `deploy/helm/antifailure-control-plane`, which
 runs step 1 as a Job before the Deployment rolls. It installs on any conformant
 cluster and is developed against kind.
+
+The Job runs step 1 only, so run step 3 once by hand against the pod:
+
+```sh
+kubectl exec "$(kubectl get deploy -l app.kubernetes.io/name=antifailure-control-plane -o name)" \
+  -- node apps/api/src/backup-cli.ts create-org \
+  --url postgres://owner:...@db:5432/antifailure \
+  --org acme --name "Acme" --github-login acme
+```
 
 Its `values.yaml` names every setting on the reference page that an installation
 is meant to choose, with the argument for each one written where you set it.
