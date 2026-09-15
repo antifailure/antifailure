@@ -815,6 +815,38 @@ jobs:
         # The suites assert this themselves, and this catches the case where a
         # suite crashed before its own assertion ran.
         #
+        # AND UNTIL NOW IT DID NOT RUN IN THAT CASE, which is the whole defect.
+        # A step with no `if:` carries the default condition `success()`, so it
+        # is skipped the moment an earlier step in the job fails. The sentence
+        # above names a crashed suite as the reason this step exists, and a
+        # crashed suite is a failed step, so the one situation it was written
+        # for was the one situation in which it never ran. It reported ok for
+        # every green job, where the suites had already asserted this
+        # themselves and it was measuring nothing that was not measured twice,
+        # and it reported nothing at all for every red one. That is a check
+        # that can only ever agree.
+        #
+        # `!cancelled()` AND NOT `always()`, deliberately, and this is the one
+        # place in this file where the difference matters. `always()` also runs
+        # the step when the job was CANCELLED, and a cancellation is exactly
+        # when a leak report is meaningless: the suites were killed part way
+        # through, their `t.Cleanup` never ran, so containers are still up by
+        # definition and this step would fail on them. A gate that reds every
+        # cancelled run is a gate people learn to read past, and the two
+        # commonest cancellations here are a concurrency kill from a rapid
+        # second push and a job timeout, neither of which says anything about
+        # whether the code leaks. `!cancelled()` runs after a FAILURE, which is
+        # the case the comment above promises, and stays quiet after a kill.
+        #
+        # THE ASYMMETRY IS THE WHOLE ARGUMENT, so it is written down rather than
+        # left as taste. After a FAILURE the job is already red, so this step
+        # cannot change the verdict: all it can do is add the list of leaked
+        # resources to a log somebody is already reading. After a CANCELLATION
+        # the job is not red, and `always()` would make this step the thing that
+        # reddens it, over containers a kill guaranteed and about code nothing
+        # was learned from. One adds information to a failure, the other invents
+        # one. The step below uses `always()` because it only prints.
+        #
         # The machine's ClickHouse is the one exception, and it is an exception
         # rather than an oversight. A store server is not an environment
         # resource: goldens and branches are databases on it, several
@@ -827,6 +859,7 @@ jobs:
         # on a laptop by 2026-09-13. The step after this one prints them.
         # docker ps has no label!= filter, so the kind is formatted out and
         # the one exception is dropped here rather than by the daemon.
+        if: '!cancelled()'
         run: |
           managed=$(docker ps -a --filter label=dev.antifailure.managed \
             --format '{{.ID}} {{.Names}} {{.Label "dev.antifailure.kind"}}')
