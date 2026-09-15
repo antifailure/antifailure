@@ -16,6 +16,7 @@ import {
   Field,
   LinkButton,
   Loaded,
+  Machine,
   Page,
   Row,
   Table,
@@ -27,6 +28,13 @@ import {
   inputClass,
   toneFor,
 } from "@/components/ui";
+import { POLL_MS, useInterval } from "@/components/load/polling";
+import {
+  nothingWasVerifiedNotice,
+  noVerdictsReason,
+  reproductionText,
+  runIsInFlight,
+} from "@/lib/runshapes";
 
 interface Environment {
   env_id: string;
@@ -75,10 +83,69 @@ function seconds(ms: number | null): string {
   return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
 
+/**
+ * The banner over a verdict table that judged nothing.
+ *
+ * Every column in that table can be full and the run can still have proved
+ * nothing: five rows reading "unverified" is a run whose personas were never
+ * created, and with only pass and fail in a reader's head it draws as a run
+ * with no failures. That is the exit code zero over nothing defect this product
+ * has already shipped once, and `components/load/results.tsx` guards the load
+ * view against exactly it. The runs page, which is the one a customer is shown,
+ * did not.
+ *
+ * role="alert" and not "status": this is the screen contradicting the
+ * impression the table beside it gives, which is the case the loud one is for.
+ */
+function NothingVerified({ values }: { values: readonly string[] }) {
+  const notice = nothingWasVerifiedNotice(values);
+  if (notice === null) return null;
+  return (
+    <p
+      role="alert"
+      className="border-b border-rule bg-[rgba(138,90,0,0.07)] px-4 py-2.5 text-[12.5px] leading-6 text-warn"
+    >
+      {notice}
+    </p>
+  );
+}
+
+/**
+ * How to reproduce what the runner found, printed only if the runner recorded
+ * it. The operator console has rendered this in a labelled column all along
+ * (app/admin/product/runs/detail/page.tsx) while the page the customer is shown
+ * fetched the column and threw it away.
+ */
+function Reproduction({ value }: { value: unknown }) {
+  const text = reproductionText(value);
+  if (text === null) return <span className="text-dim">none recorded</span>;
+  return <Machine>{text}</Machine>;
+}
+
 function Detail({ runId, onClose }: { runId: string; onClose: () => void }) {
   const run = useApi<Run>(() => query("runs.get", { runId }), [runId]);
   const verdicts = useApi<Verdict[]>(() => query("runs.verdicts", { runId }), [runId]);
   const artifacts = useApi<Artifact[]>(() => query("runs.artifacts", { runId }), [runId]);
+
+  // Ask again while the run can still change, and stop the moment it cannot.
+  //
+  // Nothing on this screen updated at all before this. The only reload in the
+  // file hung off the Start card, which is not rendered without `agents.run`,
+  // so a member watching a run they had been sent a link to had no way to see
+  // it finish short of reloading the browser. The run this product exists to
+  // show somebody was the one run in the console that could not be watched.
+  //
+  // All three reload together because they are one screen and the verdicts are
+  // the reason anybody opened it. `useApi` keeps the rows it has across a
+  // reload, so a tick does not blank the table it is refreshing. The condition
+  // reads the run's own state rather than a timer, so a finished run makes
+  // exactly zero further requests on a tab left open.
+  const inFlight = runIsInFlight(run.data?.state);
+  useInterval(inFlight, POLL_MS, () => {
+    run.reload();
+    verdicts.reload();
+    artifacts.reload();
+  });
 
   return (
     <div className="space-y-6">
@@ -118,14 +185,12 @@ function Detail({ runId, onClose }: { runId: string; onClose: () => void }) {
         <Loaded state={verdicts} skeleton={<TableSkeleton rows={3} cols={4} />}>
           {(rows) =>
             rows.length === 0 ? (
-              <Empty title="No verdicts">
-                The runner records a verdict per workflow when it finishes. This
-                run has not produced one, which usually means it is still going
-                or it failed before the first workflow.
-              </Empty>
+              <Empty title="No verdicts">{noVerdictsReason(run.data?.state)}</Empty>
             ) : (
+              <>
+              <NothingVerified values={rows.map((v) => v.value)} />
               <TableWrap>
-                <Table>
+                <Table className="sm:min-w-[860px]">
                   <thead>
                     <tr>
                       <Th>Workflow</Th>
@@ -134,6 +199,7 @@ function Detail({ runId, onClose }: { runId: string; onClose: () => void }) {
                       <Th>Summary</Th>
                       <Th numeric>Steps</Th>
                       <Th numeric>Duration</Th>
+                      <Th>Reproduction</Th>
                     </tr>
                   </thead>
                   <tbody>
@@ -147,11 +213,15 @@ function Detail({ runId, onClose }: { runId: string; onClose: () => void }) {
                         <Td label="Summary" className="max-w-[36ch]">{v.summary ?? "--"}</Td>
                         <Td label="Steps" numeric>{v.steps ?? "--"}</Td>
                         <Td label="Duration" numeric>{seconds(v.duration_ms)}</Td>
+                        <Td label="Reproduction" className="max-w-[34ch]">
+                          <Reproduction value={v.reproduction} />
+                        </Td>
                       </Row>
                     ))}
                   </tbody>
                 </Table>
               </TableWrap>
+              </>
             )
           }
         </Loaded>
@@ -389,6 +459,20 @@ function Runs() {
     },
     [],
   );
+  const rows = state.data ?? [];
+
+  const forPullRequest =
+    prNumber === null ? null : rows.find((run) => run.pull_request === prNumber) ?? null;
+  // The same rule as the detail, over the list: ask again only while a row on
+  // it can still change. A list of finished runs is a list that will not move,
+  // and polling one is a request every six seconds forever on a tab somebody
+  // left open. Hooks run before the two early returns below because they have
+  // to, so the condition carries the "is this list even on screen" part.
+  useInterval(
+    selected === null && forPullRequest === null && rows.some((r) => runIsInFlight(r.state)),
+    POLL_MS,
+    state.reload,
+  );
 
   if (selected) {
     return (
@@ -398,8 +482,6 @@ function Runs() {
     );
   }
 
-  const forPullRequest =
-    prNumber === null ? null : (state.data ?? []).find((run) => run.pull_request === prNumber) ?? null;
   if (forPullRequest) {
     return (
       <Page

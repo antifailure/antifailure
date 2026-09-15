@@ -14,6 +14,15 @@ import { useRouter } from "next/navigation";
 import { ApiError } from "@/lib/api";
 import { ago, when } from "@/lib/format";
 import { LogoMark } from "@/components/icons";
+import { toneFor, type Tone } from "@/lib/tone";
+
+// Re-exported rather than moved outright. Sixteen files import `toneFor` and
+// `Tone` from here, and the reason it now LIVES in lib/ is that this file is a
+// .tsx: `node --test` strips types and cannot parse JSX, so nothing in it can
+// be tested, and the console's one shared colour decision was therefore the one
+// piece of logic in the design system no test could reach.
+export { toneFor };
+export type { Tone };
 
 /* -------------------------------------------------------------------------
  * Surfaces
@@ -313,7 +322,6 @@ export function When({ value }: { value: string | Date | null | undefined }) {
   );
 }
 
-export type Tone = "pass" | "fail" | "warn" | "neutral";
 
 /**
  * A verdict, a status, a decision. Colour is never the only signal: the word
@@ -336,36 +344,30 @@ export function Badge({ tone = "neutral", children }: { tone?: Tone; children: R
   );
 }
 
-export function toneFor(value: string | null | undefined): Tone {
-  const v = (value ?? "").toLowerCase();
-  if (["pass", "ok", "passed", "ready", "active", "allow", "verified", "approved"].includes(v)) {
-    return "pass";
-  }
-  if (["fail", "failed", "block", "blocked", "denied", "deny", "error", "revoked"].includes(v)) {
-    return "fail";
-  }
-  if (
-    [
-      "pending",
-      "running",
-      "waiting",
-      "proposed",
-      "expiring",
-      "warn",
-      // In progress. Left out, these fell through to "neutral" and an
-      // environment that was still being built looked exactly like one that
-      // had been torn down.
-      "provisioning",
-      "creating",
-      "starting",
-      "queued",
-      "building",
-    ].includes(v)
-  ) {
-    return "warn";
-  }
-  return "neutral";
+/**
+ * A block of machine text: a command, a digest, a payload.
+ *
+ * Scrolls inside its own box rather than pushing the page sideways, which is
+ * the whole reason a payload gets a component instead of a `<pre>` at each call
+ * site.
+ *
+ * ON A PHONE IT WRAPS INSTEAD, and that is not decoration. Below 639px
+ * globals.css sets `.scroll-x { overflow-x: visible }` deliberately, because
+ * every table on that breakpoint has stopped being a table and has nothing left
+ * to scroll. A `<pre>` does still have something to scroll, so on that
+ * breakpoint alone this block would have been the one element on the page
+ * ignoring the rule the rest of the console follows, and a reproduction payload
+ * of any length would have pushed the whole document sideways. `max-sm` and not
+ * a media query of its own so the two thresholds cannot drift apart.
+ */
+export function Machine({ children }: { children: string }) {
+  return (
+    <pre className="scroll-x max-w-full overflow-x-auto rounded-md border border-rule bg-paper px-3 py-2.5 font-mono text-[12px] leading-5 text-ink max-sm:whitespace-pre-wrap max-sm:break-all">
+      {children}
+    </pre>
+  );
 }
+
 
 /* -------------------------------------------------------------------------
  * Controls

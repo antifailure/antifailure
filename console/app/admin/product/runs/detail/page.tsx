@@ -3,7 +3,17 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Badge, Card, CardSkeleton, Empty, LinkButton, Loaded, Page, When } from "@/components/ui";
+import {
+  Badge,
+  Card,
+  CardSkeleton,
+  Empty,
+  LinkButton,
+  Loaded,
+  Machine,
+  Page,
+  When,
+} from "@/components/ui";
 import {
   AdminPage,
   DataTable,
@@ -139,16 +149,6 @@ function Standing({ standing, state }: { standing: string; state: string }) {
         <span className="text-[12.5px] text-muted">the run&rsquo;s own state is {word}</span>
       )}
     </span>
-  );
-}
-
-/** A block of machine text: a command, a digest, a payload. Scrolls inside its
- *  own box rather than pushing the page sideways on a phone. */
-function Machine({ children }: { children: string }) {
-  return (
-    <pre className="scroll-x max-w-full overflow-x-auto rounded-md border border-rule bg-paper px-3 py-2.5 font-mono text-[12px] leading-5 text-ink">
-      {children}
-    </pre>
   );
 }
 
