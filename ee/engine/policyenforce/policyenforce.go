@@ -40,6 +40,36 @@ func init() {
 	feature.Declare(license.FeaturePolicy, "policyenforce/policyenforce.go:Hook.Check")
 }
 
+// reachingModes are the modes that contact the host the application named.
+//
+// The deny list is a rule about REACHING a host, so these are the modes it is
+// about. capture answers with the provider's documented success shape, mock
+// answers from a fixture pack and emulate answers from an emulator inside the
+// environment, so none of the three contacts the host and none of them can
+// breach a deny list. block refuses. What is left reaches: allow forwards,
+// sandbox forwards with a test credential substituted, and synth asks a model
+// provider to invent the response, which is a call to that provider.
+//
+// The same table lives in ee/engine/airgapped and the duplication is deliberate
+// rather than a missed refactor. The air gap asks whether anything leaves the
+// environment at all; this asks whether the host a rule would have named is
+// contacted. A mode could one day be added that answers locally and still
+// leaves the environment, and it would belong in one table and not the other.
+var reachingModes = map[string]bool{"allow": true, "sandbox": true, "synth": true}
+
+// defaultMode is the mode a host with no rule gets, normalized.
+//
+// Empty means block, which is what the engine's own normalization writes and
+// what engine/pkg/extension documents, so a hook that read the field raw would
+// treat the commonest manifest in the product as having no default at all.
+func defaultMode(req extension.EnvironmentRequest) string {
+	mode := strings.ToLower(strings.TrimSpace(req.EgressDefault))
+	if mode == "" {
+		return "block"
+	}
+	return mode
+}
+
 // Policy is what an organization requires of every repository.
 //
 // Every field is a restriction. There is no field that grants anything, which
@@ -187,6 +217,48 @@ func (h *Hook) checkEgress(req extension.EnvironmentRequest) error {
 			}
 		}
 	}
+
+	// The default, last, and the case this check could not see at all.
+	//
+	// EgressHosts and EgressModes are built from the manifest's explicit rules,
+	// so a manifest carrying no rules presented an empty list and every rule
+	// above found nothing to refuse. `egress: {default: synth}` with no rules is
+	// a valid manifest: the community validator refuses an allow, an emulate and
+	// a sandbox default and accepts that one, the policy engine gives every host
+	// no rule names the default mode, and the sidecar's synth path asks a model
+	// provider to invent a response for each of them. So an organization that
+	// named a deny list, or permitted only certain modes, was evaded by one line
+	// that names no host at all.
+	def := defaultMode(req)
+	if def == "block" {
+		return nil
+	}
+
+	// A deny list cannot hold under a reaching default, and it cannot be
+	// rescued by naming the denied hosts either: a rule would have to block
+	// every one of them, and a deny list is written as patterns precisely so
+	// that it covers hosts nobody has thought of yet.
+	if len(denied) > 0 && reachingModes[def] {
+		return &Refusal{
+			Policy: "egress deny list",
+			Detail: fmt.Sprintf(
+				"this manifest sets the egress default to %s, which reaches the host the "+
+					"application named, so every host no rule names is reached including the ones "+
+					"on this organization's deny list. Set the default to block and write a rule "+
+					"for each host the repository needs.",
+				def),
+		}
+	}
+
+	if len(h.policy.AllowedModes) > 0 && !contains(h.policy.AllowedModes, def) {
+		return &Refusal{
+			Policy: "allowed egress modes",
+			Detail: fmt.Sprintf(
+				"this manifest sets the egress default to %s, which is the mode every host no "+
+					"rule names is given, and this organization permits only %s",
+				def, strings.Join(h.policy.AllowedModes, ", ")),
+		}
+	}
 	return nil
 }
 
@@ -199,6 +271,13 @@ func (h *Hook) checkSynth(req extension.EnvironmentRequest) error {
 		if strings.EqualFold(mode, "synth") {
 			hosts = append(hosts, host)
 		}
+	}
+	// The default too, for the reason checkEgress gives at length: a manifest
+	// whose default is synth and whose rule list is empty uses synth for every
+	// host, and this check read only the rules, so the approval this
+	// organization requires was never asked for.
+	if defaultMode(req) == "synth" {
+		hosts = append(hosts, "every host no rule names")
 	}
 	if len(hosts) == 0 {
 		return nil

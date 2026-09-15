@@ -50,8 +50,13 @@ type EnvironmentRequest struct {
 	// simplification. A manifest can reach the whole internet with no rules at
 	// all: `egress: {default: allow}` and an empty rule list is valid, the
 	// validator only warns about it, and a hook reading only EgressModes sees
-	// an empty map and finds nothing to refuse. The organization policy's
-	// allowed_modes rule had the same blind spot.
+	// an empty map and finds nothing to refuse.
+	//
+	// Read by ee/engine/airgapped, which refuses a reaching default, and by
+	// ee/engine/policyenforce, whose deny list, allowed modes and synth approval
+	// rules evaluate it as the mode for every host no rule names. The policy
+	// layer read only the rules until then, so a default was how an
+	// organization's own rules were evaded.
 	EgressDefault string
 	// Provider is the database provider the environment will use.
 	Provider string
