@@ -21,16 +21,14 @@ AF-CP-001 The control plane at https://cp.example.com could not be reached.
   AF_CONTROL_PLANE_URL, to work fully locally.
 ```
 
-That is the design rather than a consolation. Events are buffered and delivered
-when it returns, environments keep running, and teardown still works, because
-teardown reads the local journal and not the control plane. Adding one is a
-decision you can reverse by deleting a line.
+Events are buffered and delivered when it returns, environments keep running,
+and teardown still works, because teardown reads the local journal and not the
+control plane.
 
 ## Two steps, in that order
 
-The first prepares the database. The second serves requests. They are separate
-because they need different credentials, and the serving step deliberately has
-no migration credential at all.
+The first prepares the database, the second serves requests. They need different
+credentials, and the serving step has no migration credential at all.
 
 ```sh
 # 1. Apply the schema, create the application role, grant it its membership.
@@ -58,9 +56,6 @@ details and the command that lists what is published.
 
 ## Do not skip step 1, and do not trust a 200
 
-This is the one that catches people, so it is worth knowing before it happens
-to you rather than after.
-
 Step 1 is what grants the application role its membership. Skip it and the
 failure is quiet instead of loud: the server starts, `/health` answers 200, the
 container reports healthy, and every query fails with
@@ -82,9 +77,7 @@ SELECT pg_has_role('af_app', 'antifailure_app', 'MEMBER');
 
 ## Point this machine at it
 
-The control plane is not a manifest key. A manifest describes an application,
-and which control plane you happen to be signed in to is a fact about your
-machine rather than about the code, so it lives with the credential:
+The control plane is not a manifest key. It lives with the credential:
 
 ```sh
 af login --control-plane https://cp.example.com
@@ -112,20 +105,17 @@ one, and the lifetime `runtime.ttl` declares, and the control plane creates the
 environment from whichever of those events reaches it first.
 
 Each of those events also carries the instant the environment began existing,
-which is not the instant the event fired: an environment is reported ready
-after its build, and the build is the expensive part of a cold run. Usage and
-the expiry are both measured from the earlier instant.
+which is not the instant the event fired: an environment is reported ready after
+its build. Usage and the expiry are both measured from the earlier instant.
 
 The repository name comes from `GITHUB_REPOSITORY` when the run is in GitHub
-Actions, and otherwise from the `origin` remote of the checkout. A checkout
-with neither, which is a directory somebody is trying the tool in, reports no
-repository: the environment runs, and it does not appear in the console. The
-response says so on the event rather than accepting it silently, and the
-control plane counts it as `af_ingest_events_total{outcome="unprojected"}`.
+Actions, and otherwise from the `origin` remote of the checkout. A checkout with
+neither reports no repository: the environment runs, and it does not appear in
+the console. The response says so on the event, and the control plane counts it
+as `af_ingest_events_total{outcome="unprojected"}`.
 
 A repository the GitHub App has never mentioned is created from the name the
-engine reports rather than refused, so an engine running against a repository
-nobody has connected still shows up.
+engine reports rather than refused.
 
 Related: [the full control plane guide](/docs/self-hosting/control-plane),
 [every variable it reads](/docs/reference/control-plane),

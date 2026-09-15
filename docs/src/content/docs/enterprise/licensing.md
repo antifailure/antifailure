@@ -11,9 +11,6 @@ contain `ee/` at all: it is a separate Go module the community build cannot
 resolve, and CI has a job that fails if the community binary carries an
 enterprise symbol.
 
-That is stronger than a runtime check. A feature you cannot compile is a feature
-that cannot be switched on by patching a boolean.
-
 ## Installing a license
 
 There is nothing to install. The enterprise binary reads its license from the
@@ -26,17 +23,12 @@ export AF_ORG=globex
 af license status
 ```
 
-That is deliberate rather than unfinished. A key on disk is a key that outlives
-the machine it was put on, survives a rollback, and has to be removed from every
-copy. Two variables are removed by unsetting them, and every enterprise setting
-is preserved when they are gone: features fall back to the community behaviour
-rather than failing.
+Every enterprise setting is preserved when they are gone: features fall back to
+the community behaviour rather than failing.
 
 So `af license install` and `af license remove` exist and both say so instead of
 pretending. On the enterprise binary they name these variables; on the community
-binary they refuse outright, because storing a key that build can never act on
-would leave somebody believing enterprise features are on until the rollout they
-bought the license for.
+binary they refuse outright.
 
 A license is an Ed25519 signed statement carrying the organisation it was issued
 to, the features it permits, the seat count, when it expires, and which key
@@ -58,8 +50,7 @@ AF-EE-001 The enterprise license could not be verified.
   truncated in transit.
 ```
 
-Almost always truncation. A license token is long and survives being pasted into
-a chat window less often than people expect.
+Almost always truncation.
 
 ## Wrong organisation
 
@@ -100,9 +91,7 @@ addition and never evicts somebody to make room.
 ## Expiry and grace
 
 An expired license keeps working for a grace period, with a warning on every
-command. Enterprise features that stop working the moment a renewal is late
-turn a billing delay into an outage, and nothing in `ee/` is worth doing that
-for.
+command.
 
 After the grace period the enterprise features stop and everything else carries
 on. The community edition is the whole product minus `ee/`, and an expired
@@ -118,19 +107,11 @@ The features a license can name are `air_gapped`, `audit_stream`, `billing`, `cl
 Of the 14 features a license can carry, **11 are refused when the license does not name them**, 8 by the engine and 4 by the control plane, with some checked by both. The rest are listed here anyway, with what actually happens without each one, because a feature that is sold and never checked is worth knowing about and the number is only useful if it can come back unflattering.
 <!-- entitlement-count:end -->
 
-The table is generated from `ee/engine/feature/catalogue.go`, which is the one
-place this product records what a license permits. Every row saying a feature is
-refused names the file that refuses it, and a test opens that file and requires
-the call that actually refuses: `feature.Enabled` for a row the enterprise
-engine gates, `edition.Permits` for one the community engine gates by name. So a
-row cannot claim an enforcement it does not have. Which of the two is required
-is decided by the row's own state and never by the shape of the path, because a
-check that guessed from the path would accept an enterprise file for a community
-gate and never notice that the mechanism claimed is not the mechanism there.
-
-Rows that say nothing changes are the honest answer rather than an omission: a
-feature that is sold and never checked is a gap worth publishing, and this page
-is where it gets published.
+The table is generated from `ee/engine/feature/catalogue.go`, the one place this
+product records what a license permits. Every row saying a feature is refused
+names the file that refuses it, and a test requires that file to carry the call
+that refuses: `feature.Enabled` where the enterprise engine gates, or
+`edition.Permits` where the community engine gates by name.
 
 <!-- entitlements:start -->
 | Feature | What it is | Without it |
@@ -151,11 +132,8 @@ is where it gets published.
 | `support_access` | A supported way for the vendor to see what a customer sees. | Nothing changes. It is implemented and deliberately available to everyone. |
 <!-- entitlements:end -->
 
-The distinction in the third column between a feature that is refused and one
-the hosted control plane covers under its plan is the one worth reading twice. A
-license carries fourteen names and the hosted plan gate carries one boolean, so
-a license naming a feature and a plan that does not are not reconcilable by
-anything. Both are real refusals and only the first is keyed on what was bought.
+A license carries fourteen names and the hosted plan gate carries one boolean.
+Both are real refusals and only the license one is keyed on what was bought.
 
 ### Two of those cannot be sold
 
@@ -164,13 +142,6 @@ else. There is no implementation of either, so there is nothing a license could
 switch on, and both are refused twice: `tools/licensegen` will not sign a
 request naming one, and the verifier carries the name through and never permits
 it.
-
-That is deliberate rather than an oversight waiting to be tidied. The
-alternative, a license check placed in front of a capability that does not
-exist, is a declared enforcement site that can never run, which reads as a
-working feature from every direction and is harder to find than the gap it
-covers. A feature nobody can buy and nobody can be granted cannot be mistaken
-for one that ships.
 
 ### Custom roles were in a third state until 2026-09-11
 

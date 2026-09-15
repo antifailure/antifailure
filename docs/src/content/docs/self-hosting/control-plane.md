@@ -26,9 +26,8 @@ AF-CPL-003 The control plane could not be reached: dial tcp: i/o timeout
   it returns.
 ```
 
-That is the design and not a consolation. Events are buffered and delivered
-when it comes back, environments keep running, and teardown still works, because
-teardown reads the local journal rather than the control plane.
+Environments keep running and teardown still works, because teardown reads the
+local journal rather than the control plane.
 
 ## Running one
 
@@ -143,12 +142,10 @@ kubectl exec "$(kubectl get deploy -l app.kubernetes.io/name=antifailure-control
 
 Its `values.yaml` names every setting on the reference page that an installation
 is meant to choose, with the argument for each one written where you set it.
-Read that file rather than a list here: a second list would rot, and the one in
-the chart is checked. `tools/wirecheck` compares the reference page against both
-supported installation routes, the Terraform module and this chart, and fails
-the build when either cannot deliver a variable and no row in
-`tools/docs/wiring-exemptions.tsv` gives a reason. Eight variables have such a
-row for the chart, and the reasons are in that file.
+`tools/wirecheck` compares the reference page against both supported installation
+routes, the Terraform module and this chart, and fails the build when either
+cannot deliver a variable and no row in `tools/docs/wiring-exemptions.tsv` gives
+a reason. Eight variables have such a row for the chart.
 
 That check was added because the chart could not set 23 of them, including
 `AF_SITE_ORIGIN`, and nothing said so. A missing setting does not present as a
@@ -170,8 +167,6 @@ serving requests is deliberately not that role.
 
 ### `antifailure_app` is not an account
 
-This is the part that catches everyone, so it is worth being exact.
-
 Migration `0001_init.sql` creates `antifailure_app` as `NOLOGIN`. It is a GROUP
 role that holds the grants. **Nobody can connect as it.** The application
 connects as a *separate* login role that is a member of it and owns nothing:
@@ -186,16 +181,15 @@ GRANT CONNECT ON DATABASE antifailure TO af_app;
 The grant has to come *after* the migrations, because that is what creates
 `antifailure_app`.
 
-If you skip it, the failure is quiet and confusing rather than loud. The schema
-migrates, the server starts, `/health` returns 200, and every query fails with:
+If you skip it, the schema migrates, the server starts, `/health` returns 200,
+and every query fails with:
 
 ```
 ERROR:  relation "organizations" does not exist
 ```
 
-which reads like a missing migration and is not one. A role with no `USAGE` on
-the schema is not told that it lacks permission; it is told the relation is not
-there. Check the membership directly:
+A role with no `USAGE` on the schema is told the relation is not there rather
+than that it lacks permission. Check the membership directly:
 
 ```sh
 psql -c "SELECT pg_has_role('af_app', 'antifailure_app', 'MEMBER')"   # expects t
@@ -215,10 +209,8 @@ Verified against a real Postgres rather than asserted:
 | `SELECT` with no tenant set | returns nothing, rather than everything |
 
 Tenant isolation is row level security in Postgres rather than a `WHERE` clause
-in the application. A missing clause is a bug that returns another
-organisation's data; a missing policy is a table that returns nothing. The
-suite proves it by running every query as a second tenant and asserting it sees
-none of the first's rows, on every table, and it fails if a new table appears
+in the application. The suite runs every query as a second tenant and asserts it
+sees none of the first's rows, on every table, and fails if a new table appears
 that nobody classified.
 
 ## Connecting an engine
@@ -277,10 +269,6 @@ AF-CP-002 The control plane rejected this engine's token.
   a different control plane.
 ```
 
-Tokens are stored as a hash. A control plane database that leaks does not leak
-anything that can be used against it, and a revoked token stops working
-immediately rather than at the end of a cache window.
-
 ## Reading an environment
 
 ```
@@ -301,8 +289,7 @@ readiness probe: a replica that has lost its database still returns 200 and
 would still be sent traffic.
 
 So the Helm chart and the Terraform both use `/health` for liveness only, and a
-TCP check for readiness. Neither claims more than it can check. If you write
-your own probes, do the same.
+TCP check for readiness. If you write your own probes, do the same.
 
 ## The audit log
 

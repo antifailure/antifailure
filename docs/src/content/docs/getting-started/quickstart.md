@@ -9,11 +9,9 @@ This goes from nothing to a running environment on your own machine. It needs
 Docker. A Postgres connection string you are allowed to read from is optional:
 with one, every environment holds a masked copy of that database, and without
 one it holds the schema your migrations create. It does not need an account, a
-control plane, or a cloud provider: everything here runs locally, and the
-hosted pieces are optional and come later.
+control plane, or a cloud provider.
 
-The whole sequence, which every page and every command in this product states
-the same way:
+The whole sequence:
 
 ```bash
 curl -fsSL https://antifailure.dev/install.sh | sh
@@ -26,8 +24,7 @@ af test            # agents run your workflows and return verdicts with evidence
 af down            # every resource it created, gone
 ```
 
-The refresh is the one conditional step, and `af start` says whether it is
-yours. The rest of this page is what each command did.
+`af start` says whether the refresh, the one conditional step, is yours.
 
 ## Install
 
@@ -38,8 +35,7 @@ curl -fsSL https://antifailure.dev/install.sh | sh
 The installer downloads the release for your platform, checks it against the
 published checksum, and puts `af` and its runner under `~/.antifailure`. It is
 POSIX `sh` rather than bash, so it works in an Alpine container as well as on a
-laptop. If you would rather read it before running it, it is the same file
-served at that URL, and the [source is in the repository](https://github.com/antifailure/antifailure/blob/main/install.sh).
+laptop. The file served at that URL is the [source in the repository](https://github.com/antifailure/antifailure/blob/main/install.sh).
 
 ### What it does to your PATH
 
@@ -59,25 +55,22 @@ Delete that line to undo it. zsh gets `.zshrc` under `ZDOTDIR`, bash gets
 than having a file guessed for it. Running the installer again does not add the
 line a second time.
 
-The terminal you ran the installer in cannot see a file written a second ago,
-so the installer ends with one line to paste that fixes that shell and runs the
-first command:
+The current terminal cannot see the file just written, so the installer ends
+with one line to paste that fixes that shell and runs the first command:
 
 ```bash
 export PATH="$HOME/.antifailure/bin:$PATH" && af start
 ```
 
 To manage PATH yourself, decline in advance. Nothing is written, and the
-installer prints the full path to `af` instead of commands that would not
-resolve:
+installer prints the full path to `af`:
 
 ```bash
 curl -fsSL https://antifailure.dev/install.sh | AF_NO_MODIFY_PATH=1 sh
 ```
 
 In GitHub Actions no profile is touched at all: the installer writes to
-`GITHUB_PATH`, which is how a step extends the PATH of the steps after it, so
-`af` resolves in every later step of the job.
+`GITHUB_PATH`, so `af` resolves in every later step of the job.
 
 ## Find out where you are
 
@@ -85,8 +78,7 @@ In GitHub Actions no profile is touched at all: the installer writes to
 af start
 ```
 
-This is the one command worth remembering, and it is the only one on this page
-you can run at any point. It reports every step below as observed on this
+You can run this at any point. It reports every step below as observed on this
 machine right now, and names the single next command.
 
 ```
@@ -96,6 +88,7 @@ Your first run
   ...   the agent runner             runner: no runner at ~/.antifailure/runner
   ...   a manifest                   no antifailure.yaml here or in any parent directory
   skip  the database source          after the manifest
+  skip  masking rules                after the manifest
   skip  a golden                     after the manifest
   skip  an environment               after the manifest
   skip  workflows to run             after the manifest
@@ -108,24 +101,19 @@ Next
     af runner install
 ```
 
-It runs nothing and writes nothing, so running it costs you a second and
-changes nothing. Every answer comes from the machine rather than from a record
-of what it last did, which is why it is still right after you close the laptop,
-switch branches, or tear an environment down by hand.
+It runs nothing and writes nothing, and every answer comes from the machine
+rather than from a record of what it last did.
 
 Five states, and it never collapses one into another. `ok` was observed to be
 finished. `...` was observed not to be, and is where you are. `warn` is
 something missing that the next command does not need: the variable naming
-production, when a verified golden for this project already exists, because
-`af up` branches that golden and only the next refresh needs the variable.
+production, when a verified golden for this project already exists.
 `fail` is something broken that has to be fixed before the next command can
 work. `skip` is a step it deliberately did not look at, and it says why and
 what to run instead. With the Docker provider the golden step is answered from
 the daemon, selected by the same rule `af up` uses, so it never names a golden
 made for another project or one that was never verified; with a hosted provider
-it is skipped, because that listing needs credentials and this branch's lock,
-and a status command that took locks could not be run while `af up` was in
-flight.
+it is skipped, because that listing needs credentials and this branch's lock.
 
 Exit 0 means every step is either done or not reached yet, which is the normal
 state of a first run in progress. Exit 3 means something is broken.
@@ -136,18 +124,15 @@ state of a first run in progress. Exit 3 means something is broken.
 af doctor
 ```
 
-`af start` reports Docker because it is the one thing nothing below can work
-without. `af doctor` is the wider check: disk, ports, DNS, outbound reachability,
-kernel isolation, proxy settings, git, and the environments this machine is
-still holding. Every problem it names carries what to do about it, and every one
-of them is a problem you would otherwise meet halfway through a run.
+`af doctor` is the wider check: disk, ports, DNS, outbound reachability, kernel
+isolation, proxy settings, git, and the environments this machine is still
+holding. Every problem it names carries what to do about it.
 
 It also validates the manifest when one exists and compares a stable CLI version
 with the latest published GitHub release, with a three second network timeout.
 An outdated version or invalid manifest fails the check. No network, a development
-build, or no manifest is reported explicitly, never as a successful check of
-something it could not inspect. An absent manifest is normal before initialization;
-it does not mean the machine is broken.
+build, or no manifest is reported explicitly rather than as a pass, and a missing
+manifest does not fail the check.
 
 ```bash
 af update
@@ -174,10 +159,8 @@ af runner install
 
 The runner drives a real browser, so it is a separate program in a separate
 language and it needs node 22.6 or newer. It is copied from the source that
-ships beside `af` rather than downloaded, because the source a release was
-tested with is the source that release should run, and its dependencies are
-installed from the lockfile that ships with it, so two people installing one
-release get one tree. It then downloads chromium, which is the slow part.
+ships beside `af` rather than downloaded, and its dependencies come from the
+lockfile that ships with it. It then downloads chromium, which is the slow part.
 
 ```bash
 af runner check
@@ -186,22 +169,18 @@ af runner check
 reports each thing separately: the source, every dependency the runner declares
 against what is actually under `node_modules`, whether the lockfile pinned them,
 node against the range the runner requires, and the browser. It does not claim
-the runner executes, because knowing that means starting node and launching a
-browser, which is what `af test` is. Anything it cannot determine it reports as
-not checked rather than as ok.
+the runner executes. Anything it cannot determine it reports as not checked
+rather than as ok.
 
 It reports on the runner `af test` would use from where you are standing, and
 prints that path. A run looks for a runner in your own checkout before it looks
 at `~/.antifailure/runner`, and it takes the nearest one that can actually run
 rather than the nearest one that exists, so a `runner/` directory whose
-dependencies were never installed is passed over rather than started and
-crashed. When that happens the check names the directory it went past and says
-what is missing from it, because a report about a tree you did not mean is
-worse than no report.
+dependencies were never installed is passed over. The check names the directory
+it went past and says what is missing from it.
 
-A failed browser download is not fatal. The runner is usable the moment a
-browser arrives, and until then a workflow that needs a page read comes back
-`unverified` rather than guessed at.
+A failed browser download is not fatal. Until a browser arrives, a workflow that
+needs a page read comes back `unverified`.
 
 Everything up to `af up` works without the runner; only `af test` needs it.
 
@@ -216,10 +195,7 @@ found, the port each listens on, the migration command, and a network policy
 derived from the SDKs in your dependency list. If your `package.json` has
 `stripe` in it, the Stripe hosts arrive in the manifest without being asked.
 
-Two things about this worth knowing, because they are deliberate:
-
-It never executes anything from the repository. Detection reads files. A
-repository that would like to run a script during setup does not get to.
+It never executes anything from the repository: detection reads files.
 
 Anything it is unsure about becomes a question rather than a silent guess, and
 everything it reports names the file it came from. You can answer the questions
@@ -229,12 +205,10 @@ without a prompt if you are scripting it:
 af init --non-interactive
 ```
 
-That accepts every default and prints what it assumed, which is the honest
-version of a silent run.
+That accepts every default and prints what it assumed.
 
-Read the manifest before going further. It is meant to be audited rather than
-trusted, and the [manifest reference](/docs/reference/manifest) explains every
-key.
+Read the manifest before going further. The
+[manifest reference](/docs/reference/manifest) explains every key.
 
 ## Name the database to copy, if there is one
 
@@ -268,8 +242,7 @@ af explain
 
 This resolves the manifest and prints the plan: which golden a branch would come
 from, what each service would build from, and the mode every host in the network
-policy has been given. Nothing is created. It is the cheapest way to find out
-that a setting does not mean what you assumed.
+policy has been given. Nothing is created.
 
 ## Bring an environment up
 
@@ -279,9 +252,8 @@ af up
 
 That builds the services, creates a branch of the golden, and starts everything
 inside a network namespace that reaches nothing except the hosts your policy
-allows. The first run is the slow one, because the images are built, and when no
-source is named the golden is built here too. Later runs branch from what
-already exists.
+allows. The first run is the slow one, because the images are built. Later runs
+branch from what already exists.
 
 While it runs, or afterwards:
 
@@ -300,10 +272,10 @@ Agents drive the application the way a person does, through the accessibility
 tree, and return one of five verdicts for each workflow in the manifest with a
 video, a trace, and steps to reproduce it.
 
-Five verdicts rather than two, and the one that matters is `blocked`. A browser
-that crashed, a page that never loaded, or a persona with no password is not
-evidence about your application, and charging it to your application is how
-people learn to ignore the results. Only a real failure exits non zero.
+The verdict that matters is `blocked`. A browser that crashed, a page that never
+loaded, or a persona with no password is not evidence about your application. Of
+the five verdicts, only a failure exits non zero. A run that never reached a
+verdict exits on the configuration problem that stopped it.
 
 ```
   ok    sign in                      pass in 4.1s
@@ -313,8 +285,7 @@ people learn to ignore the results. Only a real failure exits non zero.
 ```
 
 A manifest that declares no workflows is refused rather than reported as a run
-that examined nothing. `af start` says so before `af up`, so you find out in a
-second rather than after a build.
+that examined nothing. `af start` says so before `af up`.
 
 ### The evidence
 
@@ -344,9 +315,6 @@ command that prints it back.
 
 ## Prove the containment
 
-The interesting property is not that the environment came up. It is that it
-cannot reach anything you did not name.
-
 ```bash
 af net policy
 ```
@@ -354,18 +322,17 @@ af net policy
 prints the decision for every host the policy knows, and
 
 ```bash
-af net explain https://api.stripe.com/v1/charges
+af net explain GET https://api.stripe.com/v1/charges
 ```
 
 answers for one specific request: which rule matched, which mode it is in, and
 what would happen. If something reached the network unexpectedly,
 `af net log` has the record of it, including the denials.
 
-The modes are covered in [egress](/docs/concepts/egress). The short version is
-that `BLOCK` refuses with a decision you can read, `SANDBOX` swaps in test
-credentials and trips a wire if a live key ever appears, `CAPTURE` records mail
-and messages into an inbox your tests can read, and `MOCK` answers from an
-offline pack with no network at all.
+The modes are covered in [egress](/docs/concepts/egress). `BLOCK` refuses with a
+decision you can read, `SANDBOX` swaps in test credentials and trips a wire if a
+live key ever appears, `CAPTURE` records mail and messages into an inbox your
+tests can read, and `MOCK` answers from an offline pack with no network at all.
 
 ## Tear it down
 
@@ -386,11 +353,10 @@ once and branched cheaply, and how identifiers are replaced deterministically so
 the same customer is the same fake customer in every table and every refresh.
 
 [Verification](/docs/concepts/verification) explains why an unverified golden
-cannot be branched at all, which is enforced in code rather than in a checklist.
+cannot be branched at all.
 
 [Building services](/docs/guides/build) covers what happens when detection
-guessed wrong about how your services are built, which is the most common reason
-a first `af up` does not go cleanly.
+guessed wrong about how your services are built.
 
 [Watching a run](/docs/guides/dashboard) is the live view: `af up --hud` draws
 the same run as a dashboard, and where there is no terminal it writes one line
@@ -398,19 +364,16 @@ per event instead.
 
 ## Running it somewhere other than your laptop
 
-Everything above is the same wherever the engine runs, and there are two other
-places to run it.
+Everything above is the same wherever the engine runs.
 
 [An environment per pull request](/docs/getting-started/pull-requests) is
 Antifailure inside GitHub Actions: the same `af up`, in a workflow, with one
 comment on the pull request that is updated in place rather than appended to.
 If the checkout had a GitHub remote, `af init` already wrote that workflow
-beside the manifest, and committing it is the whole setup. Nothing else is
-needed, and in particular no server. It is the next page in this section, and
+beside the manifest, and committing it is the whole setup. No server is needed.
 [GitHub](/docs/guides/github) is the reference behind it: the two modes, what
 the App must be granted, forks, and teardown.
 
 [The control plane](/docs/self-hosting/control-plane) is the optional hosted
-piece, and the page opens by saying what still works without it, which is all
-of it. Read that one when you want environments that outlive a workflow run, a
-shared address for them, or a record across repositories.
+piece. Read it when you want environments that outlive a workflow run, a shared
+address for them, or a record across repositories.

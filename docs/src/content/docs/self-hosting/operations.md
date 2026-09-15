@@ -5,15 +5,10 @@ sidebar:
   order: 4
 ---
 
-This page is written for the person who has just been woken up. It assumes you
-know nothing about the state of the system and have about ninety seconds of
-patience. Everything here has been run; nothing is aspirational.
-
 Setting the rotation up rather than firefighting inside it belongs on the
-[on-call page](/docs/self-hosting/on-call): who holds it, what an
-acknowledgement means, and what to do first for each class of page. The
-[status page](/docs/self-hosting/status-page) is what a customer reads while
-you read this one; it is not the pager and does not substitute for it.
+[on-call page](/docs/self-hosting/on-call). The
+[status page](/docs/self-hosting/status-page) is what a customer reads while you
+read this one.
 
 ## Create the first operator
 
@@ -78,18 +73,17 @@ plane records about its own failures](#what-the-control-plane-records-about-its-
 
 ## What the alerts mean
 
-Every rule in `observability/alerts/antifailure.rules.yml` links back here. They
-read the counters the control plane keeps itself, so they need a Prometheus
-scraping `/metrics`.
+Six of the ten rules in `observability/alerts/antifailure.rules.yml` have a
+section here. `ControlPlaneAvailabilityBudgetBurningSlowly`, `ControlPlaneIsSlow`,
+`TheFailureStoreIsLosingFailures` and `TheFailureStoreCannotWrite` do not; read
+their annotations. They read the counters the control plane keeps itself, so they
+need a Prometheus scraping `/metrics`.
 
 The hosted control plane on Azure has a second, smaller set that needs no
 Prometheus and watches the platform rather than the process: the database, the
 replicas, the jobs, the certificate, and the service as a customer reaches it.
 Those have their own pages under [runbooks](/docs/self-hosting/runbooks), and
 each rule names its page in the notification it sends.
-
-Both sets are deliberately short. An alert nobody acts on trains everybody to
-ignore the ones that matter.
 
 ### ControlPlaneAvailabilityBudgetBurningFast
 
@@ -114,7 +108,7 @@ do about it, which is faster than guessing from the count.
 The slowest one in twenty environments is taking more than eight minutes to be
 reachable. Almost always one of two things: a golden that is being copied in
 full rather than branched, or a build cache that is not being hit. Neither is an
-outage and neither should be treated as one at three in the morning.
+outage.
 
 ### IngestionIsLosingEvents
 
@@ -139,11 +133,8 @@ is the tool for that.
 
 ## The control plane is down
 
-**Environments are not down.** This is the most important sentence on this page
-and the easiest to forget while being paged. `af up`, `af down`, `af test` and
-everything else work with no control plane at all. It was built that way
-deliberately: a preview environment that stops working because a web application
-is down would be a worse product than no dashboard.
+**Environments are not down.** `af up`, `af down`, `af test` and everything else
+work with no control plane at all.
 
 What is actually happening while it is down:
 
@@ -152,8 +143,7 @@ What is actually happening while it is down:
   spool survives the process. The next command that runs against a control plane
   that has come back sends what the earlier ones could not, oldest first.
 - Nothing is lost until the spool exceeds its budget, at which point the oldest
-  batches are dropped and the count is reported. You will see that reported
-  rather than have to infer it.
+  batches are dropped and the count is reported.
 - `af env pull` fails, and says so with `AF-CPL-003`, which is the only
   user-visible consequence.
 
@@ -192,13 +182,7 @@ engine that cannot reach the control plane buffers rather than dropping.
 
 **The recovery window is fourteen days**, which is `backup_retention_days` in
 `infra/terraform/modules/control-plane/variables.tf`. Azure allows 7 to 35 and
-its own default is 7. Fourteen is deliberate in both directions. Seven is not
-enough for the failure that actually needs a long window, which is not a lost
-server but a logical corruption nobody noticed: a bad migration on a Friday,
-found on the Monday after a week away, is already outside seven days and there
-is nothing to recover to. Thirty five is billed as backup storage every day for
-a window nobody has ever reached back into. Fourteen covers a fortnight, which
-is longer than anyone here has taken to notice a broken write.
+its own default is 7.
 
 **A region loss costs up to an hour, and today it costs everything.**
 `geo_redundant_backup` defaults to `false`, so backups live only in the primary
@@ -206,14 +190,11 @@ region and a region that is gone takes them with it. Turning it on gives a
 geo-restore with an RPO of up to an hour, because the copy to the paired region
 is asynchronous, and a geo-restore reaches the last backup that arrived rather
 than a second you choose: Azure does not offer point in time recovery from
-geo-redundant backups. Both of those are worse than the five minutes above, and
-both are enormously better than nothing.
+geo-redundant backups.
 
-That default is correct for staging and wrong for production, and it is the
-expensive kind of wrong: backup redundancy can only be set when the server is
-created, so switching it on later means creating a new server and moving to it.
-Decide before the apply, not after.
-
+That default is correct for staging and wrong for production: backup redundancy
+can only be set when the server is created, so switching it on later means
+creating a new server and moving to it. Decide before the apply, not after.
 **None of this is the dump.** `af-control-plane-backup` is a second line with a
 different failure mode: it produces a file you hold, readable by any Postgres,
 which is what covers the case where the Azure subscription itself is the
@@ -234,20 +215,16 @@ The **roles file** matters most and is the least obvious. `pg_dump` works on one
 database; roles live in the cluster. Restore a dump into a fresh cluster in
 another region and `antifailure_app` does not exist there, so every `GRANT` in
 the dump fails, `pg_restore` exits zero, and the application cannot connect to
-the database you just recovered. The roles file is what prevents that, and it is
-why a backup taken any other way is not enough.
+the database you just recovered. The roles file is what prevents that.
 
 The **manifest** records what a restore has to reproduce: row counts per table,
 every policy, every table with row level security enabled and separately
 `FORCE`d, every privilege the application role holds, and the audit chain head.
 
-It records its own scope as well, which matters more than it sounds. All of
-those checks read the `public` schema, where every one of the control plane's
-tables lives. Anything outside it is listed in the manifest as unverified and
-reported by the restore and the drill as a table the check cannot speak for.
-That is not a restore failure and should not be read as one. It means the
-database grew somewhere this verification does not look, and somebody has to
-decide whether that table matters before the next real recovery.
+It records its own scope as well. All of those checks read the `public` schema,
+where every one of the control plane's tables lives. Anything outside it is
+listed in the manifest as unverified and reported by the restore and the drill as
+a table the check cannot speak for. That is not a restore failure.
 
 ### Restore it
 
@@ -261,9 +238,8 @@ af-control-plane-backup restore \
   --app-password "$APP_PASSWORD"
 ```
 
-It refuses a database that already exists. That refusal is deliberate: restoring
-over a live database is not a recovery, it is an outage with a different cause.
-Restore into a new name and switch the application over.
+It refuses a database that already exists. Restore into a new name and switch the
+application over.
 
 It exits 3, and says which check failed, if the restored database does not match
 the manifest or does not isolate tenants. **Do not point the control plane at a
@@ -271,7 +247,7 @@ database that exited 3.**
 `pg_restore` exits zero over a `GRANT` that failed because the role was missing,
 and over policies restored onto a table whose row level security it could not
 enable. Both produce a control plane that starts, answers every request, and
-isolates nothing at all. Nothing about it looks wrong from the outside.
+isolates nothing at all.
 
 ### Rehearse it, on a schedule, before you need it
 
@@ -309,33 +285,22 @@ UTC, in `.github/workflows/drill.yml`, which invokes the `drill` recipe in the
 same command. Run `just drill` to run exactly that yourself: it starts a
 Postgres of its own, applies every migration, seeds two organizations so the
 cross-tenant read has another tenant to be refused, and holds the recovery time
-against a budget of 300 seconds. That budget is a backstop against a restore
-that has stopped working, not the objective below and not a performance target.
+against a budget of 300 seconds.
 What detects a regression is the series: the workflow publishes each
 measurement to the run summary and keeps it for ninety days.
 
 The number it prints is the **restore** time, not the whole run, because
-recovery starts from a backup that already exists. Counting the time to take one
-flatters the number by measuring work that has already happened when it matters.
+recovery starts from a backup that already exists.
 
-**Use your own number, not this one.** For scale only, all of it measured rather
-than estimated: on a continuous integration runner with nothing else on it, a
-control plane database holding a handful of organizations restored in under two
-seconds, and two consecutive runs of the same drill on the same runner reported
-1.8 seconds and 0.6. On a development machine running a dozen other containers,
-the same restore took between 20 and 160 seconds. A factor of three between two
-runs an hour apart, and a factor of a hundred between two machines, is the
-point. A recovery time is a property of the
-hardware, the size of the database and what else is happening, so the only
+**Use your own number, not this one.** Measured: on a continuous integration
+runner with nothing else on it, a control plane database holding a handful of
+organizations restored in under two seconds, and two consecutive runs on the same
+runner reported 1.8 seconds and 0.6. On a development machine running a dozen
+other containers, the same restore took between 20 and 160 seconds. The only
 figure worth putting in an incident plan is the one your own drill measured on
-the machine you would actually recover onto. The suite prints its measurement on
-every run, so the number in front of you is never older than the last time
-anybody checked.
+the machine you would actually recover onto.
 
-The objective to hold it against is two hours, which is the recovery time this
-system is designed for. A drill that comes in well under it is not a reason to
-stop running the drill: what the drill really tests is whether the backup is
-one, and the timing is the part you get for free.
+The objective to hold it against is two hours.
 
 ## Nobody can sign in
 
@@ -349,8 +314,7 @@ first sign-in happened while the App was broken and therefore has no owner.
 Fix GitHub first. The three that account for almost all of it: `AF_GITHUB_APP_ID`
 and its private key, `AF_GITHUB_CLIENT_SECRET` matching the OAuth App, and
 `AF_GITHUB_REDIRECT_URI` matching what the OAuth App has registered. The start-up
-log says which of these the process found. Getting sign-in working again is the
-real repair, and the command below is not a substitute for it.
+log says which of these the process found.
 
 Reach for break-glass only when sign-in works and there is nobody inside the
 organization who can act, which means nobody holds `members.manage`.
@@ -438,10 +402,6 @@ still holding environments from runs that failed days ago.
 
 ## Load testing the control plane itself
 
-`af load` shapes traffic against an environment `af up` built; nothing before
-this pointed it at the control plane's own API, which is the one service in
-this product that has never had its own load generator run against it.
-
 `engine/cmd/loadcp` does, using the same `engine/internal/load` package `af
 load` does, against a URL instead of an af-managed environment:
 
@@ -457,25 +417,17 @@ the rate limiter already enforces per caller. The profile says so: its
 `source` field reads `declared_limits`, not `production`, the same honesty
 `internal/load` itself applies to a shape nobody supplied.
 
-**What a real run found.** Built and run once against a real local instance,
-schema migrated, serving from an actual Postgres, not a fake: at half the
-combined declared rate (92 requests a second, one caller, `-scale 0.5`), p95
-latency climbed from 0.5 seconds to 3.2 seconds over a 31 second run, achieving
-37 requests a second against a target of 92, with `/readyz` carrying the worst
-tail at up to 4.9 seconds. No request was rejected by the rate limiter at any point in
-this run; the connection pool queued first. That run was on a laptop reporting
-a load average over 75 from other work sharing the same machine at the time,
-which is exactly the caveat this project's own [disaster recovery
-timings](#rehearse-it-on-a-schedule-before-you-need-it) already carry: a
-latency number is a property of the hardware and what else is running on it,
-not a portable fact about the code. What is portable is the finding underneath
-it, which is worth checking again on quiet, dedicated hardware before it
-informs a real capacity decision: on this run, the database connection pool
-(`AF_POOL_MAX`, ten by default) became the limiting factor before the
-per-caller rate limits did, for a single caller sending across every route at
-once. An operator sizing a real deployment should raise `AF_POOL_MAX` to match
-expected concurrent callers rather than assuming the rate limiter is the only
-ceiling in the system.
+**What a real run found.** Against a real local instance serving from an actual
+Postgres, at half the combined declared rate (92 requests a second, one caller,
+`-scale 0.5`), p95 latency climbed from 0.5 seconds to 3.2 seconds over a 31
+second run, achieving 37 requests a second against a target of 92, with `/readyz`
+carrying the worst tail at up to 4.9 seconds. No request was rejected by the rate
+limiter; the connection pool queued first. That run shared a laptop reporting a
+load average over 75, so the latency figures are not portable. The finding is
+that the database connection pool (`AF_POOL_MAX`, ten by default) became the
+limiting factor before the per-caller rate limits did, for a single caller
+sending across every route at once. Raise `AF_POOL_MAX` to match expected
+concurrent callers rather than assuming the rate limiter is the only ceiling.
 
 ## What the control plane records about its own failures
 
@@ -492,12 +444,9 @@ code, and it carries a count, the first and last time it was seen, the build
 running at each of those, and the request id of the most recent occurrence.
 
 **What bounds it.** The cardinality of a row's five fields is set by the code
-rather than by traffic: the routes come from the endpoint table that ships in
-the container, the procedure paths from the router, and a class name is a
-JavaScript identifier. A bad day adds occurrences to existing rows and no rows.
-On top of that the table holds at most 500 groups, and the page says out loud
-when it is at that cap rather than quietly showing you fewer failures than are
-happening.
+rather than by traffic, so a bad day adds occurrences to existing rows and no
+rows. The table holds at most 500 groups, and the page says when it is at that
+cap.
 
 **What it costs in storage.** At most 500 rows of about 200 bytes, so on the
 order of 100 kilobytes, whatever happens. The writes are one statement per
@@ -533,11 +482,9 @@ no administrative connection string configured, nothing sweeps: the table stays
 bounded by the cap regardless, and the portal says that no retention is in
 force so you read the dates rather than assuming a row is current.
 
-The page updates itself every ten seconds while the tab is in front. It polls
-rather than holding a stream open, because the control plane runs more than one
-replica behind one ingress and a held connection pins you to one of them and
-dies on every deploy, which is exactly when you are watching. A refresh that
-does not land leaves the last good numbers on screen and says how old they are.
+The page updates itself every ten seconds while the tab is in front, by polling.
+A refresh that does not land leaves the last good numbers on screen and says how
+old they are.
 
 Three counters say when the store itself is the thing that is failing, and two
 alert rules watch them:
@@ -553,15 +500,9 @@ RUN. Those happen in the engine, in an environment the control plane does not
 own, and would need the engine to report them. `af logs web` and the run
 outcomes on the same page are what you have for that side.
 
-## Where the numbers come from
-
 `GET /metrics` on the control plane, in the Prometheus text format. It reads no
-tables: tenancy here is row level security, so an aggregate across every
-organization would need a role that can read every organization's rows, and
-creating one in order to draw a graph would put the strongest read in the system
-on the least important path and leave it there being scraped every fifteen
-seconds forever. Everything exposed is a counter the process kept itself, and
-several replicas each expose their own for Prometheus to sum.
+tables: everything exposed is a counter the process kept itself, and several
+replicas each expose their own for Prometheus to sum.
 
 The dashboard is `observability/dashboards/control-plane.json`, importable as it
 is. Its panels and the alert rules are both checked against the exporter by a

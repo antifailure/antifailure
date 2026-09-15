@@ -141,7 +141,11 @@ func Explain(m *schema.Manifest, width int) string {
 			value("none declared, so branches start from an empty database this "+
 				"project makes for itself, never another project's golden", 15, width))
 	}
-	fmt.Fprintf(&b, "  masking      %s\n", value(d.MaskingRules, 15, width))
+	// A default, filled in whether or not the file is there, and the engine reads
+	// its built in rules when it is not. Naming the file alone read as though
+	// this had looked.
+	fmt.Fprintf(&b, "  masking      %s\n", value(d.MaskingRules+
+		" if present, else the built in rules", 15, width))
 	if d.Migrations != nil {
 		ledger := "the ledger probed at schema_migrations or migrations"
 		if d.Migrations.Table != "" {

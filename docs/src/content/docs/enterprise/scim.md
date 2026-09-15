@@ -26,8 +26,7 @@ once. Tokens can be given an expiry and rotated: two are live during the
 overlap, because a cutover means provisioning is broken for however long it
 takes somebody to paste the new value into the identity provider.
 
-What is supported is published where a client will look for it, and it is
-written from what the code does rather than from what would be nice:
+What is supported is published where a client will look for it:
 
 ```sh
 curl -H "Authorization: Bearer <token>" \
@@ -35,8 +34,7 @@ curl -H "Authorization: Bearer <token>" \
 ```
 
 `patch`, `filter` and `etag` are supported. `bulk`, `sort` and `changePassword`
-are not, and say so. A configuration document claiming a capability the server
-lacks makes a client use the path that fails instead of the one that works.
+are not, and say so.
 
 ## What each operation does here
 
@@ -50,14 +48,6 @@ lacks makes a client use the path that fails instead of the one that works.
 | Add a group member | Recorded. If the user does not exist yet, the reference is kept and resolved when they arrive. |
 
 ### Deactivation removes the membership
-
-This is deliberate and it has a cost worth knowing about.
-
-`active: false` from a directory means this person no longer works here, and the
-only honest implementation of that is that the row granting access stops
-existing. A flag that every read path has to remember to check is the shape of
-bug where the button says deactivated, the flag is set, and one query that
-forgot the check still returns their data.
 
 The cost: a role you set by hand here is not remembered across a deactivate and
 reactivate cycle. Somebody promoted to admin and then deactivated comes back as
@@ -121,10 +111,7 @@ Filterable: `id`, `userName`, `externalId`, `active`, `displayName`,
 `emails.value`, `name.givenName`, `name.familyName`. Groups: `id`,
 `displayName`, `externalId`.
 
-A filter this server cannot answer is refused with `invalidFilter`. That
-matters more than it sounds: a provider asking "who has this userName" and
-receiving every user will create a duplicate of everybody, so silently ignoring
-a filter is worse than refusing it.
+A filter this server cannot answer is refused with `invalidFilter`.
 
 The filter is parsed into a syntax tree and never concatenated into SQL. Every
 attribute maps to a known column through a closed list, and every literal is a
@@ -160,6 +147,3 @@ thing being audited.
 - **Group-to-role mapping through SCIM.** Groups sync, and a group can carry a
   role, but the mapping is configured through the single sign-on connection
   rather than through SCIM.
-
-Each is absent rather than half-present, and none is claimed anywhere in the
-product.

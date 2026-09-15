@@ -152,7 +152,7 @@ transition timestamps:
 If the newest golden is older than this when an environment comes up, it is
 refreshed first. A golden that has drifted far enough from production is one
 that is testing last quarter's data, and `max_age` is where you say how far is
-too far. Leave it unset and nothing is ever refreshed on your behalf.
+too far. Unset, it is `168h`.
 
 ### retain
 

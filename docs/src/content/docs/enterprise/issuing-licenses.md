@@ -8,26 +8,16 @@ sidebar:
 This is the vendor side of [licensing](/docs/enterprise/licensing). That page
 describes installing a key. This one describes producing one.
 
-Two audiences read it. The vendor issuing a paid license is the obvious one.
-The other is an air gapped installation that mints its own licenses against its
-own signing key, which is a supported arrangement rather than a workaround, and
-the steps are identical.
+An air gapped installation that mints its own licenses against its own signing
+key follows the same steps.
 
-## The tool, and why nothing calls it
+## The tool
 
-Issuing is `tools/licensegen`, a command line program with no caller. That is
-deliberate. Issuing is a vendor action taken a handful of times a year by a
-person holding a signing key, and wrapping it in a workflow would mean putting
-the signing key somewhere a workflow can reach. A key a pipeline can read is a
-key that leaks with the pipeline.
-
-What is not deliberate is that until this page existed, running it was tribal
-knowledge. A command run by hand is a legitimate design. A command nobody can
-find is not.
+Issuing is `tools/licensegen`, a command line program with no caller, run by hand
+by a person holding a signing key. Wrapping it in a workflow would put the
+signing key somewhere a workflow can reach.
 
 ## Before anything: three things that are not true yet
-
-Read these first. Each one changes what issuing means today.
 
 **No released binary carries a signing key.** `ee/engine/license/keys.go`
 expects a release to stamp public keys into `trustedKeys` with a linker flag.
@@ -58,8 +48,7 @@ It prints a key id, a public key and a private key, and writes nothing to disk.
 Paste the private half into the key vault immediately and nowhere else. The
 program has no way to recover it.
 
-The key id is a label you choose. Date it, because the only thing it has to do
-is let somebody a year from now tell one rotation from another.
+The key id is a label you choose. Date it.
 
 The public half goes to the verifier as `kid=base64`, and the key id in that
 pair has to be the one you just chose. Keep every previous entry: a build that
@@ -100,14 +89,9 @@ The features are `air_gapped`, `audit_stream`, `billing`, `cloud_database`,
 `cloud_runtime`, `compliance_packs`, `enterprise_dashboard`,
 `enterprise_secrets`, `multi_runtime`, `policy_enforcement`, `rbac`, `scim`,
 `sso` and `support_access`. Anything else
-is refused at issue time, because the verifier cannot refuse it: a license
-issued for a newer release names features an older binary has never heard of,
-and rejecting the whole license over one unknown name would take away the
-features the customer did buy. So the verifier carries an unknown name without
-acting on it, and the generator is the only place the set can be closed.
-
-Before that check existed, `"features": ["ssoo"]` signed cleanly, verified
-cleanly, reported the license active, and permitted nothing.
+is refused at issue time. The verifier carries an unknown name without acting on
+it, because a license issued for a newer release names features an older binary
+has never heard of, so the generator is the only place the set can be closed.
 
 ## No feature is issued with a warning any more
 
@@ -132,11 +116,6 @@ never print. If a feature is ever built and deliberately gated nowhere again,
 either of them is refused. Nothing in this product enforces them, so a license
 carrying one would verify, report itself active, print the feature in
 `af license status`, and change nothing about what the software does.
-
-That is a worse failure than an unknown name, because everything about it reads
-as a supported feature: it is in the documentation, in the price list, and in
-the generator's own set. The only two people positioned to discover it are the
-customer who paid and the person who sold it.
 
 Both refusals are in the product rather than in a checklist. The generator will
 not sign one, and the verifier carries the name and never permits it, exactly as
@@ -198,8 +177,7 @@ af license status
 ```
 
 Ask them to send that output back. It is the only confirmation available that
-the key they received is the key you signed, and it is cheaper than every
-alternative.
+the key they received is the key you signed.
 
 `af license inspect` does not exist. To read a key during a support call, use
 the generator, which decodes without verifying and says so:
@@ -214,14 +192,10 @@ There is no renewal. Sign a new key from a new request and send it, and the
 customer replaces the variable. The old key stays valid until its own expiry,
 which is why a shortened reissue does not shorten anything.
 
-An expired license does not stop the engine. It enters the grace period with a
-warning on every command, then falls back to the community behaviour with every
-enterprise setting preserved. A renewal restores them unchanged, so a late
-purchase order costs warnings rather than an outage.
+An expired license enters the grace period and then falls back to the community
+behaviour; see [expiry and grace](/docs/enterprise/licensing#expiry-and-grace).
 
 ## Withdrawing a license
-
-Say plainly what is available, because the obvious answer is not.
 
 The verifier has a `Revoke` method and a revoked state. Nothing calls it and
 nothing loads a list of withdrawn identifiers, so a revoked state cannot be
@@ -241,9 +215,6 @@ What is available:
    no other lever, and that is the price of a license that keeps working when
    the network does not.
 
-Choosing between these is a decision, not a procedure. Making it once and
-writing it down is worth more than any of the three.
-
 ## The hosted control plane's signing key
 
 The hosted control plane is the vendor's own installation, and it licenses
@@ -253,13 +224,9 @@ itself with one signing key, `license-signing-key-hosted-2026-09`, key id
 licences. [Turning on the enterprise edition](/docs/self-hosting/production#turning-on-the-enterprise-edition)
 has the command that uses it.
 
-**It is kept in `afcp-kv-centralus`, the staging control plane's own vault, and
-that is a measured limit rather than the arrangement this page recommends.**
-The advice above is that a signing key lives somewhere no pipeline can reach.
-This one was placed where it was because it was the fastest place with the
-right access model already in it, and the decision was taken knowingly. What
-that costs, read from the vault's role assignments on 2026-09-12 rather than
-from the Terraform that is supposed to describe them:
+**It is kept in `afcp-kv-centralus`, the staging control plane's own vault**,
+which contradicts the advice above that a signing key lives somewhere no pipeline
+can reach. What that costs, read from the vault's role assignments on 2026-09-12:
 
 | Principal | Role on the vault | What it means for this key |
 | --- | --- | --- |

@@ -10,10 +10,6 @@ licence server, because there is not one. Not a telemetry endpoint, not a
 release check, not a model provider, not Docker Hub, and not the third party
 APIs your application calls.
 
-This page is deliberately specific about what that means, because a partial air
-gap described as complete is worse than no feature at all. The buyer who needs
-this is the buyer who cannot tolerate being wrong about it.
-
 ## Turning it on
 
 ```sh
@@ -39,27 +35,17 @@ Postgres and the Docker daemon are addressed there, and an installation that
 could not reach them could not run at all.
 
 **An entry that is not an address stops the binary.** `https://registry.example.com/v2/`
-is refused rather than ignored, because an allow list with a typo in it is one
-that is quietly narrower than you believe, and you find that out at three in the
-morning.
+is refused rather than ignored.
 
 ## What happens without the licence
 
 `AF_AIR_GAPPED` set on an installation whose licence does not include
 `air_gapped` **does not start**. It does not warn and carry on unsealed.
 
-The failure this feature exists to prevent is an installation that believes it
-is air gapped and makes one call it did not expect, and the belief is the part
-that does the damage. An operator who asked for an air gap and got an open
-network plus a line on standard error is in a worse position than one who got an
-error and fixed it.
-
-For the same reason there is no way to unseal a running process. Everywhere else
-in this product a licence is asked per call, so that a lapse degrades a feature
-rather than requiring a restart. This one is the opposite on purpose: the
-expensive direction of the mistake is not "the air gap stopped working", it is
-"the machine in the secure facility started talking to the internet because a
-purchase order was slow".
+There is no way to unseal a running process. Everywhere else in this product a
+licence is asked per call, so that a lapse degrades a feature rather than
+requiring a restart; this one is the opposite, and a licence lapse does not
+unseal a running installation.
 
 ## What it refuses
 
@@ -154,10 +140,8 @@ a control plane outside your network.
 | `neon` | **refused**, creating a branch means `console.neon.tech` |
 | `supabase` | **refused**, creating a branch means `api.supabase.com` |
 
-The permitted side is the list, not the refused side. A provider added to this
-product later is refused here until somebody decides which side of the line it
-is on, which is one bad afternoon for whoever adds it and is better than an air
-gapped installation quietly reaching a cloud nobody had classified.
+The permitted side is the list, not the refused side: a provider added to this
+product later is refused here until somebody classifies it.
 
 ## What your application may do
 
@@ -184,13 +168,11 @@ does not stop the connection being made or the request leaving; it changes what
 the request carries.
 
 The environment is refused rather than quietly downgraded. An environment
-switched from `allow` to `block` behind your back would come up, go green, and
-report that it tested a code path it never reached.
+switched from `allow` to `block` behind your back would come up green.
 
 ## What is not covered, and why
 
-Three things sit outside the guard, and it is better to read them here than to
-discover them.
+Four things sit outside the guard:
 
 **Building your application's image.** `docker build` runs in the daemon and in
 BuildKit, and what it fetches is a base image and whatever your package manager
@@ -215,7 +197,6 @@ it at a remote daemon over TCP is a connection the guard does not sit on.
 
 ## Proving it
 
-The count that matters is not a list of call sites, it is what a real run does.
 `engine/internal/runtime/local` carries a test that seals the guard and then
 performs a complete lifecycle, bringing an environment up on real Docker,
 serving a request through it, and tearing it down. It asserts that the ledger
@@ -225,8 +206,7 @@ probe, because zero refusals out of zero observations is not a measurement.
 `engine/pkg/airgap` carries a second test that walks the source of both modules
 looking for an outbound client that does not go through the guard. It has its
 own test that it can say no, pointed at a fixture that reaches the network six
-different ways, because a walk that silently skipped every path would report a
-clean repository in exactly the same words. And a third test compares the table
+different ways. And a third test compares the table
 above against the guard's own source in both directions, so a site added without
 a row here, or a row here naming a refusal that does not happen, is a failure
 rather than a slow drift.

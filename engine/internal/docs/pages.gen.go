@@ -1304,7 +1304,7 @@ transition timestamps:
 If the newest golden is older than this when an environment comes up, it is
 refreshed first. A golden that has drifted far enough from production is one
 that is testing last quarter's data, and ` + "`" + `max_age` + "`" + ` is where you say how far is
-too far. Leave it unset and nothing is ever refreshed on your behalf.
+too far. Unset, it is ` + "`" + `168h` + "`" + `.
 
 ### retain
 
@@ -2649,8 +2649,9 @@ Scenarios answer in the same words the rest of a run does.
 | ` + "`" + `unverified` + "`" + ` | It ran and nothing could be measured, or it asserts nothing |
 
 ` + "`" + `blocked` + "`" + ` is deliberately not a failure: a scenario that could not be sent has
-found nothing wrong with your change. It still exits non-zero, because a check
-that ran nothing and reported green is a check everybody believes is running.
+found nothing wrong with your change. ` + "`" + `af ci` + "`" + ` exits non-zero only on ` + "`" + `fail` + "`" + `, so
+what keeps it from reading as a pass is ` + "`" + `AF-LOD-015` + "`" + ` below and its own count in
+the summary.
 
 ` + "`" + "`" + "`" + `
 AF-LOD-014 3 scenario assertions did not hold.
@@ -3208,7 +3209,7 @@ compared, and every normaliser is narrow on purpose.
 | Random identifiers | Two strings that are both UUIDs are equal. |
 | Sequence identifiers | Compared exactly, deliberately. See below. |
 | Floating point | Numbers are equal within a relative tolerance of 1e-9, so representation noise is not news. |
-| Session cookies, request ids | ` + "`" + `Set-Cookie` + "`" + `, ` + "`" + `ETag` + "`" + `, ` + "`" + `Date` + "`" + `, ` + "`" + `X-Request-Id` + "`" + ` and nine others are not compared. The full list is printed on every run. |
+| Session cookies, request ids | ` + "`" + `Set-Cookie` + "`" + `, ` + "`" + `ETag` + "`" + `, ` + "`" + `Date` + "`" + `, ` + "`" + `X-Request-Id` + "`" + ` and ten others are not compared. The full list is printed on every run. |
 | Ordering of writes | Requests are sent one at a time, and rows are matched on the primary key, so storage order is never a difference. |
 
 The hour is configurable, and every run says how wide a gap the timestamp
@@ -4791,10 +4792,6 @@ licence server, because there is not one. Not a telemetry endpoint, not a
 release check, not a model provider, not Docker Hub, and not the third party
 APIs your application calls.
 
-This page is deliberately specific about what that means, because a partial air
-gap described as complete is worse than no feature at all. The buyer who needs
-this is the buyer who cannot tolerate being wrong about it.
-
 ## Turning it on
 
 ` + "`" + "`" + "`" + `sh
@@ -4820,27 +4817,17 @@ Postgres and the Docker daemon are addressed there, and an installation that
 could not reach them could not run at all.
 
 **An entry that is not an address stops the binary.** ` + "`" + `https://registry.example.com/v2/` + "`" + `
-is refused rather than ignored, because an allow list with a typo in it is one
-that is quietly narrower than you believe, and you find that out at three in the
-morning.
+is refused rather than ignored.
 
 ## What happens without the licence
 
 ` + "`" + `AF_AIR_GAPPED` + "`" + ` set on an installation whose licence does not include
 ` + "`" + `air_gapped` + "`" + ` **does not start**. It does not warn and carry on unsealed.
 
-The failure this feature exists to prevent is an installation that believes it
-is air gapped and makes one call it did not expect, and the belief is the part
-that does the damage. An operator who asked for an air gap and got an open
-network plus a line on standard error is in a worse position than one who got an
-error and fixed it.
-
-For the same reason there is no way to unseal a running process. Everywhere else
-in this product a licence is asked per call, so that a lapse degrades a feature
-rather than requiring a restart. This one is the opposite on purpose: the
-expensive direction of the mistake is not "the air gap stopped working", it is
-"the machine in the secure facility started talking to the internet because a
-purchase order was slow".
+There is no way to unseal a running process. Everywhere else in this product a
+licence is asked per call, so that a lapse degrades a feature rather than
+requiring a restart; this one is the opposite, and a licence lapse does not
+unseal a running installation.
 
 ## What it refuses
 
@@ -4935,10 +4922,8 @@ a control plane outside your network.
 | ` + "`" + `neon` + "`" + ` | **refused**, creating a branch means ` + "`" + `console.neon.tech` + "`" + ` |
 | ` + "`" + `supabase` + "`" + ` | **refused**, creating a branch means ` + "`" + `api.supabase.com` + "`" + ` |
 
-The permitted side is the list, not the refused side. A provider added to this
-product later is refused here until somebody decides which side of the line it
-is on, which is one bad afternoon for whoever adds it and is better than an air
-gapped installation quietly reaching a cloud nobody had classified.
+The permitted side is the list, not the refused side: a provider added to this
+product later is refused here until somebody classifies it.
 
 ## What your application may do
 
@@ -4965,13 +4950,11 @@ does not stop the connection being made or the request leaving; it changes what
 the request carries.
 
 The environment is refused rather than quietly downgraded. An environment
-switched from ` + "`" + `allow` + "`" + ` to ` + "`" + `block` + "`" + ` behind your back would come up, go green, and
-report that it tested a code path it never reached.
+switched from ` + "`" + `allow` + "`" + ` to ` + "`" + `block` + "`" + ` behind your back would come up green.
 
 ## What is not covered, and why
 
-Three things sit outside the guard, and it is better to read them here than to
-discover them.
+Four things sit outside the guard:
 
 **Building your application's image.** ` + "`" + `docker build` + "`" + ` runs in the daemon and in
 BuildKit, and what it fetches is a base image and whatever your package manager
@@ -4996,7 +4979,6 @@ it at a remote daemon over TCP is a connection the guard does not sit on.
 
 ## Proving it
 
-The count that matters is not a list of call sites, it is what a real run does.
 ` + "`" + `engine/internal/runtime/local` + "`" + ` carries a test that seals the guard and then
 performs a complete lifecycle, bringing an environment up on real Docker,
 serving a request through it, and tearing it down. It asserts that the ledger
@@ -5006,8 +4988,7 @@ probe, because zero refusals out of zero observations is not a measurement.
 ` + "`" + `engine/pkg/airgap` + "`" + ` carries a second test that walks the source of both modules
 looking for an outbound client that does not go through the guard. It has its
 own test that it can say no, pointed at a fixture that reaches the network six
-different ways, because a walk that silently skipped every path would report a
-clean repository in exactly the same words. And a third test compares the table
+different ways. And a third test compares the table
 above against the guard's own source in both directions, so a site added without
 a row here, or a row here naming a refusal that does not happen, is a failure
 rather than a slow drift.
@@ -5036,15 +5017,9 @@ which is the section after it. An organization that has named one is delivered
 there and nowhere else, and the installation destination covers every
 organization that has not.
 
-Until this page said so, only the first half existed. The control plane's audit
-log carried a tamper evident chain and reached no destination at all, so single
-organization sign on, directory provisioning and administrative actions were
-recorded and forwarded nowhere.
-
 ## What the engine forwards
 
-Five actions, and the list is deliberately short. An audit stream a security
-team can read is one where every entry is an act somebody could be asked about.
+Five actions:
 
 | Action | When |
 | --- | --- |
@@ -5054,9 +5029,8 @@ team can read is one where every entry is an act somebody could be asked about.
 | ` + "`" + `golden.published` + "`" + ` | a masked copy of production was written to a shared store |
 | ` + "`" + `golden.pulled` + "`" + ` | a published golden was restored onto this machine |
 
-Egress decisions and build steps are not forwarded. They are high volume, they
-are already reported through the event bus, and a stream nobody can read is
-worse than a smaller one they can.
+Egress decisions and build steps are not forwarded. They are high volume and are
+already reported through the event bus.
 
 ## What one entry looks like
 
@@ -5067,13 +5041,10 @@ against your SIEM works against your archive:
 {"occurred_at":"2026-09-07T11:22:33.456789Z","forwarded_at":"2026-09-07T11:22:33.481204Z","org":"acme","actor":"dana@acme.example","action":"golden.published","target_type":"golden","target_id":"gv_9f2c","origin":"engine","detail":{"repository":"acme/shop","store":"the bucket s3://acme-goldens/audit"}}
 ` + "`" + "`" + "`" + `
 
-Both timestamps are there because they are different instants. ` + "`" + `occurred_at` + "`" + ` is
-when the action happened and ` + "`" + `forwarded_at` + "`" + ` is when a sink succeeded in sending
-it, which a retry can put minutes later. A stream carrying only the second
-reorders itself whenever one destination is slow. An entry whose producer did
-not say when it happened carries no ` + "`" + `occurred_at` + "`" + ` at all rather than borrowing
-the sink's clock, because a guessed timestamp in an audit log is evidence that
-is wrong rather than evidence that is missing.
+` + "`" + `occurred_at` + "`" + ` is when the action happened and ` + "`" + `forwarded_at` + "`" + ` is when a sink
+succeeded in sending it, which a retry can put minutes later. An entry whose
+producer did not say when it happened carries no ` + "`" + `occurred_at` + "`" + ` at all rather than
+borrowing the sink's clock.
 
 ` + "`" + `org` + "`" + ` and ` + "`" + `actor` + "`" + ` come from ` + "`" + `AF_ORG` + "`" + ` and from ` + "`" + `AF_ACTOR` + "`" + `, falling back to
 ` + "`" + `GITHUB_ACTOR` + "`" + ` on a GitHub Actions runner. Neither is invented when it is
@@ -5089,15 +5060,8 @@ export AF_AUDIT_SINKS=syslog,webhook,object_store
 ` + "`" + "`" + "`" + `
 
 A sink named here that cannot be built stops the engine at startup with the
-reason. That is deliberate: somebody who sets this variable has said that every
-privileged action must be forwarded, and starting anyway with the sink absent
-means nothing is forwarded and nothing says so, which is indistinguishable from
-a quiet week.
-
-With the variable unset nothing is registered and nothing is printed. Nothing is
-ever detected automatically, so a machine that happens to carry cloud
-credentials for something unrelated does not start writing your audit trail into
-somebody's bucket.
+reason. With the variable unset nothing is registered and nothing is printed.
+Nothing is ever detected automatically.
 
 ### syslog over TLS
 
@@ -5117,9 +5081,7 @@ action is the message id, which is what a receiver filters on. Port 6514 is
 assumed when the address carries none.
 
 There is no plaintext option. An address written as ` + "`" + `syslog://` + "`" + ` or ` + "`" + `tcp://` + "`" + ` is
-refused rather than downgraded: the entries say who was given a copy of
-production, and sending that unencrypted to an unauthenticated receiver is the
-thing the entries exist to prove is not happening.
+refused rather than downgraded.
 
 ### HTTPS webhook
 
@@ -5133,18 +5095,13 @@ export AF_AUDIT_WEBHOOK_HEADER="Authorization: Bearer ..."
 ` + "`" + "`" + "`" + `
 
 With a secret set, every request carries ` + "`" + `Af-Audit-Signature: sha256=<hex>` + "`" + ` over
-the body, in the same shape GitHub and Stripe use. A receiver that accepts audit
-entries on an open endpoint accepts audit entries from anybody, and a forged
-entry in an audit log is worse than a missing one.
+the body, in the same shape GitHub and Stripe use.
 
 The dead letter file is required, and it is the reason the retry is allowed to
 be short. Three attempts, pausing 200 ms and then 600 ms between them, and the
 entry is appended to that file and flushed before the call returns, in the same
 JSON the receiver would have been given. The measured total, round trips
 included, is in the report ` + "`" + `just benchmark` + "`" + ` writes.
-
-A webhook that posts once and gives up loses an entry every time its receiver
-restarts, and loses it silently. A hole you can replay is not a hole.
 
 ### Object store
 
@@ -5164,17 +5121,11 @@ One object per entry, keyed by date:
 antifailure/2026/09/07/112233.456789000-golden.published-9f2ca10b.json
 ` + "`" + "`" + "`" + `
 
-Not a batch and not an append. An object written once can be locked, which is
-what a retention obligation is usually satisfied by, and an appended file has
-to be read, extended and rewritten, which is a race between two environments
-being torn down and cannot be locked at all. The date is a path so a lifecycle
-rule and a partitioned query both work without anybody parsing a filename. An
-object is never replaced.
-
-Two entries in the same nanosecond are two objects, because the key carries
-eight random characters as well as the time. Without them the second would
-silently replace the first, and an audit log that loses the entries which
-arrived together loses exactly the ones somebody is investigating.
+Not a batch and not an append: an object written once can be locked, and an
+object is never replaced. The date is a path so a lifecycle rule and a
+partitioned query both work without parsing a filename. Two entries in the same
+nanosecond are two objects, because the key carries eight random characters as
+well as the time.
 
 ## What a sink cannot do
 
@@ -5182,11 +5133,7 @@ A sink observes. It cannot refuse an environment, cannot change an entry, and
 cannot see what another sink received. An error from one is recorded and the
 lifecycle continues.
 
-That last part matters most on teardown. A forwarding outage that stopped an
-environment being destroyed would turn a logging problem into a resource leak,
-which is strictly worse than the problem it came from. So a SIEM you cannot
-reach costs you one progress line and nothing else, carrying the sink's own
-words about what went wrong:
+A SIEM you cannot reach costs one progress line, carrying the sink's own words:
 
 ` + "`" + "`" + "`" + `
 audit sink: forwarding to syslog over TLS at collector.example.com:6514: dial tcp
@@ -5199,8 +5146,7 @@ take is in the dead letter file before ` + "`" + `Write` + "`" + ` returns.
 
 ## The control plane's own audit log
 
-A different stream with a different shape, and the shape is the reason it is
-worth having. The engine forwards five actions from a machine with no database.
+The engine forwards five actions from a machine with no database.
 The control plane forwards ` + "`" + `audit_entries` + "`" + `, the organization log covering
 actions including sign on, directory provisioning and administration. The
 separate global operator log, ` + "`" + `admin_audit_entries` + "`" + `, is forwarded only where its
@@ -5252,9 +5198,7 @@ the delivery time. Catching up after an outage can deliver old events. Verify
 the signature and deduplicate by organization and sequence; signature
 verification alone does not reject replay.
 
-One batch holds one organization. A manifest names an organization, so a batch
-carrying two would name one and cover both, and a receiver checking it would be
-checking the wrong claim.
+One batch holds one organization.
 
 ### Turning the control plane's stream on
 
@@ -5279,8 +5223,7 @@ Its batch API ignores properties supplied only through HTTP headers.
 Splunk stores the same manifest in the indexed ` + "`" + `antifailure_manifest` + "`" + ` field,
 alongside the audit entry's event data.
 
-` + "`" + `AF_AUDIT_STREAM_KEY` + "`" + ` is required whenever a sink is named. A manifest signed
-under a key nobody chose is decoration rather than evidence.
+` + "`" + `AF_AUDIT_STREAM_KEY` + "`" + ` is required whenever a sink is named.
 
 Remote collector URLs require HTTPS and cannot contain user information.
 Loopback HTTP is permitted for a local collector. Redirects are refused, each
@@ -5304,10 +5247,8 @@ nowhere.
 
 ### Choosing your own destination, per organization
 
-On a hosted control plane the installation's environment is the operator's, not
-yours, so the destination is an API instead. One destination per organization:
-a second would make "where did sequence 41 go" a question with two answers, and
-the honest way to reach two collectors is one collector that fans out after
+On a hosted control plane the destination is an API instead. One destination per
+organization; to reach two collectors, use one collector that fans out after
 receiving.
 
 ` + "`" + "`" + "`" + `sh
@@ -5329,11 +5270,7 @@ answer carries the endpoint, the last four characters of the credential and a
 fingerprint of it, and never the credential itself.
 
 **The credential is required on every save, including a change of endpoint.**
-That is deliberate. If the endpoint could be moved while the stored credential
-was kept, somebody who had taken over an administrator's session could point the
-stream at a host they control and receive your collector token in the
-authorization header of the next delivery. Changing where a credential is sent
-requires having it.
+Changing where a credential is sent requires having it.
 
 **Your credential is stored sealed.** It is encrypted with AES-256-GCM under a
 key held in the deployment's key vault and never in the database, bound to your
@@ -5347,8 +5284,7 @@ organization's current audit sequence is recorded with the destination, and
 entries above it are what get delivered, so configuring a collector does not
 replay months of entries into it as a surprise. The configuration change is
 itself an audit entry, written after that sequence is read, so the first thing
-your collector receives is the record of its own creation. That is how you can
-tell a working destination from a wrong one without a test button.
+your collector receives is the record of its own creation.
 
 Switching a destination off stops delivery on the next pass and does not fall
 back to the installation destination: an organization that turned its stream off
@@ -5446,9 +5382,8 @@ installation, so nothing is forwarded
 
 ` + "`" + `just benchmark` + "`" + ` writes a dated report of how long an action takes to reach each
 destination, and how long an undeliverable entry takes to become durable on disk
-while a receiver is down. With nothing configured it measures loopback, which is
-the delay this product is responsible for and no more. Point it at your own
-collector and the number becomes the whole path, measured by you:
+while a receiver is down. With nothing configured it measures loopback. Point it
+at your own collector and the number becomes the whole path:
 
 ` + "`" + "`" + "`" + `sh
 AF_AUDIT_BENCHMARK_SYSLOG_ADDRESS=collector.example.com:6514 \
@@ -5481,10 +5416,6 @@ It is not an audit report and it is not an opinion. It is a document that says
 what this system recorded, names the artifact so somebody can go and look, and
 leaves every conclusion to the person whose job that is.
 
-A tool that printed "SOC 2 compliant" would be worse than no tool: it reads as
-an opinion from somebody qualified to hold one and it is produced by a program
-that looked at four tables.
-
 ## The four outcomes, three of which are not "pass"
 
 **Evidenced.** The check ran, the artifact exists, and it says what the control
@@ -5496,9 +5427,7 @@ here on the first day.
 
 **Failed.** The check found evidence that the control is *not* holding: an audit
 chain with a break in it, a golden published without a clean scan, a membership
-removal that did not revoke the member's sessions. This is the most important of
-the four, because a compliance tool that cannot say no has no ability to say yes
-that means anything.
+removal that did not revoke the member's sessions.
 
 **Outside this product.** The control is real and nothing here can speak to it:
 physical security, background checks, a backup plan. Listed rather than quietly
@@ -5520,8 +5449,7 @@ never all of it.
 
 Exit 6 is what a nightly job watches, so a broken audit chain stops a pipeline
 without anybody having to parse the document. Controls that are merely not
-evidenced do not fail the command: a command that failed on the first day would
-be switched off within a week, taking the finding that matters with it.
+evidenced do not fail the command.
 
 ## What it reads
 
@@ -5558,9 +5486,6 @@ created from an unverified golden or left behind after teardown.
 
 ## The HIPAA de-identification control
 
-` + "`" + `164.514(b)` + "`" + ` is where this product does the most work and where its limits
-matter most, so the pack says it plainly rather than in a footnote.
-
 Every golden is scanned for real data before it can be branched, and the scan is
 signed with what was looked at, how many rows were sampled, and the hash of the
 rules used. **A scan is a sample and not a proof.** It is evidence that a masking
@@ -5576,13 +5501,11 @@ export AF_APP_ROLE=antifailure_app        # the role the APPLICATION connects as
 export AF_AUDIT_RETENTION_DAYS=2555       # 0 means entries are never pruned
 ` + "`" + "`" + "`" + `
 
-Run this as a role that can ` + "`" + `SELECT` + "`" + ` and nothing else. The whole document is a
-read, and a tool that produces evidence about a database it can also write is a
-tool whose evidence is worth less.
+Run this as a role that can ` + "`" + `SELECT` + "`" + ` and nothing else.
 
 ` + "`" + `AF_APP_ROLE` + "`" + ` is the role the application connects as, whose privileges on the
 audit log are one of the things reported on. It is not the role this command
-connects as, and conflating the two would report on the wrong one.
+connects as.
 
 Retention is read from configuration rather than from the database, because a
 retention policy that has not yet deleted anything leaves no trace in the data.
@@ -5626,9 +5549,8 @@ break restored afterwards so no case depends on running before another:
   the failing control, and no longer named once it is switched on;
 - an application role granted ` + "`" + `UPDATE` + "`" + ` on the audit log, naming the privilege.
 
-The number of tables carrying an ` + "`" + `org_id` + "`" + ` is never asserted. It is a property of
-the schema on the day it runs, so what is checked is that none of them has row
-level security disabled.
+The number of tables carrying an ` + "`" + `org_id` + "`" + ` is never asserted; what is checked is
+that none of them has row level security disabled.
 
 The reports that run produces, and a note saying what it did not check, are kept
 as a build artifact. Run it yourself with ` + "`" + `just compliance` + "`" + `.
@@ -5640,11 +5562,7 @@ sidebar:
   order: 11
 ---
 
-The four built-in roles, owner, admin, member and viewer, are the right four for
-a team and they are in every edition. A large organisation is shaped
-differently: somebody administers two repositories and reads the rest, a
-compliance team approves masking changes and creates no environments, a
-contractor sees one repository and nothing about the others.
+The four built-in roles, owner, admin, member and viewer, are in every edition.
 
 A custom role is a name, a description and a set of permissions from the same
 fixed catalogue every route already declares. A grant gives one person one role
@@ -5728,8 +5646,7 @@ one grant would be every grant.
 | ` + "`" + `PUT /roles/policy` + "`" + ` | Applies a file, whole, in one transaction. |
 | ` + "`" + `GET /roles/members/<id>/permissions` + "`" + ` | What one person can do and where each permission came from. You may always read your own. |
 
-A dry run is worth taking. The person applying a permission model is usually the
-person a wrong one would lock out.
+A dry run is worth taking.
 
 ` + "`" + "`" + "`" + `sh
 curl -X POST https://<your-control-plane>/roles/policy/dry-run \
@@ -5758,9 +5675,7 @@ it.
 ## What is not here
 
 ` + "`" + `approvals` + "`" + ` is part of the file format and nothing enforces it, so a file
-that carries a non-empty ` + "`" + `approvals` + "`" + ` section is refused whole, naming it. A
-stored approval requirement that nothing checks would be a control reporting
-itself as held, which is worse than not having one.
+that carries a non-empty ` + "`" + `approvals` + "`" + ` section is refused whole, naming it.
 
 ## What happens without the entitlement
 
@@ -5789,26 +5704,16 @@ sidebar:
 This is the vendor side of [licensing](/docs/enterprise/licensing). That page
 describes installing a key. This one describes producing one.
 
-Two audiences read it. The vendor issuing a paid license is the obvious one.
-The other is an air gapped installation that mints its own licenses against its
-own signing key, which is a supported arrangement rather than a workaround, and
-the steps are identical.
+An air gapped installation that mints its own licenses against its own signing
+key follows the same steps.
 
-## The tool, and why nothing calls it
+## The tool
 
-Issuing is ` + "`" + `tools/licensegen` + "`" + `, a command line program with no caller. That is
-deliberate. Issuing is a vendor action taken a handful of times a year by a
-person holding a signing key, and wrapping it in a workflow would mean putting
-the signing key somewhere a workflow can reach. A key a pipeline can read is a
-key that leaks with the pipeline.
-
-What is not deliberate is that until this page existed, running it was tribal
-knowledge. A command run by hand is a legitimate design. A command nobody can
-find is not.
+Issuing is ` + "`" + `tools/licensegen` + "`" + `, a command line program with no caller, run by hand
+by a person holding a signing key. Wrapping it in a workflow would put the
+signing key somewhere a workflow can reach.
 
 ## Before anything: three things that are not true yet
-
-Read these first. Each one changes what issuing means today.
 
 **No released binary carries a signing key.** ` + "`" + `ee/engine/license/keys.go` + "`" + `
 expects a release to stamp public keys into ` + "`" + `trustedKeys` + "`" + ` with a linker flag.
@@ -5839,8 +5744,7 @@ It prints a key id, a public key and a private key, and writes nothing to disk.
 Paste the private half into the key vault immediately and nowhere else. The
 program has no way to recover it.
 
-The key id is a label you choose. Date it, because the only thing it has to do
-is let somebody a year from now tell one rotation from another.
+The key id is a label you choose. Date it.
 
 The public half goes to the verifier as ` + "`" + `kid=base64` + "`" + `, and the key id in that
 pair has to be the one you just chose. Keep every previous entry: a build that
@@ -5881,14 +5785,9 @@ The features are ` + "`" + `air_gapped` + "`" + `, ` + "`" + `audit_stream` + "`
 ` + "`" + `cloud_runtime` + "`" + `, ` + "`" + `compliance_packs` + "`" + `, ` + "`" + `enterprise_dashboard` + "`" + `,
 ` + "`" + `enterprise_secrets` + "`" + `, ` + "`" + `multi_runtime` + "`" + `, ` + "`" + `policy_enforcement` + "`" + `, ` + "`" + `rbac` + "`" + `, ` + "`" + `scim` + "`" + `,
 ` + "`" + `sso` + "`" + ` and ` + "`" + `support_access` + "`" + `. Anything else
-is refused at issue time, because the verifier cannot refuse it: a license
-issued for a newer release names features an older binary has never heard of,
-and rejecting the whole license over one unknown name would take away the
-features the customer did buy. So the verifier carries an unknown name without
-acting on it, and the generator is the only place the set can be closed.
-
-Before that check existed, ` + "`" + `"features": ["ssoo"]` + "`" + ` signed cleanly, verified
-cleanly, reported the license active, and permitted nothing.
+is refused at issue time. The verifier carries an unknown name without acting on
+it, because a license issued for a newer release names features an older binary
+has never heard of, so the generator is the only place the set can be closed.
 
 ## No feature is issued with a warning any more
 
@@ -5913,11 +5812,6 @@ never print. If a feature is ever built and deliberately gated nowhere again,
 either of them is refused. Nothing in this product enforces them, so a license
 carrying one would verify, report itself active, print the feature in
 ` + "`" + `af license status` + "`" + `, and change nothing about what the software does.
-
-That is a worse failure than an unknown name, because everything about it reads
-as a supported feature: it is in the documentation, in the price list, and in
-the generator's own set. The only two people positioned to discover it are the
-customer who paid and the person who sold it.
 
 Both refusals are in the product rather than in a checklist. The generator will
 not sign one, and the verifier carries the name and never permits it, exactly as
@@ -5979,8 +5873,7 @@ af license status
 ` + "`" + "`" + "`" + `
 
 Ask them to send that output back. It is the only confirmation available that
-the key they received is the key you signed, and it is cheaper than every
-alternative.
+the key they received is the key you signed.
 
 ` + "`" + `af license inspect` + "`" + ` does not exist. To read a key during a support call, use
 the generator, which decodes without verifying and says so:
@@ -5995,14 +5888,10 @@ There is no renewal. Sign a new key from a new request and send it, and the
 customer replaces the variable. The old key stays valid until its own expiry,
 which is why a shortened reissue does not shorten anything.
 
-An expired license does not stop the engine. It enters the grace period with a
-warning on every command, then falls back to the community behaviour with every
-enterprise setting preserved. A renewal restores them unchanged, so a late
-purchase order costs warnings rather than an outage.
+An expired license enters the grace period and then falls back to the community
+behaviour; see [expiry and grace](/docs/enterprise/licensing#expiry-and-grace).
 
 ## Withdrawing a license
-
-Say plainly what is available, because the obvious answer is not.
 
 The verifier has a ` + "`" + `Revoke` + "`" + ` method and a revoked state. Nothing calls it and
 nothing loads a list of withdrawn identifiers, so a revoked state cannot be
@@ -6022,9 +5911,6 @@ What is available:
    no other lever, and that is the price of a license that keeps working when
    the network does not.
 
-Choosing between these is a decision, not a procedure. Making it once and
-writing it down is worth more than any of the three.
-
 ## The hosted control plane's signing key
 
 The hosted control plane is the vendor's own installation, and it licenses
@@ -6034,13 +5920,9 @@ itself with one signing key, ` + "`" + `license-signing-key-hosted-2026-09` + "`
 licences. [Turning on the enterprise edition](/docs/self-hosting/production#turning-on-the-enterprise-edition)
 has the command that uses it.
 
-**It is kept in ` + "`" + `afcp-kv-centralus` + "`" + `, the staging control plane's own vault, and
-that is a measured limit rather than the arrangement this page recommends.**
-The advice above is that a signing key lives somewhere no pipeline can reach.
-This one was placed where it was because it was the fastest place with the
-right access model already in it, and the decision was taken knowingly. What
-that costs, read from the vault's role assignments on 2026-09-12 rather than
-from the Terraform that is supposed to describe them:
+**It is kept in ` + "`" + `afcp-kv-centralus` + "`" + `, the staging control plane's own vault**,
+which contradicts the advice above that a signing key lives somewhere no pipeline
+can reach. What that costs, read from the vault's role assignments on 2026-09-12:
 
 | Principal | Role on the vault | What it means for this key |
 | --- | --- | --- |
@@ -6086,9 +5968,6 @@ contain ` + "`" + `ee/` + "`" + ` at all: it is a separate Go module the communi
 resolve, and CI has a job that fails if the community binary carries an
 enterprise symbol.
 
-That is stronger than a runtime check. A feature you cannot compile is a feature
-that cannot be switched on by patching a boolean.
-
 ## Installing a license
 
 There is nothing to install. The enterprise binary reads its license from the
@@ -6101,17 +5980,12 @@ export AF_ORG=globex
 af license status
 ` + "`" + "`" + "`" + `
 
-That is deliberate rather than unfinished. A key on disk is a key that outlives
-the machine it was put on, survives a rollback, and has to be removed from every
-copy. Two variables are removed by unsetting them, and every enterprise setting
-is preserved when they are gone: features fall back to the community behaviour
-rather than failing.
+Every enterprise setting is preserved when they are gone: features fall back to
+the community behaviour rather than failing.
 
 So ` + "`" + `af license install` + "`" + ` and ` + "`" + `af license remove` + "`" + ` exist and both say so instead of
 pretending. On the enterprise binary they name these variables; on the community
-binary they refuse outright, because storing a key that build can never act on
-would leave somebody believing enterprise features are on until the rollout they
-bought the license for.
+binary they refuse outright.
 
 A license is an Ed25519 signed statement carrying the organisation it was issued
 to, the features it permits, the seat count, when it expires, and which key
@@ -6133,8 +6007,7 @@ AF-EE-001 The enterprise license could not be verified.
   truncated in transit.
 ` + "`" + "`" + "`" + `
 
-Almost always truncation. A license token is long and survives being pasted into
-a chat window less often than people expect.
+Almost always truncation.
 
 ## Wrong organisation
 
@@ -6175,9 +6048,7 @@ addition and never evicts somebody to make room.
 ## Expiry and grace
 
 An expired license keeps working for a grace period, with a warning on every
-command. Enterprise features that stop working the moment a renewal is late
-turn a billing delay into an outage, and nothing in ` + "`" + `ee/` + "`" + ` is worth doing that
-for.
+command.
 
 After the grace period the enterprise features stop and everything else carries
 on. The community edition is the whole product minus ` + "`" + `ee/` + "`" + `, and an expired
@@ -6193,19 +6064,11 @@ The features a license can name are ` + "`" + `air_gapped` + "`" + `, ` + "`" + 
 Of the 14 features a license can carry, **11 are refused when the license does not name them**, 8 by the engine and 4 by the control plane, with some checked by both. The rest are listed here anyway, with what actually happens without each one, because a feature that is sold and never checked is worth knowing about and the number is only useful if it can come back unflattering.
 <!-- entitlement-count:end -->
 
-The table is generated from ` + "`" + `ee/engine/feature/catalogue.go` + "`" + `, which is the one
-place this product records what a license permits. Every row saying a feature is
-refused names the file that refuses it, and a test opens that file and requires
-the call that actually refuses: ` + "`" + `feature.Enabled` + "`" + ` for a row the enterprise
-engine gates, ` + "`" + `edition.Permits` + "`" + ` for one the community engine gates by name. So a
-row cannot claim an enforcement it does not have. Which of the two is required
-is decided by the row's own state and never by the shape of the path, because a
-check that guessed from the path would accept an enterprise file for a community
-gate and never notice that the mechanism claimed is not the mechanism there.
-
-Rows that say nothing changes are the honest answer rather than an omission: a
-feature that is sold and never checked is a gap worth publishing, and this page
-is where it gets published.
+The table is generated from ` + "`" + `ee/engine/feature/catalogue.go` + "`" + `, the one place this
+product records what a license permits. Every row saying a feature is refused
+names the file that refuses it, and a test requires that file to carry the call
+that refuses: ` + "`" + `feature.Enabled` + "`" + ` where the enterprise engine gates, or
+` + "`" + `edition.Permits` + "`" + ` where the community engine gates by name.
 
 <!-- entitlements:start -->
 | Feature | What it is | Without it |
@@ -6226,11 +6089,8 @@ is where it gets published.
 | ` + "`" + `support_access` + "`" + ` | A supported way for the vendor to see what a customer sees. | Nothing changes. It is implemented and deliberately available to everyone. |
 <!-- entitlements:end -->
 
-The distinction in the third column between a feature that is refused and one
-the hosted control plane covers under its plan is the one worth reading twice. A
-license carries fourteen names and the hosted plan gate carries one boolean, so
-a license naming a feature and a plan that does not are not reconcilable by
-anything. Both are real refusals and only the first is keyed on what was bought.
+A license carries fourteen names and the hosted plan gate carries one boolean.
+Both are real refusals and only the license one is keyed on what was bought.
 
 ### Two of those cannot be sold
 
@@ -6239,13 +6099,6 @@ else. There is no implementation of either, so there is nothing a license could
 switch on, and both are refused twice: ` + "`" + `tools/licensegen` + "`" + ` will not sign a
 request naming one, and the verifier carries the name through and never permits
 it.
-
-That is deliberate rather than an oversight waiting to be tidied. The
-alternative, a license check placed in front of a capability that does not
-exist, is a declared enforcement site that can never run, which reads as a
-working feature from every direction and is harder to find than the gap it
-covers. A feature nobody can buy and nobody can be granted cannot be mistaken
-for one that ships.
 
 ### Custom roles were in a third state until 2026-09-11
 
@@ -6351,9 +6204,7 @@ The rule is checked against the database's own catalogue, so it means every
 column it names. ` + "`" + `"*.email"` + "`" + ` is satisfied when every email column in the
 database is masked, and a plan that masks ` + "`" + `users.email` + "`" + ` and leaves
 ` + "`" + `contacts.email` + "`" + ` readable is refused by name. A pattern that matches no column
-at all counts as unsatisfied too, because a policy that quietly passes when the
-thing it protects is absent stops protecting the moment somebody renames a
-table.
+at all counts as unsatisfied too.
 
 ` + "`" + `denied_hosts` + "`" + ` refuses a host named in any mode other than ` + "`" + `block` + "`" + `. A repository
 may still write a ` + "`" + `block` + "`" + ` rule for one, so that it can document what it
@@ -6367,39 +6218,24 @@ af: organization policy: required masking (*.email, customers.card_number)
 ` + "`" + "`" + "`" + `
 
 A file you named that cannot be read, cannot be parsed, or carries a key this
-build does not know stops the engine with the reason. That is deliberate:
-starting anyway means every environment is created without being checked and
-nothing in the output says so, which is exactly the behaviour the policy exists
-to change.
+build does not know stops the engine with the reason.
 
 Setting nothing registers nothing and prints nothing, which is the ordinary
 case for an installation with no organization policy.
 
 Approvals live in the control plane and this file does not carry them, so
 ` + "`" + `synth_requires_approval` + "`" + ` refuses every synth rule when the engine reads its
-policy from a file. A lookup that answered "approved" because it had nowhere to
-ask would turn the rule into decoration.
+policy from a file.
 
 ## Where it runs
 
-Most of the policy is checked before anything is created, not after. A policy
-that refused an environment halfway through would leave resources behind and a
-decision nobody can act on.
+Most of the policy is checked before anything is created, not after.
 
-` + "`" + `required_masked_columns` + "`" + ` is the exception, and the reason is worth knowing
-before you write one. At creation time the engine has read a manifest, and a
-manifest enumerates services rather than columns. Expanding a column pattern
-there would mean expanding it against the tables a manifest happens to mention,
-which is not the set of tables that exist, and a required pattern that matched
-nothing in that smaller set would refuse a repository whose schema satisfies it
-perfectly.
-
-So the masking rule is checked during a golden refresh instead, after the
-engine has read the database's catalogue and worked out which columns its rules
-will rewrite, and before the first row is rewritten. A refusal there means the
-golden is never published, and an unverified golden cannot be branched, so no
-environment can hold data the policy refused. It is later than the other rules
-and it is still before the data exists.
+` + "`" + `required_masked_columns` + "`" + ` is the exception: it is checked during a golden refresh
+instead, after the engine has read the database's catalogue and worked out which
+columns its rules will rewrite, and before the first row is rewritten. A refusal
+there means the golden is never published, and an unverified golden cannot be
+branched, so no environment can hold data the policy refused.
 
 One consequence to plan for: a golden published before you tightened the policy
 is not re-examined. Refresh the golden after a policy change, with
@@ -6414,11 +6250,6 @@ them.
 
 A hook returns a refusal or nothing. It cannot permit something the engine would
 otherwise refuse.
-
-That asymmetry is the whole safety property. A hook that could grant permission
-would be a way to switch off masking verification, egress policy, or tenant
-isolation from outside the engine, and none of those should have an off switch
-that lives in somebody's plugin.
 
 ## Writing one
 
@@ -6436,9 +6267,7 @@ type MaskingHook interface {
 ` + "`" + "`" + "`" + `
 
 A hook may implement either or both. ` + "`" + `MaskingRequest` + "`" + ` carries two column lists
-and a hook needs both: masked columns alone cannot tell a database that has no
-email column from one that has three and masks none of them, and those deserve
-opposite answers.
+and a hook needs both.
 
 Register it with the engine's extension registry. The community build registers
 nothing, so each check iterates an empty slice and returns nil.
@@ -6455,10 +6284,8 @@ sidebar:
 *More than one placement target requires an enterprise license with the
 ` + "`" + `multi_runtime` + "`" + ` feature. One target needs no license.*
 
-With one runtime there is nothing to decide. With several, an environment has to
-go somewhere, and where is a policy question: a region for data residency, a
-pool with more memory for a heavy repository, an isolated pool for repositories
-that handle regulated data.
+With one runtime there is nothing to decide. With several, where an environment
+goes is a policy question.
 
 ` + "`" + "`" + "`" + `yaml
 runtime:
@@ -6490,16 +6317,9 @@ AF-SCH-001 No runtime satisfies the placement requirement region=eu-west-2.
 
 ## Why it refuses rather than falls back
 
-Placing an EU repository's environment in a US pool because the EU pool was full
-is the kind of helpfulness that ends a compliance audit badly. A requirement
-that can be silently ignored is not a requirement.
-
-The same reasoning is why a requirement nothing can satisfy is refused when the
-manifest is read rather than at dispatch. The requirement and the targets are in
-one file,
-so the contradiction is decidable before anything runs, and the person looking at
-it is the person who wrote both lines. A scheduler in a cluster reporting the
-same thing an hour later is reporting it to somebody who cannot fix it.
+A requirement that can be silently ignored is not a requirement. A requirement
+nothing can satisfy is refused when the manifest is read rather than at dispatch,
+because the requirement and the targets are in one file.
 
 ## Requirements and tags
 
@@ -6510,20 +6330,16 @@ first one listed wins.
 
 **The tags are declared in the manifest, not discovered from the cluster.** A
 kubeconfig context is a name on somebody's laptop and it does not say which
-region the cluster is in. Writing the claim in the repository puts it under
-review next to the requirement that reads it, and it is one fewer thing that can
-be changed by anyone with access to a cluster.
+region the cluster is in.
 
 ## What placement does not decide
 
 **Capacity and health are not inputs.** The engine places one environment from a
-command line and holds no capacity ledger, so it has nothing to report for either
-and does not invent one. ` + "`" + `engine/internal/scheduler` + "`" + ` carries the fair share
-round, the aging that stops a nightly job starving behind pull requests, the per
-organization limit and the queue position for the day a control plane dispatches
-batches; the engine calls the same function with the one run it has, so the
-decision on a laptop is made by the code that will make it in a cluster rather
-than by a second implementation that agrees until it does not.
+command line and holds no capacity ledger. ` + "`" + `engine/internal/scheduler` + "`" + ` carries
+the fair share round, the aging that stops a nightly job starving behind pull
+requests, the per organization limit and the queue position for the day a control
+plane dispatches batches; the engine calls the same function with the one run it
+has.
 
 The consequence worth stating plainly: **this does not fail over.** A target that
 is unreachable is an error, not a reason to place somewhere else. Placement is a
@@ -6549,25 +6365,21 @@ any other name is refused with a message that lists what this build has rather
 than quietly substituting one. The Kubernetes runtime builds a Deployment, a
 Service and an Ingress per web service and has been selectable the whole time.
 
-One target is community too. It decides nothing: it labels the single runtime
-you already had so a residency policy has something to read, and charging for a
-label would be charging for the community edition.
-
-What the enterprise edition adds is not a third runtime. It is the choice between
-several at once: the requirements, the tags and the refusal described above.
+One target is community too: it labels the single runtime you already had so a
+residency policy has something to read. What the enterprise edition adds is the
+choice between several at once: the requirements, the tags and the refusal above.
 
 ## Why there is no ECS runtime
 
 ` + "`" + `runtime.provider: ecs` + "`" + ` is registered in the enterprise binary and it refuses,
-every time, with a report rather than an error. The reason is worth reading
-before assuming it is a gap somebody will close next release.
+every time, with a report rather than an error.
 
 A runtime is allowed to exist here only if it can prove an environment has no
 way out, and the Kubernetes runtime proves it the only way a proof works: it
 creates the ` + "`" + `NetworkPolicy` + "`" + ` objects itself, then runs one pod under exactly the
 rules a service runs under and has it try to escape before any application image
 starts. If any attempt gets out the environment does not start and you get
-**AF-RUN-043**. That is not caution. Several container network plugins accept a
+**AF-RUN-043**. Several container network plugins accept a
 ` + "`" + `NetworkPolicy` + "`" + ` object and enforce nothing, every status reads green, and the
 only thing that can tell the two apart is a packet.
 
@@ -6621,22 +6433,18 @@ exfiltration path. A VPC endpoint policy naming this environment's own
 repository, log group and bucket closes the second while leaving the first, so
 the weaker half of the question was the one being answered.
 
-One finding is worth carrying away even if you never run on ECS. **On AWS the
-security group is irrelevant to a DNS query.** The VPC user guide states that
-traffic to and from the Amazon DNS server cannot be filtered with network ACLs
-or security groups, and that resolver answers recursive queries for public names
-from anywhere in the VPC. A DNS question is chosen by whoever asks it, so that
-is a data channel out that no security group audit will ever show you. Closing
-it takes a Route 53 Resolver DNS Firewall rule group whose last rule blocks every
-domain and which does not fail open. A containment argument carried over from
-Kubernetes gets this one wrong, because there the same attempt is closed by the
-policy that closes everything else.
+**On AWS the security group is irrelevant to a DNS query.** The VPC user guide
+states that traffic to and from the Amazon DNS server cannot be filtered with
+network ACLs or security groups, and that resolver answers recursive queries for
+public names from anywhere in the VPC, so that is a data channel out that no
+security group audit shows. Closing it takes a Route 53 Resolver DNS Firewall
+rule group whose last rule blocks every domain and which does not fail open.
 
 **A DNS Firewall rule group is read by priority from the lowest number up, and
 that is where the second finding is.** A group holding ` + "`" + `ALLOW` + "`" + ` on every domain
 at priority 5 and ` + "`" + `BLOCK` + "`" + ` on every domain at priority 1000 blocks nothing at all,
 because ` + "`" + `ALLOW` + "`" + ` permits the request to go through and the lower priority is
-consulted first. It reads as configured in a console screenshot. The check
+consulted first. The check
 refuses that shape, along with a terminal rule moved off the end by priority, two
 rules sharing the last priority, which AWS refuses to create anyway, and a domain
 with a star anywhere but the front, which a DNS Firewall domain list cannot hold.
@@ -6696,8 +6504,7 @@ once. Tokens can be given an expiry and rotated: two are live during the
 overlap, because a cutover means provisioning is broken for however long it
 takes somebody to paste the new value into the identity provider.
 
-What is supported is published where a client will look for it, and it is
-written from what the code does rather than from what would be nice:
+What is supported is published where a client will look for it:
 
 ` + "`" + "`" + "`" + `sh
 curl -H "Authorization: Bearer <token>" \
@@ -6705,8 +6512,7 @@ curl -H "Authorization: Bearer <token>" \
 ` + "`" + "`" + "`" + `
 
 ` + "`" + `patch` + "`" + `, ` + "`" + `filter` + "`" + ` and ` + "`" + `etag` + "`" + ` are supported. ` + "`" + `bulk` + "`" + `, ` + "`" + `sort` + "`" + ` and ` + "`" + `changePassword` + "`" + `
-are not, and say so. A configuration document claiming a capability the server
-lacks makes a client use the path that fails instead of the one that works.
+are not, and say so.
 
 ## What each operation does here
 
@@ -6720,14 +6526,6 @@ lacks makes a client use the path that fails instead of the one that works.
 | Add a group member | Recorded. If the user does not exist yet, the reference is kept and resolved when they arrive. |
 
 ### Deactivation removes the membership
-
-This is deliberate and it has a cost worth knowing about.
-
-` + "`" + `active: false` + "`" + ` from a directory means this person no longer works here, and the
-only honest implementation of that is that the row granting access stops
-existing. A flag that every read path has to remember to check is the shape of
-bug where the button says deactivated, the flag is set, and one query that
-forgot the check still returns their data.
 
 The cost: a role you set by hand here is not remembered across a deactivate and
 reactivate cycle. Somebody promoted to admin and then deactivated comes back as
@@ -6791,10 +6589,7 @@ Filterable: ` + "`" + `id` + "`" + `, ` + "`" + `userName` + "`" + `, ` + "`" + 
 ` + "`" + `emails.value` + "`" + `, ` + "`" + `name.givenName` + "`" + `, ` + "`" + `name.familyName` + "`" + `. Groups: ` + "`" + `id` + "`" + `,
 ` + "`" + `displayName` + "`" + `, ` + "`" + `externalId` + "`" + `.
 
-A filter this server cannot answer is refused with ` + "`" + `invalidFilter` + "`" + `. That
-matters more than it sounds: a provider asking "who has this userName" and
-receiving every user will create a duplicate of everybody, so silently ignoring
-a filter is worse than refusing it.
+A filter this server cannot answer is refused with ` + "`" + `invalidFilter` + "`" + `.
 
 The filter is parsed into a syntax tree and never concatenated into SQL. Every
 attribute maps to a known column through a closed list, and every literal is a
@@ -6830,9 +6625,6 @@ thing being audited.
 - **Group-to-role mapping through SCIM.** Groups sync, and a group can carry a
   role, but the mapping is configured through the single sign-on connection
   rather than through SCIM.
-
-Each is absent rather than half-present, and none is claimed anywhere in the
-product.
 `,
 	"enterprise/secrets.md": `---
 title: Enterprise secret stores
@@ -6844,14 +6636,9 @@ sidebar:
 *Requires an enterprise license with the ` + "`" + `enterprise_secrets` + "`" + ` feature, and the
 enterprise binary built from ` + "`" + `ee/` + "`" + `.*
 
-The community edition looks for a declared variable in four places, all of them
-local: this shell, ` + "`" + `.env` + "`" + `, the encrypted store beside it, and the system
-keyring. That is the right set for one person on one laptop and the wrong set
-for a company, where the credential already exists in a secret manager and the
-thing nobody wants is fifty developers copying it onto fifty machines so a
-preview environment can start.
-
-The enterprise edition adds four more, asked after every local one.
+The community edition looks for a declared variable in four local places: this
+shell, ` + "`" + `.env` + "`" + `, the encrypted store beside it, and the system keyring. The
+enterprise edition adds four more, asked after every local one.
 
 ## Which stores are asked
 
@@ -6864,15 +6651,9 @@ export AF_SECRET_SOURCES=vault
 The order is the order you write, and it decides which of two stores holding the
 same variable answers.
 
-Nothing is auto-detected on purpose. A machine may carry AWS credentials for
-something entirely unrelated, and building a source out of them would be this
-tool deciding on its own behalf to send your variable names to somebody's AWS
-account.
-
-A store you named that cannot be built stops the engine at startup with the
-reason. That is deliberate too: starting without it means your variables resolve
-out of ` + "`" + `.env` + "`" + ` instead and the environment comes up holding the wrong values,
-which is worse than not coming up.
+Nothing is auto-detected. A store you named that cannot be built stops the engine
+at startup with the reason, rather than resolving your variables out of ` + "`" + `.env` + "`" + `
+instead.
 
 ## Where they sit in the chain
 
@@ -6882,11 +6663,8 @@ which is worse than not coming up.
 4. The system keyring
 5. **Every store you named, in order**
 
-Last, for the same reason the keyring is fourth. An export you typed is for this
-run, a file is for this repository, and the company secret manager is the
-long-lived default the other two exist to override. A store asked first would
-make "try it with a different key" impossible without changing what every
-colleague resolves.
+Last, so an export you typed and a file in this repository both override the
+company secret manager.
 
 ## HashiCorp Vault
 
@@ -6953,9 +6731,7 @@ credential endpoint, and the EC2 instance role through IMDSv2. A profile in
 message says so rather than reporting "no credentials" and leaving you to guess
 which of five mechanisms was meant to supply them.
 
-IMDSv2 only. Version 1 answers an unauthenticated GET, which is what turns a
-server-side request forgery in an application on the instance into a credential
-disclosure.
+IMDSv2 only. Version 1 answers an unauthenticated GET.
 
 ## Azure Key Vault
 
@@ -6982,11 +6758,8 @@ stripping would map two different variables onto one secret.
 or the China cloud (` + "`" + `https://login.partner.microsoftonline.cn` + "`" + `).
 
 **The service principal needs ` + "`" + `Key Vault Secrets User` + "`" + ` and nothing more.** That
-role grants get and not list, which is deliberate and worth knowing before you
-read a log: this source can read a secret it is asked for and cannot enumerate
-the vault, so a 403 on a listing is the normal state of a correctly configured
-installation rather than a symptom. The source treats it that way and reports
-the vault as reachable, because a refusal is still an answer.
+role grants get and not list, so a 403 on a listing is the normal state of a
+correctly configured installation, and the source reports the vault as reachable.
 
 A vault that cannot be reached is reported as unreachable even when the
 credential is perfect. Microsoft Entra and the vault are different hosts, so a
@@ -7022,10 +6795,8 @@ were not found in any configured source.
   (secret/antifailure) (is sealed).
 ` + "`" + "`" + "`" + `
 
-"The variable was not found" on its own leaves you guessing which of five places
-to put it. A source that failed silently would make that list a lie, so a store
-that cannot be used is named with its reason: the vault is sealed, the token
-expired, the licence lapsed.
+A store that cannot be used is named with its reason: the vault is sealed, the
+token expired, the licence lapsed.
 
 Run ` + "`" + `af explain` + "`" + ` to see the same list without starting anything.
 
@@ -7041,11 +6812,8 @@ was rejected after one refresh: Key Vault answered 403 Forbidden.
   Next: Rotate the credential and store the new value where it reads it.
 ` + "`" + "`" + "`" + `
 
-Retrying will not help, so the message does not suggest it. One renewal rather
-than one per lookup is deliberate: twenty declared variables against a revoked
-credential would otherwise be twenty logins and twenty rejections, which is how
-a configuration mistake becomes a rate limit on the store everybody else is
-also using.
+Retrying will not help. One renewal per process rather than one per lookup, so
+twenty declared variables against a revoked credential are not twenty rejections.
 
 ## What happens when the licence lapses
 
@@ -7122,9 +6890,7 @@ wrong:
   ships its own certificate is internally consistent and is refused.
 - **What was actually signed.** The assertion is read back out of the exact
   bytes the signature covered, so a document carrying a second, forged assertion
-  cannot make the verifier and the reader disagree. Signature wrapping is the
-  most common way a SAML implementation that *does* check signatures is still
-  broken.
+  cannot make the verifier and the reader disagree.
 - **The algorithm.** RSA or ECDSA with SHA-256 or better. SHA-1 is refused, and
   so is any HMAC: an HMAC would let anybody holding a shared secret forge an
   assertion.
@@ -7147,14 +6913,10 @@ Redirect URI   https://<your-control-plane>/sso/oidc/<handle>/callback
 
 You supply the issuer, the client ID and the client secret. The endpoints are
 read from the provider's discovery document when the connection is configured,
-not on every login: discovery is a network call to somebody else's service, and
-putting it on the critical path of every sign-in makes their brief outage your
-sign-in outage.
+not on every login.
 
 PKCE is always used, even though this is a confidential client that holds a
-secret. The secret stops somebody else redeeming a stolen authorization code
-from their own server; it does nothing about somebody feeding a stolen code into
-our callback. The verifier does.
+secret.
 
 ` + "`" + `state` + "`" + ` and ` + "`" + `nonce` + "`" + ` are separate values doing separate jobs and both are
 required: ` + "`" + `state` + "`" + ` is round-tripped through the browser and consumed once,
@@ -7180,8 +6942,7 @@ claiming your own domain.
 
 Once verified, ` + "`" + `/sso/start?email=someone@your-domain` + "`" + ` sends the browser to your
 provider. That endpoint reveals that a domain uses single sign-on and which
-connection handles it, which is the same fact the redirect itself announces. It
-reveals nothing about any other domain and nothing you have not verified.
+connection handles it, and nothing about any domain you have not verified.
 
 ## Roles from groups
 
@@ -7241,23 +7002,14 @@ not sign everybody out mid-work.
 | ` + "`" + `AF_EE_SSO_KEY` + "`" + ` | 32 bytes, base64, encrypting the OIDC client secret and the service provider private key at rest. Generate with ` + "`" + `openssl rand -base64 32` + "`" + `. The control plane refuses to start without it. |
 
 Secrets are sealed with AES-256-GCM under that key, with the organisation ID
-authenticated as additional data. That last part is not decoration: without it a
-ciphertext is portable, and anybody able to write a row could copy another
-tenant's encrypted client secret into their own connection and have the server
-decrypt it for them.
+authenticated as additional data, so a ciphertext is not portable between
+organisations.
 
 ## Testing against a real provider
 
-Everything above is exercised by suites that build their own assertions and
-their own tokens. That proves the verifier refuses what it should, and it does
-not prove interoperability, because a fixture written by the same person who
-wrote the parser agrees with the parser by construction. The things that break
-against a real provider are the ones nobody thought to put in a fixture: the
-namespace prefix it happens to use, where it puts the signature, whether it
-sends the address as a NameID or a claim.
-
-So there is a conformance suite that drives a real Keycloak, and a script that
-boots one:
+The suites above build their own assertions and tokens, which does not prove
+interoperability. So there is a conformance suite that drives a real Keycloak,
+and a script that boots one:
 
 ` + "`" + "`" + "`" + `
 eval "$(ee/web/sso/test/keycloak-up.sh)"
@@ -7270,13 +7022,8 @@ run time into a temporary directory outside the repository, and prints both
 ` + "`" + `AF_KEYCLOAK_URL` + "`" + ` and the ` + "`" + `NODE_EXTRA_CA_CERTS` + "`" + ` that names a file which did not
 exist until it ran.
 
-The provider has to be HTTPS. This is not a preference: ` + "`" + `parseIdentityProviderMetadata` + "`" + `
-refuses an ` + "`" + `http` + "`" + ` single sign-on URL and ` + "`" + `discover` + "`" + ` refuses an ` + "`" + `http` + "`" + ` token
-endpoint, because a token exchange over plain HTTP carries a client secret in
-clear text. An earlier version of this suite documented a plain HTTP provider
-and therefore could not have passed, which is worth recording because a suite
-gated behind an environment variable is a suite nobody runs, and a suite nobody
-runs is a claim nobody checks.
+The provider has to be HTTPS: ` + "`" + `parseIdentityProviderMetadata` + "`" + ` refuses an ` + "`" + `http` + "`" + `
+single sign-on URL and ` + "`" + `discover` + "`" + ` refuses an ` + "`" + `http` + "`" + ` token endpoint.
 
 The suite is deliberately not part of ` + "`" + `just gate` + "`" + ` or CI: it boots a container
 and takes minutes. Keycloak is also not a substitute for Entra ID or Okta, which
@@ -7291,9 +7038,6 @@ three any given row rests on.
   provider.
 - **Signed AuthnRequests** are implemented but the key has to be supplied
   directly; there is no UI for generating one yet.
-
-Each of those is absent rather than half-present, and none of them is claimed
-anywhere in the product.
 `,
 	"getting-started/hosted.md": `---
 title: When one machine is not enough
@@ -7318,16 +7062,14 @@ AF-CP-001 The control plane at https://cp.example.com could not be reached.
   AF_CONTROL_PLANE_URL, to work fully locally.
 ` + "`" + "`" + "`" + `
 
-That is the design rather than a consolation. Events are buffered and delivered
-when it returns, environments keep running, and teardown still works, because
-teardown reads the local journal and not the control plane. Adding one is a
-decision you can reverse by deleting a line.
+Events are buffered and delivered when it returns, environments keep running,
+and teardown still works, because teardown reads the local journal and not the
+control plane.
 
 ## Two steps, in that order
 
-The first prepares the database. The second serves requests. They are separate
-because they need different credentials, and the serving step deliberately has
-no migration credential at all.
+The first prepares the database, the second serves requests. They need different
+credentials, and the serving step has no migration credential at all.
 
 ` + "`" + "`" + "`" + `sh
 # 1. Apply the schema, create the application role, grant it its membership.
@@ -7355,9 +7097,6 @@ details and the command that lists what is published.
 
 ## Do not skip step 1, and do not trust a 200
 
-This is the one that catches people, so it is worth knowing before it happens
-to you rather than after.
-
 Step 1 is what grants the application role its membership. Skip it and the
 failure is quiet instead of loud: the server starts, ` + "`" + `/health` + "`" + ` answers 200, the
 container reports healthy, and every query fails with
@@ -7379,9 +7118,7 @@ SELECT pg_has_role('af_app', 'antifailure_app', 'MEMBER');
 
 ## Point this machine at it
 
-The control plane is not a manifest key. A manifest describes an application,
-and which control plane you happen to be signed in to is a fact about your
-machine rather than about the code, so it lives with the credential:
+The control plane is not a manifest key. It lives with the credential:
 
 ` + "`" + "`" + "`" + `sh
 af login --control-plane https://cp.example.com
@@ -7409,20 +7146,17 @@ one, and the lifetime ` + "`" + `runtime.ttl` + "`" + ` declares, and the contro
 environment from whichever of those events reaches it first.
 
 Each of those events also carries the instant the environment began existing,
-which is not the instant the event fired: an environment is reported ready
-after its build, and the build is the expensive part of a cold run. Usage and
-the expiry are both measured from the earlier instant.
+which is not the instant the event fired: an environment is reported ready after
+its build. Usage and the expiry are both measured from the earlier instant.
 
 The repository name comes from ` + "`" + `GITHUB_REPOSITORY` + "`" + ` when the run is in GitHub
-Actions, and otherwise from the ` + "`" + `origin` + "`" + ` remote of the checkout. A checkout
-with neither, which is a directory somebody is trying the tool in, reports no
-repository: the environment runs, and it does not appear in the console. The
-response says so on the event rather than accepting it silently, and the
-control plane counts it as ` + "`" + `af_ingest_events_total{outcome="unprojected"}` + "`" + `.
+Actions, and otherwise from the ` + "`" + `origin` + "`" + ` remote of the checkout. A checkout with
+neither reports no repository: the environment runs, and it does not appear in
+the console. The response says so on the event, and the control plane counts it
+as ` + "`" + `af_ingest_events_total{outcome="unprojected"}` + "`" + `.
 
 A repository the GitHub App has never mentioned is created from the name the
-engine reports rather than refused, so an engine running against a repository
-nobody has connected still shows up.
+engine reports rather than refused.
 
 Related: [the full control plane guide](/docs/self-hosting/control-plane),
 [every variable it reads](/docs/reference/control-plane),
@@ -7448,9 +7182,8 @@ to host, and no secret to create before the first check runs.
 **Install the GitHub App.** When the App is installed on a repository that has
 no workflow, it opens a pull request titled "Check every pull request with
 Antifailure" on a branch called ` + "`" + `antifailure/setup` + "`" + `. The pull request adds one
-file. Merge it, and the next pull request gets a check. Nothing runs until it
-is merged, and the console lists the repositories it is still getting
-connected. [The pull request the App opens](/docs/guides/github#the-pull-request-the-app-opens)
+file. Merge it, and the next pull request gets a check. The console lists the
+repositories it is still getting connected. [The pull request the App opens](/docs/guides/github#the-pull-request-the-app-opens)
 says what happens when the App cannot write to the repository.
 
 **Run ` + "`" + `af init` + "`" + `.** When the checkout has a ` + "`" + `github.com` + "`" + ` remote, ` + "`" + `af init` + "`" + `
@@ -7467,8 +7200,7 @@ in the repository. Copy it to ` + "`" + `.github/workflows/antifailure.yml` + "`
 
 ## The file
 
-Whichever door you came through, this is the whole of what lands in your
-repository:
+This is the whole of what lands in your repository:
 
 ` + "`" + "`" + "`" + `yaml
 # Antifailure checks every pull request on a disposable copy of production.
@@ -7512,37 +7244,28 @@ jobs:
       control-plane: ${{ vars.AF_CONTROL_PLANE || 'https://app.antifailure.dev' }}
 ` + "`" + "`" + "`" + `
 
-It is short because the work is somewhere else, and where it is matters.
-
 The App writes its own address on that last line. The file above carries the
 hosted control plane's, and a self hosted control plane that knows its public
-address writes that instead, so the pull request it opens and the file it adds
-name the same place.
+address writes that instead.
 
 The job calls a **reusable workflow** in the Antifailure repository. That
 workflow checks out your branch with full history, because ` + "`" + `af change` + "`" + ` diffs
-against the merge base and a one commit clone has none. It applies the fork
-label gate, sets the concurrency group so a push cancels the check it
-supersedes, and then calls the action.
+against the merge base. It applies the fork label gate, sets the concurrency
+group so a push cancels the check it supersedes, and then calls the action.
 
 The **action**, ` + "`" + `antifailure/antifailure@v1` + "`" + `, installs ` + "`" + `af` + "`" + `, installs the
 agent runner when the command needs a browser, works out what the change
 touches, runs the check, and leaves the comment. Its inputs and outputs are on
 [the action reference](/docs/reference/action).
 
-` + "`" + `secrets: inherit` + "`" + ` is the line that makes the file short. A composite action
-cannot read a caller's secrets, so without it every secret would have to be
-named in your file, including the production database secret whose name only
-your manifest knows. With it the reusable workflow can see your secrets, and
-it reads only the ones the manifest names. ` + "`" + `af change` + "`" + ` reports which those are
-before the check starts, and each is looked up by that name and passed to the
-action under it. A secret the manifest never mentions is never read.
+` + "`" + `secrets: inherit` + "`" + ` lets the reusable workflow see your secrets, and it reads
+only the ones the manifest names. ` + "`" + `af change` + "`" + ` reports which those are before the
+check starts, and each is looked up by that name and passed to the action under
+it. A secret the manifest never mentions is never read.
 
-The ` + "`" + `workflow_dispatch` + "`" + ` block is for the hosted control plane, whose buttons
-run this workflow on the branch an environment is on. Delete it if you do not
-use one. The ` + "`" + `permissions` + "`" + ` block is what the job needs: ` + "`" + `pull-requests: write` + "`" + `
-for the comment, and ` + "`" + `id-token: write` + "`" + ` so the job can prove who it is to a
-control plane without a stored credential.
+The ` + "`" + `permissions` + "`" + ` block is what the job needs: ` + "`" + `pull-requests: write` + "`" + ` for the
+comment, and ` + "`" + `id-token: write` + "`" + ` so the job can prove who it is to a control plane
+without a stored credential.
 
 ## Nothing else is required
 
@@ -7550,20 +7273,17 @@ No secrets and no account. Open a pull request and the workflow runs, ` + "`" + 
 change` + "`" + ` reads the diff, and ` + "`" + `af ci` + "`" + ` brings the environment up, runs the
 workflows, asks the invariants, rehearses the migrations, writes the report and
 tears down. Teardown happens whatever the outcome, including on a failed job
-and on a cancelled one, because an environment that outlives its pull request
-is the leak this product exists to prevent.
+and on a cancelled one.
 
 [` + "`" + `af change` + "`" + `](/docs/concepts/change-analysis) is what keeps the check off a
 change to a README. It reads the diff, says which checks exercise what it
 touched, and writes that as the comment when nothing else runs. A path it does
-not recognise selects every check rather than none, so the mistake it can make
-costs a run rather than hiding one.
+not recognise selects every check rather than none.
 
 ## What is optional, by name
 
 Each of these is a repository secret, except the last, which is a repository
-variable. Each is read only when the manifest asks for it, and each has a real
-consequence when it is missing.
+variable. Each is read only when the manifest asks for it.
 
 ` + "`" + `ANTHROPIC_API_KEY` + "`" + ` lets the agents read a page. Without one they still run,
 and a workflow that needed a page read comes back unverified rather than
@@ -7585,15 +7305,14 @@ empty database, and the report says so at the top.
 the engine reads. It has to be a test key. A live one is refused before
 anything starts.
 
-` + "`" + `AF_CONTROL_PLANE` + "`" + ` is a repository **variable**, not a secret, because it is an
-address. The file already carries one as the variable's default: the control
-plane whose App opened the pull request, or the hosted one when you copied the
-file by hand. The run reports there, the control plane concludes the check it
-posted and maintains the comment, and there is nothing to set. Set the variable
-only to point the run at a self hosted control plane. A repository the control
-plane does not know refuses the run a credential, the job comments for itself,
-and nothing is red for it. [The control plane](/docs/getting-started/hosted)
-is what reporting adds.
+` + "`" + `AF_CONTROL_PLANE` + "`" + ` is a repository **variable**, not a secret. The file already
+carries one as the variable's default: the control plane whose App opened the
+pull request, or the hosted one when you copied the file by hand. The run
+reports there, and the control plane concludes the check it posted and maintains
+the comment, so there is nothing to set. Set the variable only to point the run
+at a self hosted control plane. A repository the control plane does not know
+refuses the run a credential, the job comments for itself, and nothing is red
+for it. [The control plane](/docs/getting-started/hosted) is what reporting adds.
 
 ## No manifest yet
 
@@ -7602,8 +7321,7 @@ The check does not wait for one. When the repository has no ` + "`" + `antifailu
 would, and uses that. The comment says so in its first lines: this run used a
 manifest Antifailure drafted from the repository, and ` + "`" + `af init` + "`" + ` committed is
 what makes it yours. A repository the draft cannot describe gets a skipped run
-and a comment naming the reason, with ` + "`" + `af init` + "`" + ` as the next command, rather
-than a red check for a file that was never there.
+and a comment naming the reason, with ` + "`" + `af init` + "`" + ` as the next command.
 
 ## An empty database
 
@@ -7614,10 +7332,8 @@ When ` + "`" + `database.source_url_env` + "`" + ` is unset, the report opens wi
 > Set ` + "`" + `database.source_url_env: PRODUCTION_DATABASE_URL` + "`" + ` and add that secret
 > to the repository.
 
-It is rendered before the workflow table on purpose. A check that passed on an
-empty schema is a weaker claim than one that passed on a masked copy of
-production, and the difference has to be the first thing a reader sees rather
-than a footnote. ` + "`" + `af up` + "`" + ` prints the same sentence on a workstation.
+It is rendered before the workflow table. ` + "`" + `af up` + "`" + ` prints the same sentence on a
+workstation.
 
 ## Turn the integration on
 
@@ -7631,15 +7347,13 @@ github:
   fork_policy: label
 ` + "`" + "`" + "`" + `
 
-Three keys rather than four. There is a ` + "`" + `teardown_on` + "`" + ` as well, and it is
+There is a ` + "`" + `teardown_on` + "`" + ` key as well, and it is
 [read by nothing](/docs/reference/manifest#github): teardown happens whatever
-you put there, so setting it would only teach you to trust a line that does not
-work.
+you put there.
 
-` + "`" + `mode: actions` + "`" + ` runs everything inside the workflow. The environment lives for
-the length of the job, which suits a repository that wants preview checks
-rather than preview URLs somebody opens later. When you want the second thing,
-[the control plane](/docs/getting-started/hosted) is what adds it, and the
+` + "`" + `mode: actions` + "`" + ` runs everything inside the workflow, and the environment lives
+for the length of the job. For preview URLs somebody opens later,
+[the control plane](/docs/getting-started/hosted) is what adds them, and the
 mode becomes ` + "`" + `app` + "`" + `.
 
 ## Open a pull request
@@ -7662,23 +7376,18 @@ what they locked and for how long, what Postgres rewrote, and what the
 fails the check by default; a rewrite warns. The
 [policy block](/docs/concepts/verdicts) is where you change that.
 
-It edits that comment in place on the next push rather than adding another. A
-bot that comments on every push is a bot people mute, and a muted bot reports
-nothing.
+It edits that comment in place on the next push rather than adding another.
 
 ## Pull requests from forks
 
-` + "`" + `fork_policy: label` + "`" + ` is the default and the right starting point. A pull
-request from a fork runs code somebody outside your organisation wrote, against
-an environment holding a masked copy of your data. Nothing runs until a
-maintainer adds the ` + "`" + `antifailure:allow` + "`" + ` label, which is a person deciding.
-The file subscribes to ` + "`" + `labeled` + "`" + ` and ` + "`" + `unlabeled` + "`" + ` so that the approval, and a
-withdrawn approval, reach the check without waiting for the next push.
+` + "`" + `fork_policy: label` + "`" + ` is the default. Nothing runs on a pull request from a fork
+until a maintainer adds the ` + "`" + `antifailure:allow` + "`" + ` label. The file subscribes to
+` + "`" + `labeled` + "`" + ` and ` + "`" + `unlabeled` + "`" + ` so that the approval, and a withdrawn approval, reach
+the check without waiting for the next push.
 
 The policy is read from the base branch rather than from the pull request,
 because the pull request's copy of the manifest belongs to the contributor.
-[Forks](/docs/guides/github#forks) has the full picture, including what GitHub
-itself withholds from a fork and what it does not.
+[Forks](/docs/guides/github#forks) has the full picture.
 
 Related: [the full GitHub configuration](/docs/guides/github),
 [the action reference](/docs/reference/action),
@@ -7695,11 +7404,9 @@ This goes from nothing to a running environment on your own machine. It needs
 Docker. A Postgres connection string you are allowed to read from is optional:
 with one, every environment holds a masked copy of that database, and without
 one it holds the schema your migrations create. It does not need an account, a
-control plane, or a cloud provider: everything here runs locally, and the
-hosted pieces are optional and come later.
+control plane, or a cloud provider.
 
-The whole sequence, which every page and every command in this product states
-the same way:
+The whole sequence:
 
 ` + "`" + "`" + "`" + `bash
 curl -fsSL https://antifailure.dev/install.sh | sh
@@ -7712,8 +7419,7 @@ af test            # agents run your workflows and return verdicts with evidence
 af down            # every resource it created, gone
 ` + "`" + "`" + "`" + `
 
-The refresh is the one conditional step, and ` + "`" + `af start` + "`" + ` says whether it is
-yours. The rest of this page is what each command did.
+` + "`" + `af start` + "`" + ` says whether the refresh, the one conditional step, is yours.
 
 ## Install
 
@@ -7724,8 +7430,7 @@ curl -fsSL https://antifailure.dev/install.sh | sh
 The installer downloads the release for your platform, checks it against the
 published checksum, and puts ` + "`" + `af` + "`" + ` and its runner under ` + "`" + `~/.antifailure` + "`" + `. It is
 POSIX ` + "`" + `sh` + "`" + ` rather than bash, so it works in an Alpine container as well as on a
-laptop. If you would rather read it before running it, it is the same file
-served at that URL, and the [source is in the repository](https://github.com/antifailure/antifailure/blob/main/install.sh).
+laptop. The file served at that URL is the [source in the repository](https://github.com/antifailure/antifailure/blob/main/install.sh).
 
 ### What it does to your PATH
 
@@ -7745,25 +7450,22 @@ Delete that line to undo it. zsh gets ` + "`" + `.zshrc` + "`" + ` under ` + "`"
 than having a file guessed for it. Running the installer again does not add the
 line a second time.
 
-The terminal you ran the installer in cannot see a file written a second ago,
-so the installer ends with one line to paste that fixes that shell and runs the
-first command:
+The current terminal cannot see the file just written, so the installer ends
+with one line to paste that fixes that shell and runs the first command:
 
 ` + "`" + "`" + "`" + `bash
 export PATH="$HOME/.antifailure/bin:$PATH" && af start
 ` + "`" + "`" + "`" + `
 
 To manage PATH yourself, decline in advance. Nothing is written, and the
-installer prints the full path to ` + "`" + `af` + "`" + ` instead of commands that would not
-resolve:
+installer prints the full path to ` + "`" + `af` + "`" + `:
 
 ` + "`" + "`" + "`" + `bash
 curl -fsSL https://antifailure.dev/install.sh | AF_NO_MODIFY_PATH=1 sh
 ` + "`" + "`" + "`" + `
 
 In GitHub Actions no profile is touched at all: the installer writes to
-` + "`" + `GITHUB_PATH` + "`" + `, which is how a step extends the PATH of the steps after it, so
-` + "`" + `af` + "`" + ` resolves in every later step of the job.
+` + "`" + `GITHUB_PATH` + "`" + `, so ` + "`" + `af` + "`" + ` resolves in every later step of the job.
 
 ## Find out where you are
 
@@ -7771,8 +7473,7 @@ In GitHub Actions no profile is touched at all: the installer writes to
 af start
 ` + "`" + "`" + "`" + `
 
-This is the one command worth remembering, and it is the only one on this page
-you can run at any point. It reports every step below as observed on this
+You can run this at any point. It reports every step below as observed on this
 machine right now, and names the single next command.
 
 ` + "`" + "`" + "`" + `
@@ -7782,6 +7483,7 @@ Your first run
   ...   the agent runner             runner: no runner at ~/.antifailure/runner
   ...   a manifest                   no antifailure.yaml here or in any parent directory
   skip  the database source          after the manifest
+  skip  masking rules                after the manifest
   skip  a golden                     after the manifest
   skip  an environment               after the manifest
   skip  workflows to run             after the manifest
@@ -7794,24 +7496,19 @@ Next
     af runner install
 ` + "`" + "`" + "`" + `
 
-It runs nothing and writes nothing, so running it costs you a second and
-changes nothing. Every answer comes from the machine rather than from a record
-of what it last did, which is why it is still right after you close the laptop,
-switch branches, or tear an environment down by hand.
+It runs nothing and writes nothing, and every answer comes from the machine
+rather than from a record of what it last did.
 
 Five states, and it never collapses one into another. ` + "`" + `ok` + "`" + ` was observed to be
 finished. ` + "`" + `...` + "`" + ` was observed not to be, and is where you are. ` + "`" + `warn` + "`" + ` is
 something missing that the next command does not need: the variable naming
-production, when a verified golden for this project already exists, because
-` + "`" + `af up` + "`" + ` branches that golden and only the next refresh needs the variable.
+production, when a verified golden for this project already exists.
 ` + "`" + `fail` + "`" + ` is something broken that has to be fixed before the next command can
 work. ` + "`" + `skip` + "`" + ` is a step it deliberately did not look at, and it says why and
 what to run instead. With the Docker provider the golden step is answered from
 the daemon, selected by the same rule ` + "`" + `af up` + "`" + ` uses, so it never names a golden
 made for another project or one that was never verified; with a hosted provider
-it is skipped, because that listing needs credentials and this branch's lock,
-and a status command that took locks could not be run while ` + "`" + `af up` + "`" + ` was in
-flight.
+it is skipped, because that listing needs credentials and this branch's lock.
 
 Exit 0 means every step is either done or not reached yet, which is the normal
 state of a first run in progress. Exit 3 means something is broken.
@@ -7822,18 +7519,15 @@ state of a first run in progress. Exit 3 means something is broken.
 af doctor
 ` + "`" + "`" + "`" + `
 
-` + "`" + `af start` + "`" + ` reports Docker because it is the one thing nothing below can work
-without. ` + "`" + `af doctor` + "`" + ` is the wider check: disk, ports, DNS, outbound reachability,
-kernel isolation, proxy settings, git, and the environments this machine is
-still holding. Every problem it names carries what to do about it, and every one
-of them is a problem you would otherwise meet halfway through a run.
+` + "`" + `af doctor` + "`" + ` is the wider check: disk, ports, DNS, outbound reachability, kernel
+isolation, proxy settings, git, and the environments this machine is still
+holding. Every problem it names carries what to do about it.
 
 It also validates the manifest when one exists and compares a stable CLI version
 with the latest published GitHub release, with a three second network timeout.
 An outdated version or invalid manifest fails the check. No network, a development
-build, or no manifest is reported explicitly, never as a successful check of
-something it could not inspect. An absent manifest is normal before initialization;
-it does not mean the machine is broken.
+build, or no manifest is reported explicitly rather than as a pass, and a missing
+manifest does not fail the check.
 
 ` + "`" + "`" + "`" + `bash
 af update
@@ -7860,10 +7554,8 @@ af runner install
 
 The runner drives a real browser, so it is a separate program in a separate
 language and it needs node 22.6 or newer. It is copied from the source that
-ships beside ` + "`" + `af` + "`" + ` rather than downloaded, because the source a release was
-tested with is the source that release should run, and its dependencies are
-installed from the lockfile that ships with it, so two people installing one
-release get one tree. It then downloads chromium, which is the slow part.
+ships beside ` + "`" + `af` + "`" + ` rather than downloaded, and its dependencies come from the
+lockfile that ships with it. It then downloads chromium, which is the slow part.
 
 ` + "`" + "`" + "`" + `bash
 af runner check
@@ -7872,22 +7564,18 @@ af runner check
 reports each thing separately: the source, every dependency the runner declares
 against what is actually under ` + "`" + `node_modules` + "`" + `, whether the lockfile pinned them,
 node against the range the runner requires, and the browser. It does not claim
-the runner executes, because knowing that means starting node and launching a
-browser, which is what ` + "`" + `af test` + "`" + ` is. Anything it cannot determine it reports as
-not checked rather than as ok.
+the runner executes. Anything it cannot determine it reports as not checked
+rather than as ok.
 
 It reports on the runner ` + "`" + `af test` + "`" + ` would use from where you are standing, and
 prints that path. A run looks for a runner in your own checkout before it looks
 at ` + "`" + `~/.antifailure/runner` + "`" + `, and it takes the nearest one that can actually run
 rather than the nearest one that exists, so a ` + "`" + `runner/` + "`" + ` directory whose
-dependencies were never installed is passed over rather than started and
-crashed. When that happens the check names the directory it went past and says
-what is missing from it, because a report about a tree you did not mean is
-worse than no report.
+dependencies were never installed is passed over. The check names the directory
+it went past and says what is missing from it.
 
-A failed browser download is not fatal. The runner is usable the moment a
-browser arrives, and until then a workflow that needs a page read comes back
-` + "`" + `unverified` + "`" + ` rather than guessed at.
+A failed browser download is not fatal. Until a browser arrives, a workflow that
+needs a page read comes back ` + "`" + `unverified` + "`" + `.
 
 Everything up to ` + "`" + `af up` + "`" + ` works without the runner; only ` + "`" + `af test` + "`" + ` needs it.
 
@@ -7902,10 +7590,7 @@ found, the port each listens on, the migration command, and a network policy
 derived from the SDKs in your dependency list. If your ` + "`" + `package.json` + "`" + ` has
 ` + "`" + `stripe` + "`" + ` in it, the Stripe hosts arrive in the manifest without being asked.
 
-Two things about this worth knowing, because they are deliberate:
-
-It never executes anything from the repository. Detection reads files. A
-repository that would like to run a script during setup does not get to.
+It never executes anything from the repository: detection reads files.
 
 Anything it is unsure about becomes a question rather than a silent guess, and
 everything it reports names the file it came from. You can answer the questions
@@ -7915,12 +7600,10 @@ without a prompt if you are scripting it:
 af init --non-interactive
 ` + "`" + "`" + "`" + `
 
-That accepts every default and prints what it assumed, which is the honest
-version of a silent run.
+That accepts every default and prints what it assumed.
 
-Read the manifest before going further. It is meant to be audited rather than
-trusted, and the [manifest reference](/docs/reference/manifest) explains every
-key.
+Read the manifest before going further. The
+[manifest reference](/docs/reference/manifest) explains every key.
 
 ## Name the database to copy, if there is one
 
@@ -7954,8 +7637,7 @@ af explain
 
 This resolves the manifest and prints the plan: which golden a branch would come
 from, what each service would build from, and the mode every host in the network
-policy has been given. Nothing is created. It is the cheapest way to find out
-that a setting does not mean what you assumed.
+policy has been given. Nothing is created.
 
 ## Bring an environment up
 
@@ -7965,9 +7647,8 @@ af up
 
 That builds the services, creates a branch of the golden, and starts everything
 inside a network namespace that reaches nothing except the hosts your policy
-allows. The first run is the slow one, because the images are built, and when no
-source is named the golden is built here too. Later runs branch from what
-already exists.
+allows. The first run is the slow one, because the images are built. Later runs
+branch from what already exists.
 
 While it runs, or afterwards:
 
@@ -7986,10 +7667,10 @@ Agents drive the application the way a person does, through the accessibility
 tree, and return one of five verdicts for each workflow in the manifest with a
 video, a trace, and steps to reproduce it.
 
-Five verdicts rather than two, and the one that matters is ` + "`" + `blocked` + "`" + `. A browser
-that crashed, a page that never loaded, or a persona with no password is not
-evidence about your application, and charging it to your application is how
-people learn to ignore the results. Only a real failure exits non zero.
+The verdict that matters is ` + "`" + `blocked` + "`" + `. A browser that crashed, a page that never
+loaded, or a persona with no password is not evidence about your application. Of
+the five verdicts, only a failure exits non zero. A run that never reached a
+verdict exits on the configuration problem that stopped it.
 
 ` + "`" + "`" + "`" + `
   ok    sign in                      pass in 4.1s
@@ -7999,8 +7680,7 @@ people learn to ignore the results. Only a real failure exits non zero.
 ` + "`" + "`" + "`" + `
 
 A manifest that declares no workflows is refused rather than reported as a run
-that examined nothing. ` + "`" + `af start` + "`" + ` says so before ` + "`" + `af up` + "`" + `, so you find out in a
-second rather than after a build.
+that examined nothing. ` + "`" + `af start` + "`" + ` says so before ` + "`" + `af up` + "`" + `.
 
 ### The evidence
 
@@ -8030,9 +7710,6 @@ command that prints it back.
 
 ## Prove the containment
 
-The interesting property is not that the environment came up. It is that it
-cannot reach anything you did not name.
-
 ` + "`" + "`" + "`" + `bash
 af net policy
 ` + "`" + "`" + "`" + `
@@ -8040,18 +7717,17 @@ af net policy
 prints the decision for every host the policy knows, and
 
 ` + "`" + "`" + "`" + `bash
-af net explain https://api.stripe.com/v1/charges
+af net explain GET https://api.stripe.com/v1/charges
 ` + "`" + "`" + "`" + `
 
 answers for one specific request: which rule matched, which mode it is in, and
 what would happen. If something reached the network unexpectedly,
 ` + "`" + `af net log` + "`" + ` has the record of it, including the denials.
 
-The modes are covered in [egress](/docs/concepts/egress). The short version is
-that ` + "`" + `BLOCK` + "`" + ` refuses with a decision you can read, ` + "`" + `SANDBOX` + "`" + ` swaps in test
-credentials and trips a wire if a live key ever appears, ` + "`" + `CAPTURE` + "`" + ` records mail
-and messages into an inbox your tests can read, and ` + "`" + `MOCK` + "`" + ` answers from an
-offline pack with no network at all.
+The modes are covered in [egress](/docs/concepts/egress). ` + "`" + `BLOCK` + "`" + ` refuses with a
+decision you can read, ` + "`" + `SANDBOX` + "`" + ` swaps in test credentials and trips a wire if a
+live key ever appears, ` + "`" + `CAPTURE` + "`" + ` records mail and messages into an inbox your
+tests can read, and ` + "`" + `MOCK` + "`" + ` answers from an offline pack with no network at all.
 
 ## Tear it down
 
@@ -8072,11 +7748,10 @@ once and branched cheaply, and how identifiers are replaced deterministically so
 the same customer is the same fake customer in every table and every refresh.
 
 [Verification](/docs/concepts/verification) explains why an unverified golden
-cannot be branched at all, which is enforced in code rather than in a checklist.
+cannot be branched at all.
 
 [Building services](/docs/guides/build) covers what happens when detection
-guessed wrong about how your services are built, which is the most common reason
-a first ` + "`" + `af up` + "`" + ` does not go cleanly.
+guessed wrong about how your services are built.
 
 [Watching a run](/docs/guides/dashboard) is the live view: ` + "`" + `af up --hud` + "`" + ` draws
 the same run as a dashboard, and where there is no terminal it writes one line
@@ -8084,22 +7759,19 @@ per event instead.
 
 ## Running it somewhere other than your laptop
 
-Everything above is the same wherever the engine runs, and there are two other
-places to run it.
+Everything above is the same wherever the engine runs.
 
 [An environment per pull request](/docs/getting-started/pull-requests) is
 Antifailure inside GitHub Actions: the same ` + "`" + `af up` + "`" + `, in a workflow, with one
 comment on the pull request that is updated in place rather than appended to.
 If the checkout had a GitHub remote, ` + "`" + `af init` + "`" + ` already wrote that workflow
-beside the manifest, and committing it is the whole setup. Nothing else is
-needed, and in particular no server. It is the next page in this section, and
+beside the manifest, and committing it is the whole setup. No server is needed.
 [GitHub](/docs/guides/github) is the reference behind it: the two modes, what
 the App must be granted, forks, and teardown.
 
 [The control plane](/docs/self-hosting/control-plane) is the optional hosted
-piece, and the page opens by saying what still works without it, which is all
-of it. Read that one when you want environments that outlive a workflow run, a
-shared address for them, or a record across repositories.
+piece. Read it when you want environments that outlive a workflow run, a shared
+address for them, or a record across repositories.
 `,
 	"guides/aws.md": `---
 title: AWS
@@ -10926,7 +10598,7 @@ info` + "`" + ` is where that number comes from.
 
 ` + "`" + "`" + "`" + `
 AF-RUN-010 Writing to /Users/you/.antifailure failed because the disk is full;
-2.0 GiB is required.
+the state directory is required.
 AF-RUN-020 Docker has no room left for the environment: no space left on device
 ` + "`" + "`" + "`" + `
 
@@ -16289,7 +15961,6 @@ below that take no session either.
 | ` + "`" + `POST /v1/auth/github-oidc` + "`" + ` | a GitHub Actions workflow identity token, in the body | Exchanges a job's own identity for a short lived engine token, so nothing has to be pasted into a repository secret. The identity says which repository the job runs in and never whose, so the organization comes from a claim on that repository. See [GitHub](/docs/guides/github#sending-events-with-no-token-at-all). |
 | ` + "`" + `POST /v1/pr/callback-token` + "`" + ` | a GitHub Actions workflow identity token | Exchanges a job's own identity for a credential scoped to one commit. |
 | ` + "`" + `POST /v1/pr/report` + "`" + ` | that credential | What a job says about the commit it checked. |
-| ` + "`" + `POST /webhooks/github` + "`" + `, ` + "`" + `POST /webhooks/stripe` + "`" + ` | an HMAC over the raw body | Deliveries. Verified before the body is parsed, and each one handled once. |
 | ` + "`" + `/auth/*` + "`" + ` | varies | GitHub sign in for a browser, the device flow ` + "`" + `af login` + "`" + ` uses, and the browser consent an MCP client is sent through. |
 | ` + "`" + `POST /mcp` + "`" + ` | an MCP access token issued by that consent | The hosted Model Context Protocol endpoint. Stateless JSON only, so ` + "`" + `GET /mcp` + "`" + ` and ` + "`" + `DELETE /mcp` + "`" + ` answer ` + "`" + `405` + "`" + ` with an ` + "`" + `Allow: POST` + "`" + ` header rather than opening an event stream this endpoint would have no session for. See [MCP](/docs/reference/mcp). |
 | ` + "`" + `GET /.well-known/oauth-protected-resource` + "`" + ` | none | Which resource ` + "`" + `/mcp` + "`" + ` is and which authorization server issues tokens for it, read by an MCP client before it authorizes. The resource is the configured public origin rather than the request's ` + "`" + `Host` + "`" + `, so a token cannot be minted for an audience somebody else named. |
@@ -22672,7 +22343,7 @@ AF-MAN-002 The manifest at ./antifailure.yaml is not valid: services[0].port
 must be between 1 and 65535
 AF-MAN-003 The manifest declares schema version 2, which this build does not
 understand.
-AF-MAN-005 The manifest is larger than the 256 KiB limit.
+AF-MAN-005 The manifest is larger than the 1.0 MiB limit.
 AF-MAN-006 The path ../secrets in the manifest resolves outside the repository.
 ` + "`" + "`" + "`" + `
 
@@ -24371,7 +24042,7 @@ exists to make sure it does.
 v1.0.0, so a rename fails in the pull request that proposes it rather than in
 somebody's upgrade.
 
-The chart carries its own version, and it is 1.0.0 for this reason. A chart at
+The chart carries its own version, past 1.0.0 for this reason. A chart at
 0.x says in the only language its ecosystem has that its values may be
 rearranged at any time.
 
@@ -25412,9 +25083,6 @@ shared environment pool yourself.
 
 ## What exists, and what does not
 
-Said first, because a self-hosting page that describes an architecture nobody
-can run is worse than a short one.
-
 | Piece | State |
 | --- | --- |
 | Terraform remote state | **applied**, ` + "`" + `af-tfstate-eastus` + "`" + `, and it took a policy exemption to be reachable |
@@ -25430,11 +25098,8 @@ can run is worse than a short one.
 
 The goldens storage account is ` + "`" + `goldens_enabled = false` + "`" + ` on purpose. Nothing in
 the control plane reads blob storage: there is no ` + "`" + `@azure/storage` + "`" + ` dependency
-anywhere in ` + "`" + `web/` + "`" + `, and no code path that opens a container. Creating an
-account nothing reads is a resource that looks like a feature. It also cannot
-be reached without a private endpoint, per the policy above, so it would be a
-recurring cost for a consumer that does not exist. Turn it on when the golden
-storage backend lands, and add the private endpoint in the same change.
+anywhere in ` + "`" + `web/` + "`" + `, and no code path that opens a container. Turn it on when the
+golden storage backend lands, and add the private endpoint in the same change.
 
 ` + "`" + `runtime.provider: kubernetes` + "`" + ` is named in the manifest schema and refused at
 startup with a message saying so, rather than quietly giving you containers on
@@ -25473,11 +25138,6 @@ az policy definition show --name <definition> --query policyRule
 
 ## A region has three gates, and only one of them is the one everybody checks
 
-This stack has been in three regions and each move was forced by a different
-system. It is worth reading before you pick one, because the three are checked
-at three different times by three different things, and the last one is
-invisible to everything else.
-
 | Gate | Asked by | When | Visible to a plan |
 | --- | --- | --- | --- |
 | Quota | ` + "`" + `az vm list-usage` + "`" + ` | whenever you look | no, and it was never the constraint |
@@ -25486,14 +25146,13 @@ invisible to everything else.
 
 ` + "`" + `southcentralus` + "`" + ` is what the spec names, and ` + "`" + `bonfire-allowed-locations` + "`" + ` denies
 it. ` + "`" + `eastus` + "`" + ` is allowed by that policy and is cheaper, so the default moved
-there. Then an apply created twenty six of twenty seven resources and failed on
-the database:
+there. An apply there then failed on the database:
 
 ` + "`" + "`" + "`" + `
 ParameterOutOfRange: The value of 'Version' should be in: []
 ` + "`" + "`" + "`" + `
 
-The empty list is literal, and asking Azure directly explains it:
+The empty list is literal:
 
 ` + "`" + "`" + "`" + `sh
 az postgres flexible-server list-skus -l eastus \
@@ -25508,11 +25167,10 @@ az postgres flexible-server list-skus -l eastus \
 ` + "`" + "`" + "`" + `
 
 PostgreSQL flexible server cannot be created in ` + "`" + `eastus` + "`" + ` on this subscription at
-any version in any SKU, while every other resource in the stack creates there
-quite happily. ` + "`" + `centralus` + "`" + ` offers versions 11 through 18 and every burstable
-SKU, so that is where the control plane lives and the group is
-` + "`" + `af-cp-centralus` + "`" + `. It costs about two dollars a month more than ` + "`" + `eastus` + "`" + ` would
-have.
+any version in any SKU; every other resource in the stack creates there.
+` + "`" + `centralus` + "`" + ` offers versions 11 through 18 and every burstable SKU, so the
+control plane lives there and the group is ` + "`" + `af-cp-centralus` + "`" + `. It costs about two
+dollars a month more than ` + "`" + `eastus` + "`" + `.
 
 **Run this before you plan, not after you apply:**
 
@@ -25520,13 +25178,11 @@ have.
 go run ./tools/azguard region centralus
 ` + "`" + "`" + "`" + `
 
-It fails closed. A region it cannot get an answer about is refused, because "I
-could not tell" and "it is fine" must never look alike.
+It fails closed. A region it cannot get an answer about is refused.
 
 ## Remote state, and the one policy exemption in this project
 
-The state has to exist before the control plane does, because it is where the
-control plane's record lives. ` + "`" + `stacks/tfstate` + "`" + ` creates it.
+The state has to exist before the control plane does. ` + "`" + `stacks/tfstate` + "`" + ` creates it.
 
 ` + "`" + "`" + "`" + `sh
 cd infra/terraform/stacks/tfstate
@@ -25534,38 +25190,34 @@ terraform apply -var subscription_id=... -var storage_account_name=...
 terraform output -raw backend_hcl > ../control-plane/backend.hcl
 ` + "`" + "`" + "`" + `
 
-**This needs a policy exemption and you should decide about it rather than
-inherit it.** ` + "`" + `bonfire-deny-public-data` + "`" + ` forces any storage account to
-` + "`" + `publicNetworkAccess = Disabled` + "`" + `, which is not a firewall default that a network
-rule carves an exception out of: it turns the data plane off for everything that
-is not a private endpoint. Neither a laptop nor a GitHub-hosted runner can reach
-it, and a CI plan with no state to compare against cannot report a destroy,
-which is the only reason that job exists.
+**This needs a policy exemption.** ` + "`" + `bonfire-deny-public-data` + "`" + ` forces any storage
+account to ` + "`" + `publicNetworkAccess = Disabled` + "`" + `, which turns the data plane off for
+everything that is not a private endpoint. Neither a laptop nor a GitHub-hosted
+runner can reach it, and a CI plan with no state to compare against cannot
+report a destroy, which is the only reason that job exists.
 
-` + "`" + `stacks/tfstate/exemption.tf` + "`" + ` therefore exempts **that one resource group** from
-**that one assignment**, categorised ` + "`" + `Mitigated` + "`" + ` and with an expiry date. It
-earns the word: the account keeps ` + "`" + `shared_access_key_enabled = false` + "`" + ` so no
-storage key exists, ` + "`" + `allow_nested_items_to_be_public = false` + "`" + ` so nothing can be
-made anonymous, a private container, a TLS 1.2 floor, and RBAC on the data
-plane. What the exemption restores is *reachability*, not readability. Delete it
-and the next write to the account is denied.
+` + "`" + `stacks/tfstate/exemption.tf` + "`" + ` exempts **that one resource group** from **that
+one assignment**, categorised ` + "`" + `Mitigated` + "`" + ` and with an expiry date. The account
+keeps ` + "`" + `shared_access_key_enabled = false` + "`" + ` so no storage key exists,
+` + "`" + `allow_nested_items_to_be_public = false` + "`" + ` so nothing can be made anonymous, a
+private container, a TLS 1.2 floor, and RBAC on the data plane. The exemption
+restores *reachability*, not readability. Delete it and the next write to the
+account is denied.
 
-Three sharp edges this hit, all of which will hit you:
+Three sharp edges:
 
-- **Turning storage keys off breaks the provider, not just you.** After creating
-  an account the ` + "`" + `azurerm` + "`" + ` provider polls the blob service to see whether the
-  data plane is up, using a shared key. With keys disabled it gets ` + "`" + `403 Key
-  based authentication is not permitted` + "`" + `, while the account is perfectly
-  healthy. Set ` + "`" + `storage_use_azuread = true` + "`" + ` on the provider.
+- **Turning storage keys off breaks the provider.** After creating an account
+  the ` + "`" + `azurerm` + "`" + ` provider polls the blob service to see whether the data plane is
+  up, using a shared key. With keys disabled it gets ` + "`" + `403 Key based
+  authentication is not permitted` + "`" + `. Set ` + "`" + `storage_use_azuread = true` + "`" + ` on the
+  provider.
 - **Owner on the subscription does not let you read a blob.** Azure splits
   storage into a control plane and a data plane; Owner covers the first and
   grants nothing on the second. You need an explicit data role, and expect to
   re-run once while RBAC propagates.
 - **` + "`" + `prevent_destroy` + "`" + ` and a tainted resource deadlock.** If a create fails after
   Azure made the resource, Terraform taints it, the next plan proposes a
-  replace, and ` + "`" + `prevent_destroy` + "`" + ` refuses. The error names ` + "`" + `prevent_destroy` + "`" + `, so
-  the tempting move is to delete the guard on the resource you least want to
-  lose. ` + "`" + `terraform untaint` + "`" + ` is the fix.
+  replace, and ` + "`" + `prevent_destroy` + "`" + ` refuses. ` + "`" + `terraform untaint` + "`" + ` is the fix.
 
 ## The control plane
 
@@ -25591,25 +25243,20 @@ that keeps the event partitions ahead, and the application on public HTTPS.
 The container app runs in ` + "`" + `Multiple` + "`" + ` revision mode, and ownership is split:
 Terraform owns the template, continuous deployment owns the image and the
 traffic weights. The module says so, with ` + "`" + `ignore_changes` + "`" + ` on
-` + "`" + `template[0].container[0].image` + "`" + ` and ` + "`" + `ingress[0].traffic_weight` + "`" + `, and the split
-is what lets the two run on their own schedules instead of undoing each other.
+` + "`" + `template[0].container[0].image` + "`" + ` and ` + "`" + `ingress[0].traffic_weight` + "`" + `.
 
-The consequence is not obvious and it has already caught us once. Any Terraform
-change to the template creates a **new revision**, and that revision comes up
-with **zero percent of traffic**. Terraform reports a successful apply.
-Production is still serving the old revision, without the change. Add an
-environment variable this way and the application will not see it, for as long
-as nobody deploys.
+Any Terraform change to the template creates a **new revision**, and that
+revision comes up with **zero percent of traffic**. Terraform reports a
+successful apply while production still serves the old revision. Add an
+environment variable this way and the application will not see it until somebody
+deploys.
 
-The mechanism is worth stating exactly, because the obvious explanation is the
-wrong one. Terraform does not leave the traffic block out. It sends one, and
+Terraform does not leave the traffic block out. It sends one, and
 ` + "`" + `ignore_changes` + "`" + ` decides which one: the value it refreshed from Azure rather
 than the value written in the configuration.
 
-Those two do not say the same thing. The configuration asks for
-` + "`" + `latest_revision = true` + "`" + ` at one hundred percent, which would put every new
-revision straight into service. What Azure actually holds, once any deploy has
-run, is a pin naming one revision:
+The configuration asks for ` + "`" + `latest_revision = true` + "`" + ` at one hundred percent. What
+Azure actually holds, once any deploy has run, is a pin naming one revision:
 
 ` + "`" + "`" + "`" + `hcl
 traffic_weight = [{
@@ -25620,16 +25267,9 @@ traffic_weight = [{
 ` + "`" + "`" + "`" + `
 
 So the apply reasserts the pin it just read, the revision named there keeps all
-of the traffic, and the one Terraform has built gets none of it. It is not that
-Terraform declines to move traffic. It is that Terraform faithfully puts back
-the arrangement it found, and the revision it is creating is not in it.
+of the traffic, and the one Terraform built gets none of it.
 
-Which is why the question "where will the traffic be after this apply" is
-answered by Azure and not by anything in this repository. Ask it directly, with
-the commands below, before and after.
-
-So after an apply that touched the template, check what is actually serving:
-
+After an apply that touched the template, check what is actually serving:
 ` + "`" + "`" + "`" + `sh
 az containerapp ingress traffic show -n afcp-app -g af-cp-centralus -o table
 az containerapp revision list -n afcp-app -g af-cp-centralus \
@@ -25655,38 +25295,31 @@ above, the stored state file keeps the OLD revision suffix, and it keeps it
 indefinitely. Nothing writes the true value back, because ` + "`" + `ignore_changes` + "`" + ` on
 ` + "`" + `ingress[0].traffic_weight` + "`" + ` is exactly what stops Terraform caring.
 
-Both of our environments were stale that way when this was written, each by more
-than one deploy. Neither was a fault and neither needed repairing.
+A stale suffix is not a fault and does not need repairing.
 
 The distinction that matters is between the STORED file and a REFRESH. A plan
 and an apply both refresh, so the value they act on is the one they just read
 from Azure, and it is current. ` + "`" + `terraform state show` + "`" + ` and ` + "`" + `terraform state pull` + "`" + `
-read the stored file, and it is not. On the deployment this was written against,
-the stored file named a revision that had already been deactivated while the
-plan's own view named the one actually serving.
+read the stored file, and it is not.
 
 So: **do not ask this repository what is serving.** Not the state file, which
 answers confidently and wrongly, and not a plan either. An empty plan means
 Terraform intends no change, and because this attribute is ignored, that is not
 a statement about where traffic is. Ask Azure, with the two commands above.
 
-The one case that needs real care is REMOVING that ` + "`" + `ignore_changes` + "`" + `, and the
-consequence is the opposite of what the stale file suggests. The stored suffix
-is not what would take effect: the configuration is. ` + "`" + `latest_revision = true` + "`" + `
-would win, so traffic would follow the newest revision automatically, every
-Terraform apply would put its own revision into service at one hundred percent
-with no opportunity to probe it first, and each apply would undo the pin the
-deploy pipeline sets. If you want that, it is a deliberate change to how
-releases work here and not a tidy-up of a stale field.
+The one case that needs real care is REMOVING that ` + "`" + `ignore_changes` + "`" + `. The
+configuration, not the stored suffix, is what would take effect:
+` + "`" + `latest_revision = true` + "`" + ` would win, so traffic would follow the newest revision
+automatically, every Terraform apply would put its own revision into service at
+one hundred percent with no opportunity to probe it first, and each apply would
+undo the pin the deploy pipeline sets.
 
 ### Grant yourself write access to the vault, once
 
-` + "`" + `assign_deployer_secret_officer` + "`" + ` is **off by default** and that default is
-deliberate. A role assignment whose principal is "whoever is running Terraform"
-churns on every plan by a different caller, ` + "`" + `principal_id` + "`" + ` is ForceNew, and the
-pull request plan job would then report a resource that **must be replaced** on
-every single run. A plan that always carries a destroy is a plan people stop
-reading, which is precisely how a real one gets waved through.
+` + "`" + `assign_deployer_secret_officer` + "`" + ` is **off by default**: ` + "`" + `principal_id` + "`" + ` is
+ForceNew, so a role assignment whose principal is whoever runs Terraform would
+make the pull request plan job report a resource that **must be replaced** on
+every single run.
 
 So it is one command, run once, by a human:
 
@@ -25728,12 +25361,10 @@ anybody else on the machine. It is also in the environment if it arrived as
 process. The value comes from a file that nothing else can read instead, and the
 file is written by a prompt rather than by a command somebody typed.
 
-` + "`" + `printf '%s'` + "`" + ` rather than ` + "`" + `echo` + "`" + `, and this is the part that fails silently. A
-webhook signing secret with a trailing newline is a different string, and every
-signature computed with it is wrong, so ` + "`" + `POST /webhooks/stripe` + "`" + ` answers 401 on
-every real delivery while the endpoint, the deploy and the plan all look
-correct. ` + "`" + `echo` + "`" + ` appends a newline. ` + "`" + `read -r` + "`" + ` strips the one your return key
-adds. Both halves are needed.
+` + "`" + `printf '%s'` + "`" + ` rather than ` + "`" + `echo` + "`" + `. A webhook signing secret with a trailing
+newline is a different string, and every signature computed with it is wrong, so
+` + "`" + `POST /webhooks/stripe` + "`" + ` answers 401 on every real delivery. ` + "`" + `echo` + "`" + ` appends a
+newline. ` + "`" + `read -r` + "`" + ` strips the one your return key adds. Both halves are needed.
 
 ` + "`" + "`" + "`" + `sh
 VAULT="$(terraform output -raw key_vault_name)"
@@ -25757,9 +25388,8 @@ afsecret() {
 }
 
 # Billing. The Team price is the switch and it is NOT a secret: it goes in
-# production.tfvars in plain text, because a price identifier is in the checkout
-# URL of everybody who buys. There is no Enterprise price and there is not meant
-# to be one, because Enterprise is arranged with a person.
+# production.tfvars in plain text. There is no Enterprise price and there is not
+# meant to be one; Enterprise is arranged with a person.
 afsecret stripe-secret-key       # sk_live_... or sk_test_... from Stripe, Developers, API keys
 afsecret stripe-webhook-secret   # whsec_..., shown once when you create the endpoint
 
@@ -25770,9 +25400,7 @@ afsecret resend-api-key
 ` + "`" + "`" + "`" + `
 
 Confirm both arrived without printing either. The first command prints names,
-the second prints a length and a checksum of what the vault holds, which is
-enough to catch a truncated paste or a stray newline and is not enough to
-reconstruct the value:
+the second a length, which catches a truncated paste or a stray newline:
 
 ` + "`" + "`" + "`" + `sh
 az keyvault secret list --vault-name "$VAULT" \
@@ -25814,17 +25442,14 @@ it. Mail sent as anything at that domain fails SPF, fails DKIM, and is rejected
 outright by every receiver that honours DMARC, which is all the large ones.
 
 So the order for mail is: fix the DNS, verify the domain in Resend, then set
-` + "`" + `mail_from` + "`" + `. Until then leave it empty. Nothing breaks in the meantime and it is
-worth knowing exactly what still works, because it is more than it sounds:
+` + "`" + `mail_from` + "`" + `. Until then leave it empty. What still works:
 
 - **Sign-in is unaffected.** GitHub is the front door and is always offered; the
-  mailed link is an additional method for a preview environment or an isolated
-  network, and its route is not registered at all when mail is not set up, so
-  there is no button that fails on press.
-- **Invitations work by copy and paste.** The link is returned to the inviter
-  and shown on screen whether or not mail is configured, because an invitation
-  that existed only as an email would silently do nothing on a self-hosted plane
-  with no mailer. A send that fails does not fail the invitation either.
+  mailed link is an additional method, and its route is not registered at all
+  when mail is not set up, so there is no button that fails on press.
+- **Invitations work by copy and paste.** The link is returned to the inviter and
+  shown on screen whether or not mail is configured. A send that fails does not
+  fail the invitation either.
 - **Enterprise leads are still recorded**, and are read with
   ` + "`" + `af-control-plane-backup leads` + "`" + `. ` + "`" + `lead_notify_email` + "`" + ` is what announces them,
   and the module refuses a plan that sets it without ` + "`" + `mail_from` + "`" + `.
@@ -25860,12 +25485,9 @@ refuses rather than guessing: a role that does not exist, does not hold
 message naming which. So an apply that turns the portal on is not finished until
 the bootstrap job has run, which a deploy does.
 
-Which brings back [the revision trap above](#an-apply-that-changes-the-app-changes-nothing-until-traffic-moves).
-Every switch here changes the container template, so every one of them creates a
-revision at **zero percent of traffic**. The apply will report success and the
-feature will not be on. Run a deploy, or move the traffic yourself, and check
-what is actually serving:
-
+Every switch here changes the container template, so each one creates a revision
+at **zero percent of traffic** ([above](#an-apply-that-changes-the-app-changes-nothing-until-traffic-moves)).
+Run a deploy, or move the traffic yourself, and check what is serving:
 ` + "`" + "`" + "`" + `sh
 az containerapp show -n afcp-app -g af-cp-centralus   --query "properties.template.containers[0].env[].name" -o tsv | sort
 ` + "`" + "`" + "`" + `
@@ -25878,13 +25500,11 @@ rather than being left empty: unset, the count on a role assignment goes to zero
 and every pull request reports "1 to destroy" for something nobody proposed to
 remove.
 
-The two GitHub OAuth secrets are the exception, and they are handled in the
-module rather than by discipline. Terraform seeds them once and then carries
-` + "`" + `ignore_changes` + "`" + ` on the value, because it cannot know them and must not
-overwrite them: creating an OAuth application is a human act on another service.
-That is also what makes the rotation instruction in
-[the control plane page](/docs/self-hosting/control-plane) true. Without it,
-the next apply would quietly put the placeholder back.
+The two GitHub OAuth secrets are the exception. Terraform seeds them once and
+then carries ` + "`" + `ignore_changes` + "`" + ` on the value, because it cannot know them and must
+not overwrite them. That is what makes the rotation instruction in [the control
+plane page](/docs/self-hosting/control-plane) true: without it, the next apply
+would quietly put the placeholder back.
 
 ` + "`" + `resource_provider_registrations = "none"` + "`" + ` is set on the provider, so Terraform
 never tries to register a resource provider, because registration is a write at
@@ -25892,11 +25512,11 @@ subscription scope and no identity here holds one. On a subscription where a
 provider is not yet registered, apply fails naming the namespace and the fix is
 ` + "`" + `az provider register --namespace <name>` + "`" + ` run by somebody who is allowed to.
 
-Container Apps rather than AKS, deliberately. The control plane is one web
-process and a database. The cheapest always-on AKS control plane is around 75
-USD a month before a single node runs, and buys nothing here. If you want it on
-Kubernetes anyway, the [Helm chart](/docs/self-hosting/control-plane) installs on
-any conformant cluster.
+Container Apps rather than AKS, deliberately: the control plane is one web
+process and a database, and the cheapest always-on AKS control plane is around
+75 USD a month before a single node runs. If you want it on Kubernetes anyway,
+the [Helm chart](/docs/self-hosting/control-plane) installs on any conformant
+cluster.
 
 ### After an upgrade that carries new migrations
 
@@ -25910,14 +25530,11 @@ az containerapp job start -n afcp-bootstrap -g af-cp-centralus
 
 ` + "`" + `deploy/cd/deploy.sh` + "`" + ` already does most of this: migrate first, start the new
 revision at zero traffic, check it there, shift traffic, check the public
-origin, and shift back on any failure after the shift. Read the script before
-this section; it is short and it is the actual mechanism, not a summary of one.
+origin, and shift back on any failure after the shift. Read the script first.
 
-What follows is for the case its own rollback does not fire, because the
-failure showed up after the health gate already passed and the deploy exited.
-An error rate that ramps up over the next hour, a customer report, a graph that
-looks wrong: the gate cannot catch what has not happened yet, and once it exits
-nothing is watching the deploy anymore. From here it is a person.
+What follows is for the case its own rollback does not fire, because the failure
+showed up after the health gate passed and the deploy exited: the gate cannot
+catch what has not happened yet, and once it exits nothing is watching.
 
 **1. Find the last revision that was actually good.**
 
@@ -25927,17 +25544,15 @@ az containerapp revision list -n afcp-app -g af-cp-centralus \
   -o table
 ` + "`" + "`" + "`" + `
 
-Old revisions are left active at zero traffic rather than deactivated, exactly
-so this list has something to go back to; deploy.sh's own comment says why.
-"The one before this one" is not the same question as "the last one that was
-good": if two bad releases shipped in a row, the previous revision is also
-broken. Cross-reference against the CD run history
+Old revisions are left active at zero traffic rather than deactivated, so this
+list has something to go back to. "The one before this one" is not "the last one
+that was good": if two bad releases shipped in a row, the previous revision is
+also broken. Cross-reference against the CD run history
 (` + "`" + `gh run list --workflow=cd.yml` + "`" + ` or the Actions tab) for the last run whose
-"What is serving" step summary showed a healthy ` + "`" + `/readyz` + "`" + `, and note which
-commit it deployed. That commit is what you are rolling back to, and the
-revision list above tells you which revision name still serves it. If the
-revision is gone, ` + "`" + `deploy.sh` + "`" + `'s promotion step will make you a new one from the
-same image, at zero traffic, checked before it takes any.
+"What is serving" step summary showed a healthy ` + "`" + `/readyz` + "`" + `, and note which commit
+it deployed. The revision list above tells you which revision still serves that
+commit. If the revision is gone, ` + "`" + `deploy.sh` + "`" + `'s promotion step makes you a new
+one from the same image, at zero traffic, checked before it takes any.
 
 **2. Move traffic to it.**
 
@@ -25946,83 +25561,54 @@ az containerapp ingress traffic set -n afcp-app -g af-cp-centralus \
   --revision-weight <good-revision>=100
 ` + "`" + "`" + "`" + `
 
-This is the exact command step 5 of ` + "`" + `deploy.sh` + "`" + ` runs on your behalf when its
-own gate catches the failure. Running it by hand is not a lesser version of the
-same action.
+This is the exact command step 5 of ` + "`" + `deploy.sh` + "`" + ` runs when its own gate catches
+the failure.
 
 **3. Verify it took, the same way the pipeline does.**
 
-A revision report and a real check are not the same evidence: ` + "`" + `az` + "`" + ` can say the
-weight moved while the origin still answers from a cache or a stale connection.
-Run the actual gate against the public origin:
+` + "`" + `az` + "`" + ` can say the weight moved while the origin still answers from a cache or a
+stale connection. Run the gate against the public origin:
 
 ` + "`" + "`" + "`" + `sh
 deploy/cd/health-gate.sh https://app.antifailure.dev <commit-you-rolled-back-to> 20 3
 ` + "`" + "`" + "`" + `
 
-It checks two things, not one: that ` + "`" + `/readyz` + "`" + ` answers, and that it names the
-commit you expect. A healthy answer from the wrong commit is exactly the
-failure this script exists to catch, and it is the one a plain ` + "`" + `curl` + "`" + ` would
-miss.
+It checks two things: that ` + "`" + `/readyz` + "`" + ` answers, and that it names the commit you
+expect. A healthy answer from the wrong commit is what a plain ` + "`" + `curl` + "`" + ` would miss.
 
 **4. The migration that already applied.**
 
-This is the genuinely hard part, and it deserves more than "roll the schema
-back too", because there is no such command here. ` + "`" + `web/packages/db` + "`" + `'s migration
-runner has no down migration and has never had one: each file is one
-transaction, applied and recorded together, so a migration is either fully
-applied or not applied at all. There is no partial state to reason about, which
-narrows the problem to exactly two cases.
+` + "`" + `web/packages/db` + "`" + `'s migration runner has no down migration and has never had
+one: each file is one transaction, applied and recorded together, so a migration
+is either fully applied or not applied at all. That leaves two cases.
 
-**The migration is additive.** This is the case the whole design assumes, and
-it is why ` + "`" + `deploy.sh` + "`" + `'s own comment states the constraint plainly: migrations
-in this project are expected to be backward compatible with the previous
-release. A new nullable column, a new table, a new index, a new policy grant,
-none of it is visible to a query the old code never learned to send. If that
-holds, step 2 above is already the whole fix: the revision you just moved
-traffic back to runs correctly against the schema as it now stands, and nothing
-about the database needs to change. Do not assume this. Read the migration
-files that shipped with the release you are rolling back, the same files
+**The migration is additive.** ` + "`" + `deploy.sh` + "`" + `'s own comment states the constraint:
+migrations in this project are expected to be backward compatible with the
+previous release. If that holds, step 2 above is the whole fix: the revision you
+moved traffic back to runs correctly against the schema as it now stands. Do not
+assume it. Read the migration files that shipped with the release you are
+rolling back, which
 ` + "`" + `git diff <good-commit>..<bad-commit> -- web/packages/db/migrations` + "`" + ` shows you,
 and check each statement is additive rather than something that removes or
 narrows what the old code depends on: a dropped or renamed column, a ` + "`" + `NOT NULL` + "`" + `
-added with no default, a changed type, a revoked grant. This is a five minute
-read and it is not optional. Assuming compatibility instead of checking it is
-how a rollback becomes a second incident.
+added with no default, a changed type, a revoked grant.
 
-**The migration is not additive.** Now the old code is the one that breaks,
-because it is querying a column, a type, or a grant that no longer matches what
-it expects. Moving traffic back in this case does not fix anything; it trades
-one broken revision for a different one. There is no third option that makes
-both sides correct at once, because the schema and the code serving it cannot
-disagree, and disagreement, not either release on its own, is the incident:
-
-- Do not write a rollback migration under incident pressure. A migration
-  authored in a hurry, run once and never tested against the same suite every
-  other migration goes through, is exactly the kind of change this project's
-  own migration runner has been burned by before: a failed statement leaves the
-  connection in an aborted transaction, and every diagnostic that runs after it
-  in the same connection reports the aborted state rather than the real cause.
-  Fast, under-tested schema changes are where that shows up.
-- Compare what each side actually does in production right now: is the new
-  code erroring in a way worse than the old code would against the changed
-  schema, or the other way around. Whichever fails less badly is what stays
-  serving while the real fix is written, and that choice is a judgment call
-  under real constraints, not a formula. Say which way you chose and why in the
-  incident record, because the next person reading it needs the reasoning more
-  than the outcome.
-- The actual fix is forward, not back: a new migration that restores what the
-  old code needs, or, if the new code is staying, a migration that finishes
-  what it started, tested the same way any migration is, through a normal pull
-  request and the kind cluster check in ` + "`" + `control-plane-image.yml` + "`" + `, then
-  deployed the same way any deploy is. There is no faster correct path than
-  that, because a schema and the traffic serving it cannot be made to agree by
-  moving a traffic weight.
-- Afterwards, name the specific miss. It is almost always one release both
-  dropping or renaming a column and no longer being read by anything that still
-  expects it. The prevention is a convention rather than a tool: deprecate a
-  column for one release before dropping it, so the release that stops writing
-  it and the release that removes it are never the same one.
+**The migration is not additive.** The old code is then the one that breaks,
+because it queries a column, a type, or a grant that no longer matches. Moving
+traffic back trades one broken revision for a different one:
+- Do not write a rollback migration under incident pressure. It would be run
+  once and never tested against the suite every other migration goes through.
+- Compare what each side actually does in production now: whether the new code
+  errors worse against the changed schema than the old code would, or the other
+  way around. Whichever fails less badly stays serving while the real fix is
+  written. Say which way you chose and why in the incident record.
+- The fix is forward: a new migration that restores what the old code needs, or,
+  if the new code is staying, one that finishes what it started, tested through a
+  normal pull request and the kind cluster check in ` + "`" + `control-plane-image.yml` + "`" + `,
+  then deployed the same way any deploy is.
+- Afterwards, name the specific miss. Deprecate a column for one release before
+  dropping it, so the release that stops writing it and the release that removes
+  it are never the same one.
 
 ## What it costs
 
@@ -26049,15 +25635,12 @@ At the defaults, **30.47 USD a month**:
 | Log Analytics, assuming 2 GB a month | 0.24 |
 | Key Vault | 0.15 |
 
-It was 28.34 in ` + "`" + `eastus` + "`" + `, and the difference is what the third gate costs:
-` + "`" + `centralus` + "`" + ` charges 0.01921 an hour for a B1ms against 0.017, and 0.13 a
-gigabyte-month for database storage against 0.115. Container Apps, the DNS zone
-and Key Vault are the same in both.
+` + "`" + `eastus` + "`" + ` would be 28.34: ` + "`" + `centralus` + "`" + ` charges 0.01921 an hour for a B1ms against
+0.017, and 0.13 a gigabyte-month for database storage against 0.115.
 
 ` + "`" + `--budget N` + "`" + ` turns the estimate into a gate that refuses a plan projected above
 the resource group's budget. A resource the tool cannot price is reported
-` + "`" + `UNKNOWN` + "`" + ` and suppresses the total, because an estimator that silently prices
-what it does not recognise at zero gives a confident, small, wrong number.
+` + "`" + `UNKNOWN` + "`" + ` and suppresses the total.
 
 Three ways to spend much more than the table above, all off by default:
 ` + "`" + `high_availability` + "`" + ` runs a second server and needs a non-burstable SKU (which
@@ -26071,22 +25654,18 @@ reports it ` + "`" + `UNKNOWN` + "`" + ` rather than as free.
 ## Two settings Azure adds that Terraform will try to remove
 
 Both of these produce a plan that never converges, and a plan that always shows
-a diff is a plan people stop reading, which is how a real destroy gets past a
-reviewer.
+a diff is a plan people stop reading.
 
 - Creating a flexible server on a delegated subnet makes the platform attach the
   **` + "`" + `Microsoft.Storage` + "`" + ` service endpoint** to that subnet for its own backup
   traffic.
 - Every managed environment gets a default **` + "`" + `Consumption` + "`" + ` workload profile**.
 
-Terraform created neither, so it proposes to delete both, quietly, as small
-blocks inside otherwise uninteresting in-place updates. Azure then puts them
-back. Both are declared in the module for that reason, with a comment saying so,
-and the stack now plans ` + "`" + `0 to change` + "`" + ` against itself.
-
-If you fork these modules and see a permanent diff on a subnet or an
-environment, this is why, and the fix is to declare what the platform set rather
-than to keep deleting it.
+Terraform created neither, so it proposes to delete both and Azure puts them
+back. Both are declared in the module for that reason, and the stack plans
+` + "`" + `0 to change` + "`" + ` against itself. If you fork these modules and see a permanent diff
+on a subnet or an environment, declare what the platform set rather than keep
+deleting it.
 
 ## Isolation
 
@@ -26116,9 +25695,8 @@ rather than discovered by whoever runs apply.
 
 It authenticates with a federated credential and **no client secret exists at
 all**. The Entra application ` + "`" + `af-infra-ci` + "`" + ` carries no password and no
-certificate; GitHub Actions presents an OIDC token and Azure exchanges it. There
-is nothing to leak, nothing to rotate, and nothing that can be committed by
-accident. Revoking it is deleting a federated credential.
+certificate; GitHub Actions presents an OIDC token and Azure exchanges it.
+Revoking it is deleting a federated credential.
 
 ` + "`" + "`" + "`" + `sh
 az ad app create --display-name af-infra-ci --sign-in-audience AzureADMyOrg
@@ -26139,19 +25717,17 @@ carry the numeric organisation and repository ids rather than their names:
 subject claim - repo:antifailure@321004801/antifailure@1346757509:pull_request
 ` + "`" + "`" + "`" + `
 
-Every example on the internet, including the one above, shows the login form.
-If yours is on the immutable format, Entra answers:
+If your repository is on the immutable format, Entra answers:
 
 ` + "`" + "`" + "`" + `
 AADSTS700213: No matching federated identity record found for presented
 assertion subject 'repo:<org>@<orgid>/<repo>@<repoid>:pull_request'
 ` + "`" + "`" + "`" + `
 
-which is accurate and reads like a typo in your own configuration. **Read the
-subject out of the failing job's log and create a credential that matches it
-exactly.** Keeping both forms costs nothing, an application takes twenty
-federated credentials, and it means a change to the format in either direction
-does not break the job:
+**Read the subject out of the failing job's log and create a credential that
+matches it exactly.** Keep both forms: an application takes twenty federated
+credentials, so a change to the format in either direction does not break the
+job:
 
 ` + "`" + "`" + "`" + `sh
 gh api repos/<owner>/<repo> --jq '{repo_id:.id, owner_id:.owner.id}'
@@ -26159,10 +25735,9 @@ gh api repos/<owner>/<repo> --jq '{repo_id:.id, owner_id:.owner.id}'
 
 Then set ` + "`" + `AZURE_CLIENT_ID` + "`" + `, ` + "`" + `AZURE_TENANT_ID` + "`" + ` and ` + "`" + `AZURE_SUBSCRIPTION_ID` + "`" + ` as
 repository secrets, plus ` + "`" + `AZURE_TFSTATE_RG` + "`" + ` and ` + "`" + `AZURE_TFSTATE_ACCOUNT` + "`" + ` if you
-want it to read real state. None of those five is a credential; they are
-identifiers, and the whole design is that the credential does not exist.
+want it to read real state. None of those five is a credential; they are identifiers.
 
-**What the plan job needs**, which is short on purpose:
+**What the plan job needs**:
 
 | Scope | Role |
 | --- | --- |
@@ -26170,13 +25745,11 @@ identifiers, and the whole design is that the credential does not exist.
 | the state storage account | Storage Blob Data Reader |
 | the state storage account | Reader |
 
-The last two look redundant and are not. Azure splits storage into a control
-plane and a data plane and a role on one grants nothing on the other, **in both
-directions**: Owner on the subscription cannot read a blob, and Storage Blob
-Data Reader cannot perform ` + "`" + `Microsoft.Storage/storageAccounts/read` + "`" + `, which the
+The last two look redundant and are not. A role on the storage control plane
+grants nothing on the data plane and the reverse also holds: Storage Blob Data
+Reader cannot perform ` + "`" + `Microsoft.Storage/storageAccounts/read` + "`" + `, which the
 ` + "`" + `azurerm` + "`" + ` backend does before reading any state, to resolve the blob endpoint.
-The error names a read action while the identity is called a Reader, so it takes
-a moment to see. Both roles are read-only.
+Both roles are read-only.
 
 Nothing at subscription scope. The plan job also passes two flags, and each
 one is there so the job does not need a write:
@@ -26188,11 +25761,10 @@ one is there so the job does not need a write:
   secret's *value*, which would put the live database URLs into a pull
   request job.
 
-**What the deploy job needs on top of that**, and this is the same principal
-on the hosted control plane, which is the uncomfortable part
-` + "`" + `stacks/control-plane/ci.tf` + "`" + ` spells out. ` + "`" + `cd.yml` + "`" + ` deploys with it and, since
-2026-09-06, applies each environment's container app configuration from its
-tfvars before deploying, through ` + "`" + `deploy/cd/apply-config.sh` + "`" + `:
+**What the deploy job needs on top of that**, the same principal on the hosted
+control plane, as ` + "`" + `stacks/control-plane/ci.tf` + "`" + ` spells out. ` + "`" + `cd.yml` + "`" + ` deploys with
+it and applies each environment's container app configuration from its tfvars
+before deploying, through ` + "`" + `deploy/cd/apply-config.sh` + "`" + `:
 
 | Scope | Role | For |
 | --- | --- | --- |
@@ -26221,10 +25793,6 @@ apply, and both federated credentials name this repository.
 | credential, no state secrets | **planned from an empty state**: real Azure, real cost estimate, and a summary whose first line says it *cannot report a destroy* |
 | credential and state secrets | **planned against real state**, the only mode in which "0 to destroy" is evidence |
 
-A green check that could not see the thing it exists to see is worse than a
-missing one, which is why the middle mode announces its own blindness instead of
-passing quietly.
-
 ## Quota
 
 ` + "`" + "`" + "`" + `
@@ -26240,10 +25808,9 @@ low and an increase can take a day to be approved.
 az vm list-usage --location eastus -o table
 ` + "`" + "`" + "`" + `
 
-Ask for the family the node pool uses, not the total. A subscription can have
+Ask for the family the node pool uses, not the total: a subscription can have
 plenty of total cores and none of the family a pool wants, and the error names
-which. This matters for an AKS pool; the control plane above needs no VM quota
-at all, because Container Apps and a flexible server do not consume it.
+which. This matters for an AKS pool; the control plane above needs no VM quota.
 
 ## Tearing it down
 
@@ -26261,17 +25828,13 @@ The Key Vault is soft-deleted rather than purged, on purpose: a vault that can
 be destroyed and recreated immediately is one whose secrets can be replaced by
 somebody holding only delete.
 
-**That has a consequence worth knowing before you destroy anything, not after.**
 A Key Vault name is GLOBAL, a soft-deleted vault keeps its name for the
-retention period, and purge protection means nobody can release it early, not
-even the person who owns it. So ` + "`" + `terraform destroy` + "`" + ` followed by ` + "`" + `terraform
-apply` + "`" + ` in the same region inside seven days fails on the vault, with an error
-about a name conflict rather than about soft delete.
-
-The vault name therefore includes the location, ` + "`" + `<name>-kv-<location>` + "`" + `, so that
-moving regions works. Nothing can make same-region recreation work inside the
-window, because that is precisely the sequence purge protection exists to
-prevent. Set ` + "`" + `key_vault_name` + "`" + ` yourself if you need to sidestep it knowingly.
+retention period, and purge protection means nobody can release it early. So
+` + "`" + `terraform destroy` + "`" + ` followed by ` + "`" + `terraform apply` + "`" + ` in the same region inside
+seven days fails on the vault, with an error about a name conflict rather than
+about soft delete. The vault name therefore includes the location,
+` + "`" + `<name>-kv-<location>` + "`" + `, so that moving regions works. Set ` + "`" + `key_vault_name` + "`" + `
+yourself if you need to sidestep it knowingly.
 
 Related: [the control plane](/docs/self-hosting/control-plane),
 [standing up production](/docs/self-hosting/production),
@@ -26306,9 +25869,8 @@ AF-CPL-003 The control plane could not be reached: dial tcp: i/o timeout
   it returns.
 ` + "`" + "`" + "`" + `
 
-That is the design and not a consolation. Events are buffered and delivered
-when it comes back, environments keep running, and teardown still works, because
-teardown reads the local journal rather than the control plane.
+Environments keep running and teardown still works, because teardown reads the
+local journal rather than the control plane.
 
 ## Running one
 
@@ -26423,12 +25985,10 @@ kubectl exec "$(kubectl get deploy -l app.kubernetes.io/name=antifailure-control
 
 Its ` + "`" + `values.yaml` + "`" + ` names every setting on the reference page that an installation
 is meant to choose, with the argument for each one written where you set it.
-Read that file rather than a list here: a second list would rot, and the one in
-the chart is checked. ` + "`" + `tools/wirecheck` + "`" + ` compares the reference page against both
-supported installation routes, the Terraform module and this chart, and fails
-the build when either cannot deliver a variable and no row in
-` + "`" + `tools/docs/wiring-exemptions.tsv` + "`" + ` gives a reason. Eight variables have such a
-row for the chart, and the reasons are in that file.
+` + "`" + `tools/wirecheck` + "`" + ` compares the reference page against both supported installation
+routes, the Terraform module and this chart, and fails the build when either
+cannot deliver a variable and no row in ` + "`" + `tools/docs/wiring-exemptions.tsv` + "`" + ` gives
+a reason. Eight variables have such a row for the chart.
 
 That check was added because the chart could not set 23 of them, including
 ` + "`" + `AF_SITE_ORIGIN` + "`" + `, and nothing said so. A missing setting does not present as a
@@ -26450,8 +26010,6 @@ serving requests is deliberately not that role.
 
 ### ` + "`" + `antifailure_app` + "`" + ` is not an account
 
-This is the part that catches everyone, so it is worth being exact.
-
 Migration ` + "`" + `0001_init.sql` + "`" + ` creates ` + "`" + `antifailure_app` + "`" + ` as ` + "`" + `NOLOGIN` + "`" + `. It is a GROUP
 role that holds the grants. **Nobody can connect as it.** The application
 connects as a *separate* login role that is a member of it and owns nothing:
@@ -26466,16 +26024,15 @@ GRANT CONNECT ON DATABASE antifailure TO af_app;
 The grant has to come *after* the migrations, because that is what creates
 ` + "`" + `antifailure_app` + "`" + `.
 
-If you skip it, the failure is quiet and confusing rather than loud. The schema
-migrates, the server starts, ` + "`" + `/health` + "`" + ` returns 200, and every query fails with:
+If you skip it, the schema migrates, the server starts, ` + "`" + `/health` + "`" + ` returns 200,
+and every query fails with:
 
 ` + "`" + "`" + "`" + `
 ERROR:  relation "organizations" does not exist
 ` + "`" + "`" + "`" + `
 
-which reads like a missing migration and is not one. A role with no ` + "`" + `USAGE` + "`" + ` on
-the schema is not told that it lacks permission; it is told the relation is not
-there. Check the membership directly:
+A role with no ` + "`" + `USAGE` + "`" + ` on the schema is told the relation is not there rather
+than that it lacks permission. Check the membership directly:
 
 ` + "`" + "`" + "`" + `sh
 psql -c "SELECT pg_has_role('af_app', 'antifailure_app', 'MEMBER')"   # expects t
@@ -26495,10 +26052,8 @@ Verified against a real Postgres rather than asserted:
 | ` + "`" + `SELECT` + "`" + ` with no tenant set | returns nothing, rather than everything |
 
 Tenant isolation is row level security in Postgres rather than a ` + "`" + `WHERE` + "`" + ` clause
-in the application. A missing clause is a bug that returns another
-organisation's data; a missing policy is a table that returns nothing. The
-suite proves it by running every query as a second tenant and asserting it sees
-none of the first's rows, on every table, and it fails if a new table appears
+in the application. The suite runs every query as a second tenant and asserts it
+sees none of the first's rows, on every table, and fails if a new table appears
 that nobody classified.
 
 ## Connecting an engine
@@ -26557,10 +26112,6 @@ AF-CP-002 The control plane rejected this engine's token.
   a different control plane.
 ` + "`" + "`" + "`" + `
 
-Tokens are stored as a hash. A control plane database that leaks does not leak
-anything that can be used against it, and a revoked token stops working
-immediately rather than at the end of a cache window.
-
 ## Reading an environment
 
 ` + "`" + "`" + "`" + `
@@ -26581,8 +26132,7 @@ readiness probe: a replica that has lost its database still returns 200 and
 would still be sent traffic.
 
 So the Helm chart and the Terraform both use ` + "`" + `/health` + "`" + ` for liveness only, and a
-TCP check for readiness. Neither claims more than it can check. If you write
-your own probes, do the same.
+TCP check for readiness. If you write your own probes, do the same.
 
 ## The audit log
 
@@ -26600,31 +26150,18 @@ sidebar:
   order: 5
 ---
 
-A rotation of one person is still a rotation. Writing it down changes what
-happens at three in the morning: without this page, "who is on call" is
-answered from memory, "did anyone see this" is answered by asking around, and
-"what do I do first" is answered by reading code while the page is still
-buzzing. None of that is available to someone who has just woken up.
-
 ## The rotation
 
-One person, holding the pager continuously, until this page names a second
-one. That is not a gap to apologize for; it is the honest state of a project
-this size, and pretending otherwise with an empty schedule tool would be worse
-than saying so plainly.
+One person, holding the pager continuously, until this page names a second one.
 
-The moment a second person exists, the rotation is a fixed weekly handoff
-rather than anything dynamic: whoever is on call through Sunday hands off
-Monday morning, in a message that says explicitly which alerts fired that week
-and what is still open, not just "nothing happened". A handoff that only
-speaks when something is wrong is a handoff nobody trusts when it says nothing
-happened.
+With a second person, the rotation is a fixed weekly handoff: whoever is on
+call through Sunday hands off Monday morning, in a message naming which alerts
+fired that week and what is still open, not just "nothing happened".
 
 ## What an acknowledgement means
 
-Acknowledging a page is a promise, not a formality: **I have seen this, I am
-looking at it now, stop paging anyone else about it.** It is not "I will look
-at it after this meeting" and it is not "I saw the notification go by."
+Acknowledging a page means: **I have seen this, I am looking at it now, stop
+paging anyone else about it.**
 
 Concretely, an acknowledgement means, within the next few minutes:
 
@@ -26636,8 +26173,7 @@ Concretely, an acknowledgement means, within the next few minutes:
   the second escalation below, before you are an hour into it and out of
   runway.
 
-An unacknowledged page after the escalation window is treated as a missed page,
-full stop. Nobody gets credit for having seen it in their peripheral vision.
+An unacknowledged page after the escalation window is treated as a missed page.
 
 ## When to wake somebody
 
@@ -26646,10 +26182,7 @@ Three questions, and any one of them being true is enough on its own.
 **Is a customer's data at risk?** A row-level security failure, a masking
 failure that let raw data leave the boundary it is supposed to stay inside, a
 credential that may have leaked. Wake somebody now, and do not wait for a
-second opinion on whether it is bad enough; the two agents who once held
-conflicting Terraform state and destroyed a container registry between them
-learned that a five-minute pause to double-check would have been cheap and
-skipping it was not, described in ` + "`" + `docs/plan/prod_guide.md` + "`" + `'s account of the
+second opinion on whether it is bad enough. ` + "`" + `docs/plan/prod_guide.md` + "`" + ` has the
 incident that reshaped how this project applies infrastructure changes.
 
 **Is the whole control plane down, not one organization?** The operations
@@ -26672,11 +26205,9 @@ runbook before deciding it can wait, rather than guessing from the name.
 
 **The control plane will not answer at all.**
 Read [The control plane is down](/docs/self-hosting/operations#the-control-plane-is-down)
-before doing anything else. The single most important fact on that page: ` + "`" + `af
-up` + "`" + `, ` + "`" + `af down` + "`" + `, and every environment already running keep working with no
-control plane at all, so this is not the five-alarm fire it feels like at
-first. Bring the control plane back; do nothing to the engines, they catch up
-on their own.
+before doing anything else. ` + "`" + `af up` + "`" + `, ` + "`" + `af down` + "`" + `, and every environment already
+running keep working with no control plane at all. Bring the control plane
+back; do nothing to the engines, they catch up on their own.
 
 **A deploy just went out and something looks wrong.**
 Check whether the automatic rollback already fired: a failed post-promotion
@@ -26691,9 +26222,7 @@ safe default.
 
 **A specific alert fired.**
 Its entry under [What the alerts mean](/docs/self-hosting/operations#what-the-alerts-mean)
-is the runbook. Read that section's specific guidance before touching
-anything; several of them exist precisely to stop a reasonable-sounding first
-instinct that turns out to be wrong for that failure.
+is the runbook. Read it before touching anything.
 
 **Something feels wrong and no alert has fired.**
 Trust it, and start from
@@ -26706,8 +26235,6 @@ something first is not a false alarm just because nothing crossed the line yet.
 ` + "`" + `af support bundle` + "`" + ` for one environment, and for the control plane itself, the
 steps under
 [Collecting evidence before you change anything](/docs/self-hosting/operations#collecting-evidence-before-you-change-anything).
-The state that explains an incident is usually the first thing a fix destroys,
-so gather it before you start changing things, not after.
 `,
 	"self-hosting/operations.md": `---
 title: Operations
@@ -26716,15 +26243,10 @@ sidebar:
   order: 4
 ---
 
-This page is written for the person who has just been woken up. It assumes you
-know nothing about the state of the system and have about ninety seconds of
-patience. Everything here has been run; nothing is aspirational.
-
 Setting the rotation up rather than firefighting inside it belongs on the
-[on-call page](/docs/self-hosting/on-call): who holds it, what an
-acknowledgement means, and what to do first for each class of page. The
-[status page](/docs/self-hosting/status-page) is what a customer reads while
-you read this one; it is not the pager and does not substitute for it.
+[on-call page](/docs/self-hosting/on-call). The
+[status page](/docs/self-hosting/status-page) is what a customer reads while you
+read this one.
 
 ## Create the first operator
 
@@ -26789,18 +26311,17 @@ plane records about its own failures](#what-the-control-plane-records-about-its-
 
 ## What the alerts mean
 
-Every rule in ` + "`" + `observability/alerts/antifailure.rules.yml` + "`" + ` links back here. They
-read the counters the control plane keeps itself, so they need a Prometheus
-scraping ` + "`" + `/metrics` + "`" + `.
+Six of the ten rules in ` + "`" + `observability/alerts/antifailure.rules.yml` + "`" + ` have a
+section here. ` + "`" + `ControlPlaneAvailabilityBudgetBurningSlowly` + "`" + `, ` + "`" + `ControlPlaneIsSlow` + "`" + `,
+` + "`" + `TheFailureStoreIsLosingFailures` + "`" + ` and ` + "`" + `TheFailureStoreCannotWrite` + "`" + ` do not; read
+their annotations. They read the counters the control plane keeps itself, so they
+need a Prometheus scraping ` + "`" + `/metrics` + "`" + `.
 
 The hosted control plane on Azure has a second, smaller set that needs no
 Prometheus and watches the platform rather than the process: the database, the
 replicas, the jobs, the certificate, and the service as a customer reaches it.
 Those have their own pages under [runbooks](/docs/self-hosting/runbooks), and
 each rule names its page in the notification it sends.
-
-Both sets are deliberately short. An alert nobody acts on trains everybody to
-ignore the ones that matter.
 
 ### ControlPlaneAvailabilityBudgetBurningFast
 
@@ -26825,7 +26346,7 @@ do about it, which is faster than guessing from the count.
 The slowest one in twenty environments is taking more than eight minutes to be
 reachable. Almost always one of two things: a golden that is being copied in
 full rather than branched, or a build cache that is not being hit. Neither is an
-outage and neither should be treated as one at three in the morning.
+outage.
 
 ### IngestionIsLosingEvents
 
@@ -26850,11 +26371,8 @@ is the tool for that.
 
 ## The control plane is down
 
-**Environments are not down.** This is the most important sentence on this page
-and the easiest to forget while being paged. ` + "`" + `af up` + "`" + `, ` + "`" + `af down` + "`" + `, ` + "`" + `af test` + "`" + ` and
-everything else work with no control plane at all. It was built that way
-deliberately: a preview environment that stops working because a web application
-is down would be a worse product than no dashboard.
+**Environments are not down.** ` + "`" + `af up` + "`" + `, ` + "`" + `af down` + "`" + `, ` + "`" + `af test` + "`" + ` and everything else
+work with no control plane at all.
 
 What is actually happening while it is down:
 
@@ -26863,8 +26381,7 @@ What is actually happening while it is down:
   spool survives the process. The next command that runs against a control plane
   that has come back sends what the earlier ones could not, oldest first.
 - Nothing is lost until the spool exceeds its budget, at which point the oldest
-  batches are dropped and the count is reported. You will see that reported
-  rather than have to infer it.
+  batches are dropped and the count is reported.
 - ` + "`" + `af env pull` + "`" + ` fails, and says so with ` + "`" + `AF-CPL-003` + "`" + `, which is the only
   user-visible consequence.
 
@@ -26903,13 +26420,7 @@ engine that cannot reach the control plane buffers rather than dropping.
 
 **The recovery window is fourteen days**, which is ` + "`" + `backup_retention_days` + "`" + ` in
 ` + "`" + `infra/terraform/modules/control-plane/variables.tf` + "`" + `. Azure allows 7 to 35 and
-its own default is 7. Fourteen is deliberate in both directions. Seven is not
-enough for the failure that actually needs a long window, which is not a lost
-server but a logical corruption nobody noticed: a bad migration on a Friday,
-found on the Monday after a week away, is already outside seven days and there
-is nothing to recover to. Thirty five is billed as backup storage every day for
-a window nobody has ever reached back into. Fourteen covers a fortnight, which
-is longer than anyone here has taken to notice a broken write.
+its own default is 7.
 
 **A region loss costs up to an hour, and today it costs everything.**
 ` + "`" + `geo_redundant_backup` + "`" + ` defaults to ` + "`" + `false` + "`" + `, so backups live only in the primary
@@ -26917,14 +26428,11 @@ region and a region that is gone takes them with it. Turning it on gives a
 geo-restore with an RPO of up to an hour, because the copy to the paired region
 is asynchronous, and a geo-restore reaches the last backup that arrived rather
 than a second you choose: Azure does not offer point in time recovery from
-geo-redundant backups. Both of those are worse than the five minutes above, and
-both are enormously better than nothing.
+geo-redundant backups.
 
-That default is correct for staging and wrong for production, and it is the
-expensive kind of wrong: backup redundancy can only be set when the server is
-created, so switching it on later means creating a new server and moving to it.
-Decide before the apply, not after.
-
+That default is correct for staging and wrong for production: backup redundancy
+can only be set when the server is created, so switching it on later means
+creating a new server and moving to it. Decide before the apply, not after.
 **None of this is the dump.** ` + "`" + `af-control-plane-backup` + "`" + ` is a second line with a
 different failure mode: it produces a file you hold, readable by any Postgres,
 which is what covers the case where the Azure subscription itself is the
@@ -26945,20 +26453,16 @@ The **roles file** matters most and is the least obvious. ` + "`" + `pg_dump` + 
 database; roles live in the cluster. Restore a dump into a fresh cluster in
 another region and ` + "`" + `antifailure_app` + "`" + ` does not exist there, so every ` + "`" + `GRANT` + "`" + ` in
 the dump fails, ` + "`" + `pg_restore` + "`" + ` exits zero, and the application cannot connect to
-the database you just recovered. The roles file is what prevents that, and it is
-why a backup taken any other way is not enough.
+the database you just recovered. The roles file is what prevents that.
 
 The **manifest** records what a restore has to reproduce: row counts per table,
 every policy, every table with row level security enabled and separately
 ` + "`" + `FORCE` + "`" + `d, every privilege the application role holds, and the audit chain head.
 
-It records its own scope as well, which matters more than it sounds. All of
-those checks read the ` + "`" + `public` + "`" + ` schema, where every one of the control plane's
-tables lives. Anything outside it is listed in the manifest as unverified and
-reported by the restore and the drill as a table the check cannot speak for.
-That is not a restore failure and should not be read as one. It means the
-database grew somewhere this verification does not look, and somebody has to
-decide whether that table matters before the next real recovery.
+It records its own scope as well. All of those checks read the ` + "`" + `public` + "`" + ` schema,
+where every one of the control plane's tables lives. Anything outside it is
+listed in the manifest as unverified and reported by the restore and the drill as
+a table the check cannot speak for. That is not a restore failure.
 
 ### Restore it
 
@@ -26972,9 +26476,8 @@ af-control-plane-backup restore \
   --app-password "$APP_PASSWORD"
 ` + "`" + "`" + "`" + `
 
-It refuses a database that already exists. That refusal is deliberate: restoring
-over a live database is not a recovery, it is an outage with a different cause.
-Restore into a new name and switch the application over.
+It refuses a database that already exists. Restore into a new name and switch the
+application over.
 
 It exits 3, and says which check failed, if the restored database does not match
 the manifest or does not isolate tenants. **Do not point the control plane at a
@@ -26982,7 +26485,7 @@ database that exited 3.**
 ` + "`" + `pg_restore` + "`" + ` exits zero over a ` + "`" + `GRANT` + "`" + ` that failed because the role was missing,
 and over policies restored onto a table whose row level security it could not
 enable. Both produce a control plane that starts, answers every request, and
-isolates nothing at all. Nothing about it looks wrong from the outside.
+isolates nothing at all.
 
 ### Rehearse it, on a schedule, before you need it
 
@@ -27020,33 +26523,22 @@ UTC, in ` + "`" + `.github/workflows/drill.yml` + "`" + `, which invokes the ` +
 same command. Run ` + "`" + `just drill` + "`" + ` to run exactly that yourself: it starts a
 Postgres of its own, applies every migration, seeds two organizations so the
 cross-tenant read has another tenant to be refused, and holds the recovery time
-against a budget of 300 seconds. That budget is a backstop against a restore
-that has stopped working, not the objective below and not a performance target.
+against a budget of 300 seconds.
 What detects a regression is the series: the workflow publishes each
 measurement to the run summary and keeps it for ninety days.
 
 The number it prints is the **restore** time, not the whole run, because
-recovery starts from a backup that already exists. Counting the time to take one
-flatters the number by measuring work that has already happened when it matters.
+recovery starts from a backup that already exists.
 
-**Use your own number, not this one.** For scale only, all of it measured rather
-than estimated: on a continuous integration runner with nothing else on it, a
-control plane database holding a handful of organizations restored in under two
-seconds, and two consecutive runs of the same drill on the same runner reported
-1.8 seconds and 0.6. On a development machine running a dozen other containers,
-the same restore took between 20 and 160 seconds. A factor of three between two
-runs an hour apart, and a factor of a hundred between two machines, is the
-point. A recovery time is a property of the
-hardware, the size of the database and what else is happening, so the only
+**Use your own number, not this one.** Measured: on a continuous integration
+runner with nothing else on it, a control plane database holding a handful of
+organizations restored in under two seconds, and two consecutive runs on the same
+runner reported 1.8 seconds and 0.6. On a development machine running a dozen
+other containers, the same restore took between 20 and 160 seconds. The only
 figure worth putting in an incident plan is the one your own drill measured on
-the machine you would actually recover onto. The suite prints its measurement on
-every run, so the number in front of you is never older than the last time
-anybody checked.
+the machine you would actually recover onto.
 
-The objective to hold it against is two hours, which is the recovery time this
-system is designed for. A drill that comes in well under it is not a reason to
-stop running the drill: what the drill really tests is whether the backup is
-one, and the timing is the part you get for free.
+The objective to hold it against is two hours.
 
 ## Nobody can sign in
 
@@ -27060,8 +26552,7 @@ first sign-in happened while the App was broken and therefore has no owner.
 Fix GitHub first. The three that account for almost all of it: ` + "`" + `AF_GITHUB_APP_ID` + "`" + `
 and its private key, ` + "`" + `AF_GITHUB_CLIENT_SECRET` + "`" + ` matching the OAuth App, and
 ` + "`" + `AF_GITHUB_REDIRECT_URI` + "`" + ` matching what the OAuth App has registered. The start-up
-log says which of these the process found. Getting sign-in working again is the
-real repair, and the command below is not a substitute for it.
+log says which of these the process found.
 
 Reach for break-glass only when sign-in works and there is nobody inside the
 organization who can act, which means nobody holds ` + "`" + `members.manage` + "`" + `.
@@ -27149,10 +26640,6 @@ still holding environments from runs that failed days ago.
 
 ## Load testing the control plane itself
 
-` + "`" + `af load` + "`" + ` shapes traffic against an environment ` + "`" + `af up` + "`" + ` built; nothing before
-this pointed it at the control plane's own API, which is the one service in
-this product that has never had its own load generator run against it.
-
 ` + "`" + `engine/cmd/loadcp` + "`" + ` does, using the same ` + "`" + `engine/internal/load` + "`" + ` package ` + "`" + `af
 load` + "`" + ` does, against a URL instead of an af-managed environment:
 
@@ -27168,25 +26655,17 @@ the rate limiter already enforces per caller. The profile says so: its
 ` + "`" + `source` + "`" + ` field reads ` + "`" + `declared_limits` + "`" + `, not ` + "`" + `production` + "`" + `, the same honesty
 ` + "`" + `internal/load` + "`" + ` itself applies to a shape nobody supplied.
 
-**What a real run found.** Built and run once against a real local instance,
-schema migrated, serving from an actual Postgres, not a fake: at half the
-combined declared rate (92 requests a second, one caller, ` + "`" + `-scale 0.5` + "`" + `), p95
-latency climbed from 0.5 seconds to 3.2 seconds over a 31 second run, achieving
-37 requests a second against a target of 92, with ` + "`" + `/readyz` + "`" + ` carrying the worst
-tail at up to 4.9 seconds. No request was rejected by the rate limiter at any point in
-this run; the connection pool queued first. That run was on a laptop reporting
-a load average over 75 from other work sharing the same machine at the time,
-which is exactly the caveat this project's own [disaster recovery
-timings](#rehearse-it-on-a-schedule-before-you-need-it) already carry: a
-latency number is a property of the hardware and what else is running on it,
-not a portable fact about the code. What is portable is the finding underneath
-it, which is worth checking again on quiet, dedicated hardware before it
-informs a real capacity decision: on this run, the database connection pool
-(` + "`" + `AF_POOL_MAX` + "`" + `, ten by default) became the limiting factor before the
-per-caller rate limits did, for a single caller sending across every route at
-once. An operator sizing a real deployment should raise ` + "`" + `AF_POOL_MAX` + "`" + ` to match
-expected concurrent callers rather than assuming the rate limiter is the only
-ceiling in the system.
+**What a real run found.** Against a real local instance serving from an actual
+Postgres, at half the combined declared rate (92 requests a second, one caller,
+` + "`" + `-scale 0.5` + "`" + `), p95 latency climbed from 0.5 seconds to 3.2 seconds over a 31
+second run, achieving 37 requests a second against a target of 92, with ` + "`" + `/readyz` + "`" + `
+carrying the worst tail at up to 4.9 seconds. No request was rejected by the rate
+limiter; the connection pool queued first. That run shared a laptop reporting a
+load average over 75, so the latency figures are not portable. The finding is
+that the database connection pool (` + "`" + `AF_POOL_MAX` + "`" + `, ten by default) became the
+limiting factor before the per-caller rate limits did, for a single caller
+sending across every route at once. Raise ` + "`" + `AF_POOL_MAX` + "`" + ` to match expected
+concurrent callers rather than assuming the rate limiter is the only ceiling.
 
 ## What the control plane records about its own failures
 
@@ -27203,12 +26682,9 @@ code, and it carries a count, the first and last time it was seen, the build
 running at each of those, and the request id of the most recent occurrence.
 
 **What bounds it.** The cardinality of a row's five fields is set by the code
-rather than by traffic: the routes come from the endpoint table that ships in
-the container, the procedure paths from the router, and a class name is a
-JavaScript identifier. A bad day adds occurrences to existing rows and no rows.
-On top of that the table holds at most 500 groups, and the page says out loud
-when it is at that cap rather than quietly showing you fewer failures than are
-happening.
+rather than by traffic, so a bad day adds occurrences to existing rows and no
+rows. The table holds at most 500 groups, and the page says when it is at that
+cap.
 
 **What it costs in storage.** At most 500 rows of about 200 bytes, so on the
 order of 100 kilobytes, whatever happens. The writes are one statement per
@@ -27244,11 +26720,9 @@ no administrative connection string configured, nothing sweeps: the table stays
 bounded by the cap regardless, and the portal says that no retention is in
 force so you read the dates rather than assuming a row is current.
 
-The page updates itself every ten seconds while the tab is in front. It polls
-rather than holding a stream open, because the control plane runs more than one
-replica behind one ingress and a held connection pins you to one of them and
-dies on every deploy, which is exactly when you are watching. A refresh that
-does not land leaves the last good numbers on screen and says how old they are.
+The page updates itself every ten seconds while the tab is in front, by polling.
+A refresh that does not land leaves the last good numbers on screen and says how
+old they are.
 
 Three counters say when the store itself is the thing that is failing, and two
 alert rules watch them:
@@ -27264,15 +26738,9 @@ RUN. Those happen in the engine, in an environment the control plane does not
 own, and would need the engine to report them. ` + "`" + `af logs web` + "`" + ` and the run
 outcomes on the same page are what you have for that side.
 
-## Where the numbers come from
-
 ` + "`" + `GET /metrics` + "`" + ` on the control plane, in the Prometheus text format. It reads no
-tables: tenancy here is row level security, so an aggregate across every
-organization would need a role that can read every organization's rows, and
-creating one in order to draw a graph would put the strongest read in the system
-on the least important path and leave it there being scraped every fifteen
-seconds forever. Everything exposed is a counter the process kept itself, and
-several replicas each expose their own for Prometheus to sum.
+tables: everything exposed is a counter the process kept itself, and several
+replicas each expose their own for Prometheus to sum.
 
 The dashboard is ` + "`" + `observability/dashboards/control-plane.json` + "`" + `, importable as it
 is. Its panels and the alert rules are both checked against the exporter by a
@@ -27287,9 +26755,8 @@ sidebar:
   order: 3
 ---
 
-The production control plane is one ` + "`" + `terraform apply` + "`" + ` and nine things a person
-has to do in a browser or a shell, and the order matters because several of them
-fail if done early.
+The production control plane is one ` + "`" + `terraform apply` + "`" + ` and fifteen steps in a
+browser or a shell. The order matters: several fail if done early.
 
 Read [Azure](/docs/self-hosting/azure) first. Everything on that page about
 policy, regions, the Key Vault name and the revision mode trap applies here and
@@ -27302,17 +26769,16 @@ configuration and every value in it says why it differs from staging. One apply
 produces the resource group, a zone redundant Postgres with geo redundant
 backups, the Key Vault, the bootstrap and maintenance jobs, the application on
 two replicas, the DNS records for ` + "`" + `app.antifailure.dev` + "`" + `, the managed
-certificate, the custom domain binding, and twelve alert rules with an action
+certificate, the custom domain binding, and ten alert rules with an action
 group.
 
 ## What Terraform cannot own, and why
 
 **The GitHub App's private key and webhook secret.** GitHub mints the key once
-and shows it once. Terraform can neither create it nor recreate it, and a
-resource that manages a value it cannot produce is one that will eventually set
-it to the empty string. The module reads both from Key Vault with a data source
-instead, which is also why setting ` + "`" + `github_app_id` + "`" + ` before those secrets exist
-fails at plan rather than at the first delivery.
+and shows it once, so Terraform can neither create it nor recreate it. The module
+reads both from Key Vault with a data source instead, which is also why setting
+` + "`" + `github_app_id` + "`" + ` before those secrets exist fails at plan rather than at the first
+delivery.
 
 **The OAuth App's client secret.** Same reason. Terraform seeds a placeholder
 once and then carries ` + "`" + `ignore_changes` + "`" + ` on the value, so rotating it with ` + "`" + `az
@@ -27430,13 +26896,12 @@ is fixed when the server is created.
 **The apply may need running twice.** The Key Vault Secrets Officer grant is
 created in the same apply that writes the first secrets, and Azure RBAC takes a
 minute or two to propagate, so a second apply after the first fails on a secret
-write is normal and is not a sign of anything wrong. It did not happen on the
-first real run of this stack, and it is still the likeliest reason you see one.
+write is normal.
 
-Whatever the cause, a partly finished apply is not a mess to clean up by hand.
-Terraform records every resource that succeeded, and running ` + "`" + `plan` + "`" + ` again asks
-for exactly the remainder. Read that plan the same way as the first: it should
-add what is missing and destroy nothing.
+A partly finished apply needs no hand cleanup. Terraform records every resource
+that succeeded, and running ` + "`" + `plan` + "`" + ` again asks for exactly the remainder. Read
+that plan the same way as the first: it should add what is missing and destroy
+nothing.
 
 Sign-in does not work yet. The OAuth values in the vault are placeholders and
 the next three steps replace them.
@@ -27469,10 +26934,7 @@ curl -sS -o /dev/null -w 'http=%{http_code} sslverify=%{ssl_verify_result}\n' \
   https://app.antifailure.dev/health
 ` + "`" + "`" + "`" + `
 
-` + "`" + `sslverify=0` + "`" + ` is a certificate the client trusts, and if you see it here then
-Azure bound the certificate without you. That is the thing this page cannot yet
-tell you, so say so, and the next person to stand production up can delete the
-command below with evidence rather than with an argument.
+` + "`" + `sslverify=0` + "`" + ` is a certificate the client trusts: Azure bound it without you.
 
 A connection reset means the binding did not take, and this is the remedy:
 
@@ -27507,10 +26969,8 @@ az monitor action-group test-notifications create \
   -a email email-0 "you@example.com" usecommonalertschema
 ` + "`" + "`" + "`" + `
 
-Do the second one. An action group that creates cleanly, attaches to every rule
-and delivers nothing looks exactly like one that works. A ` + "`" + `Status` + "`" + ` of
-` + "`" + `Succeeded` + "`" + ` in the result is the proof; anything else is a page that will not
-arrive.
+Do the second one. A ` + "`" + `Status` + "`" + ` of ` + "`" + `Succeeded` + "`" + ` in the result is the proof; anything
+else is a page that will not arrive.
 
 THE RECEIVER NAME IS NOT FREE TEXT and neither is the alert type. Azure matches
 ` + "`" + `email-0` + "`" + ` against the receivers the action group already has and refuses
@@ -27543,15 +27003,11 @@ Leave wildcard matching off. The registered callback is exact and nothing needs
 it. While you are there, **untick it on the staging OAuth App too**: it is on,
 and nothing there needs it either.
 
-Leave Device Flow off, and it is worth knowing what it would be for so that the
-default does not survive by accident. GitHub's device flow is for a client with
-no browser to redirect: it shows a code, the user types it at
-` + "`" + `github.com/login/device` + "`" + `, and the client polls GitHub for a token. ` + "`" + `af login` + "`" + `
-does look like that, and it is not that: it is this control plane's own device
-grant, in ` + "`" + `web/apps/api/src/auth/device.ts` + "`" + `, minting ` + "`" + `afu_` + "`" + ` tokens against
-` + "`" + `/auth/device/code` + "`" + ` on this server. Nothing here calls ` + "`" + `github.com/login/device` + "`" + `
-at all. Ticking it adds a way to obtain a GitHub token in this application's
-name that nothing in the product would ever use.
+Leave Device Flow off. ` + "`" + `af login` + "`" + ` is this control plane's own device grant, in
+` + "`" + `web/apps/api/src/auth/device.ts` + "`" + `, minting ` + "`" + `afu_` + "`" + ` tokens against
+` + "`" + `/auth/device/code` + "`" + ` on this server; nothing here calls ` + "`" + `github.com/login/device` + "`" + `.
+Ticking it adds a way to obtain a GitHub token in this application's name that
+nothing in the product would ever use.
 
 Generate a client secret and keep the page open. GitHub shows it once.
 
@@ -27600,11 +27056,9 @@ workflow through ` + "`" + `dispatchWorkflow` + "`" + ` in ` + "`" + `web/apps/a
 without the permission GitHub refuses with
 ` + "`" + `403 Resource not accessible by integration` + "`" + `.
 
-**Checks used to say "do not grant this" here, and that was right at the time:
-nothing called the Checks API.** Something does now. Without it, a pull request
-gets the comment and no check run, so no branch protection rule can require
-Antifailure, and the control plane says which grant is missing in the comment
-rather than failing quietly.
+**Grant Checks.** Without it, a pull request gets the comment and no check run,
+so no branch protection rule can require Antifailure, and the control plane says
+which grant is missing in the comment rather than failing quietly.
 
 Subscribe to events: **Installation**, **Installation repositories**,
 **Repository**, **Pull request**, **Workflow run**, **Check run**, **Check
@@ -27625,8 +27079,6 @@ run**, and that attempt then asks for a credential of its own. The control
 plane reads the attempt number GitHub signed into the run's identity and
 reopens the check for a later attempt of the run already checking the commit,
 so a re-run from either place produces a new check run with a fresh verdict.
-Before this, a re-run from the Actions tab was refused a credential and the
-check went on showing the verdict of the attempt it replaced.
 
 **Push** is still deliberately absent: nothing handles it, and an event nobody
 consumes is delivery-log noise that makes a real failed delivery harder to find.
@@ -27752,8 +27204,7 @@ is the ignored one. See
 ### 12. Install the App on the organization
 
 On the App's page, **Install App**, and choose the account and repositories.
-Nothing has a tenant until an installation exists: this is why everybody who
-signed in during the first week landed with no organization.
+Nothing has a tenant until an installation exists.
 
 **Installing is not the same as being installed, and the difference is a webhook
 this control plane may have refused.** Installing sends one ` + "`" + `installation` + "`" + `
@@ -27783,8 +27234,7 @@ One trap if you script this instead. Delivery ids are past the range a double
 holds exactly, 3839993231035072512 being a real one, so a JSON parser backed by
 doubles rounds the last digits and JavaScript's ` + "`" + `JSON.parse` + "`" + ` turns that id into
 ...072500. A redelivery aimed at the rounded id is a 404 on a delivery
-that never existed, and it reads as "GitHub lost it" rather than as an
-arithmetic bug. Take the id out of the raw body as text.
+that never existed. Take the id out of the raw body as text.
 
 ### 13. Let continuous deployment reach production
 
@@ -27857,14 +27307,9 @@ it refuses cleanly if any of the above was skipped.
 
 ## Turning billing on
 
-Billing is off on a control plane that has never been told about Stripe, and off
-is a supported state rather than a half-finished one: a self-hosted installation
-takes no money, and every route that would charge answers ` + "`" + `PRECONDITION_FAILED` + "`" + `
-naming the settings it needs. What follows turns it on, in the only order that
-works. The four sections below are deliberately not numbered, because this is
-not step sixteen of first setup: it is a separate procedure somebody runs later,
-possibly years later, on a control plane that is already serving. Run them in
-the order they are written.
+Billing is off on a control plane that has never been told about Stripe. Every
+route that would charge answers ` + "`" + `PRECONDITION_FAILED` + "`" + ` naming the settings it
+needs. What follows turns it on; run the sections in the order they are written.
 
 **Three settings, and two of them are credentials.** ` + "`" + `web/apps/api/src/billing/plans.ts` + "`" + `
 requires exactly these:
@@ -27884,8 +27329,7 @@ customer pays and never gets what they bought.
 
 **There is no ` + "`" + `AF_STRIPE_PRICE_ENTERPRISE` + "`" + ` and there is not meant to be one.**
 Enterprise is agreed with a person, so no Stripe price exists behind it. Checkout
-refuses that plan by name and points at the contact route. A plan with no price
-is a plan that is not sold here, not a misconfiguration.
+refuses that plan by name and points at the contact route.
 
 ### First, create the webhook endpoint at Stripe
 
@@ -27922,8 +27366,7 @@ The vault name is ` + "`" + `afcpprod-kv-centralus` + "`" + ` for production. Us
 helper on the [Azure page](/docs/self-hosting/azure), which takes the value at a
 prompt rather than as an argument, writes it with no trailing newline, and
 removes the file afterwards. A signing secret with a trailing newline fails every
-signature and the endpoint answers 401 to every delivery Stripe makes, while the
-plan, the deploy and the dashboard all look correct.
+signature and the endpoint answers 401 to every delivery Stripe makes.
 
 Confirm both are there before going on. This prints names, never values:
 
@@ -27939,14 +27382,11 @@ Two names, or stop here.
 ` + "`" + `stripe_price_team` + "`" + ` in ` + "`" + `production.tfvars` + "`" + ` is the switch. Setting it makes the
 container app reference both vault secrets by their versionless ids.
 
-**The plan cannot tell you the secrets are missing, and this is the one place
-that matters.** ` + "`" + `keyvault.tf` + "`" + ` addresses them by constructed id rather than
-reading them, because the identity that plans production holds nothing on the
-vault and the only way to give it a read is to grant a pull request identity
-access to production's credentials. So a plan is green whether or not the
-secrets exist, Azure discovers a missing one while resolving references during
-deployment, and the revision fails to start on a control plane that was serving
-a moment earlier. Putting the credentials in the vault is not optional and it is not
+**The plan cannot tell you the secrets are missing.** ` + "`" + `keyvault.tf` + "`" + ` addresses
+them by constructed id rather than reading them, so a plan is green whether or
+not the secrets exist, Azure discovers a missing one while resolving references
+during deployment, and the revision fails to start on a control plane that was
+serving a moment earlier. Putting the credentials in the vault is not
 reorderable.
 
 Apply, then shift traffic the way every other change to this app is shifted:
@@ -27992,12 +27432,11 @@ still built and published for self-hosted installations, and nothing here
 changes it.
 
 That image **will not start on an app that has not been given its edition.**
-Measured against the entry point rather than read off it: without
-` + "`" + `AF_EE_SSO_KEY` + "`" + ` the process exits before it listens, whatever the licence says,
-and a licence with no ` + "`" + `AF_ORG` + "`" + ` or no trusted key stops it at start-up with exit
-status 2. So this is a one-time procedure per environment, and it runs before
-the first release that deploys the enterprise image there. Like billing, it is
-not a numbered step of first setup. Run the sections in the order written.
+Without ` + "`" + `AF_EE_SSO_KEY` + "`" + ` the process exits before it listens, whatever the licence
+says, and a licence with no ` + "`" + `AF_ORG` + "`" + ` or no trusted key stops it at start-up with
+exit status 2. This is a one-time procedure per environment, and it runs before
+the first release that deploys the enterprise image there. Run the sections in
+the order written.
 
 **Three settings in the tfvars file, and two secrets in the vault.**
 
@@ -28061,11 +27500,7 @@ rm -rf "$dir"
 **Read the receipt on standard error before going on.** Its second line names a
 public key. It must be exactly the value after ` + "`" + `hosted-2026-09=` + "`" + ` in
 ` + "`" + `production.tfvars` + "`" + `, or every start refuses the licence as signed by a key this
-installation does not trust. The receipt also warns that ` + "`" + `rbac` + "`" + ` is gated nowhere
-by the licence, so withdrawing the licence would not withdraw it. That is
-expected here: on the hosted plane role based access is an entitlement of each
-organization's plan, and the licence names it so the installation's licence
-describes the whole enterprise plan.
+installation does not trust.
 
 ` + "`" + `org` + "`" + ` is ` + "`" + `antifailure` + "`" + ` because that is ` + "`" + `license_org` + "`" + `, and the two are compared
 at start-up. It names the installation, not a customer: each customer
@@ -28183,7 +27618,6 @@ hands to a stranger, and the installer follows ` + "`" + `releases/latest` + "`"
 download changes the moment the release is created. Two workflows fire on the
 same tag, they run in parallel, and neither knows the other exists.
 
-This page is the order to do it in and the thing to look at after each step.
 [Releases and how to verify one](/docs/security/releases) is the companion
 page, written for the person downloading a release rather than the person
 cutting one.
@@ -28194,8 +27628,6 @@ cutting one.
 | --- | --- | --- |
 | ` + "`" + `.github/workflows/release.yml` + "`" + ` | ` + "`" + `push` + "`" + ` of a tag matching ` + "`" + `v*` + "`" + ` | Waits for CI, builds four platforms, packages, signs, and creates the GitHub release |
 | ` + "`" + `.github/workflows/cd.yml` + "`" + ` | ` + "`" + `push` + "`" + ` to ` + "`" + `main` + "`" + ` **and** ` + "`" + `push` + "`" + ` of a tag matching ` + "`" + `v*` + "`" + ` | Waits for CI, builds the control plane image, applies staging's configuration from its tfvars and deploys staging, then waits for a human to approve production and does the same there |
-
-Two things follow from that table and both have bitten somebody somewhere.
 
 ` + "`" + `release.yml` + "`" + ` has a gate of its own, and until recently it did not. A ` + "`" + `gate` + "`" + `
 job runs before the build, waits for CI's conclusion on the commit the tag
@@ -28214,10 +27646,6 @@ this is now rare rather than routine. Six merges once landed inside one run's
 length and each cancelled the one before it, and ` + "`" + `main` + "`" + ` went hours with no
 completed run. If you do meet a cancelled run on the commit you want to tag,
 re-run CI on it, wait for green, then re-run the release from the Actions page.
-
-Checking before you tag is still the cheaper order. The gate turns a mistake
-into a refused release rather than a published one, which is not the same as
-turning it into no mistake.
 
 ` + "`" + `cd.yml` + "`" + ` runs a second time on the tag, on the same commit it already ran on
 when that commit merged to ` + "`" + `main` + "`" + `. Its concurrency group is keyed on the ref,
@@ -28270,9 +27698,7 @@ just coverage-profile   # about an hour, needs Docker and a Postgres
 just coverage
 ` + "`" + "`" + "`" + `
 
-Nothing else in ` + "`" + `gate` + "`" + ` is excused. A criterion nobody can meet is one people
-learn to skip, which is why this paragraph exists rather than a rule saying
-"all gates green" that is false on a fresh clone.
+Nothing else in ` + "`" + `gate` + "`" + ` is excused.
 
 **1b. Every branch that landed reached CI before it landed.**
 
@@ -28348,11 +27774,7 @@ cat .changes/*.md
 
 **5. Nothing in the release path has moved since it was last exercised.**
 
-Everything on this page was checked against a tree, not against the idea of a
-tree. Nothing in the mechanism depends on any particular branch having landed,
-so a release can be cut at any point. What does depend on the tree is whether
-the checks behind this page still describe what is about to run. Ask, rather
-than assume:
+Ask whether the checks behind this page still describe what is about to run:
 
 ` + "`" + "`" + "`" + `sh
 git diff --stat 8389faf..origin/main -- \
@@ -28368,19 +27790,8 @@ new file under ` + "`" + `migrations/` + "`" + ` means production is being asked
 migration nobody on this page has read, and that one is worth stopping for: a
 migration is the only part of a deploy that cannot be rolled back.
 
-**It is not empty today, and here is what has been done about each half.**
-` + "`" + `install.sh` + "`" + ` and ` + "`" + `tools/release/build.sh` + "`" + ` have both moved since that revision,
-so the release build path was re-run rather than assumed: ` + "`" + `just build-release
-v1.0.0` + "`" + ` on this tree, the archive unpacked and the binary inside it run out of
-the unpacked directory, ` + "`" + `af version` + "`" + ` reporting the version passed to the script
-with the real commit and that commit's own date, the checksum file verified,
-` + "`" + `just reproducible` + "`" + ` building twice with a cold cache and getting the same
-archive, and ` + "`" + `just ldcheck` + "`" + `, ` + "`" + `just relnotes` + "`" + `, ` + "`" + `just tagsync` + "`" + ` and
-` + "`" + `just releasecheck` + "`" + ` green. That re-run is what found ` + "`" + `build.sh` + "`" + ` packaging an
-archive with no ` + "`" + `af` + "`" + ` in it, so the drift here was carrying a real defect and not
-only a stale sentence.
+### Tag it
 
-The ` + "`" + `migrations/` + "`" + ` half is not resolved and is read below rather than here.
 ` + "`" + "`" + "`" + `sh
 git tag -a v0.1.2 -m "v0.1.2"
 git push origin v0.1.2
@@ -28589,12 +28000,6 @@ git diff --name-only v0.1.1..v0.1.2 -- web/packages/db/migrations
 
 ### This is the first time production will deploy itself
 
-Every production ` + "`" + `cd` + "`" + ` run so far has been skipped. The script inside it has run
-against production once, by hand: ` + "`" + `afcpprod-app` + "`" + ` carries a revision named
-` + "`" + `afcpprod-app--cf66d6af2-164545` + "`" + `, which is ` + "`" + `deploy.sh` + "`" + `'s own naming, and
-` + "`" + `afcpprod-bootstrap` + "`" + ` has exactly one execution, ` + "`" + `Succeeded` + "`" + `, a minute before it.
-So the script is not the untested part. The job around it is.
-
 What has no prior run behind it:
 
 * ` + "`" + `azure/login` + "`" + ` under the ` + "`" + `production` + "`" + ` environment needs a federated credential
@@ -28618,9 +28023,7 @@ carrying a number that goes stale between two merges:
 curl -sS https://app.antifailure.dev/readyz
 git rev-list --count f66d6af..origin/main
 ` + "`" + "`" + "`" + `
-
-At the time of writing that was 178, so the first tag is not a normal
-increment. It is every change since, arriving at once.
+At the time of writing that was 178.
 
 **Ask which migrations rather than reading a count off this page**, because the
 count has already gone stale once:
@@ -28629,8 +28032,7 @@ count has already gone stale once:
 git diff --name-only f66d6af..origin/main -- web/packages/db/migrations
 ` + "`" + "`" + "`" + `
 
-All of them have been checked, and the checks are recorded here so nobody
-repeats them nervously at tag time. Every migration from ` + "`" + `0001` + "`" + ` to ` + "`" + `0023` + "`" + `
+All of them have been checked. Every migration from ` + "`" + `0001` + "`" + ` to ` + "`" + `0023` + "`" + `
 applies cleanly to a real PostgreSQL 17 from an empty database, and ` + "`" + `0023` + "`" + ` was
 applied a second time to a database built to ` + "`" + `0022` + "`" + ` and then seeded, so that it
 met existing rows rather than an empty table. It validated its constraint and
@@ -28692,12 +28094,8 @@ applied to a real PostgreSQL 17, seeded with two organizations and three
   and every existing one carried ` + "`" + `approved_at = created_at` + "`" + ` with no approver,
   which is the true statement: nobody approved them because there was nothing
   to approve with. **No live egress rule stops enforcing.**
-* **` + "`" + `0019` + "`" + `** creates ` + "`" + `runtimes` + "`" + `. Row level security is enabled and forced,
-  proved not by reading the catalog but by connecting as a real unprivileged
-  role that is a member of ` + "`" + `antifailure_app` + "`" + `: the other tenant's runtime is
-  invisible, a query with no organization set returns zero rows, and an insert
-  aimed at another tenant is refused by the policy.
-
+* **` + "`" + `0019` + "`" + `** creates ` + "`" + `runtimes` + "`" + `, with row level security enabled and forced,
+  proved by connecting as a real unprivileged member of ` + "`" + `antifailure_app` + "`" + `.
 Every one of ` + "`" + `0018` + "`" + ` to ` + "`" + `0023` + "`" + ` is additive, which is what makes a rollback safe:
 ` + "`" + `deploy.sh` + "`" + ` can put traffic back on the old revision and cannot un-apply a
 schema change, so the old code has to tolerate the new schema. Nothing in the
@@ -28721,10 +28119,8 @@ the next patch immediately. If you want a version people cannot reach yet, the
 release has to be a GitHub prerelease, which ` + "`" + `releases/latest` + "`" + ` skips by
 definition, and ` + "`" + `release.yml` + "`" + ` does not currently create one.
 
-That same API has one more property, and it decides whether a recovery works
-rather than whether a release does, so it is written out under
-[If a release goes out wrong](#if-a-release-goes-out-wrong) where you will need
-it: ` + "`" + `latest` + "`" + ` follows the newest tagged **commit**, not the newest publish.
+` + "`" + `latest` + "`" + ` follows the newest tagged **commit**, not the newest publish; see
+[If a release goes out wrong](#if-a-release-goes-out-wrong).
 
 ### Prove the thing a stranger gets
 
@@ -28836,8 +28232,7 @@ newest publish.
 
 A hotfix cut from an older commit therefore publishes perfectly, reports
 nothing wrong, and never reaches a single installer: ` + "`" + `latest` + "`" + ` stays on the bad
-release. There is no error anywhere, and it strikes at precisely the moment
-somebody is trying to pull a bad release back.
+release. There is no error anywhere.
 
 A patch branched off ` + "`" + `main` + "`" + ` is always newer, so the ordinary path is safe. The
 case to refuse is reverting to an earlier good commit and tagging that. If the
@@ -28860,11 +28255,7 @@ sidebar:
 ---
 
 The Terraform in ` + "`" + `infra/terraform/modules/control-plane` + "`" + ` puts eight secrets in
-one Key Vault. This page is one runbook for each: what it is, what stops working
-while it is being replaced, the steps, and how to check the new value is the one
-in use.
-
-Read the honesty note before you run any of it.
+one Key Vault. One runbook each below.
 
 ## What has been rehearsed
 
@@ -28886,9 +28277,6 @@ still opens.
 
 ## What is in the vault
 
-Ownership is the first thing to know, because it decides whether Terraform will
-put your new value back.
-
 | Secret | Who owns the value | What reads it |
 | --- | --- | --- |
 | ` + "`" + `database-url` + "`" + ` | Terraform generates it | the app, and the bootstrap job |
@@ -28903,14 +28291,12 @@ put your new value back.
 
 Three kinds, and the difference matters when you rotate:
 
-**Owned.** Terraform generated the value, so a difference between the
-configuration and the vault is drift it will correct. Rotating one of these by
-hand means the next ` + "`" + `terraform apply` + "`" + ` proposes to put the generated value back.
+**Owned.** Terraform generated the value, so the next ` + "`" + `terraform apply` + "`" + `
+proposes to put the generated value back.
 
 **Seeded.** Terraform wrote a placeholder once and then stopped, through
-` + "`" + `ignore_changes` + "`" + ` on the value in ` + "`" + `keyvault.tf` + "`" + `. That line is what makes the
-instruction to rotate these by hand true. Without it, the next apply would put
-the placeholder back and break sign-in.
+` + "`" + `ignore_changes` + "`" + ` on the value in ` + "`" + `keyvault.tf` + "`" + `. Without that line the next
+apply would put the placeholder back and break sign-in.
 
 **Yours.** GitHub mints an App private key and shows it once, so Terraform can
 neither create it nor recreate it. The module reads both App secrets with a data
@@ -28929,9 +28315,7 @@ configuration change rather than a security operation.
 ## Before any of them
 
 **You need write access to the vault.** The role assignment that grants it is
-off by default, for the reason in ` + "`" + `keyvault.tf` + "`" + `: a role assignment whose
-principal is whoever ran Terraform churns on every plan by a different caller.
-Grant it once, by hand:
+off by default; see ` + "`" + `keyvault.tf` + "`" + `. Grant it once, by hand:
 
 ` + "`" + "`" + "`" + `sh
 az role assignment create \
@@ -28975,11 +28359,10 @@ new value. From that moment the app can only connect if Postgres knows the new
 password too.
 
 **The step nothing in this repository does for you.** The bootstrap job creates
-` + "`" + `af_app` + "`" + ` only when the role is absent, and leaves an existing one alone. Read
-` + "`" + `deploy/docker/bootstrap.mjs` + "`" + `: it says so, and the reason is that silently
-resetting the credential of a running system is worse than refusing to. So
-changing the vault value alone gives the application a password the database has
-never heard of. The ` + "`" + `ALTER ROLE` + "`" + ` is yours to run.
+` + "`" + `af_app` + "`" + ` only when the role is absent and leaves an existing one alone; see
+` + "`" + `deploy/docker/bootstrap.mjs` + "`" + `. Changing the vault value alone gives the
+application a password the database has never heard of. The ` + "`" + `ALTER ROLE` + "`" + ` is
+yours to run.
 
 Postgres has no public endpoint, so you cannot run it from a laptop. It has to
 come from inside the virtual network, which means a container app job using
@@ -29029,18 +28412,14 @@ curl -s https://your-control-plane/metrics | grep af_http_requests_total
 **Afterwards.** ` + "`" + `random_password.app` + "`" + ` still holds the old value in Terraform
 state, so the next plan will propose to put the old URL back into the vault.
 Either import the new value or accept that this rotation needs a Terraform
-change beside it. This is the sharpest edge on the page and it is a consequence
-of the secret being owned rather than seeded.
+change beside it.
 
 ---
 
 ## ` + "`" + `migration-database-url` + "`" + `
 
 **What it is.** The owner's connection string, as ` + "`" + `af_migrator` + "`" + `. It runs
-migrations and owns the tables. The serving app never holds it, which is the
-point of the two roles: a process on a public address should not be able to drop
-the policies that isolate tenants.
-
+migrations and owns the tables. The serving app never holds it.
 **What breaks while you rotate it.** Nothing that serves traffic. The bootstrap
 job and the nightly maintenance job both use it, so a deploy or a partition
 maintenance run inside the window fails.
@@ -29063,8 +28442,7 @@ maintenance run inside the window fails.
    ` + "`" + "`" + "`" + `
 
 **How to verify.** The bootstrap job reports ` + "`" + `bootstrap complete` + "`" + ` and exits
-zero. It asserts the end state it exists to produce, so a run that achieved
-nothing fails rather than reporting success.
+zero.
 
 **Afterwards.** ` + "`" + `database.tf` + "`" + ` carries ` + "`" + `ignore_changes` + "`" + ` on
 ` + "`" + `administrator_password` + "`" + `, so Terraform will not fight the reset on the server
@@ -29075,7 +28453,7 @@ same reason as ` + "`" + `database-url` + "`" + `.
 
 ## ` + "`" + `provider-key-secret` + "`" + `
 
-**This can now be rotated, and before 2026-09-12 it could not.** The steps below
+**This can be rotated.** The steps below
 add a second key, move every stored credential onto it, and then take the first
 one away. Read all of them before starting: the order is the whole procedure.
 
@@ -29084,33 +28462,21 @@ under AES-256-GCM. ` + "`" + `web/apps/api/src/providers/seal.ts` + "`" + ` hold
 sealing key never reaches Postgres, so a database dump on its own decrypts
 nothing.
 
-**What used to break, and why it was silent.** Replacing the value in place made
-every stored key stop opening, permanently. Rows recorded which key version
-sealed them and nothing read that column, so the application tried every row
-against the one key it held and reported the same failure for all of them: a value
-that will not decrypt is indistinguishable from a value somebody altered. An
-operator saw authentication failures across every organization and no sentence
-saying why.
-
-**What happens now instead.** The application holds a SET of sealing keys
+**How the keys are held.** The application holds a SET of sealing keys
 addressed by version, so the old key and the new one are open at the same time.
 A row names its version, is opened with the key that version names, and a row
-whose version is not held produces its own error naming the missing version. That
-error is the difference between a silent outage and a message, and it is the one
-thing to look for in the logs if any step below goes wrong.
+whose version is not held produces its own error naming the missing version.
+Look for that error in the logs if any step below goes wrong.
 
-**What breaks while you rotate.** Nothing, if the steps are run in this order.
-There is no window in which a stored key cannot be opened, because no key is
-removed until every row has been moved off it and that has been verified.
+**What breaks while you rotate.** Nothing, if the steps are run in this order:
+no key is removed until every row has been moved off it and verified.
 
 **One thing to decide first.** If the sealing key is rotating because it was
-COMPROMISED, re-sealing is the wrong operation: the keys it sealed are compromised
-with it, and re-sealing protects values that already need replacing. In that case
-tell each affected organization to revoke their provider key at the provider and
-store a new one, which is a normal operation for an owner or admin and is
-described in [provider keys](/docs/guides/provider-keys). Rotate the sealing
-secret afterwards, with these steps, so the new keys are sealed under a key
-nobody has seen.
+COMPROMISED, re-sealing is the wrong operation: the keys it sealed are
+compromised with it. Tell each affected organization to revoke their provider
+key at the provider and store a new one, described in
+[provider keys](/docs/guides/provider-keys). Rotate the sealing secret
+afterwards, with these steps.
 
 ### Steps
 
@@ -29196,11 +28562,10 @@ nobody has seen.
    ` + "`" + `production.tfvars` + "`" + `, ` + "`" + `afcpprod-app` + "`" + ` and ` + "`" + `afcpprod-reseal` + "`" + ` in
    ` + "`" + `af-cp-prod-centralus` + "`" + `, run after the tag's production deploy has finished.
 
-   The image is pinned on the command line because the job reads
-   ` + "`" + `image_repository` + "`" + ` and ` + "`" + `image_tag` + "`" + ` from the stack's defaults, and a job created
-   from a default older than this change would run an image with no
-   ` + "`" + `backup-cli.mjs` + "`" + ` and no re-sealing tool in it. The job ignores later image
-   changes from Terraform, so only ` + "`" + `deploy.sh` + "`" + ` moves it from then on.
+   The image is pinned on the command line because the job otherwise reads
+   ` + "`" + `image_repository` + "`" + ` and ` + "`" + `image_tag` + "`" + ` from the stack's defaults, which can
+   predate ` + "`" + `backup-cli.mjs` + "`" + `. The job ignores later image changes from
+   Terraform, so only ` + "`" + `deploy.sh` + "`" + ` moves it from then on.
 
    **Confirm the revision actually holds both keys before going further.** The
    start-up log names the versions, which is the only way to check this without
@@ -29223,11 +28588,9 @@ nobody has seen.
    Merging this deploys it the same way. From here, a customer who saves a key
    gets it sealed under ` + "`" + `v2` + "`" + ` and every existing row still opens under ` + "`" + `v1` + "`" + `.
 
-   This is a separate deploy from step 2 on purpose. Both revisions serve for a
-   few seconds during a traffic shift, and a key sealed under ` + "`" + `v2` + "`" + ` by the new
-   revision cannot be opened by a revision that has not got ` + "`" + `v2` + "`" + ` yet. Making the
-   set available first and switching which one seals second removes that window
-   rather than relying on it being short.
+   This is a separate deploy from step 2 on purpose: during a traffic shift
+   both revisions serve, and a key sealed under ` + "`" + `v2` + "`" + ` cannot be opened by a
+   revision that has not got ` + "`" + `v2` + "`" + ` yet.
 
 4. Move every stored credential onto the new key. This is the job that did not
    exist:
@@ -29249,8 +28612,7 @@ nobody has seen.
    the image's launcher, the same path in both images, and the enterprise copy
    registers the enterprise tables before the tool starts. Pointed at a database
    holding sealed values in a table it was not told about, the tool refuses to
-   run and names the table, rather than re-sealing everything else and letting
-   step 5 call the rotation complete.
+   run and names the table.
 
    Read its log. It prints a count per version and it prints no key material:
 
@@ -29266,10 +28628,7 @@ nobody has seen.
    moved between organizations, and they are a separate investigation. Nothing
    has been lost either way: a row the job cannot open is left exactly as it was.
 
-5. **Verify before removing anything.** This is the step that separates a
-   completed rotation from one that appears complete, and it asks a different
-   question from step 4: not "what is left to do" but "does what has been done
-   actually work".
+5. **Verify before removing anything.**
 
    ` + "`" + "`" + "`" + `sh
    az containerapp job show -n afcp-reseal -g af-cp-centralus -o json \
@@ -29289,19 +28648,15 @@ nobody has seen.
    four separate entries before you read anything the execution reports. Without
    ` + "`" + `--check` + "`" + ` it is step 4, which writes.
 
-   This is not ` + "`" + `az containerapp job start --command` + "`" + `, and that is not a style
-   choice. The CLI takes that flag as a list, so a quoted command arrives as one
-   program name with spaces in it, and it sends a container named after the job
-   rather than ` + "`" + `reseal` + "`" + ` with no image and no environment. Every value the check
-   needs comes from the job itself here, including the second key and the version
-   a rotation adds in step 2, so the check runs with exactly the keys step 4 had.
-   This form was run against staging on 2026-09-13: the execution's own template
-   read those four entries, it exited 0, and it reported every row opened.
+   This is not ` + "`" + `az containerapp job start --command` + "`" + `: the CLI takes that flag
+   as a list, so a quoted command arrives as one program name with spaces in
+   it, and it sends a container named after the job rather than ` + "`" + `reseal` + "`" + ` with
+   no image and no environment. Every value the check needs comes from the job
+   itself here, including the second key and the version a rotation adds in
+   step 2.
 
    It opens EVERY row whatever version it is at and writes nothing. It must
    report zero rows that could not be opened and zero rows not yet at ` + "`" + `v2` + "`" + `.
-   Without this check, "nothing left to re-seal" and "every row is at the new
-   version and none of them open" look identical.
 
    A row still at ` + "`" + `v1` + "`" + ` here, reported as naming a key this revision does not
    hold or simply counted as not yet at ` + "`" + `v2` + "`" + `, is not a failed job. It is a key a
@@ -29514,9 +28869,7 @@ and the OAuth credentials are used only to complete a sign-in.
 Step 5 is the whole reason for the ordering. GitHub allows both secrets to be
 live at once, so a rotation done in this order has no window at all.
 
-**How to verify.** A completed sign-in is the verification. There is no shortcut
-that proves the value without exercising it, because the failure mode is GitHub
-refusing the exchange rather than the app refusing to start.
+**How to verify.** A completed sign-in is the verification.
 
 The client id is public and changes only when the OAuth application itself
 changes. If you do change it, change ` + "`" + `github-redirect-uri` + "`" + ` in the same pass and
@@ -29552,9 +28905,8 @@ one.
 5. Delete the old key in GitHub.
 
 **How to verify.** The app refuses a half configured App at start-up, so a
-revision that starts has a key it could parse. That is a weaker statement than
-it looks: parsing is not the same as GitHub accepting the signature. Step 4 is
-the verification and step 3 is not.
+revision that starts has a key it could parse. Parsing is not GitHub accepting
+the signature: step 4 is the verification, not step 3.
 
 ---
 
@@ -29566,8 +28918,7 @@ old one are refused, and the app is still holding the old one until a revision
 starts.
 
 **What it is.** The shared secret GitHub signs webhook deliveries with. Without
-a valid signature the endpoint refuses the delivery, which is the behaviour you
-want and the reason the window exists.
+a valid signature the endpoint refuses the delivery.
 
 **What breaks.** Every delivery between the change in GitHub and the new
 revision serving. GitHub records each one as a failed delivery and they can be
@@ -29608,8 +28959,7 @@ plane database that leaks does not leak anything usable against it, and a
 revoked token stops working immediately.
 
 There is no automated expiry on any secret above and nothing warns you that one
-is old. Rotation here is a decision somebody makes, not a schedule the
-infrastructure keeps.
+is old.
 `,
 	"self-hosting/runbooks/availability.md": `---
 title: The control plane is unreachable
@@ -30673,64 +30023,30 @@ sidebar:
   order: 7
 ---
 
-Customers of an availability product ask for a status page before they ask for
-almost anything else. The wrong status page is worse than none. A page that
-says "all systems operational" during an outage has not failed to inform
-anyone. It has actively told them something false, at the exact moment they
-are checking because they suspect it is not true.
-
 ## The one property that decides the design
 
 **The check has to come from somewhere other than the thing it checks.** A
 status page hosted on the control plane's own Container App, reading the
 control plane's own ` + "`" + `/metrics` + "`" + `, cannot report a total outage of the control
 plane. The process that would say "I am down" is the process that is down.
-This is not a hypothetical. ` + "`" + `/health` + "`" + ` answered ` + "`" + `200` + "`" + ` for thirteen minutes with
-no database schema behind it, once, already, in this project. That is
-described on the [operations page](/docs/self-hosting/operations). A status
-page built the same way would repeat that failure in front of customers,
-instead of in a log nobody reads yet.
 
-The corollary: whatever hosts the check and whatever hosts the page both have
-to survive an outage of the thing being watched. They do not need to survive
-an outage of *everything*. A status page cannot promise more resilience than
-exists to give it.
+Whatever hosts the check and whatever hosts the page both have to survive an
+outage of the thing being watched.
 
 ## What this rules in and out
 
-A synthetic external monitor, checking the public origin from somewhere else,
-satisfies the property by construction. Two shapes of it exist.
-
-**A hosted uptime or status page product** is a legitimate answer. Several
-have a workable free tier for one monitor. For a team that already uses one
-for something else, it is probably the right one: someone else's
-infrastructure runs the check and hosts the page. The only work is pointing it
-at ` + "`" + `https://app.antifailure.dev/readyz` + "`" + ` and reading its ` + "`" + `ready` + "`" + ` field. It does
-add a real, if usually small, ongoing dependency, and often a cost once more
-than one monitor or one page is needed.
-
-**A scheduled check on infrastructure the project already trusts for
-something else** is the other answer, with the page hosted apart from Azure.
-This is the one built here. GitHub already holds this repository, runs CI and
-CD, and issues this project OIDC credentials. Adding a status probe to it is
-not a new vendor. It is the existing one doing one more scheduled thing. The
-check runs on GitHub's compute, not Azure's, so an Azure-wide event that took
-out the control plane would not also take out the thing reporting on it. Free
-at this scale, and it needed nothing this repository did not already have:
-` + "`" + `curl` + "`" + `, ` + "`" + `jq` + "`" + `, and a place to push a branch.
-
-This project is small enough that the second answer costs less to build than
-it costs to evaluate the first. That is why it is what exists today. A team
-that already pays for a monitoring product should point it at the same
-` + "`" + `/readyz` + "`" + ` endpoint instead of adopting this one. The two are not exclusive,
-and nothing here assumes this is the only way to watch this system.
+A synthetic external monitor checking the public origin from somewhere else
+satisfies the property. A hosted uptime or status page product is one answer:
+point it at ` + "`" + `https://app.antifailure.dev/readyz` + "`" + ` and read its ` + "`" + `ready` + "`" + ` field.
+The other, built here, is a scheduled check on GitHub's compute with the page
+hosted off Azure, so an Azure-wide event that took out the control plane would
+not take out the thing reporting on it. It needs only ` + "`" + `curl` + "`" + `, ` + "`" + `jq` + "`" + `, and a place
+to push a branch.
 
 ## What is watched, and why each one separately
 
-A status page whose granularity is "the whole company" cannot answer the only
-question anybody brings to it, which is whether the thing they use is
-affected. So ` + "`" + `deploy/status/targets.json` + "`" + ` names components, and each one is
-there because it can fail while the others are fine.
+` + "`" + `deploy/status/targets.json` + "`" + ` names components, each one able to fail while the
+others are fine.
 
 | Component | Checked | Why it is its own line |
 | --- | --- | --- |
@@ -30738,39 +30054,29 @@ there because it can fail while the others are fine.
 | Console | ` + "`" + `app.antifailure.dev/` + "`" + ` | Served by the same process, from a static export copied into the image. An image whose console directory is empty answers every page with a 503 while ` + "`" + `/readyz` + "`" + ` stays green. |
 | Website | ` + "`" + `antifailure.dev/` + "`" + ` | The marketing site. |
 | Documentation | ` + "`" + `antifailure.dev/docs` + "`" + ` | Every error the engine prints ends in a link to a page here. A publish that drops the subtree breaks all of them. |
-| CLI installer | ` + "`" + `antifailure.dev/install.sh` + "`" + ` | What ` + "`" + `curl` + "`" + ` is piped from. It is placed by the site assembly, and two copies of that assembly had already drifted to the point that neither placed it. |
-| Site API | ` + "`" + `antifailure.dev/api` + "`" + ` | A managed function, not a static file. It can be present and refuse every request, and did, for two days, behind a green deploy each time. |
+| CLI installer | ` + "`" + `antifailure.dev/install.sh` + "`" + ` | What ` + "`" + `curl` + "`" + ` is piped from. It is placed by the site assembly. |
+| Site API | ` + "`" + `antifailure.dev/api` + "`" + ` | A managed function, not a static file. It can be present and refuse every request. |
 | Control plane, staging | ` + "`" + `app.dev.antifailure.dev/readyz` + "`" + ` | Where ` + "`" + `main` + "`" + ` lands first. Listed as pre-production, because it is not a customer surface and should never be read as one. |
 
 The first two share a process and the next four share a Static Web App, so an
-outage of one will often show as an outage of its neighbours. They are still
-separate lines, because each of the failures in the right hand column has
-happened to exactly one of them.
+outage of one will often show as an outage of its neighbours.
 
 ## What a check asserts
 
-The control plane checks read ` + "`" + `/readyz` + "`" + `, the same endpoint and the same
-reasoning as
+The control plane checks read ` + "`" + `/readyz` + "`" + `, the same endpoint as
 [` + "`" + `deploy/cd/health-gate.sh` + "`" + `](/docs/self-hosting/azure#upgrade-and-rollback-the-manual-path).
 ` + "`" + `/health` + "`" + ` is a static literal that answers even when the database cannot. A
-status page built on it would report an outage as healthy, the same way a
-liveness probe would. A ` + "`" + `200` + "`" + ` carrying ` + "`" + `"ready": false` + "`" + ` is a failure here,
-which is the distinction that endpoint exists to make.
+` + "`" + `200` + "`" + ` carrying ` + "`" + `"ready": false` + "`" + ` is a failure here.
 
-The static checks assert a marker in the body as well as the ` + "`" + `200` + "`" + `. Every
-surface in the table above has already been published broken behind a ` + "`" + `200` + "`" + `,
-so a check that reads only the status line would have called those healthy.
-The markers are build output paths and route names rather than copy, because a
-marker that tracks a headline turns a prose edit into a false outage, and a
-false outage is the one thing this page must never publish.
+The static checks assert a marker in the body as well as the ` + "`" + `200` + "`" + `. The markers
+are build output paths and route names rather than copy, so a prose edit is not
+a false outage.
 
 ## What the page shows
 
-Plain, dense and in the order a person needs it: any open incident first, then
-every component with its current status and its last ninety days, then the
-response times behind those checks, then the incident history day by day. No
-card inside a card and nothing decorative, because somebody reading this is
-trying to find one fact quickly while something else is going wrong.
+In order: any open incident first, then every component with its current status
+and its last ninety days, then the response times behind those checks, then the
+incident history day by day.
 
 Each component states its status as a **word** as well as a colour:
 ` + "`" + `Operational` + "`" + `, ` + "`" + `Degraded Performance` + "`" + `, ` + "`" + `Partial Outage` + "`" + `, ` + "`" + `Major Outage` + "`" + `, and
@@ -30779,34 +30085,22 @@ the two most status pages have no word for and quietly render as green,
 component has never been checked.
 
 Every status word carries the age of the check that earned it, on the same
-line and at the same weight: ` + "`" + `Operational  checked 21 minutes ago` + "`" + `. That
-pairing is the point. GitHub delivers this five minute cron every three to six
-hours in practice, so a status word standing alone would be a weaker claim
-than a reader takes it for, and a reader can only discount it if the age is in
-front of them rather than in a paragraph at the foot of the page. The page
-also says once, where the list starts, that Operational means the most recent
-check passed and not that a component is up right now.
+line: ` + "`" + `Operational  checked 21 minutes ago` + "`" + `. GitHub delivers this five minute
+cron every three to six hours in practice. The page also says once, where the
+list starts, that Operational means the most recent check passed and not that a
+component is up right now.
 
-Past a threshold the word itself changes. A component whose last reading is
-older than three times the interval the probe has actually been keeping reads
-` + "`" + `No Recent Data` + "`" + `, not ` + "`" + `Operational` + "`" + `, because at that point the page has
-stopped knowing rather than started disagreeing.
+A component whose last reading is older than three times the interval the probe
+has actually been keeping reads ` + "`" + `No Recent Data` + "`" + `, not ` + "`" + `Operational` + "`" + `.
 
-The word is not politeness. The amber and the red in the day strip are 0.7
-apart in OKLab under deuteranopia and the green and the red are 4.0 apart,
-which is to say all three bars are one bar to a red-green colour blind reader
-and on a greyscale printout. So a day containing any failure is also capped in
-near black and sized by the share of that day's checks that failed, and the
-neutral for a day with no readings is achromatic, which is the one thing no
-form of colour blindness can confuse with the other three.
+The amber and the red in the day strip are 0.7 apart in OKLab under
+deuteranopia and the green and the red are 4.0 apart. So a day containing any
+failure is also capped in near black and sized by the share of that day's
+checks that failed, and the neutral for a day with no readings is achromatic.
 
-Under System metrics is the only thing this design measures besides pass and
-fail: how long each check took. There is no CPU, no queue depth and no
-throughput, because nothing here observes any of those and a chart of a number
-nobody measured is the worst thing a status page can contain. The window
-selector is three radio inputs and a stylesheet, with no script at all, since
-a page that has to render from a cold cache during an outage cannot depend on
-JavaScript arriving.
+Under System metrics is the only other thing measured: how long each check
+took. There is no CPU, no queue depth and no throughput. The window selector is
+three radio inputs and a stylesheet, with no script.
 
 ## What the page refuses to say
 
@@ -30822,39 +30116,26 @@ and no typed figure.
 - **Nothing rounds up.** A percentage is floored, so only an unbroken run of
   passing checks can print ` + "`" + `100%` + "`" + `.
 - **A day with no readings is drawn in the neutral**, never in green, and is
-  never counted as a day that was up. The strip ships almost entirely neutral
-  and that is the honest picture of a record that has just started.
+  never counted as a day that was up.
 - **A gap in the readings is a gap in the line.** An isolated reading is drawn
-  as a dot rather than joined to one hours away, because a line across a gap
-  is a line through data that does not exist.
+  as a dot rather than joined to one hours away.
 - **The observed interval is printed, not the schedule.** The workflow asks
   for a check every five minutes. GitHub drops scheduled runs under load and
   delivers considerably fewer, so the page measures the gaps between the
   readings it actually has.
 
-Nothing on the page animates. There is deliberately no live indicator: a
-pulsing dot says nothing a timestamp does not say better, and it says it
-forever.
+Nothing on the page animates. There is no live indicator.
 
 ## Subscribe
 
 The Subscribe control is an Atom feed at ` + "`" + `feed.xml` + "`" + `, generated from the same
 data by ` + "`" + `deploy/status/feed.jq` + "`" + `.
 
-It is a feed rather than a mailing list because there is no mailing list here,
-and a Subscribe button that does nothing is worse than no button: it tells a
-customer they will be told, and then does not tell them. A feed costs almost
-nothing, works in every reader, and is what a person watching a vendor's
-status actually wants.
-
-Two kinds of entry, and both are real. One per incident update, so a
-subscriber sees each note as it is written rather than one entry that silently
-changes. And one per run of consecutive failed checks detected in the
-readings, because without those the feed would be empty until somebody hand
-wrote an incident, and the most common real outage is the one nobody had time
-to write up. A detected entry says so in its own text and carries only what
-the readings support: when the run started, when it last failed, and whether a
-later check has passed.
+Two kinds of entry. One per incident update, so a subscriber sees each note as
+it is written rather than one entry that silently changes. And one per run of
+consecutive failed checks detected in the readings. A detected entry says so in
+its own text and carries when the run started, when it last failed, and whether
+a later check has passed.
 
 ## Incidents
 
@@ -30873,26 +30154,19 @@ next probe rather than instantly, and the alerting stack, not this page, is
 what wakes anybody.
 
 ` + "`" + `deploy/status/incidents/README.md` + "`" + ` carries the fields. The shape is a flat
-object with no generator and no schema registry, because the failure to design
-against is not a missing feature, it is a habit nobody keeps: an incident
-history that stays empty because writing one is hard is a lie of omission the
-moment something has gone wrong.
+object with no generator and no schema registry.
 
-Two things guard it. The ` + "`" + `validate` + "`" + ` job in ` + "`" + `.github/workflows/status.yml` + "`" + `
-checks every file on any pull request touching ` + "`" + `deploy/status` + "`" + `, including that
-each component an incident names actually exists, which is the typo that would
-otherwise attach an incident to nothing at all. And the renderer never fails
-on a bad file: it reports it by name on the page and renders the rest, because
-a probe has to keep publishing whatever else is wrong.
+The ` + "`" + `validate` + "`" + ` job in ` + "`" + `.github/workflows/status.yml` + "`" + ` checks every file on any
+pull request touching ` + "`" + `deploy/status` + "`" + `, including that each component an
+incident names exists. The renderer never fails on a bad file: it reports it by
+name on the page and renders the rest.
 
 ## What is built
 
 - ` + "`" + `deploy/status/targets.json` + "`" + ` names the components and what to assert about
   each.
 - ` + "`" + `deploy/status/probe.sh` + "`" + ` checks every one of them and prints one reading per
-  line. It never fails the run on a component being down, because a component
-  that does not answer is a status to report rather than a reason to stop
-  reporting it.
+  line. It never fails the run on a component being down.
 - ` + "`" + `deploy/status/render.sh` + "`" + ` folds a run's readings into two records and
   renders the page. ` + "`" + `history.json` + "`" + ` holds recent raw readings, bounded by age
   and by count. ` + "`" + `daily.json` + "`" + ` holds one rollup per component per UTC day, and
@@ -30914,17 +30188,11 @@ a probe has to keep publishing whatever else is wrong.
   in the commit log of the product it is watching.
 
 The page is self contained. No font file, no stylesheet, no script, no image
-and no request of any kind leaves the document, because the one moment it has
-to render correctly is the moment something else is broken. That rules out the
-site's own web fonts, so the type is the reader's system stack with the site's
-type scale and tracking applied over it, and every colour is copied by value
-from the console's palette.
+and no request of any kind leaves the document. The type is the reader's system
+stack with the site's type scale and tracking applied over it, and every colour
+is copied by value from the console's palette.
 
 ## The step left for a person
-
-This cannot be done from inside the repository, the same way nothing in
-` + "`" + `deploy.yml` + "`" + ` can set the static site's publish token. It is one person's
-action, once, and everything it depends on is already built and running.
 
 **Turn on Pages.** Settings > Pages > Build and deployment > Deploy from a
 branch > branch ` + "`" + `status-data` + "`" + `, folder ` + "`" + `/ (root)` + "`" + ` > Save. The page appears at
@@ -30935,15 +30203,11 @@ about how it renders. Until this is done the workflow still runs, still writes
 ` + "`" + `status-data` + "`" + `, and the record is still readable with ` + "`" + `git log` + "`" + ` or by cloning
 that branch. There is simply no public URL.
 
-That paragraph is written for somebody standing up their own copy, because
-that is who this page is for. For the Antifailure deployment itself the step
-is **done**: Pages is enabled, https is enforced, and the page is live at
-<https://antifailure.github.io/antifailure/>.
+For the Antifailure deployment itself this is **done**: Pages is enabled, https
+is enforced, and the page is live at <https://antifailure.github.io/antifailure/>.
 
-One thing to be clear about, because the name reads like one: ` + "`" + `status-data` + "`" + ` is
-not a separate repository. It is an orphan branch inside this one, with no
-common ancestor with ` + "`" + `main` + "`" + `, rewritten by ` + "`" + `status.yml` + "`" + ` on every probe. There
-is one repository.
+` + "`" + `status-data` + "`" + ` is an orphan branch inside this repository, with no common
+ancestor with ` + "`" + `main` + "`" + `, rewritten by ` + "`" + `status.yml` + "`" + ` on every probe.
 
 **Optionally, point a subdomain at it.** This one is still open for the
 Antifailure deployment. A ` + "`" + `CNAME` + "`" + ` for ` + "`" + `status` + "`" + ` in the ` + "`" + `antifailure.dev` + "`" + ` zone, targeting ` + "`" + `antifailure.github.io` + "`" + `, plus the same name
@@ -30961,31 +30225,16 @@ than hosting would be, and cached resolutions soften it further, but it is not
 nothing, and ` + "`" + `antifailure.github.io` + "`" + ` has none of it. Publish both and give the
 ` + "`" + `github.io` + "`" + ` address as the fallback in the incident note.
 
-What the subdomain must not be is a route on ` + "`" + `antifailure.dev` + "`" + ` itself. That
-hostname is the Static Web App, so serving this page from it would put the
-page and the site it reports on in the same Azure region, and one event would
-take both down together. That is the exact failure this whole design avoids.
-What the site does carry is a way to find the page: the footer of every
-` + "`" + `antifailure.dev` + "`" + ` page links it under Connect, and ` + "`" + `antifailure.dev/status` + "`" + `
-is a 301 to the ` + "`" + `github.io` + "`" + ` address rather than a page of its own. Both went
-in after the page had been live for days with nothing anywhere linking to it,
-which is a status page only its author could find.
+The subdomain must not be a route on ` + "`" + `antifailure.dev` + "`" + ` itself. That hostname is
+the Static Web App, so the page and the site it reports on would share an Azure
+region. The footer of every ` + "`" + `antifailure.dev` + "`" + ` page links the status page under
+Connect, and ` + "`" + `antifailure.dev/status` + "`" + ` is a 301 to the ` + "`" + `github.io` + "`" + ` address.
 
 ## What this is not
 
 **It is not the pager.** The alerting stack behind
 [the alert rules](/docs/self-hosting/operations#what-the-alerts-mean) is what
-wakes a person. This page is what a customer reads. They watch the same
-system from different distances, and neither substitutes for the other. A
-fast burn alert can page someone before a single failed check has accumulated
-enough history to move the page's bars. The page also has no opinion about
-whether one organization's own repository is failing, which is exactly the
-distinction the alerts are built to make and this page is not.
-
-**It is not real time.** The gap between checks is the cost of running on a
-free scheduled trigger rather than a dedicated always-on watcher. It is an
-honest gap: the page never claims to know about anything more recent than its
-last check, it prints when that was, and it prints how far apart the checks
-have actually been arriving.
+wakes a person. This page is what a customer reads, and it has no opinion about
+whether one organization's own repository is failing.
 `,
 }

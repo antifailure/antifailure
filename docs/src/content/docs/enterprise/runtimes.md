@@ -8,10 +8,8 @@ sidebar:
 *More than one placement target requires an enterprise license with the
 `multi_runtime` feature. One target needs no license.*
 
-With one runtime there is nothing to decide. With several, an environment has to
-go somewhere, and where is a policy question: a region for data residency, a
-pool with more memory for a heavy repository, an isolated pool for repositories
-that handle regulated data.
+With one runtime there is nothing to decide. With several, where an environment
+goes is a policy question.
 
 ```yaml
 runtime:
@@ -43,16 +41,9 @@ AF-SCH-001 No runtime satisfies the placement requirement region=eu-west-2.
 
 ## Why it refuses rather than falls back
 
-Placing an EU repository's environment in a US pool because the EU pool was full
-is the kind of helpfulness that ends a compliance audit badly. A requirement
-that can be silently ignored is not a requirement.
-
-The same reasoning is why a requirement nothing can satisfy is refused when the
-manifest is read rather than at dispatch. The requirement and the targets are in
-one file,
-so the contradiction is decidable before anything runs, and the person looking at
-it is the person who wrote both lines. A scheduler in a cluster reporting the
-same thing an hour later is reporting it to somebody who cannot fix it.
+A requirement that can be silently ignored is not a requirement. A requirement
+nothing can satisfy is refused when the manifest is read rather than at dispatch,
+because the requirement and the targets are in one file.
 
 ## Requirements and tags
 
@@ -63,20 +54,16 @@ first one listed wins.
 
 **The tags are declared in the manifest, not discovered from the cluster.** A
 kubeconfig context is a name on somebody's laptop and it does not say which
-region the cluster is in. Writing the claim in the repository puts it under
-review next to the requirement that reads it, and it is one fewer thing that can
-be changed by anyone with access to a cluster.
+region the cluster is in.
 
 ## What placement does not decide
 
 **Capacity and health are not inputs.** The engine places one environment from a
-command line and holds no capacity ledger, so it has nothing to report for either
-and does not invent one. `engine/internal/scheduler` carries the fair share
-round, the aging that stops a nightly job starving behind pull requests, the per
-organization limit and the queue position for the day a control plane dispatches
-batches; the engine calls the same function with the one run it has, so the
-decision on a laptop is made by the code that will make it in a cluster rather
-than by a second implementation that agrees until it does not.
+command line and holds no capacity ledger. `engine/internal/scheduler` carries
+the fair share round, the aging that stops a nightly job starving behind pull
+requests, the per organization limit and the queue position for the day a control
+plane dispatches batches; the engine calls the same function with the one run it
+has.
 
 The consequence worth stating plainly: **this does not fail over.** A target that
 is unreachable is an error, not a reason to place somewhere else. Placement is a
@@ -102,25 +89,21 @@ any other name is refused with a message that lists what this build has rather
 than quietly substituting one. The Kubernetes runtime builds a Deployment, a
 Service and an Ingress per web service and has been selectable the whole time.
 
-One target is community too. It decides nothing: it labels the single runtime
-you already had so a residency policy has something to read, and charging for a
-label would be charging for the community edition.
-
-What the enterprise edition adds is not a third runtime. It is the choice between
-several at once: the requirements, the tags and the refusal described above.
+One target is community too: it labels the single runtime you already had so a
+residency policy has something to read. What the enterprise edition adds is the
+choice between several at once: the requirements, the tags and the refusal above.
 
 ## Why there is no ECS runtime
 
 `runtime.provider: ecs` is registered in the enterprise binary and it refuses,
-every time, with a report rather than an error. The reason is worth reading
-before assuming it is a gap somebody will close next release.
+every time, with a report rather than an error.
 
 A runtime is allowed to exist here only if it can prove an environment has no
 way out, and the Kubernetes runtime proves it the only way a proof works: it
 creates the `NetworkPolicy` objects itself, then runs one pod under exactly the
 rules a service runs under and has it try to escape before any application image
 starts. If any attempt gets out the environment does not start and you get
-**AF-RUN-043**. That is not caution. Several container network plugins accept a
+**AF-RUN-043**. Several container network plugins accept a
 `NetworkPolicy` object and enforce nothing, every status reads green, and the
 only thing that can tell the two apart is a packet.
 
@@ -174,22 +157,18 @@ exfiltration path. A VPC endpoint policy naming this environment's own
 repository, log group and bucket closes the second while leaving the first, so
 the weaker half of the question was the one being answered.
 
-One finding is worth carrying away even if you never run on ECS. **On AWS the
-security group is irrelevant to a DNS query.** The VPC user guide states that
-traffic to and from the Amazon DNS server cannot be filtered with network ACLs
-or security groups, and that resolver answers recursive queries for public names
-from anywhere in the VPC. A DNS question is chosen by whoever asks it, so that
-is a data channel out that no security group audit will ever show you. Closing
-it takes a Route 53 Resolver DNS Firewall rule group whose last rule blocks every
-domain and which does not fail open. A containment argument carried over from
-Kubernetes gets this one wrong, because there the same attempt is closed by the
-policy that closes everything else.
+**On AWS the security group is irrelevant to a DNS query.** The VPC user guide
+states that traffic to and from the Amazon DNS server cannot be filtered with
+network ACLs or security groups, and that resolver answers recursive queries for
+public names from anywhere in the VPC, so that is a data channel out that no
+security group audit shows. Closing it takes a Route 53 Resolver DNS Firewall
+rule group whose last rule blocks every domain and which does not fail open.
 
 **A DNS Firewall rule group is read by priority from the lowest number up, and
 that is where the second finding is.** A group holding `ALLOW` on every domain
 at priority 5 and `BLOCK` on every domain at priority 1000 blocks nothing at all,
 because `ALLOW` permits the request to go through and the lower priority is
-consulted first. It reads as configured in a console screenshot. The check
+consulted first. The check
 refuses that shape, along with a terminal rule moved off the end by priority, two
 rules sharing the last priority, which AWS refuses to create anyway, and a domain
 with a star anywhere but the front, which a DNS Firewall domain list cannot hold.

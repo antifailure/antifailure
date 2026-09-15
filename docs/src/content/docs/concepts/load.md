@@ -283,8 +283,9 @@ Scenarios answer in the same words the rest of a run does.
 | `unverified` | It ran and nothing could be measured, or it asserts nothing |
 
 `blocked` is deliberately not a failure: a scenario that could not be sent has
-found nothing wrong with your change. It still exits non-zero, because a check
-that ran nothing and reported green is a check everybody believes is running.
+found nothing wrong with your change. `af ci` exits non-zero only on `fail`, so
+what keeps it from reading as a pass is `AF-LOD-015` below and its own count in
+the summary.
 
 ```
 AF-LOD-014 3 scenario assertions did not hold.

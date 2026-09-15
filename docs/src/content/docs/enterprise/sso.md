@@ -59,9 +59,7 @@ wrong:
   ships its own certificate is internally consistent and is refused.
 - **What was actually signed.** The assertion is read back out of the exact
   bytes the signature covered, so a document carrying a second, forged assertion
-  cannot make the verifier and the reader disagree. Signature wrapping is the
-  most common way a SAML implementation that *does* check signatures is still
-  broken.
+  cannot make the verifier and the reader disagree.
 - **The algorithm.** RSA or ECDSA with SHA-256 or better. SHA-1 is refused, and
   so is any HMAC: an HMAC would let anybody holding a shared secret forge an
   assertion.
@@ -84,14 +82,10 @@ Redirect URI   https://<your-control-plane>/sso/oidc/<handle>/callback
 
 You supply the issuer, the client ID and the client secret. The endpoints are
 read from the provider's discovery document when the connection is configured,
-not on every login: discovery is a network call to somebody else's service, and
-putting it on the critical path of every sign-in makes their brief outage your
-sign-in outage.
+not on every login.
 
 PKCE is always used, even though this is a confidential client that holds a
-secret. The secret stops somebody else redeeming a stolen authorization code
-from their own server; it does nothing about somebody feeding a stolen code into
-our callback. The verifier does.
+secret.
 
 `state` and `nonce` are separate values doing separate jobs and both are
 required: `state` is round-tripped through the browser and consumed once,
@@ -117,8 +111,7 @@ claiming your own domain.
 
 Once verified, `/sso/start?email=someone@your-domain` sends the browser to your
 provider. That endpoint reveals that a domain uses single sign-on and which
-connection handles it, which is the same fact the redirect itself announces. It
-reveals nothing about any other domain and nothing you have not verified.
+connection handles it, and nothing about any domain you have not verified.
 
 ## Roles from groups
 
@@ -178,23 +171,14 @@ not sign everybody out mid-work.
 | `AF_EE_SSO_KEY` | 32 bytes, base64, encrypting the OIDC client secret and the service provider private key at rest. Generate with `openssl rand -base64 32`. The control plane refuses to start without it. |
 
 Secrets are sealed with AES-256-GCM under that key, with the organisation ID
-authenticated as additional data. That last part is not decoration: without it a
-ciphertext is portable, and anybody able to write a row could copy another
-tenant's encrypted client secret into their own connection and have the server
-decrypt it for them.
+authenticated as additional data, so a ciphertext is not portable between
+organisations.
 
 ## Testing against a real provider
 
-Everything above is exercised by suites that build their own assertions and
-their own tokens. That proves the verifier refuses what it should, and it does
-not prove interoperability, because a fixture written by the same person who
-wrote the parser agrees with the parser by construction. The things that break
-against a real provider are the ones nobody thought to put in a fixture: the
-namespace prefix it happens to use, where it puts the signature, whether it
-sends the address as a NameID or a claim.
-
-So there is a conformance suite that drives a real Keycloak, and a script that
-boots one:
+The suites above build their own assertions and tokens, which does not prove
+interoperability. So there is a conformance suite that drives a real Keycloak,
+and a script that boots one:
 
 ```
 eval "$(ee/web/sso/test/keycloak-up.sh)"
@@ -207,13 +191,8 @@ run time into a temporary directory outside the repository, and prints both
 `AF_KEYCLOAK_URL` and the `NODE_EXTRA_CA_CERTS` that names a file which did not
 exist until it ran.
 
-The provider has to be HTTPS. This is not a preference: `parseIdentityProviderMetadata`
-refuses an `http` single sign-on URL and `discover` refuses an `http` token
-endpoint, because a token exchange over plain HTTP carries a client secret in
-clear text. An earlier version of this suite documented a plain HTTP provider
-and therefore could not have passed, which is worth recording because a suite
-gated behind an environment variable is a suite nobody runs, and a suite nobody
-runs is a claim nobody checks.
+The provider has to be HTTPS: `parseIdentityProviderMetadata` refuses an `http`
+single sign-on URL and `discover` refuses an `http` token endpoint.
 
 The suite is deliberately not part of `just gate` or CI: it boots a container
 and takes minutes. Keycloak is also not a substitute for Entra ID or Okta, which
@@ -228,6 +207,3 @@ three any given row rests on.
   provider.
 - **Signed AuthnRequests** are implemented but the key has to be supplied
   directly; there is no UI for generating one yet.
-
-Each of those is absent rather than half-present, and none of them is claimed
-anywhere in the product.
