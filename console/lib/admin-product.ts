@@ -65,6 +65,7 @@ export interface TwinRunSummary {
   state: string;
   standing: RunStanding;
   verdicts: number;
+  passing: number;
   failing: number;
   startedAt: string | null;
   finishedAt: string | null;

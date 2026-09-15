@@ -472,7 +472,19 @@ const runsRouter = router({
                  e.env_id, e.branch, e.pull_request, rep.full_name AS repository,
                  (SELECT count(*) FROM verdicts v WHERE v.run_id = r.id) AS verdicts,
                  (SELECT count(*) FROM verdicts v
-                   WHERE v.run_id = r.id AND v.value IN ('fail', 'blocked')) AS failing
+                   WHERE v.run_id = r.id AND v.value = 'pass') AS passing,
+                 (SELECT count(*) FROM verdicts v
+                   WHERE v.run_id = r.id AND v.value = 'fail') AS failing,
+                 -- Conclusive verdicts, the ones that are a judgement about the
+                 -- change: pass, fail, flaky, warn. blocked and unverified
+                 -- prove nothing, so a run made only of those has proved = 0 and
+                 -- the list must not colour it as a pass. Cast to text because
+                 -- warn is a verdict the engine emits but migration 0001's enum
+                 -- does not yet carry, and comparing the enum column to a label
+                 -- it lacks is a hard error rather than a non match.
+                 (SELECT count(*) FROM verdicts v
+                   WHERE v.run_id = r.id
+                     AND v.value::text IN ('pass', 'fail', 'flaky', 'warn')) AS proved
           FROM runs r
           JOIN environments e ON e.id = r.environment_id
           JOIN repositories rep ON rep.id = e.repository_id

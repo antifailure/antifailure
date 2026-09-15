@@ -326,14 +326,51 @@ describe('the golden, run and verdict projections', {
     assert.equal(shown[0].repository, org.repository)
     assert.equal(shown[0].branch, 'feature/a-branch')
     assert.equal(shown[0].state, 'complete')
-    // The counts the list column shows. Two verdicts, one of them against the
-    // application.
+    // The counts the list column shows. Two verdicts, one pass and one fail,
+    // and both are conclusive, so the run proved everything it recorded.
+    // `failing` is the fails alone now, not fail plus blocked: a blocked
+    // verdict never reached the application and is not a failure.
     assert.equal(Number(shown[0].verdicts), 2)
+    assert.equal(Number(shown[0].passing), 1)
     assert.equal(Number(shown[0].failing), 1)
+    assert.equal(Number(shown[0].proved), 2)
 
     // And the detail page, which titles itself from a separate query.
     const detail = data(await callProcedure(h, admin, 'runs.get', 'query', { runId: shown[0].id }))
     assert.equal(detail.env_id, id)
+  })
+
+  it('a run that verified nothing reports zero proved and zero failing, so the list cannot call it passing', async () => {
+    // THE LIE THIS FIXES. The list coloured a row green and wrote "N passing"
+    // whenever no verdict was failing. A run whose verdicts are all `blocked`
+    // or `unverified` has nothing failing, so it drew as a pass on the surface
+    // customers scan first, while the detail view for the same run said nothing
+    // was verified. The list now reads `proved`, the count of conclusive
+    // verdicts, and this run has none.
+    //
+    // The run below is one blocked verdict and two unverified ones (an engine
+    // word this control plane does not know projects to unverified). It proves
+    // two things at once: proved is zero, and blocked is no longer folded into
+    // failing the way it used to be.
+    const id = envId('nothing-verified')
+    const runId = `run_${randomUUID().slice(0, 8)}`
+    projected((await send([
+      event('run.started', id, 1, { run_id: runId }),
+      event('verdict.recorded', id, 2, { run_id: runId, workflow: 'signup', value: 'blocked' }),
+      event('verdict.recorded', id, 3, { run_id: runId, workflow: 'search', value: 'unverified' }),
+      event('verdict.recorded', id, 4, {
+        run_id: runId, workflow: 'checkout', value: 'inconclusive-in-a-later-engine',
+      }),
+      event('run.finished', id, 5, { run_id: runId, state: 'complete' }),
+    ])).body, 5)
+
+    const shown = data(
+      await callProcedure(h, admin, 'runs.recent', 'query', { envId: id, limit: 10 })).runs as any[]
+    assert.equal(shown.length, 1, 'the run is in the table')
+    assert.equal(Number(shown[0].verdicts), 3, 'three verdicts were recorded')
+    assert.equal(Number(shown[0].proved), 0, 'nothing conclusive: the run proved nothing')
+    assert.equal(Number(shown[0].failing), 0, 'blocked is not a failure and unverified is not one either')
+    assert.equal(Number(shown[0].passing), 0, 'and nothing passed')
   })
 
   it('the same workflow reported twice in one run is one verdict, corrected', async () => {

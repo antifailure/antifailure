@@ -27,11 +27,13 @@ import {
   When,
   inputClass,
   toneFor,
+  type Tone,
 } from "@/components/ui";
 import { POLL_MS, useInterval } from "@/components/load/polling";
 import {
   nothingWasVerifiedNotice,
   noVerdictsReason,
+  recentRunSummary,
   reproductionText,
   runIsInFlight,
 } from "@/lib/runshapes";
@@ -55,8 +57,20 @@ interface Run {
   pull_request: number | null;
   repository: string;
   verdicts?: string;
+  passing?: string;
   failing?: string;
+  proved?: string;
 }
+
+// The runs list colours its verdict summary with the same tokens as the rest
+// of the console. `neutral` never comes back from `recentRunSummary`, but the
+// map is total over `Tone` so it cannot silently miss a case.
+const verdictTone: Record<Tone, string> = {
+  pass: "text-pass",
+  warn: "text-warn",
+  fail: "text-fail",
+  neutral: "text-dim",
+};
 
 interface Verdict {
   workflow: string;
@@ -532,8 +546,12 @@ function Runs() {
                   </thead>
                   <tbody>
                     {data.map((r) => {
-                      const failing = Number(r.failing ?? 0);
-                      const total = Number(r.verdicts ?? 0);
+                      const summary = recentRunSummary({
+                        total: Number(r.verdicts ?? 0),
+                        passing: Number(r.passing ?? 0),
+                        failing: Number(r.failing ?? 0),
+                        proved: Number(r.proved ?? 0),
+                      });
                       return (
                         <Row key={r.id} onClick={() => router.push(`/runs?run=${r.id}`)}>
                           <Td>
@@ -545,14 +563,10 @@ function Runs() {
                             <Badge tone={toneFor(r.state)}>{r.state}</Badge>
                           </Td>
                           <Td label="Verdicts" numeric>
-                            {total === 0 ? (
-                              "--"
-                            ) : failing > 0 ? (
-                              <span className="text-fail">
-                                {failing} of {total} failing
-                              </span>
+                            {summary === null ? (
+                              <span className="text-dim">--</span>
                             ) : (
-                              <span className="text-pass">{total} passing</span>
+                              <span className={verdictTone[summary.tone]}>{summary.text}</span>
                             )}
                           </Td>
                           <Td label="Started">
