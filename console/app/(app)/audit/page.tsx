@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { mutate, query, useApi, usePages } from "@/lib/api";
+import { debounce } from "@/lib/debounce";
 import { useSessionContext } from "@/components/session";
 import { More } from "@/components/pagination";
 import {
@@ -21,6 +22,10 @@ import {
   When,
   inputClass,
 } from "@/components/ui";
+
+// Long enough that a typed word is one request rather than one per letter,
+// short enough that the table still follows the typing.
+const FILTER_WAIT_MS = 250;
 
 interface Entry {
   seq: string;
@@ -133,7 +138,19 @@ function Exporter() {
 
 function Audit() {
   const session = useSessionContext();
+  // Two values, because what the reader types and what the server is asked for
+  // are not the same thing: `typed` is the box, `action` is the query. The box
+  // keeps every keystroke so it stays responsive, and the query follows once the
+  // typing stops, which is what turns seven requests for "billing" into one.
+  const [typed, setTyped] = useState("");
   const [action, setAction] = useState("");
+  const ask = useMemo(() => debounce((value: string) => setAction(value.trim()), FILTER_WAIT_MS), []);
+  useEffect(() => ask.cancel, [ask]);
+  const clearFilter = useCallback(() => {
+    ask.cancel();
+    setTyped("");
+    setAction("");
+  }, [ask]);
   // `audit.list` is the odd one of the three: it pages by `seq` under the name
   // `before`, wants a number where the row hands back a string, and returns a
   // bare array. So a full page is the only signal that there is another, which
@@ -170,8 +187,11 @@ function Audit() {
           <input
             aria-label="Filter by action"
             placeholder="filter by action"
-            value={action}
-            onChange={(e) => setAction(e.target.value.trim())}
+            value={typed}
+            onChange={(e) => {
+              setTyped(e.target.value);
+              ask(e.target.value);
+            }}
             className={`${inputClass} mt-0 w-full sm:w-[190px]`}
           />
         }
@@ -179,7 +199,13 @@ function Audit() {
         <Loaded state={state} skeleton={<TableSkeleton rows={8} cols={5} />}>
           {(rows) =>
             rows.length === 0 ? (
-              <Empty title={action ? "No entries with that action" : "Nothing recorded yet"}>
+              <Empty
+                title={action ? "No entries with that action" : "Nothing recorded yet"}
+                // The prose told the reader to clear the filter and left them to
+                // find the box themselves. The operator console's identical case
+                // hands over the control, so this one does too.
+                action={action ? <Button onClick={clearFilter}>Clear the filter</Button> : undefined}
+              >
                 {action
                   ? "Clear the filter to see everything the log holds."
                   : "The log fills as people and machines act on this organization."}

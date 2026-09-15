@@ -919,7 +919,14 @@ const auditRouter = router({
         const rows = await db.execute<AuditRow>(sql`
           SELECT seq, actor_label, action, target_type, target_id, origin, detail, occurred_at
           FROM audit_entries
-          WHERE (${input.action ?? null}::text IS NULL OR action = ${input.action ?? null})
+          -- Contains, not equals. An action is a dotted name like
+          -- billing.plan.changed, and the filter is a text box a reader types
+          -- into, so equality answered "no entries with that action" for every
+          -- prefix of a name that is right there in the log. The three replaces
+          -- keep a typed % or _ literal, so a filter cannot become a wildcard by
+          -- accident, and the backslash is escaped first or it would escape the
+          -- escapes that follow it.
+          WHERE (${input.action ?? null}::text IS NULL OR action ILIKE '%' || replace(replace(replace(${input.action ?? null}, '\', '\\'), '%', '\%'), '_', '\_') || '%')
             AND (${input.before ?? null}::bigint IS NULL OR seq < ${input.before ?? null})
           ORDER BY seq DESC LIMIT ${input.limit}`)
         // seq is a bigserial and arrives as a string, for the same reason
