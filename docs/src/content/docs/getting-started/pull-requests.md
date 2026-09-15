@@ -18,9 +18,8 @@ to host, and no secret to create before the first check runs.
 **Install the GitHub App.** When the App is installed on a repository that has
 no workflow, it opens a pull request titled "Check every pull request with
 Antifailure" on a branch called `antifailure/setup`. The pull request adds one
-file. Merge it, and the next pull request gets a check. Nothing runs until it
-is merged, and the console lists the repositories it is still getting
-connected. [The pull request the App opens](/docs/guides/github#the-pull-request-the-app-opens)
+file. Merge it, and the next pull request gets a check. The console lists the
+repositories it is still getting connected. [The pull request the App opens](/docs/guides/github#the-pull-request-the-app-opens)
 says what happens when the App cannot write to the repository.
 
 **Run `af init`.** When the checkout has a `github.com` remote, `af init`
@@ -37,8 +36,7 @@ in the repository. Copy it to `.github/workflows/antifailure.yml` and commit.
 
 ## The file
 
-Whichever door you came through, this is the whole of what lands in your
-repository:
+This is the whole of what lands in your repository:
 
 ```yaml
 # Antifailure checks every pull request on a disposable copy of production.
@@ -82,37 +80,28 @@ jobs:
       control-plane: ${{ vars.AF_CONTROL_PLANE || 'https://app.antifailure.dev' }}
 ```
 
-It is short because the work is somewhere else, and where it is matters.
-
 The App writes its own address on that last line. The file above carries the
 hosted control plane's, and a self hosted control plane that knows its public
-address writes that instead, so the pull request it opens and the file it adds
-name the same place.
+address writes that instead.
 
 The job calls a **reusable workflow** in the Antifailure repository. That
 workflow checks out your branch with full history, because `af change` diffs
-against the merge base and a one commit clone has none. It applies the fork
-label gate, sets the concurrency group so a push cancels the check it
-supersedes, and then calls the action.
+against the merge base. It applies the fork label gate, sets the concurrency
+group so a push cancels the check it supersedes, and then calls the action.
 
 The **action**, `antifailure/antifailure@v1`, installs `af`, installs the
 agent runner when the command needs a browser, works out what the change
 touches, runs the check, and leaves the comment. Its inputs and outputs are on
 [the action reference](/docs/reference/action).
 
-`secrets: inherit` is the line that makes the file short. A composite action
-cannot read a caller's secrets, so without it every secret would have to be
-named in your file, including the production database secret whose name only
-your manifest knows. With it the reusable workflow can see your secrets, and
-it reads only the ones the manifest names. `af change` reports which those are
-before the check starts, and each is looked up by that name and passed to the
-action under it. A secret the manifest never mentions is never read.
+`secrets: inherit` lets the reusable workflow see your secrets, and it reads
+only the ones the manifest names. `af change` reports which those are before the
+check starts, and each is looked up by that name and passed to the action under
+it. A secret the manifest never mentions is never read.
 
-The `workflow_dispatch` block is for the hosted control plane, whose buttons
-run this workflow on the branch an environment is on. Delete it if you do not
-use one. The `permissions` block is what the job needs: `pull-requests: write`
-for the comment, and `id-token: write` so the job can prove who it is to a
-control plane without a stored credential.
+The `permissions` block is what the job needs: `pull-requests: write` for the
+comment, and `id-token: write` so the job can prove who it is to a control plane
+without a stored credential.
 
 ## Nothing else is required
 
@@ -120,20 +109,17 @@ No secrets and no account. Open a pull request and the workflow runs, `af
 change` reads the diff, and `af ci` brings the environment up, runs the
 workflows, asks the invariants, rehearses the migrations, writes the report and
 tears down. Teardown happens whatever the outcome, including on a failed job
-and on a cancelled one, because an environment that outlives its pull request
-is the leak this product exists to prevent.
+and on a cancelled one.
 
 [`af change`](/docs/concepts/change-analysis) is what keeps the check off a
 change to a README. It reads the diff, says which checks exercise what it
 touched, and writes that as the comment when nothing else runs. A path it does
-not recognise selects every check rather than none, so the mistake it can make
-costs a run rather than hiding one.
+not recognise selects every check rather than none.
 
 ## What is optional, by name
 
 Each of these is a repository secret, except the last, which is a repository
-variable. Each is read only when the manifest asks for it, and each has a real
-consequence when it is missing.
+variable. Each is read only when the manifest asks for it.
 
 `ANTHROPIC_API_KEY` lets the agents read a page. Without one they still run,
 and a workflow that needed a page read comes back unverified rather than
@@ -155,15 +141,14 @@ empty database, and the report says so at the top.
 the engine reads. It has to be a test key. A live one is refused before
 anything starts.
 
-`AF_CONTROL_PLANE` is a repository **variable**, not a secret, because it is an
-address. The file already carries one as the variable's default: the control
-plane whose App opened the pull request, or the hosted one when you copied the
-file by hand. The run reports there, the control plane concludes the check it
-posted and maintains the comment, and there is nothing to set. Set the variable
-only to point the run at a self hosted control plane. A repository the control
-plane does not know refuses the run a credential, the job comments for itself,
-and nothing is red for it. [The control plane](/docs/getting-started/hosted)
-is what reporting adds.
+`AF_CONTROL_PLANE` is a repository **variable**, not a secret. The file already
+carries one as the variable's default: the control plane whose App opened the
+pull request, or the hosted one when you copied the file by hand. The run
+reports there, and the control plane concludes the check it posted and maintains
+the comment, so there is nothing to set. Set the variable only to point the run
+at a self hosted control plane. A repository the control plane does not know
+refuses the run a credential, the job comments for itself, and nothing is red
+for it. [The control plane](/docs/getting-started/hosted) is what reporting adds.
 
 ## No manifest yet
 
@@ -172,8 +157,7 @@ The check does not wait for one. When the repository has no `antifailure.yaml`,
 would, and uses that. The comment says so in its first lines: this run used a
 manifest Antifailure drafted from the repository, and `af init` committed is
 what makes it yours. A repository the draft cannot describe gets a skipped run
-and a comment naming the reason, with `af init` as the next command, rather
-than a red check for a file that was never there.
+and a comment naming the reason, with `af init` as the next command.
 
 ## An empty database
 
@@ -184,10 +168,8 @@ When `database.source_url_env` is unset, the report opens with this sentence:
 > Set `database.source_url_env: PRODUCTION_DATABASE_URL` and add that secret
 > to the repository.
 
-It is rendered before the workflow table on purpose. A check that passed on an
-empty schema is a weaker claim than one that passed on a masked copy of
-production, and the difference has to be the first thing a reader sees rather
-than a footnote. `af up` prints the same sentence on a workstation.
+It is rendered before the workflow table. `af up` prints the same sentence on a
+workstation.
 
 ## Turn the integration on
 
@@ -201,15 +183,13 @@ github:
   fork_policy: label
 ```
 
-Three keys rather than four. There is a `teardown_on` as well, and it is
+There is a `teardown_on` key as well, and it is
 [read by nothing](/docs/reference/manifest#github): teardown happens whatever
-you put there, so setting it would only teach you to trust a line that does not
-work.
+you put there.
 
-`mode: actions` runs everything inside the workflow. The environment lives for
-the length of the job, which suits a repository that wants preview checks
-rather than preview URLs somebody opens later. When you want the second thing,
-[the control plane](/docs/getting-started/hosted) is what adds it, and the
+`mode: actions` runs everything inside the workflow, and the environment lives
+for the length of the job. For preview URLs somebody opens later,
+[the control plane](/docs/getting-started/hosted) is what adds them, and the
 mode becomes `app`.
 
 ## Open a pull request
@@ -232,23 +212,18 @@ what they locked and for how long, what Postgres rewrote, and what the
 fails the check by default; a rewrite warns. The
 [policy block](/docs/concepts/verdicts) is where you change that.
 
-It edits that comment in place on the next push rather than adding another. A
-bot that comments on every push is a bot people mute, and a muted bot reports
-nothing.
+It edits that comment in place on the next push rather than adding another.
 
 ## Pull requests from forks
 
-`fork_policy: label` is the default and the right starting point. A pull
-request from a fork runs code somebody outside your organisation wrote, against
-an environment holding a masked copy of your data. Nothing runs until a
-maintainer adds the `antifailure:allow` label, which is a person deciding.
-The file subscribes to `labeled` and `unlabeled` so that the approval, and a
-withdrawn approval, reach the check without waiting for the next push.
+`fork_policy: label` is the default. Nothing runs on a pull request from a fork
+until a maintainer adds the `antifailure:allow` label. The file subscribes to
+`labeled` and `unlabeled` so that the approval, and a withdrawn approval, reach
+the check without waiting for the next push.
 
 The policy is read from the base branch rather than from the pull request,
 because the pull request's copy of the manifest belongs to the contributor.
-[Forks](/docs/guides/github#forks) has the full picture, including what GitHub
-itself withholds from a fork and what it does not.
+[Forks](/docs/guides/github#forks) has the full picture.
 
 Related: [the full GitHub configuration](/docs/guides/github),
 [the action reference](/docs/reference/action),

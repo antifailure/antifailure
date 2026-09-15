@@ -901,6 +901,15 @@ func TestExplain_SaysWhichHalfOfTheSizeWasNamed(t *testing.T) {
 	require.Contains(t, out, "size 512Mi memory, requested and capped; CPU uncapped")
 }
 
+func TestExplain_DoesNotPromiseAMaskingFileThatMayNotBeThere(t *testing.T) {
+	t.Parallel()
+	// The path is filled in whether or not the file exists, and the engine reads
+	// its built in rules when it does not. Naming it alone read as though this
+	// had looked.
+	out := strings.Join(strings.Fields(manifest.Explain(mustParse(t, minimal), 0)), " ")
+	require.Contains(t, out, "masking masking.yaml if present, else the built in rules")
+}
+
 func TestExplain_SaysWhenThereAreNoRules(t *testing.T) {
 	t.Parallel()
 	out := manifest.Explain(mustParse(t, minimal), 0)
