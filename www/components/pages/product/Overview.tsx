@@ -115,17 +115,13 @@ export function OverviewPage() {
         path="/product"
         eyebrow="Product"
         title="A disposable production twin that proves whether a deployment is safe."
-        lead="Connect a repository and a cloud environment. For every risky change, Antifailure builds an isolated production twin, fills it with safe production-shaped state, exercises it, and says whether the deployment is safe to ship."
+        lead="Connect a repository and a cloud environment. For every risky change, Antifailure builds an isolated production twin, fills it with safe production-shaped state, and exercises it."
         framed={false}
         visual={<POV01 />}
       />
 
       <PageSection>
         <PageHeading title="<strong>Seven pieces, one decision.</strong> None of these is the product on its own." />
-        <p className="mt-6 max-w-[520px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-          Twin, state, containment, behavior, judgment, evidence, and cleanup. The output is a pass
-          or a fail on the pull request, and then the environment is destroyed.
-        </p>
 
         <div className="relative mt-14 max-md:mt-10">
           <ul className="grid grid-cols-4 gap-x-16 gap-y-12 max-xl:grid-cols-2 max-xl:gap-x-10 max-md:grid-cols-1 max-md:gap-y-8">
@@ -155,8 +151,7 @@ export function OverviewPage() {
           <PageHeading title="<strong>The question staging cannot answer.</strong> What happens when this change meets real data, concurrency, workers, and the deploy process." />
           <p className="mt-8 max-w-[520px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
             Preview tools, test-data platforms, E2E suites, load tests, packet mirrors, and observability
-            each cover one fragment. A disposable twin unifies the minimum set required to validate a
-            real deployment.
+            each cover one fragment.
           </p>
         </Split>
       </PageSection>
@@ -166,9 +161,7 @@ export function OverviewPage() {
           <PageHeading kicker="Scope" title="<strong>Postgres migrations first.</strong> Not universal multicloud cloning." />
           <p className="mt-6 max-w-[560px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
             Exclusive locks, table rewrites, query-plan regressions, and old binaries
-            that cannot read candidate writes. Conventional tests miss all of them. So the first thing
-            built completely is the check for a risky Postgres-backed deployment, rather than a shallow
-            version of everything.
+            that cannot read candidate writes. Conventional tests miss all of them.
           </p>
         </Split>
         <Illustrative label="Example finding">
@@ -187,8 +180,7 @@ export function OverviewPage() {
             </h3>
             <p className="mt-5 max-w-[440px] text-[16px] leading-7 tracking-extra-tight text-gray-new-40">
               The rehearsal runs the pending migrations against a branch with production's shape and
-              samples what is locked every 250 milliseconds. It reports the strongest mode held per
-              table, how long it was held, and whether another session was left waiting on it.
+              samples what is locked every 250 milliseconds.
             </p>
           </div>
         </div>

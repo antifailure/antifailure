@@ -47,7 +47,7 @@ export function MigrationsPage() {
         path="/product/migrations"
         eyebrow="Migration Safety Engine"
         title="Catch exclusive locks before they take checkout down."
-        lead="The flagship module. A fresh branch carrying production's shape applies the pending migrations while a second connection samples what is locked, then reports the strongest mode held per table, how long it was held, whether another session was left waiting on it, which tables were rewritten, and how the query plans moved."
+        lead="A fresh branch carrying production's shape applies the pending migrations while a second connection samples what is locked, then reports the strongest mode held per table, how long it was held, whether another session was left waiting on it, which tables were rewritten, and how the query plans moved."
         framed={false}
         visual={<PMG01 captions={CAPTIONS} />}
       />
@@ -83,8 +83,7 @@ export function MigrationsPage() {
         </Split>
         <Illustrative label="Example finding">
           A rehearsal of one migration, with the numbers chosen. The measurements are the ones{" "}
-          <code className="font-mono text-[12px] text-black/70">af insights</code> takes: lock mode
-          and hold time from pg_locks, rewrites from Postgres, plans from EXPLAIN.
+          <code className="font-mono text-[12px] text-black/70">af insights</code> takes.
         </Illustrative>
       </PageSection>
 
@@ -97,17 +96,11 @@ export function MigrationsPage() {
             runs, because the session running it cannot see its own lock until the statement returns,
             which is exactly when the interesting part is over.
           </p>
-          <div className="mt-8">
-            <Callout label="Suggested remediation">
-              Add a second column of the new type, backfill it in batches, deploy code that reads
-              both, then drop the old column in a later migration.
-            </Callout>
-          </div>
         </Split>
       </PageSection>
 
       <PageSection>
-        <PageHeading title="<strong>Failures conventional tests miss.</strong> The engine measures what staging cannot." />
+        <PageHeading title="<strong>Failures conventional tests miss.</strong>" />
         <FeatureGrid
           items={[
             { title: "Locks", body: "The strongest mode held per table, how long, and whether another session was left waiting on it." },
