@@ -14,6 +14,426 @@ and the per change entries are what make it a wall. `just relnotes` refuses an
 unbalanced marker, a second region in one section, an empty region, and a
 section that omits all of itself.
 
+## v1.4.1
+
+Where v1.4.0 was about things that had been sold or declared and were not true,
+this release is mostly about things that ran and were wrong while reporting
+that they were right. Masking gave rows each other's values on any table whose
+primary key has more than one column. An emulator that had been started was
+called ready and answered the application with a 502. A migration lint counted
+a `lock_timeout` that was not in effect. Two console surfaces drew a run that
+had verified nothing as a pass. Three cloud database providers met real clouds
+for the first time and came back with defects no fake had shown.
+
+### For operators, before you upgrade
+
+**Masking a table whose primary key has more than one column gave its rows each
+other's masked values.** The run addressed a row by the first key column alone,
+compared as text, so for a key such as `(tenant_id, id)` the update that wrote
+one row's values matched every row of that tenant. On a table of three tenants
+with seven contacts each, 18 of the 21 rows ended up holding another row's
+masked email. Golden verification reported nothing wrong, because every value
+it sampled was a valid fake address, and every join on those columns found the
+wrong person. Rows are now read, paged and rewritten by the whole primary key,
+compared as the table stores it. **If you hold a golden masked by an earlier
+release from a table with a composite primary key, refresh it: the data in it is
+shuffled between rows, and nothing in the golden says so.** The same change makes
+it fast rather than merely correct: on 200,000 rows a chunk read went from 78.5
+milliseconds to 3.7 and a row update from 13 to 2.7, where before the first
+20,000 row chunk had not committed after 45 minutes.
+
+**A masking plan whose only rule for a required column is `preserve` is now
+refused.** A preserved column holds exactly what production held, and it was
+being counted among the masked columns an enterprise `required_masked_columns`
+policy was given, so such a plan used to be approved. A golden refresh that
+passed before may now be refused naming a column. Give that column a masking
+transform, or ask an administrator to narrow the policy. Two refusals went the
+other way and are now allowed: a `preserve` rule on a generated column, and one
+on a ClickHouse table with no sorting key.
+
+**A managed cloud database was reached with `sslmode=require`, which encrypts
+the connection and checks nothing about who answers it.** Anything on the path
+could present a certificate and read a copy of production. The three cloud
+providers now hand out `verify-full` or `verify-ca` with a pinned public trust
+bundle: AWS's published RDS roots, Microsoft's published Azure roots, and the
+Cloud SQL instance's own CA fetched through the authenticated Admin API.
+**`require` is now refused**, and plaintext is limited to a loopback test
+fixture. The same bundle reaches the application as its own file, separate from
+the egress proxy's inspection authority, because a proxy that can sign any
+hostname must not be able to vouch for a database.
+
+**The self hosting pages pinned a control plane image that could not create the
+first organization.** `main-b53906a` predated `create-org`, `break-glass` and
+the `tokens.manage` scope, so anybody who followed the four step bring up got a
+running server with no organization and no way to make one. The pages now pin
+`main-fa6c8aa`, and the Kubernetes section gains the `create-org` step the
+bootstrap Job does not run. **If you brought up a control plane against the old
+pin and never got an organization, that is why.**
+
+**An emulator that had been started was called ready, and the application got a
+502 from it.** The daemon reports a container started as soon as its first
+process runs, and the server inside binds its port later: the Google emulators
+take between 17.7 and 51.5 seconds to accept a first connection and LocalStack
+spends its own seconds loading providers. The 502 is the same status the sidecar
+returns for an emulator the environment is not running at all, so the one
+message anybody had said the opposite of what was wrong. `af up` now dials each
+emulator from inside the environment until it accepts a connection, before any
+service is created. Each emulator has three minutes, `AF_EMULATOR_READY_TIMEOUT`
+moves that, and one that never binds stops the run with `AF-RUN-049` naming the
+emulator, its address and its image, and tears that environment down.
+
+**An organisation's egress policy could be evaded by writing no egress rules at
+all.** `egress: {default: synth}` with an empty rule list is a valid manifest,
+and the deny list, the permitted modes and the synth approval requirement were
+all read from the explicit rules, which such a manifest has none of. The default
+is now read as the mode every unnamed host is given, so a default that reaches
+the host it was asked about cannot honour a deny list and is refused, a default
+the organisation does not permit is refused as a rule already was, and a synth
+default needs the same approval a synth rule needs. **A manifest that relied on
+a reaching default with an empty rule list will now be refused by policy.**
+`capture`, `mock` and `emulate` answer without contacting the host, so a default
+of one of those breaches nothing, and the core manifest default is unchanged:
+empty still means block.
+
+**Directory provisioning now refuses an addition past the licence's seat
+count.** Single sign-on had enforced the seat limit since it took one; the word
+"seat" appeared nowhere in `ee/web/scim`, so the two provisioning paths
+disagreed and the limit had a documented way around it. The refusal is a 403 on
+creating an active resource and on reactivating a deprovisioned one, which is an
+addition too. An inactive resource takes no seat. No seat count still means
+unlimited. **A SCIM sync that has been adding members past a seat limit will
+start receiving 403s.**
+
+**The migration lint counted a `lock_timeout` that was not in effect when the
+lock was taken.** It asked only whether a `SET lock_timeout` appeared anywhere,
+so a `SET` after the `ALTER`, a `RESET` or a `SET` to `0` before it, a `SET
+LOCAL` whose transaction had committed, a `ROLLBACK` that undid the `SET`, and
+an `ALTER ROLE` or `ALTER DATABASE`, which reach only sessions that start later,
+all silenced the rule while the `ALTER` would have queued with no limit. The
+rule now follows the migrations in the order one session runs them and judges
+each lock against the timeout in effect at that moment. **A migration that
+passed this rule before may now be flagged, and correctly.**
+
+**Two billing owners who pressed Subscribe a minute apart each got their own
+payable Stripe checkout page**, and if both were paid the organization held two
+subscriptions on one customer and one card was charged twice. Each organization
+now holds one purchase attempt claimed under its own lock, a second press or
+second owner is given the page that already exists, the old page is expired at
+Stripe before a new one opens, and every payable page opened before this release
+is expired when the customer's open sessions are read. A paused subscription,
+which is what a trial that ended with no payment method leaves, now refuses a
+new purchase instead of counting as nothing and being sold a second plan.
+
+**A manifest may now declare two services listening on the same port.** The
+validator refused that pair, so a Next.js application beside PostgREST, which
+both listen on 3000, was a manifest Antifailure would not load. Neither runtime
+shares a port: the local runtime publishes each service on a host port it
+allocates, and Kubernetes gives each its own Deployment and Service. The port in
+the manifest is what the service listens on inside its own container.
+
+### Security
+
+**A raw invitation token was stored in plain text, beside the hash that exists
+so that it is not.** An invitation is kept as a sha256 and nothing else, so a
+copy of the table is not a list of working invitations. The console asked to be
+returned to `/invite?token=<the raw token>` after sign-in, and the control plane
+stores a return target verbatim in `oauth_states.redirect_to` and
+`email_signin_tokens.redirect_to`, both plain text. The token sat readable for
+the ten minutes a handshake lives, and for up to a day when nobody came back to
+redeem it, which is the case where the token is still valid. A return target now
+carries no `token` parameter.
+
+**Hosted persona credentials were derived only from values that are not secret,
+so they were not secret either**, and one environment's `af up` locked every
+other environment out of the persona it shared. A persona created through Clerk,
+Auth0, WorkOS or Supabase's admin API lives in the provider's tenant, which
+holds one account per address, so each `af up` reset the shared account and
+signed the others out. Credentials are now derived from the tenant's admin
+token, which every environment reaching that tenant already holds, and an empty
+admin token is refused with AF-DB-025. **What to do: upgrade, and rotate
+nothing.** The next `af up`, `af test` or `af explore` against a hosted tenant
+replaces every hosted persona's password and second factor. Anybody who enrolled
+an authenticator app by hand against a persona's old second factor has to enrol
+it again.
+
+**The documentation said a pulled golden was checked to be yours. It is checked
+against an accident.** The pull compares the project identity recorded in the
+attestation, which was written for an accidental collision and is measured
+against exactly that. The pages said more: that a pulled golden was "signed
+along with everything else", which reads as an authentication of the publisher.
+There is none. The pull never checks the signature, and the signature would not
+answer that question anyway, because the key is generated per signature and
+travels inside the document, so it proves the document was not changed after
+signing and not who signed it. The pages now say what holds: the verification
+scan running again on the machine that pulled it is what protects the data, and
+the store's own access control is what decides who may publish, which makes the
+store credentials and the bucket policy the trust boundary. No behaviour
+changed.
+
+### Enterprise
+
+**Custom roles now work.** The licence sold them, `LICENSING.md` and
+`ee/README.md` listed them, and no organisation could have one. Both halves
+existed and neither was joined to the other: `permits()` has asked an installed
+permission resolver on every request since it was written, and `ee/web/rbac` has
+always carried a role model, a validator, a scope resolver and a reviewable file
+format in exactly that resolver's shape. Nothing stored a model and nothing
+installed a resolver. Migration 0046 stores a model per organisation under row
+level security, the enterprise edition mounts four routes that export, preview
+and apply it as a reviewed YAML file, and its entry point installs the resolver,
+which reads the model per request rather than from a cache. A resolver is asked
+only where the built-in table has already refused, so a custom role can widen a
+role and never narrow one; that was the documented rule and not the behaviour.
+`members.list` now returns each member's `user_id`, without which a grant could
+not name a person from any route an organisation can call.
+
+**The compliance report called every real masking attestation forged.** Each
+golden's attestation showed "SIGNATURE DOES NOT VERIFY" in the SOC 2 and HIPAA
+evidence although nothing had been changed. Since before 1.0 the engine has
+signed four fields the report did not know about, so it rebuilt the document
+without them, hashed different bytes and failed every signature. Its own tests
+passed because they checked attestations written before those fields existed.
+The report now reads every field the engine signs, and the engine's suite signs
+an attestation with every field set that the compliance suite must verify, so a
+field added to one side without the other fails a test rather than a customer's
+audit evidence.
+
+### Databases and the clouds they run on
+
+**`database.provider` now accepts `cloudsql` and `azurepg`.** Before this, the
+runtimes, the emulators and the secret stores were symmetric across the three
+clouds and the database was not, so "works on AWS, GCP and Azure" was true of
+three dimensions out of four and the fourth was the one holding the data.
+Neither is a copy of the Aurora provider and each says where it stops.
+`cloudsql` branches with a FAST clone, which Google documents as metadata only,
+and the clone request type used here has no field for a zone or a point in time,
+so asking for the slow path does not compile. `azurepg` branches with a point in
+time restore and declares copy on write FALSE, because log replay follows and
+Microsoft gives the overall recovery as a few minutes up to a few hours. It also
+does the three things Azure does not do for you, each an outage or an exposure
+if a provider assumes otherwise: firewall rules are not copied across a restore,
+a restored server keeps the source's administrator login, and a restore cannot
+cross between public and private access, which is refused before provisioning.
+
+**`database.provider` now accepts `rds`.** The comparison table in `benchmarks/`
+had a row for RDS with no code behind the name, while most Postgres on AWS runs
+on plain RDS rather than Aurora. A branch is
+`RestoreDBInstanceFromDBSnapshot`, which hydrates a new volume from the
+snapshot, so the provider declares `CopyOnWrite: false` and its branch time
+grows with the data. A restore inherits production's whole role catalog, so it
+closes every inherited login and ends its sessions before masking, again before
+publication and again on every branch, rotates the master password, turns IAM
+database authentication off, and places the instance in the source's own subnet
+group and security groups with no public address.
+
+**What has and has not met a real cloud is recorded rather than implied.** One
+RDS run in `us-east-1` reached a masked, verified candidate over `verify-full`
+against RDS's own certificate, with a snapshot in 1 minute 11 seconds and a
+restore in 5 minutes 4 seconds at 20 GB, and found three defects, all fixed. It
+stopped before publishing, so publishing, branching, isolation and destroy are
+proved against a fake control plane over a real Postgres only. `azurepg` has met
+Azure once, where a golden restore, mask and verification succeeded over
+`verify-full` in 392.4 seconds and the branch restore after it failed with an
+internal error from Azure. `cloudsql` has not been run against Google Cloud.
+Every wall clock cell in the benchmark prints `UNMEASURED` where it was not
+measured, and the copy on write verdicts for these providers are recorded as
+unproven.
+
+**The Aurora provider could not refresh a golden against real AWS.** Its first
+live run connected with the rotated master password one second after asking for
+it; Aurora accepts that change before applying it and the cluster reads
+available throughout, so Postgres refused the login and nothing was published.
+Five of the fault codes the provider recognised carried a `Fault` suffix RDS
+does not send, including the one AWS answers when an instance is already being
+deleted, so cleaning up a writer that was already going away failed instead of
+succeeding. A failed refresh also gave its cleanup five minutes and AWS took
+twelve.
+
+**A Xata branch wait that could last five minutes printed nothing**, so a slow
+branch and a hung one looked the same. The wait now publishes `engine.progress`:
+a line when a branch is first found not ready, another every thirty seconds with
+how long it has waited and the status now, and one when it is ready saying how
+long it took. A branch ready on the first check still prints nothing.
+
+**Provisioning a persona read every user in the golden to find one.** The SQL
+adapter compared a row's key cast to text, and a key that is not already text
+becomes an expression no index can be searched by, so reconciling a persona's
+account, its identity and its second factor each read the whole table. Against a
+million Supabase users the users update took a median of 185 milliseconds and
+each identity lookup up to 126, per persona and on every branch. The key is now
+compared as its own type.
+
+### The console
+
+**The runs list called a run that verified nothing passing.** Pass, fail, flaky
+and warn are judgements; blocked and unverified are not, because the work either
+never reached the application or finished with nothing to evaluate. The list
+coloured a row green and wrote "N passing" whenever no verdict was failing, and
+a run whose verdicts are all blocked or unverified has nothing failing, so a run
+that proved nothing drew as a pass on the surface a customer scans first, while
+the detail view for the same run already said nothing was verified. A run that
+proved nothing now reads "nothing verified" in amber, a partial run reads "N of
+M passed", and only a run that is genuinely all passes reads green.
+
+**The runs detail page drew a run that proved nothing as clean**, for the
+related reason that `unverified` and `flaky` were in none of the colour
+function's three lists and were drawn in the grey reserved for a value nobody
+needs to react to. Those two are now amber and a run whose verdicts judged
+nothing carries a banner with the counts. The same page also never updated once
+it was open, because its only refresh hung off a card a member cannot see, so a
+run could not be watched to completion in the console this product is
+demonstrated in. And the reproduction recorded for a failing verdict, which the
+operator console has printed all along, is now on the page the customer is
+shown.
+
+**The data export and account deletion page had never rendered.** It read
+`account.exits` and the control plane registers `account.context`. A console
+path is an ordinary string, so a name with no procedure behind it is a 404 at
+run time rather than a compile error, and every visit to the one screen a lapsed
+customer is sent to drew an error card. That screen is also the nav entry, the
+primary button on the lapsed plan and the wordmark target for anybody who cannot
+bill. Behind it sat a second defect that fixing the first would have exposed:
+the page typed `sessions` as always present and read its count in exactly the
+branch the server leaves null, which is every member and every viewer.
+
+**The audit log's filter said "No entries with that action" about entries it
+had**, because it matched only a whole dotted name typed exactly. It now matches
+any action containing what you typed, a typed `%` or `_` stays a literal
+character, the box waits for typing to stop rather than sending a request per
+keystroke, and the filtered empty state carries the "Clear the filter" control
+it was telling people to use.
+
+### Instruments that could not say no
+
+**Two gates in the engine job reported ok having checked nothing.** The leak
+check exists, in its own comment's words, because "a suite crashed before its
+own assertion ran", and it carried no `if:` key, so it took the default
+`success()` and was skipped the moment an earlier step failed. The one situation
+it was written for was the one situation in which it never ran. It now runs on
+`!cancelled()`. The three golden store round trip suites were the second: they
+skip when no server answers, and the job set no equivalent of `AF_REQUIRE_DOCKER`
+for object storage, so all three skipped on every pull request and the package
+reported ok. What was going unexamined is the part no fixture can check, namely
+Signature Version 4 signing for S3, the account shared access signature for
+Azure Blob, and the escaped object name, `alt=media` read, separate upload path
+root and paging shape for Cloud Storage. `AF_REQUIRE_OBJECT_STORE` turns the
+skip into a failure, and MinIO, Azurite and fake-gcs-server now start in the job
+and in a `just stores` recipe at the same digests. Pinning those exposed a third
+gate that could not say no: the image digest agreement test matched lowercase
+across the name, the colon and the tag together, and MinIO publishes no
+lowercase tag at all, so a MinIO reference matched nothing and a tree naming two
+different digests for it would have passed.
+
+**A draft pull request's dogfood check always failed, and marking it ready never
+replaced the failure.** The workflow ran on the default pull request events; the
+control plane starts no check on a draft and opens one when the pull request is
+marked ready, so the draft's run did twenty minutes of work, was refused with
+HTTP 409 because no check was waiting on its commit, and went red, while marking
+it ready started a check with no run to answer it. The workflow now runs when a
+pull request is marked ready for review, skips the check on a draft and says so
+in its comment, and cancels a run that is still going when a pull request is
+sent back to draft.
+
+**A page that showed escaped markup as text had a markdown twin that said
+something else.** The twin decoded `&amp;` into `&` first, so the next step read
+the result as a second entity, and a page displaying `&lt;b&gt;` came out in its
+twin as `<b>`. The check that compares every page against its twin decoded in
+the same order, so both sides were wrong in the same way and agreed. The writer
+and the check now share one decoder, which turns `&amp;` back last.
+
+**`tools/routecheck` now reads console call sites as well as the marketing
+site**, so a console page naming a procedure the control plane does not register
+is refused before it merges rather than 404ing at run time.
+
+### Documentation that said more than the code does
+
+**Five things the product said about itself that the code does not do.** The
+list of Postgres failures the insights check finds named connection pool
+exhaustion; the catalogue holds seventeen rules and none concerns pools, and the
+diagram beside it carried a pool row for the same reason. The pull request gate
+was described as carrying the video: the runner does record one and it never
+reaches the comment, which carries the trace. The egress mode plate showed
+`api.stripe.com` in `mock`, where the mode a detected Stripe SDK is actually
+given is `sandbox`, which opens a real connection to Stripe's own sandbox with a
+substituted credential, and `mock` is the default for nothing.
+
+**`af init` wrote personas that sign in with a password whatever the repository
+was**, so the documented first run could not finish on a service that serves
+JSON. A JSON API owns no users table, `af up` refused with AF-DB-022, and
+`af test` exited 3 with no verdict. Detection now decides how a persona signs in
+from what the repository shows: a draft keeps `login: password` when the
+repository depends on an authentication provider that owns its users, declares a
+users table in its own SQL or Prisma schema, or renders any markup, and only a
+repository with none of those gets `login: none`. `af init` says which it chose
+under Assumed.
+
+**Four places phrased a deliberate boundary as work somebody would get to
+later**, and a boundary described as deferred reads as a hole. A budgeted key
+still refuses a streaming request with a 400 and no longer calls that
+unsupported: the budget is a per token spend limit and a streamed response
+carries no total token count until it finishes, so refusing is the fail closed
+answer. Per person GDPR erasure now reads "Not offered by architecture" rather
+than "Not implemented", because the audit chains hash each entry into the next
+and a per person deletion reaching them could not rewrite them without breaking
+the tamper evidence the compliance record depends on. No behaviour and no
+erasure code path changed.
+
+**`THIRD_PARTY_NOTICES.md` now attributes everything Antifailure ships**, in a
+section per artifact: the `af` binary, the community control plane image, and
+what the enterprise image adds. It used to list each Go module's path and
+version and nothing else, and said nothing about the npm packages and the
+console the images carry. The licence is recognised rather than guessed, read
+from the files each module ships, and a gap stops the build instead of shipping.
+
+<!-- relnotes:omit -->
+
+Every change in this release, by kind, with the pull request that made it.
+
+**Added.** Managed Postgres for Google Cloud and Azure, as the `cloudsql` and
+`azurepg` database providers (#374). The `rds` provider, which branches an
+Amazon RDS for PostgreSQL instance (#400). Custom roles an organisation can
+define, grant and assign, stored under row level security and enforced per
+request (#382).
+
+**Changed.** A manifest may declare two services on one port, which neither
+runtime shares anyway (#408). Four deliberate boundaries restated as the
+decisions they are rather than as work deferred (#434).
+`THIRD_PARTY_NOTICES.md` rewritten to attribute every artifact, with the licence
+read from what each module ships (#396).
+
+**Fixed.** Masking a composite primary key giving rows each other's values, and
+a preserved column rewritten over itself (#444). An emulator called ready before
+it was listening, answering the application with a 502 (#436). A `lock_timeout`
+that was not in effect silencing the lint that asks for one (#450). Two payable
+Stripe checkout pages for one organization (#393). The Aurora provider's first
+live run against AWS, and its teardown fault codes (#433). A Xata branch wait
+that printed nothing for five minutes (#443). Persona provisioning reading every
+user in the golden to find one (#414). The compliance report calling every real
+attestation forged (#431). The runs list calling a run that verified nothing
+passing (#453), and the runs detail page drawing one as clean (#448). The data
+export and account deletion page, which had never rendered (#452), and the route
+checker that should have caught it (#452). The audit filter saying no entries
+about entries it had (#449). Two engine gates reporting ok having looked at
+nothing, and a digest agreement test that could not see MinIO (#456). A draft
+pull request's dogfood check failing always (#422). Markdown twins keeping
+escaped text (#427). `af init` writing password personas on a JSON API, so the
+documented quickstart could not finish (#454). Self hosting pinned to a control
+plane image that could not create the first organization (#455). Five claims the
+site made that the code does not do (#459). Four quickstart steps that could not
+be copied as printed (#458). Seven figures in the documentation that had
+drifted from the code (#458).
+
+**Security.** An invitation token stored in plain text beside the hash that
+exists so that it is not (#461). Hosted persona credentials derived only from
+values that are not secret, and one environment locking others out of a shared
+persona (#447). A cloud database reached with `sslmode=require`, which encrypts
+without checking who answers (#374). An organisation's egress deny list,
+permitted modes and synth approval evaded by a manifest with no egress rules
+(#445). A directory sync with no seat limit (#446). Documentation that described
+a golden's provenance check as an authentication of the publisher (#430).
+
+<!-- relnotes:end -->
+
 ## v1.4.0
 
 Most of this release is things that had been sold, declared or reported and were
