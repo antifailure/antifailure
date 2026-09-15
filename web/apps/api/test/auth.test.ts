@@ -45,6 +45,25 @@ describe('open redirects', () => {
       assert.equal(safeRedirect(bad), null, `${bad} was accepted as a return target`)
     }
   })
+
+  it('carries no invitation token, whatever else the target holds', () => {
+    // An invitation is stored as a sha256 and nothing else. The console used to
+    // ask to come back to /invite?token=<raw>, and a return target is stored
+    // verbatim in oauth_states and in email_signin_tokens, so the raw token sat
+    // in plain text beside the hash that exists to keep it out.
+    assert.equal(safeRedirect('/invite?token=sekrit'), '/invite')
+    assert.equal(safeRedirect('/invite?token=sekrit&from=email'), '/invite?from=email')
+    assert.equal(safeRedirect('/invite?from=email&token=sekrit'), '/invite?from=email')
+    assert.equal(safeRedirect('/invite?TOKEN=sekrit'), '/invite')
+    assert.equal(safeRedirect('/invite?token=sekrit#accept'), '/invite#accept')
+    // Everything that is not a token is left exactly as it was, because this
+    // runs on every return target and not only on the invitation one.
+    assert.equal(safeRedirect('/repos/acme/app?tab=runs'), '/repos/acme/app?tab=runs')
+    assert.equal(safeRedirect('/environments'), '/environments')
+    assert.equal(safeRedirect('/audit?q=token'), '/audit?q=token')
+    // A malformed escape in a name is not a reason to throw on a sign-in path.
+    assert.equal(safeRedirect('/invite?%zz=1&token=sekrit'), '/invite?%zz=1')
+  })
 })
 
 describe('cross-site request forgery tokens', () => {
@@ -125,6 +144,24 @@ describe('the OAuth exchange', { skip: hasDatabase ? false : 'no Postgres' }, ()
     assert.equal(body.signedIn, true)
     assert.equal(body.orgId, org.orgId)
     assert.equal(body.role, 'member')
+  })
+
+  it('stores no invitation token in the handshake row', async () => {
+    // The whole exposure: this row lives for ten minutes of handshake, and for
+    // a day when nobody comes back, and it is plain text.
+    const secret = `sekrit-${randomUUID()}`
+    const res = await h.fetch(`/auth/github?redirect_to=${encodeURIComponent(`/invite?token=${secret}`)}`)
+    const state = new URL(res.headers.get('location')!).searchParams.get('state')!
+    const [row] = await h.admin<{ redirect_to: string | null }[]>`
+      SELECT redirect_to FROM oauth_states WHERE state = ${state}`
+    assert.ok(row, 'the handshake wrote no row')
+    assert.ok(
+      !(row.redirect_to ?? '').includes(secret),
+      `the raw invitation token is in oauth_states.redirect_to: ${row.redirect_to}`,
+    )
+    // And the person still comes back to the invitation, which is the point of
+    // the return target in the first place.
+    assert.equal(row.redirect_to, '/invite')
   })
 
   it('does not let a browser cache a signed in or signed out session', async () => {
