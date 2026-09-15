@@ -44,6 +44,7 @@ cd antifailure
 just hooks     # turns on the commit hooks; see below
 just setup     # checks your toolchain and names what is missing
 just db        # starts the Postgres the control plane suites need
+just stores    # starts the object storage the golden store suites need
 just build     # builds the af binary into bin/af
 just test      # unit and property tests
 ```

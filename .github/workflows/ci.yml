@@ -748,6 +748,108 @@ jobs:
             docker logs af-cp-target; echo "the second postgres never came up"; exit 1
           fi
 
+      - name: Object storage the golden store suites can use
+        # THE SAME DEFECT THE POSTGRES STEP ABOVE FIXED, one directory over and
+        # still live until now. engine/internal/golden holds three round trip
+        # suites, one per remote store, and each skipped when no server
+        # answered. This job set AF_REQUIRE_DOCKER, AF_REQUIRE_DATABASE and
+        # AF_REQUIRE_RUNNER, and there was no equivalent for object storage, so
+        # all three skipped on every pull request, `go test` printed nothing for
+        # a skip as it always does, and the package reported ok having driven
+        # none of the four operations against a server that answers.
+        #
+        # What was going unexamined is the part that is hand written here and
+        # cannot be checked by a fixture: Signature Version 4 signing in
+        # store_s3.go, the account shared access signature assembled in
+        # store_azure.go, and the JSON API's escaped object name, alt=media
+        # read, separate upload path root and paging shape in store_gcs.go.
+        # TestS3Store's own comment says a fixture cannot tell a correct
+        # signature from a plausible one, which is exactly why the suite needs a
+        # server and exactly what made its silence expensive.
+        #
+        # PROVIDED RATHER THAN MERELY REQUIRED. Setting AF_REQUIRE_OBJECT_STORE
+        # with nothing to point it at converts a vacuous pass into a permanent
+        # red wall, which is a worse instrument and not a better one.
+        #
+        # THE COST, MEASURED. The three linux/amd64 images are 62.2 MB, 113.8 MB
+        # and 25.4 MB compressed, 201.4 MB in total, read from each registry's
+        # manifest rather than estimated. The job's own work measures about 21
+        # minutes at its worst and the emulator step above it is bounded at 20,
+        # so 45 keeps its headroom.
+        #
+        # Steps rather than a `services:` block, for the reason the Postgres
+        # above gives: a service cannot override the image's command, and both
+        # Azurite and fake-gcs-server need theirs. MinIO does not, and is here
+        # with the other two rather than away from them.
+        #
+        # PINNED BY DIGEST. The reasoning and the refresh procedure are written
+        # out above the af-cp-test container, and `just stores` names the same
+        # three digests, which TestEveryPinnedImageAgreesOnOneDigest holds
+        # equal. It could not see the MinIO one until this commit widened its
+        # pattern: the name half is lowercase by the registry specification, the
+        # TAG half is not, and MinIO publishes no lowercase tag at all.
+        #
+        # MINIO COMES FROM quay.io AND NOT FROM DOCKER HUB, which is a
+        # constraint rather than a preference. An anonymous pull token for
+        # docker.io/minio/minio comes back carrying an EMPTY access list, so a
+        # pull of `minio/minio` from Docker Hub needs a login this runner does
+        # not have. quay.io serves the same image anonymously. Written as a pull
+        # rather than as the command, because the pin gate reads a bare image
+        # after `docker` plus `run` even inside a comment, and it is right to:
+        # a bare name there cannot be told from a subcommand.
+        #
+        # THE CREDENTIALS BELOW ARE FIXTURES AND NOT SECRETS. They are the
+        # defaults store_test.go already carries in tracked source, they reach a
+        # container on this runner's loopback and nothing else, and MinIO
+        # refuses a root password under eight characters, which is the only
+        # reason this one is long.
+        run: |
+          set -euo pipefail
+          docker run -d --name af-minio -p 49000:9000 \
+            -e MINIO_ROOT_USER=aftestaccess -e MINIO_ROOT_PASSWORD=aftestsecret123 \
+            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e \
+            server /data
+          docker run -d --name af-azurite -p 41000:10000 \
+            mcr.microsoft.com/azure-storage/azurite:3.37.0@sha256:830430c1da1a2d537e08f3e6764dd1f5ae00cf0346bcaf625b968ec3f0971fd5 \
+            azurite-blob --blobHost 0.0.0.0
+          # NO TAG IN FRONT OF THIS ONE, which breaks the form the other two
+          # use and is deliberate. engine/pkg/emulator/testdata/probe already
+          # pins fake-gcs-server at this exact digest and names no tag, because
+          # the digest is what `latest` pointed at rather than any numbered
+          # release. Naming 1.52.2 here would have been more readable and would
+          # have made the repository run TWO fake-gcs-servers, which is exactly
+          # what TestEveryPinnedImageAgreesOnOneDigest refuses. One image, one
+          # digest, across all four sites.
+          docker run -d --name af-fakegcs -p 44443:4443 \
+            fsouza/fake-gcs-server@sha256:797ce226d62f947c009dc40246b30cfb456b8473d8241407f9d6f2c04e4d69ef \
+            -scheme http -backend memory
+          # No `-f` on any of these. The wait is for a RESPONSE and not for a
+          # 200, which is also what the suites' own reachability probe asks for:
+          # Azurite answers an unsigned list with 403 and that is a server that
+          # is up.
+          wait_for() {
+            for _ in $(seq 1 60); do
+              if curl -s -o /dev/null "$2"; then return 0; fi
+              sleep 1
+            done
+            docker logs "$1"; echo "$1 never answered at $2"; return 1
+          }
+          wait_for af-minio http://127.0.0.1:49000/minio/health/live
+          wait_for af-azurite "http://127.0.0.1:41000/devstoreaccount1?comp=list"
+          wait_for af-fakegcs "http://127.0.0.1:44443/storage/v1/b?project=af"
+          # The bucket, because the store deliberately does not create one: a
+          # product that quietly creates buckets is a product that quietly
+          # creates bills, and store_test.go says so at both the S3 and the GCS
+          # suite. `mc` ships inside the MinIO image, so this needs no second
+          # image and no second pin. The Azure container and the GCS bucket are
+          # made by the suites themselves.
+          docker exec af-minio mc alias set af http://127.0.0.1:9000 \
+            aftestaccess aftestsecret123 > /dev/null
+          docker exec af-minio mc mb --ignore-existing af/afgoldens > /dev/null
+          # Proof rather than hope: the bucket the suite will address, read back.
+          docker exec af-minio mc ls af/afgoldens > /dev/null
+          echo "minio on 49000 with bucket afgoldens, azurite on 41000, fake-gcs-server on 44443"
+
       - name: The goldens on this runner before the suites
         # Recorded so the step after the suites can name the goldens they left.
         # A golden outlives af down by design, so a test that makes one has to
@@ -786,6 +888,14 @@ jobs:
           # The refusal suite drives it for real, so a missing runner has to
           # fail rather than skip.
           AF_REQUIRE_RUNNER: '1'
+          # And the same for object storage, which the step above starts. The
+          # three golden store round trip suites are the only thing that drives
+          # the hand written S3 signing, the Azure shared access signature and
+          # the Cloud Storage JSON API against a server, and until this variable
+          # existed every one of them skipped here and the package printed ok.
+          # One variable for all three, named for the resource, because three
+          # variables is three chances to wire two and forget the third.
+          AF_REQUIRE_OBJECT_STORE: '1'
 
       - name: The vendor's own SDK reaches the emulator with no endpoint override
         # The whole claim of the emulator work, driven rather than described.
