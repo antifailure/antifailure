@@ -27,7 +27,9 @@ describe(
   'the audit filter, against the log it reads',
   { skip: hasDb ? false : 'no Postgres at AF_TEST_DATABASE_URL' },
   () => {
-    let h: ApiHarness
+    // Undefined until before() succeeds, so the teardown guards rather than
+    // throwing a second error over the first one.
+    let h: ApiHarness | undefined
     let org: Org
     let session: SignedIn
 
@@ -44,19 +46,19 @@ describe(
       org = await seedOrg(h.admin, 'auditfilter')
       session = await signInAs(h, org, 'owner')
       for (const action of ACTIONS) {
-        await h.admin`
+        await h!.admin`
           INSERT INTO audit_entries (org_id, actor_label, action, target_type, target_id, origin, entry_hash)
           VALUES (${org.orgId}, 'somebody', ${action}, 'organization', ${org.orgId}, 'console', ${randomUUID()})`
       }
     })
 
     after(async () => {
-      await h.stop()
+      await h?.close()
     })
 
     async function filtered(action?: string): Promise<string[]> {
       const input = action === undefined ? { limit: 50 } : { limit: 50, action }
-      const r = await callProcedure(h, session, 'audit.list', 'query', input)
+      const r = await callProcedure(h!, session, 'audit.list', 'query', input)
       assert.equal(r.status, 200, `audit.list answered ${r.status}`)
       const body = r.body as { result?: { data?: unknown } }
       const rows = (body.result?.data ?? body) as { action: string }[]
