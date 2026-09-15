@@ -24269,10 +24269,10 @@ sentence contradicting it.
 
 ## Determinism
 
-Every transform is keyed. The same input maps to the same output within one
-golden, which is what makes ` + "`" + `link` + "`" + ` work and what makes a masked database
-self-consistent. Across goldens the key differs, so the mapping cannot be
-reversed by diffing two refreshes.
+Every transform is keyed. The key is generated once and kept, so the same input
+maps to the same output within a golden and across refreshes: that is what makes
+` + "`" + `link` + "`" + ` work and two goldens comparable. The key stays inside the boundary the
+golden is built in.
 
 Related: [masking](/docs/concepts/masking), [verification](/docs/concepts/verification).
 `,

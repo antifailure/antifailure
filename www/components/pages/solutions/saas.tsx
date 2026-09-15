@@ -35,7 +35,7 @@ export function SaasPage() {
                 "Referential subset of orgs, seats, subscriptions, invoices.",
                 "Long-tail and malformed historical seats kept when the parent is kept.",
                 "helix dropped. Children follow parent.",
-                "Tokens and sessions deleted, not masked.",
+                "Tokens hashed. Live sessions dropped.",
               ],
             }}
           />
