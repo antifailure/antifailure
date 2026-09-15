@@ -159,6 +159,9 @@ const (
 	// The value of the variable named by database.source_url_env is not a
 	// connection string: {detail}
 	AFDB024 Code = "AF-DB-024"
+	// Personas cannot be provisioned in {provider} because the admin token
+	// it was given is empty.
+	AFDB025 Code = "AF-DB-025"
 	// Migrations failed on the branch: {detail}
 	AFDB030 Code = "AF-DB-030"
 	// The migration finding {rule} fails this project's policy: {detail}
@@ -1029,6 +1032,15 @@ var catalog = map[Code]Entry{
 		Docs:      "concepts/goldens",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
+	},
+	AFDB025: {
+		Code:      AFDB025,
+		Area:      "DB",
+		Message:   "Personas cannot be provisioned in {provider} because the admin token it was given is empty.",
+		NextStep:  "Set the variable auth.token_env names to the tenant's admin token. A hosted persona's password is derived from that token, so an empty one is refused rather than used as a key.",
+		Docs:      "guides/personas",
+		Retryable: false,
+		ExitCode:  ExitAuth,
 	},
 	AFDB030: {
 		Code:      AFDB030,

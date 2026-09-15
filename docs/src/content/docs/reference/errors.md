@@ -700,6 +700,18 @@ The value of the variable named by database.source_url_env is not a connection s
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/goldens](/docs/concepts/goldens) |
 
+### AF-DB-025
+
+Personas cannot be provisioned in {provider} because the admin token it was given is empty.
+
+**What to do.** Set the variable auth.token_env names to the tenant's admin token. A hosted persona's password is derived from that token, so an empty one is refused rather than used as a key.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/personas](/docs/guides/personas) |
+
 ### AF-DB-030
 
 Migrations failed on the branch: {detail}

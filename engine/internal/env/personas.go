@@ -75,7 +75,11 @@ func (o *Orchestrator) provisionPersonas(
 	}
 	defer closeAdapter()
 
-	result, err := personas.Provision(ctx, adapter, o.personaDeriver(), list)
+	deriver, err := personas.DeriverFor(adapter, o.envID, o.opts.Manifest.Name, o.personaPolicy())
+	if err != nil {
+		return nil, err
+	}
+	result, err := personas.Provision(ctx, adapter, deriver, list)
 	if err != nil {
 		return nil, err
 	}
@@ -97,13 +101,14 @@ func (o *Orchestrator) provisionPersonas(
 	return result, nil
 }
 
-// personaDeriver returns the credential derivation for this environment.
+// personaPolicy is the manifest's shape for generated passwords, which both
+// derivations apply.
 //
 // Both the adapter that writes the hash and the document that tells the runner
 // the password go through this, so the two cannot disagree. Before this
 // existed the derivation lived in one function with one caller and the comment
 // claimed a second.
-func (o *Orchestrator) personaDeriver() *personas.Deriver {
+func (o *Orchestrator) personaPolicy() personas.PasswordPolicy {
 	policy := personas.PasswordPolicy{}
 	if a := o.opts.Manifest.Auth; a != nil && a.Password != nil {
 		policy = personas.PasswordPolicy{
@@ -112,7 +117,7 @@ func (o *Orchestrator) personaDeriver() *personas.Deriver {
 			Forbid:    a.Password.Forbid,
 		}
 	}
-	return personas.NewDeriver(o.envID, policy)
+	return policy
 }
 
 // personaAdapter builds the adapter the manifest asks for, or the one
