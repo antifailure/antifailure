@@ -1666,7 +1666,17 @@ The ` + "`" + `lock_timeout` + "`" + ` rule fires once for the whole migration r
 statement, because the fix is one line for the whole migration. It reads
 ` + "`" + `current_setting('lock_timeout')` + "`" + ` from the branch before it fires, so a project
 that sets the timeout on the role or on the database rather than in the file is
-not told it has none. When the rehearsal saw the lock, the finding also carries
+not told it has none. It then follows the migrations in the order one session
+runs them, one transaction per file, and a timeout counts only where it is in
+effect when the lock is taken. A ` + "`" + `SET` + "`" + ` after the ` + "`" + `ALTER` + "`" + `, a ` + "`" + `RESET` + "`" + ` or a ` + "`" + `SET` + "`" + `
+to ` + "`" + `0` + "`" + ` before it, a ` + "`" + `SET LOCAL` + "`" + ` whose transaction has ended, and a ` + "`" + `ROLLBACK` + "`" + `
+that undid the ` + "`" + `SET` + "`" + ` all leave the lock uncovered. ` + "`" + `ALTER ROLE` + "`" + ` and
+` + "`" + `ALTER DATABASE` + "`" + ` with ` + "`" + `SET lock_timeout` + "`" + ` reach only sessions that start later,
+so inside a migration they do not cover that migration's own locks.
+` + "`" + `set_config('lock_timeout', value, is_local)` + "`" + ` counts as ` + "`" + `SET` + "`" + ` or ` + "`" + `SET LOCAL` + "`" + `
+when its value and ` + "`" + `is_local` + "`" + ` are both written out. A value the file does not
+spell out never counts, and the finding says the timeout could not be read
+statically. When the rehearsal saw the lock, the finding also carries
 how long it was really held on a table with production's row counts, which is
 how long production's queries would have been queued behind it.
 

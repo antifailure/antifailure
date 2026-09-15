@@ -596,6 +596,130 @@ func TestRehearse_ReadsLockTimeoutFromTheServerRatherThanGuessing(t *testing.T) 
 		"the setting is on the database, so warning that nothing sets it would be false")
 }
 
+// The lint follows lock_timeout through the migrations by reading them, and
+// that model is only worth anything if it is Postgres's. So each ordering the
+// rule's own tests describe runs here on a real session, with the timeout read
+// back immediately before every ALTER TABLE. The lint has to name exactly the
+// first ALTER TABLE that Postgres ran with no timeout, and nothing when there is
+// none.
+//
+// Each file runs in its own transaction, and its statements are sent one at a
+// time over the simple protocol, so a BEGIN, COMMIT or ROLLBACK written inside a
+// file does what it does for a runner that sends the file as written. The
+// orderings the lint cannot know statically, a parameter, an expression or a
+// savepoint, are left to the unit tests: Postgres has an answer for them and
+// the lint deliberately does not claim one.
+func TestLint_FollowsLockTimeoutTheWayPostgresDoes(t *testing.T) {
+	db, done := requireDatabase(t, "insightstimeoutorder")
+	defer done()
+	ctx := context.Background()
+	simple := pgx.QueryExecModeSimpleProtocol
+
+	type file struct{ name, body string }
+	one := func(body string) []file { return []file{{"001_change.sql", body}} }
+	cases := []struct {
+		name  string
+		files []file
+		// fails is the SQLSTATE a fixture that Postgres refuses stops with.
+		fails string
+	}{
+		{name: "nothing sets it", files: one("ALTER TABLE orders ADD COLUMN c01 text;")},
+		{name: "SET before the lock", files: one("SET lock_timeout = '3s';\nALTER TABLE orders ADD COLUMN c02 text;")},
+		{name: "SET SESSION before the lock", files: one("SET SESSION lock_timeout = 3000;\nALTER TABLE orders ADD COLUMN c03 text;")},
+		{name: "SET LOCAL before the lock", files: one("SET LOCAL lock_timeout TO '3s';\nALTER TABLE orders ADD COLUMN c04 text;")},
+		{name: "SET after the lock", files: one("ALTER TABLE orders ADD COLUMN c05 text;\nSET lock_timeout = '3s';")},
+		{name: "SET then RESET", files: one("SET lock_timeout = '3s';\nRESET lock_timeout;\nALTER TABLE orders ADD COLUMN c06 text;")},
+		{name: "SET then RESET ALL", files: one("SET lock_timeout = '3s';\nRESET ALL;\nALTER TABLE orders ADD COLUMN c07 text;")},
+		{name: "SET 3s then SET 0", files: one("SET lock_timeout = '3s';\nSET lock_timeout = '0';\nALTER TABLE orders ADD COLUMN c08 text;")},
+		{name: "a SET carries into the next file", files: []file{
+			{"001_timeout.sql", "SET lock_timeout = '3s';"},
+			{"002_change.sql", "ALTER TABLE orders ADD COLUMN c09 text;"},
+		}},
+		{name: "a SET LOCAL ends with its file", files: []file{
+			{"001_first.sql", "SET LOCAL lock_timeout = '3s';\nALTER TABLE orders ADD COLUMN c10 text;"},
+			{"002_second.sql", "ALTER TABLE orders ADD COLUMN c11 text;"},
+		}},
+		{name: "a SET LOCAL ends at a COMMIT inside the file", files: one(
+			"BEGIN;\nSET LOCAL lock_timeout = '3s';\nCOMMIT;\nBEGIN;\nALTER TABLE orders ADD COLUMN c12 text;\nCOMMIT;")},
+		{name: "a ROLLBACK undoes the SET", files: one(
+			"BEGIN;\nSET lock_timeout = '3s';\nROLLBACK;\nALTER TABLE orders ADD COLUMN c13 text;")},
+		{name: "a ROLLBACK keeps an earlier file's SET", files: []file{
+			{"001_timeout.sql", "SET lock_timeout = '3s';"},
+			{"002_change.sql", "ROLLBACK;\nALTER TABLE orders ADD COLUMN c14 text;"},
+		}},
+		{name: "a ROLLBACK keeps a SET made before its BEGIN", files: one(
+			"BEGIN;\nCOMMIT;\nSET lock_timeout = '3s';\nBEGIN;\nROLLBACK;\nALTER TABLE orders ADD COLUMN c15 text;")},
+		{name: "set_config for the session", files: []file{
+			{"001_timeout.sql", "SELECT set_config('lock_timeout', '3s', false);"},
+			{"002_change.sql", "ALTER TABLE orders ADD COLUMN c16 text;"},
+		}},
+		{name: "set_config with is_local true ends with its file", files: []file{
+			{"001_first.sql", "SELECT set_config('lock_timeout', '3s', true);\nALTER TABLE orders ADD COLUMN c17 text;"},
+			{"002_second.sql", "ALTER TABLE orders ADD COLUMN c18 text;"},
+		}},
+		{name: "set_config to 0", files: one("SELECT set_config('lock_timeout', '0', false);\nALTER TABLE orders ADD COLUMN c19 text;")},
+		{name: "set_config without is_local", fails: "42883",
+			files: one("SELECT set_config('lock_timeout', '3s');\nALTER TABLE orders ADD COLUMN c20 text;")},
+		// Last, because it changes what every later session on this database
+		// starts with.
+		{name: "ALTER DATABASE reaches only later sessions", files: one(
+			"ALTER DATABASE af_insights_insightstimeoutorder SET lock_timeout = '3s';\n" +
+				"ALTER TABLE orders ADD COLUMN c21 text;")},
+	}
+
+	for _, c := range cases {
+		conn, err := pgx.Connect(ctx, db.url.Reveal())
+		require.NoError(t, err)
+		schema, err := insights.CaptureSchema(ctx, conn)
+		require.NoError(t, err)
+
+		var stmts []insights.Statement
+		for _, f := range c.files {
+			stmts = append(stmts, insights.Split(f.name, f.body)...)
+		}
+
+		uncovered, failed := "", ""
+	run:
+		for _, f := range c.files {
+			_, err := conn.Exec(ctx, "BEGIN", simple)
+			require.NoError(t, err, c.name)
+			for _, st := range insights.Split(f.name, f.body) {
+				if strings.HasPrefix(strings.ToUpper(st.SQL), "ALTER TABLE") {
+					var now string
+					require.NoError(t, conn.QueryRow(ctx,
+						"SELECT current_setting('lock_timeout')", simple).Scan(&now), c.name)
+					if now == "0" && uncovered == "" {
+						uncovered = st.SQL
+					}
+				}
+				if _, err := conn.Exec(ctx, st.SQL, simple); err != nil {
+					failed = err.Error()
+					_, _ = conn.Exec(ctx, "ROLLBACK", simple)
+					break run
+				}
+			}
+			_, err = conn.Exec(ctx, "COMMIT", simple)
+			require.NoError(t, err, c.name)
+		}
+		require.NoError(t, conn.Close(ctx))
+
+		named := ""
+		for _, f := range insights.Lint(stmts, schema, insights.LargeTableRows) {
+			if f.Rule == insights.RuleNoLockTimeout {
+				named = f.Statement
+			}
+		}
+		if c.fails != "" {
+			require.Contains(t, failed, "(SQLSTATE "+c.fails+")", c.name)
+			require.NotEmpty(t, named, "%s: a migration Postgres refuses covers no lock", c.name)
+			continue
+		}
+		require.Empty(t, failed, c.name)
+		require.Equal(t, uncovered, named,
+			"%s: the lint and Postgres disagree about which lock ran with no timeout", c.name)
+	}
+}
+
 func TestRehearse_OnlyAppliesWhatThePendingSetSays(t *testing.T) {
 	db, done := requireDatabase(t, "insightspending")
 	defer done()

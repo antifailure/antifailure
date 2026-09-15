@@ -194,15 +194,50 @@ func TestLint_NoLockTimeoutOnAMigrationThatTakesALock(t *testing.T) {
 	require.Contains(t, f[0].Fix, "lock_timeout = '3s'")
 }
 
+// lintFiles lints several migration files in the order they run, against a
+// database where nothing sets lock_timeout. The arguments are name and body
+// pairs.
+func lintFiles(t *testing.T, pairs ...string) []insights.LintFinding {
+	t.Helper()
+	require.Zero(t, len(pairs)%2, "lintFiles takes name and body pairs")
+	var stmts []insights.Statement
+	for i := 0; i < len(pairs); i += 2 {
+		stmts = append(stmts, insights.Split(pairs[i], pairs[i+1])...)
+	}
+	return insights.Lint(stmts, noLockTimeout(), 1_000_000)
+}
+
+// A timeout covers a lock only where it is in effect when the lock is taken.
+// Every test below is one ordering, and TestLint_FollowsLockTimeoutTheWayPostgresDoes
+// runs the same orderings on a real session to prove the model is Postgres's.
+
 func TestLint_LockTimeoutSetInTheMigrationIsFine(t *testing.T) {
 	t.Parallel()
+	// Set before the lock, for the session or for the transaction that takes
+	// it. An ALTER ROLE used to count here as well, and does not: see
+	// TestLint_AlterRoleSetsLockTimeoutOnlyForSessionsThatStartLater.
 	require.Empty(t, lintUntimed(t,
 		"SET lock_timeout = '3s';\nALTER TABLE orders ADD COLUMN region text;"))
 	require.Empty(t, lintUntimed(t,
-		"SET LOCAL lock_timeout TO '3s';\nALTER TABLE orders ADD COLUMN region text;"))
+		"SET SESSION lock_timeout = 3000;\nALTER TABLE orders ADD COLUMN region text;"))
 	require.Empty(t, lintUntimed(t,
-		"ALTER ROLE migrator SET lock_timeout = '3s';\n"+
-			"ALTER TABLE orders ADD COLUMN region text;"))
+		"SET LOCAL lock_timeout TO '3s';\nALTER TABLE orders ADD COLUMN region text;"))
+}
+
+func TestLint_ASessionSetCarriesIntoTheNextFile(t *testing.T) {
+	t.Parallel()
+	require.Empty(t, lintFiles(t,
+		"001_timeout.sql", "SET lock_timeout = '3s';",
+		"002_change.sql", "ALTER TABLE orders ADD COLUMN region text;"))
+}
+
+func TestLint_ALockTimeoutSetAfterTheLockDoesNotCoverIt(t *testing.T) {
+	t.Parallel()
+	f := lintUntimed(t,
+		"ALTER TABLE orders ADD COLUMN region text;\nSET lock_timeout = '3s';")
+	require.Equal(t, []insights.Rule{insights.RuleNoLockTimeout}, rulesIn(f))
+	require.Contains(t, f[0].Detail,
+		"Nothing in these migrations sets lock_timeout before this statement runs")
 }
 
 func TestLint_LockTimeoutSetToZeroIsNotSet(t *testing.T) {
@@ -212,6 +247,142 @@ func TestLint_LockTimeoutSetToZeroIsNotSet(t *testing.T) {
 	f := lintUntimed(t,
 		"SET lock_timeout = '0';\nALTER TABLE orders ADD COLUMN region text;")
 	require.Equal(t, []insights.Rule{insights.RuleNoLockTimeout}, rulesIn(f))
+	// And turning it off after turning it on is the same state.
+	after := lintUntimed(t,
+		"SET lock_timeout = '3s';\nSET lock_timeout = '0';\nALTER TABLE orders ADD COLUMN region text;")
+	require.Equal(t, []insights.Rule{insights.RuleNoLockTimeout}, rulesIn(after))
+	require.Contains(t, after[0].Detail, "statement 2 of 001_change.sql sets it to 0, which turns it off")
+}
+
+func TestLint_ASetToZeroTurnsOffTheServersTimeout(t *testing.T) {
+	t.Parallel()
+	f := lintOne(t, "SET lock_timeout = 0;\nALTER TABLE orders ADD COLUMN region text;")
+	require.Equal(t, []insights.Rule{insights.RuleNoLockTimeout}, rulesIn(f))
+	require.Empty(t, lintOne(t,
+		"SET lock_timeout = 0;\nSET lock_timeout TO DEFAULT;\nALTER TABLE orders ADD COLUMN region text;"))
+}
+
+func TestLint_LockTimeoutResetBeforeTheLockIsOff(t *testing.T) {
+	t.Parallel()
+	f := lintUntimed(t,
+		"SET lock_timeout = '3s';\nRESET lock_timeout;\nALTER TABLE orders ADD COLUMN region text;")
+	require.Equal(t, []insights.Rule{insights.RuleNoLockTimeout}, rulesIn(f))
+	require.Contains(t, f[0].Detail, "statement 2 of 001_change.sql resets it to the server's value")
+	all := lintUntimed(t,
+		"SET lock_timeout = '3s';\nRESET ALL;\nALTER TABLE orders ADD COLUMN region text;")
+	require.Equal(t, []insights.Rule{insights.RuleNoLockTimeout}, rulesIn(all))
+}
+
+func TestLint_ASetLocalEndsWithItsFileSoALaterFileIsNotCovered(t *testing.T) {
+	t.Parallel()
+	f := lintFiles(t,
+		"001_first.sql", "SET LOCAL lock_timeout = '3s';\nALTER TABLE orders ADD COLUMN region text;",
+		"002_second.sql", "ALTER TABLE orders ADD COLUMN currency text;")
+	require.Equal(t, []insights.Rule{insights.RuleNoLockTimeout}, rulesIn(f))
+	require.Contains(t, f[0].Detail, "ended with its transaction at the end of 001_first.sql")
+}
+
+func TestLint_ASetLocalEndsAtACommitInsideTheFile(t *testing.T) {
+	t.Parallel()
+	f := lintUntimed(t,
+		"BEGIN;\nSET LOCAL lock_timeout = '3s';\nCOMMIT;\n"+
+			"BEGIN;\nALTER TABLE orders ADD COLUMN region text;\nCOMMIT;")
+	require.Equal(t, []insights.Rule{insights.RuleNoLockTimeout}, rulesIn(f))
+}
+
+func TestLint_ARollbackUndoesTheSetInsideItsTransaction(t *testing.T) {
+	t.Parallel()
+	f := lintUntimed(t,
+		"BEGIN;\nSET lock_timeout = '3s';\nROLLBACK;\nALTER TABLE orders ADD COLUMN region text;")
+	require.Equal(t, []insights.Rule{insights.RuleNoLockTimeout}, rulesIn(f))
+	require.Contains(t, f[0].Detail, "the ROLLBACK at statement 3 of 001_change.sql undid")
+	// A SET that an earlier transaction already committed is not undone.
+	require.Empty(t, lintFiles(t,
+		"001_timeout.sql", "SET lock_timeout = '3s';",
+		"002_change.sql", "ROLLBACK;\nALTER TABLE orders ADD COLUMN region text;"))
+	require.Empty(t, lintUntimed(t,
+		"BEGIN;\nCOMMIT;\nSET lock_timeout = '3s';\nBEGIN;\nROLLBACK;\n"+
+			"ALTER TABLE orders ADD COLUMN region text;"))
+}
+
+func TestLint_ARollbackToASavepointIsNotFollowed(t *testing.T) {
+	t.Parallel()
+	// Savepoints are not followed, so what the timeout is afterwards is not
+	// known, and a value that is not known never covers a lock.
+	f := lintUntimed(t,
+		"SET lock_timeout = '3s';\nSAVEPOINT before;\nSET lock_timeout = '5s';\n"+
+			"ROLLBACK TO SAVEPOINT before;\nALTER TABLE orders ADD COLUMN region text;")
+	require.Equal(t, []insights.Rule{insights.RuleNoLockTimeout}, rulesIn(f))
+	require.Contains(t, f[0].Detail, "could not be read statically")
+}
+
+func TestLint_AlterRoleSetsLockTimeoutOnlyForSessionsThatStartLater(t *testing.T) {
+	t.Parallel()
+	// Postgres applies ALTER ROLE ... SET and ALTER DATABASE ... SET when a
+	// session starts, so neither reaches the session running the migration
+	// that contains it.
+	f := lintUntimed(t,
+		"ALTER ROLE migrator SET lock_timeout = '3s';\nALTER TABLE orders ADD COLUMN region text;")
+	require.Equal(t, []insights.Rule{insights.RuleNoLockTimeout}, rulesIn(f))
+	require.Contains(t, f[0].Detail, "only for sessions that start after it")
+	db := lintUntimed(t,
+		"ALTER DATABASE app SET lock_timeout = '3s';\nALTER TABLE orders ADD COLUMN region text;")
+	require.Equal(t, []insights.Rule{insights.RuleNoLockTimeout}, rulesIn(db))
+}
+
+func TestLint_SetConfigWithLiteralsIsASet(t *testing.T) {
+	t.Parallel()
+	require.Empty(t, lintFiles(t,
+		"001_timeout.sql", "SELECT set_config('lock_timeout', '3s', false);",
+		"002_change.sql", "ALTER TABLE orders ADD COLUMN region text;"))
+}
+
+func TestLint_SetConfigWithIsLocalTrueEndsWithItsTransaction(t *testing.T) {
+	t.Parallel()
+	f := lintFiles(t,
+		"001_first.sql", "SELECT set_config('lock_timeout', '3s', true);\n"+
+			"ALTER TABLE orders ADD COLUMN region text;",
+		"002_second.sql", "ALTER TABLE orders ADD COLUMN currency text;")
+	require.Equal(t, []insights.Rule{insights.RuleNoLockTimeout}, rulesIn(f))
+	require.Contains(t, f[0].Statement, "currency",
+		"is_local true covers the lock in its own transaction and nothing after it")
+}
+
+func TestLint_SetConfigToZeroOrEmptyIsOff(t *testing.T) {
+	t.Parallel()
+	zero := lintUntimed(t,
+		"SELECT set_config('lock_timeout', '0', false);\nALTER TABLE orders ADD COLUMN region text;")
+	require.Equal(t, []insights.Rule{insights.RuleNoLockTimeout}, rulesIn(zero))
+	empty := lintUntimed(t,
+		"SELECT set_config('lock_timeout', '', false);\nALTER TABLE orders ADD COLUMN region text;")
+	require.Equal(t, []insights.Rule{insights.RuleNoLockTimeout}, rulesIn(empty))
+}
+
+func TestLint_SetConfigWithAValueTheFileDoesNotSpellOutIsNotCovered(t *testing.T) {
+	t.Parallel()
+	expr := lintUntimed(t,
+		"SELECT set_config('lock_timeout', current_setting('statement_timeout'), false);\n"+
+			"ALTER TABLE orders ADD COLUMN region text;")
+	require.Equal(t, []insights.Rule{insights.RuleNoLockTimeout}, rulesIn(expr))
+	require.Contains(t, expr[0].Detail, "could not be read statically")
+	param := lintUntimed(t,
+		"SELECT set_config('lock_timeout', $1, false);\nALTER TABLE orders ADD COLUMN region text;")
+	require.Equal(t, []insights.Rule{insights.RuleNoLockTimeout}, rulesIn(param))
+}
+
+func TestLint_SetConfigWithoutALiteralIsLocalCoversNothing(t *testing.T) {
+	t.Parallel()
+	// Postgres has no two argument set_config, so this statement fails and the
+	// migration stops before its ALTER.
+	f := lintUntimed(t,
+		"SELECT set_config('lock_timeout', '3s');\nALTER TABLE orders ADD COLUMN region text;")
+	require.Equal(t, []insights.Rule{insights.RuleNoLockTimeout}, rulesIn(f))
+	require.Contains(t, f[0].Detail, "has only set_config(setting_name, new_value, is_local)")
+	expr := lintUntimed(t,
+		"SELECT set_config('lock_timeout', '3s', current_setting('app.local') = 'on');\n"+
+			"ALTER TABLE orders ADD COLUMN region text;")
+	require.Equal(t, []insights.Rule{insights.RuleNoLockTimeout}, rulesIn(expr))
+	require.Contains(t, expr[0].Detail, "could not be read statically")
 }
 
 func TestLint_LockTimeoutSetOnTheServerIsFine(t *testing.T) {
