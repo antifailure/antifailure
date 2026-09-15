@@ -384,6 +384,7 @@ func DefaultAnalyzers() []Analyzer {
 		&EnvAnalyzer{},
 		&ThirdPartyAnalyzer{},
 		&AuthAnalyzer{},
+		&SignInAnalyzer{},
 		&ScheduleAnalyzer{},
 	}
 }

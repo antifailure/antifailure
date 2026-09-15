@@ -48,7 +48,7 @@ func Merge(findings []Finding, root string) (*schema.Manifest, []Question, Propo
 	var proposals Proposals
 	proposals.Datastores, m.Datastores = mergeDatastores(findings, hasPostgresFinding(findings))
 	m.Egress, proposals.Emulators = mergeEgress(findings)
-	m.Personas = defaultPersonas()
+	m.Personas = defaultPersonas(findings)
 	m.Auth = mergeAuth(findings)
 	m.Workflows = suggestedWorkflows(findings)
 
@@ -981,12 +981,59 @@ func mergeAuth(findings []Finding) *schema.Auth {
 }
 
 // defaultPersonas returns the two accounts nearly every application needs, so
-// that a first af test has someone to log in as.
-func defaultPersonas() []schema.Persona {
-	return []schema.Persona{
-		{Name: "owner", Email: "owner@example.test", Role: "admin", Login: schema.LoginPassword},
-		{Name: "member", Email: "member@example.test", Role: "member", Login: schema.LoginPassword},
+// that a first af test has someone to log in as, and the way they sign in.
+//
+// They said password whatever the repository was, and on a JSON API that is a
+// persona provisioning cannot create. af up refused with AF-DB-022, "the
+// personas could not be created, so signing in will not work", and af test
+// exited 3 with no verdict, on the documented first run of the commonest
+// repository shape there is. This repository's own examples/go-api carries
+// login: none by hand, with a comment saying it said password until af ci was
+// actually run against it and every run came back blocked, waiting for a login
+// form on a service that serves JSON. Detection knew better in the example
+// than in the code that writes one.
+//
+// So password when the repository shows anywhere to sign in: a dependency on
+// an authentication provider that owns the user table, a users table the
+// repository declares itself, any rendered markup, or a framework whose whole
+// job is rendering pages. None when it shows none of those, where a password
+// persona cannot work, and a persona that never signs in is what lets the
+// workflow run and be judged instead of blocked.
+func defaultPersonas(findings []Finding) []schema.Persona {
+	login := schema.LoginNone
+	if len(OfKind(findings, KindAuth)) > 0 ||
+		len(OfKind(findings, KindSignInSurface)) > 0 ||
+		rendersPages(findings) {
+		login = schema.LoginPassword
 	}
+	return []schema.Persona{
+		{Name: "owner", Email: "owner@example.test", Role: "admin", Login: login},
+		{Name: "member", Email: "member@example.test", Role: "member", Login: login},
+	}
+}
+
+// uiFrameworks render pages for people, so an application built on one has
+// somewhere a password could be typed even when its own files say nothing: a
+// Next.js application whose pages are plain .js files declares no markup this
+// can recognise and is still a web application.
+//
+// The API first frameworks are deliberately absent. Express with EJS views or
+// Flask with templates is recognised by those files instead, which is the
+// honest signal for a framework that serves either.
+var uiFrameworks = map[string]bool{
+	"nextjs": true, "remix": true, "nuxt": true, "sveltekit": true,
+	"astro": true, "angular": true, "vite": true,
+	"django": true, "rails": true,
+}
+
+// rendersPages reports whether a detected framework is one of those.
+func rendersPages(findings []Finding) bool {
+	for _, f := range OfKind(findings, KindFramework) {
+		if uiFrameworks[f.Value] {
+			return true
+		}
+	}
+	return false
 }
 
 // suggestedWorkflows proposes workflows based on what the repository suggests
