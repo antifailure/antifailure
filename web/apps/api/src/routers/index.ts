@@ -919,7 +919,20 @@ const auditRouter = router({
         const rows = await db.execute<AuditRow>(sql`
           SELECT seq, actor_label, action, target_type, target_id, origin, detail, occurred_at
           FROM audit_entries
-          WHERE (${input.action ?? null}::text IS NULL OR action = ${input.action ?? null})
+          -- Contains, not equals. An action is a dotted name like
+          -- billing.plan.changed, and the filter is a text box a reader types
+          -- into, so equality answered "no entries with that action" for every
+          -- prefix of a name that is right there in the log.
+          --
+          -- strpos rather than ILIKE, because ILIKE would need % and _ escaped
+          -- and the escaping cannot survive the trip: this SQL is written inside
+          -- a JavaScript template literal, where '\\' collapses to one backslash
+          -- and '\_' collapses to a bare underscore, so the escapes reach
+          -- Postgres already eaten and a typed _ matches any character. A
+          -- containment test has no pattern language, so there is nothing to
+          -- escape and nothing to get wrong.
+          WHERE (${input.action ?? null}::text IS NULL
+                 OR strpos(lower(action), lower(${input.action ?? null})) > 0)
             AND (${input.before ?? null}::bigint IS NULL OR seq < ${input.before ?? null})
           ORDER BY seq DESC LIMIT ${input.limit}`)
         // seq is a bigserial and arrives as a string, for the same reason
