@@ -15,7 +15,11 @@ function GitHubMark({ className }: { className?: string }) {
 }
 
 /**
- * The sign-up screen, which for the first time describes something that happens.
+ * The sign-in screen. It used to serve sign-up too, on a `mode` prop, until
+ * self-serve was switched off: a stranger cannot create an organization on
+ * their own now, so the front door is /request-demo and this screen is only
+ * for operators who already have one. The cover art and its history below are
+ * kept because both the sign-in and the retired sign-up screen wore it.
  *
  * WHAT THIS PAGE HAS BEEN, in order, because each version was a true statement
  * about the product at the time and the page is where they went stale.
@@ -70,9 +74,8 @@ function AuthCover() {
   );
 }
 
-export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
+export function AuthScreen() {
   const { openSheet } = useChrome();
-  const signUp = mode === "signup";
 
   // One engagement per time this screen is reached. It moved here when the
   // waitlist dialog was replaced by a page, and it stays now that the waitlist
@@ -112,12 +115,11 @@ export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
                   They differed by one word and the twin check caught it: a
                   reader arriving from a search result should land on the
                   heading they clicked. */}
-              {signUp ? "Create an account" : "Sign in"}
+              Sign in
             </h1>
             <p className="mt-4 text-[14px] leading-6 text-black/55">
-              {signUp
-                ? "One button, no card, and no invitation needed. You keep the account whether or not you ever pay us anything."
-                : "Continue with the GitHub account you signed up with. You land in the organization you belong to."}
+              Continue with the GitHub account you signed up with. You land in
+              the organization you belong to.
             </p>
 
             <a
@@ -128,42 +130,23 @@ export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
               Continue with GitHub
             </a>
 
-            {/* One paragraph, the same shape as the sign in side, rather than
-                a numbered three step explainer with a divider over it. Those
-                steps ran the column past the viewport on every laptop, so the
-                one page whose entire job is a single button was the one page
-                you had to scroll, while sign in sat still. The facts that
-                earned their place are the two a person decides on: the
-                organization is theirs, and the plan costs nothing. The rest
-                was describing an OAuth round trip to somebody who has done a
-                hundred of them. */}
-            {signUp ? (
-              <p className="mt-7 text-[13.5px] leading-6 text-black/55">
-                You land in your own organization, named after your GitHub
-                account, on the free plan, with you as its owner. What that plan
-                holds, and what it refuses when you reach it, is on the{" "}
-                <a
-                  className="text-black underline decoration-black/25 underline-offset-4 hover:decoration-black"
-                  href="/pricing"
-                >
-                  pricing page
-                </a>
-                .
-              </p>
-            ) : (
-              <p className="mt-7 text-[13.5px] leading-6 text-black/55">
-                No account yet?{" "}
-                <a
-                  className="text-black underline decoration-black/25 underline-offset-4 hover:decoration-black"
-                  href="/signup"
-                >
-                  Create one
-                </a>
-                . It takes the same button and no card. If somebody invited you
-                to their organization, open the link they sent instead: it puts
-                you in theirs rather than in one of your own.
-              </p>
-            )}
+            {/* One paragraph, the same shape as the two below it. It names the
+                two things somebody who cannot sign in yet needs: the hosted
+                plane is reached by a booked demo now that self-serve is off,
+                and an invitation link puts you in somebody else's organization
+                rather than one of your own. */}
+            <p className="mt-7 text-[13.5px] leading-6 text-black/55">
+              No organization yet?{" "}
+              <a
+                className="text-black underline decoration-black/25 underline-offset-4 hover:decoration-black"
+                href="/request-demo"
+              >
+                Request a demo
+              </a>{" "}
+              and we set your team up on the hosted plane. If somebody invited
+              you to their organization, open the link they sent instead: it
+              puts you in theirs rather than in one of your own.
+            </p>
 
             {/* The two cases the button above does not serve, named rather
                 than left for somebody to guess at. Both are real paths: an

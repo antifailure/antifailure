@@ -182,6 +182,7 @@ export type SiteRoute =
   | "contact"
   | "signin"
   | "signup"
+  | "request_demo"
   | "other";
 
 export type VisitSource =
@@ -236,7 +237,10 @@ export function routeIdFor(pathname: string): SiteRoute {
   if (path === "/blog") return "blog";
   if (path.startsWith("/blog/")) return "blog_post";
   if (path === "/contact") return "contact";
+  if (path === "/request-demo") return "request_demo";
   if (path === "/signin") return "signin";
+  // /signup 301s to /request-demo, so this rarely classifies a real view; it
+  // stays for a direct hit that renders the MovedPage before its redirect.
   if (path === "/signup") return "signup";
   if (["/privacy", "/terms", "/acceptable-use", "/developer-policy"].includes(path)) {
     return "legal";

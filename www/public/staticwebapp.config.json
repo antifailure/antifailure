@@ -53,8 +53,13 @@
       "statusCode": 301
     },
     {
+      "route": "/signup",
+      "redirect": "/request-demo",
+      "statusCode": 301
+    },
+    {
       "route": "/sign-up",
-      "redirect": "/signup",
+      "redirect": "/request-demo",
       "statusCode": 301
     },
     {

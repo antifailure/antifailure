@@ -84,8 +84,18 @@ function sourcesFor(routePath: string): string[] {
     );
   } else if (routePath === "/pricing") {
     candidates.push("app/pricing/page.tsx", "components/pages/company/Pricing.tsx");
-  } else if (routePath === "/signin" || routePath === "/signup") {
-    candidates.push(`app${routePath}/page.tsx`, "components/AuthScreen.tsx");
+  } else if (routePath === "/request-demo") {
+    // /signup left the registry when it became a 301 to this page, so /signin
+    // is the only AuthScreen route the branch above used to share. The demo
+    // page is its own shell, the request form it holds, and the form's logic.
+    candidates.push(
+      "app/request-demo/page.tsx",
+      "components/pages/company/RequestDemo.tsx",
+      "components/pages/company/DemoRequestForm.tsx",
+      "lib/demo-request.ts",
+    );
+  } else if (routePath === "/signin") {
+    candidates.push("app/signin/page.tsx", "components/AuthScreen.tsx");
   } else {
     // The legal pages, all six of which are components/pages/company/Legal.tsx.
     //

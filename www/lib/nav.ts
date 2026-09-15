@@ -102,7 +102,7 @@ export const HEADER_MENUS: HeaderMenu[] = [
       {
         title: "Give us one nervous deploy",
         description: "A real upcoming migration, not a generic demo.",
-        href: "/signup",
+        href: "/request-demo",
         visual: "twin",
       },
       {
@@ -176,7 +176,7 @@ export const FOOTER_MENUS = [
       { text: "About", href: "/about" },
       { text: "Careers", href: "/careers" },
       { text: "Contact", href: "/contact" },
-      { text: "Start free", href: "/signup" },
+      { text: "Request a demo", href: "/request-demo" },
     ],
   },
   {
@@ -197,7 +197,7 @@ export const FOOTER_MENUS = [
       { text: "GitHub", href: GITHUB_URL },
       { text: "Status", href: STATUS_URL },
       { text: "Sign in", href: "/signin" },
-      { text: "Start free", href: "/signup" },
+      { text: "Request a demo", href: "/request-demo" },
     ],
   },
 ];

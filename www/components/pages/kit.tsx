@@ -69,8 +69,8 @@ function PagesClose() {
               <Button href="/docs/getting-started/quickstart" theme="filled">
                 Start the quickstart
               </Button>
-              <Button href="/signup" theme="outlined">
-                Create an account
+              <Button href="/request-demo" theme="outlined">
+                Request a demo
               </Button>
             </div>
             {/* The border, the fill and the hover come from the `white`
@@ -148,8 +148,8 @@ export function PageHero({
               <Button href="/docs/getting-started/quickstart" theme="filled">
                 Start the quickstart
               </Button>
-              <Button href="/signup" theme="outlined">
-                Create an account
+              <Button href="/request-demo" theme="outlined">
+                Request a demo
               </Button>
             </>
           )}
