@@ -19,7 +19,7 @@ export function SafeStatePage() {
           items={[
             { title: "Snapshot restore", body: "Logical restore for portability, or provider-native copy-on-write branches when supported." },
             { title: "Referential subsets", body: "Keep joins valid. Long-tail and malformed historical state stay in the subset." },
-            { title: "Deterministic masking", body: "Format-preserving replacement with uniqueness preserved, inside the customer boundary." },
+            { title: "Deterministic masking", body: "Format-preserving replacement inside the customer boundary." },
             { title: "Nothing that grants access survives", body: "A session token is deleted. A key, a secret and a password become a keyed hash of the same length that unlocks nothing." },
             { title: "Free-text PII", body: "Scan for emails, cards, phones, and keys that schema rules miss." },
             { title: "Evidence report", body: "The tables, columns and rows sampled, every detector finding, and a signed sanitization attestation. A rule naming a column the schema no longer has is refused by name." },

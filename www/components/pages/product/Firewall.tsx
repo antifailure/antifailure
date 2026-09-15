@@ -79,8 +79,9 @@ export function FirewallPage() {
           visual={
             <Callout label="Existential failure" tone="block">
               Charging cards, emailing users, or invoking production webhooks from a twin is a failed
-              containment model. Read-only forwarding exists only for explicitly approved endpoints. Request
-              and response redaction is mandatory. The ledger is the proof.
+              containment model. A request reaches a live endpoint only where the manifest names that host,
+              and where a mode intercepts, the application holds a placeholder credential. The ledger is the
+              proof.
             </Callout>
           }
         >
