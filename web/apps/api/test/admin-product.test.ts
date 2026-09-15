@@ -218,6 +218,7 @@ describe('the product routes answer from real rows', { skip: hasDatabase ? false
   let overdueEnvId: string
   let failingRunId: string
   let silentRunId: string
+  let provedNothingRunId: string
   let loadRunId: string
   let checkId: string
 
@@ -276,6 +277,22 @@ describe('the product routes answer from real rows', { skip: hasDatabase ? false
       VALUES (${org.orgId}, ${overdueEnvId}, 'agent', 'complete', now() - interval '5 minutes', now())
       RETURNING id`
     silentRunId = silent!.id
+
+    // A third agent run, the one the operator standing was getting wrong until
+    // now: it reached `complete` and it DID report verdicts, but every one is
+    // `unverified`, so it proved nothing. `verdicts === 0` is false here, so
+    // the old standing fell through to `passed`. It must read `unknown`, the
+    // same as the run that reported nothing at all, because proving nothing and
+    // reporting nothing are the same answer about the change.
+    const [provedNothing] = await h.admin<{ id: string }[]>`
+      INSERT INTO runs (org_id, environment_id, kind, state, started_at, finished_at)
+      VALUES (${org.orgId}, ${overdueEnvId}, 'agent', 'complete', now() - interval '4 minutes', now())
+      RETURNING id`
+    provedNothingRunId = provedNothing!.id
+    await h.admin`
+      INSERT INTO verdicts (org_id, run_id, workflow, value, summary, steps, duration_ms)
+      VALUES (${org.orgId}, ${provedNothingRunId}, 'signup', 'unverified', 'the persona never signed in', 3, 900),
+             (${org.orgId}, ${provedNothingRunId}, 'checkout', 'unverified', 'never reached the app', 1, 120)`
 
     // A load run that succeeded and carries a failing verdict, which is the
     // other half of the same distinction: the job ran to completion and what it
@@ -371,7 +388,7 @@ describe('the product routes answer from real rows', { skip: hasDatabase ? false
     // Null would mean the twin names a version this installation has no row
     // for, which is a different answer and the page says so differently.
     assert.equal(mine.goldenVerified, false)
-    assert.equal(mine.runs, 2)
+    assert.equal(mine.runs, 3)
 
     const overdue = await owner.product.twins.list({ scope: 'overdue', orgId: org.orgId, limit: 50 })
     assert.ok(overdue.rows.some((t) => t.id === overdueEnvId))
@@ -420,7 +437,7 @@ describe('the product routes answer from real rows', { skip: hasDatabase ? false
     const twin = await callerAs('owner').product.twins.get({ id: overdueEnvId })
     assert.equal(twin.orgSlug, org.slug)
     assert.equal(twin.golden?.verified, false)
-    assert.equal(twin.runs.length, 2)
+    assert.equal(twin.runs.length, 3)
     assert.equal(twin.workloadRuns.length, 1)
     assert.deepEqual(twin.teardowns, [])
   })
@@ -440,6 +457,34 @@ describe('the product routes answer from real rows', { skip: hasDatabase ? false
     assert.equal(silent?.state, 'complete')
     assert.equal(silent?.standing, 'unknown')
     assert.equal(silent?.verdict, null)
+  })
+
+  it('a run that reported only unverified verdicts is unknown, and reads zero passed', async () => {
+    // The operator-facing half of the tenant list lie. This run reached
+    // `complete` and recorded two verdicts, so `verdicts === 0` is false and the
+    // old standing called it `passed`. But both verdicts are `unverified`: it
+    // proved nothing. The standing is `unknown`, and the verdict line counts the
+    // passes alone, which is zero, not `verdicts - failing` which would be two.
+    const rows = (
+      await callerAs('owner').product.runs.list({ kind: 'agent', orgId: org.orgId, limit: 50 })
+    ).rows
+    const provedNothing = rows.find((r) => r.id === provedNothingRunId)
+    assert.equal(provedNothing?.state, 'complete')
+    assert.equal(provedNothing?.standing, 'unknown', 'a run that proved nothing must not read as passed')
+    assert.equal(provedNothing?.verdict, '0 of 2 passed')
+
+    // And the twin detail, which computes its own passed count from the same
+    // counts. It must not read the two unverified verdicts as two of two.
+    const twin = await callerAs('owner').product.twins.get({ id: overdueEnvId })
+    const twinRow = twin.runs.find((r) => r.id === provedNothingRunId)
+    assert.equal(twinRow?.standing, 'unknown')
+    assert.equal(twinRow?.verdicts, 2)
+    assert.equal(twinRow?.passing, 0)
+
+    // And the run detail page, which computes standing from the verdict rows it
+    // already holds rather than from a count column.
+    const detail = await callerAs('owner').product.runs.get({ kind: 'agent', id: provedNothingRunId })
+    assert.equal(detail.standing, 'unknown')
   })
 
   it('a load run that succeeded with a failing verdict is a failure', async () => {

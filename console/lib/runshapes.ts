@@ -26,6 +26,7 @@
  * would create the second copy whose drift loadshapes' own header is about.
  */
 
+import type { Tone } from "./tone.ts";
 import { VERDICT_FACTS, verdictOf } from "./loadshapes.ts";
 
 /** `run_state` in 0001_init.sql:230. Five words, not the workload run's eight. */
@@ -223,4 +224,53 @@ export function reproductionText(reproduction: unknown): string | null {
   if (reproduction === null || reproduction === undefined) return null;
   if (typeof reproduction === "string") return reproduction.trim() === "" ? null : reproduction;
   return JSON.stringify(reproduction, null, 2);
+}
+
+/**
+ * The counts the runs LIST needs, which is a different question from the run
+ * DETAIL above and reaches the page a different way.
+ *
+ * The detail holds verdict ROWS and tallies them with `tallyVerdicts`. A row in
+ * the list has no verdicts attached: `runs.recent` sends aggregate counts per
+ * run, because attaching every run's verdicts to a fifty row list is a join the
+ * page does not need. So the list gets its numbers from the server and this is
+ * their shape. `passing` is the passes alone; `failing` is the fails alone, not
+ * fails and blocks together, because a blocked verdict never reached the app and
+ * is not a failure of it; `proved` is the conclusive verdicts, the ones that are
+ * a judgement at all.
+ */
+export interface RecentTally {
+  /** Every verdict the run recorded, conclusive or not. */
+  total: number;
+  /** `pass` only. */
+  passing: number;
+  /** `fail` only. */
+  failing: number;
+  /** The conclusive verdicts: `pass`, `fail`, `flaky`, `warn`. */
+  proved: number;
+}
+
+/**
+ * The word and tone the list's Verdicts cell shows, or null when there is
+ * nothing to say yet (no verdicts, so the cell renders a dash).
+ *
+ * This is the list's spelling of the same judgement the detail's
+ * `nothingWasVerifiedNotice` makes, and the two must not disagree about one
+ * run. The list had said "N passing" whenever nothing was failing, so a run
+ * whose verdicts were all blocked or unverified drew green on the surface a
+ * customer scans first while the detail banner said nothing was verified. The
+ * precedence here mirrors the banner: a failure is named first, a run that
+ * proved nothing is called that rather than passing, a run that proved
+ * something short of all passes is neither green nor a failure, and only a run
+ * that is genuinely all passes is green.
+ *
+ * `failing > 0` implies `proved > 0` because `fail` is conclusive, so the
+ * failing branch and the proved-nothing branch never both apply.
+ */
+export function recentRunSummary(t: RecentTally): { tone: Tone; text: string } | null {
+  if (t.total === 0) return null;
+  if (t.failing > 0) return { tone: "fail", text: `${t.failing} of ${t.total} failing` };
+  if (t.proved === 0) return { tone: "warn", text: "nothing verified" };
+  if (t.passing < t.total) return { tone: "warn", text: `${t.passing} of ${t.total} passed` };
+  return { tone: "pass", text: `${t.total} passing` };
 }

@@ -205,14 +205,17 @@ function AgentRun({ run }: { run: AgentRunDetail }) {
       <div className="space-y-6">
         {run.standing === "unknown" ? (
           // The exit-code-zero-over-nothing case, said out loud. A run that
-          // reached a terminal state and reported no verdict at all did nothing
-          // and found nothing, and reading it as a pass is the defect this
-          // repository has already shipped once.
+          // reached a terminal state and proved nothing did nothing and found
+          // nothing, and reading it as a pass is the defect this repository has
+          // already shipped once. Two shapes reach here: no verdict at all, and
+          // verdicts that are all blocked or unverified, which prove nothing
+          // either. The verdict table below, when it has rows, says which.
           <div role="status" className="rounded-lg border border-rule bg-[rgba(138,90,0,0.12)] px-4 py-3">
             <p className="text-[12.5px] leading-5 text-ink">
-              This run finished and reported no verdict. It is not a pass and it is not a failure:
-              nothing was checked. A run in this state usually means the persona could not be
-              created or the environment was not reachable when the engine got there.
+              This run finished and verified nothing. It is not a pass and it is not a failure:
+              nothing about the change was proved. A run in this state usually means the persona
+              could not be created or the environment was not reachable when the engine got there,
+              so every verdict came back blocked or unverified.
             </p>
           </div>
         ) : null}

@@ -33,6 +33,7 @@ import {
   noVerdictsReason,
   nothingWasVerified,
   nothingWasVerifiedNotice,
+  recentRunSummary,
   reproductionText,
   runIsInFlight,
   runStateOf,
@@ -267,4 +268,70 @@ test("the runs page actually calls each of these", () => {
     (page.match(/runIsInFlight/g) ?? []).length >= 3,
     "the list and the detail must each gate their own poll",
   );
+});
+
+/* -------------------------------------------------------------------------
+ * The LIST column, which reaches the page as server counts rather than rows.
+ *
+ * `nothingWasVerifiedNotice` above guards the run DETAIL, which holds verdict
+ * rows. The list holds only the aggregate counts `runs.recent` sends, so it has
+ * its own helper, and the two must agree about one run: the list said "N
+ * passing" whenever nothing was failing, so a run whose verdicts were all
+ * blocked or unverified drew green on the surface a customer scans first while
+ * the detail banner said nothing was verified. Each test below is one cell of
+ * `recentRunSummary`, and each was mutation checked: the production line broken,
+ * the exact test confirmed red, restored, confirmed green.
+ * ---------------------------------------------------------------------- */
+
+test("the list reads five passes as five passing, in the pass tone", () => {
+  assert.deepEqual(recentRunSummary({ total: 5, passing: 5, failing: 0, proved: 5 }), {
+    tone: "pass",
+    text: "5 passing",
+  });
+});
+
+test("the list names a failure first, in the fail tone", () => {
+  assert.deepEqual(recentRunSummary({ total: 5, passing: 3, failing: 2, proved: 5 }), {
+    tone: "fail",
+    text: "2 of 5 failing",
+  });
+});
+
+test("the list calls a run of five unverified verdicts nothing verified, never passing", () => {
+  // THE DEMO LIE. This tally used to render green "5 passing" on the most
+  // scanned surface while the detail banner said nothing was verified.
+  const out = recentRunSummary({ total: 5, passing: 0, failing: 0, proved: 0 });
+  assert.deepEqual(out, { tone: "warn", text: "nothing verified" });
+  assert.notEqual(out?.tone, "pass");
+});
+
+test("the list calls five flaky zero of five passed, not nothing verified", () => {
+  // Flaky is conclusive, so the run PROVED something and is not "nothing
+  // verified"; it is not a pass either, so it is not green. This is the line
+  // that separates proved-nothing from proved-but-not-passing, consistent with
+  // the detail banner declining to fire on a run that has findings.
+  assert.deepEqual(recentRunSummary({ total: 5, passing: 0, failing: 0, proved: 5 }), {
+    tone: "warn",
+    text: "0 of 5 passed",
+  });
+});
+
+test("the list calls three passes and two unverified three of five passed", () => {
+  assert.deepEqual(recentRunSummary({ total: 5, passing: 3, failing: 0, proved: 3 }), {
+    tone: "warn",
+    text: "3 of 5 passed",
+  });
+});
+
+test("the list calls five blocked nothing verified", () => {
+  // Blocked is not conclusive, exactly like unverified: the work never reached
+  // the application, so a run made only of blocked verdicts proved nothing.
+  assert.deepEqual(recentRunSummary({ total: 5, passing: 0, failing: 0, proved: 0 }), {
+    tone: "warn",
+    text: "nothing verified",
+  });
+});
+
+test("the list says nothing about a run with no verdicts, so the cell is a dash", () => {
+  assert.equal(recentRunSummary({ total: 0, passing: 0, failing: 0, proved: 0 }), null);
 });

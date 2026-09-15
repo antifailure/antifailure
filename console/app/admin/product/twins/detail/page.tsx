@@ -357,7 +357,10 @@ const AGENT_COLUMNS = [
         // case, so it is said in words rather than as a 0 beside a green chip.
         <span className="text-dim">none reported</span>
       ) : (
-        `${r.verdicts - r.failing} of ${r.verdicts}`
+        // The passes, not everything that did not fail. A blocked or
+        // unverified verdict did not pass, and `verdicts - failing` counted it
+        // as if it had, so a run of five unverified verdicts read "5 of 5".
+        `${r.passing} of ${r.verdicts}`
       ),
   },
   {

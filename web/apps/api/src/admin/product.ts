@@ -418,13 +418,24 @@ const twinsRouter = router({
           finished_at: Date | string | null
           created_at: Date | string
           verdicts: string
+          passing: string
           failing: string
+          proved: string
         }>(sql`
           SELECT rn.id, rn.kind, rn.state::text AS state, rn.started_at, rn.finished_at,
                  rn.created_at,
                  (SELECT count(*) FROM verdicts v WHERE v.run_id = rn.id) AS verdicts,
                  (SELECT count(*) FROM verdicts v
-                   WHERE v.run_id = rn.id AND v.value IN ('fail', 'blocked')) AS failing
+                   WHERE v.run_id = rn.id AND v.value = 'pass') AS passing,
+                 (SELECT count(*) FROM verdicts v
+                   WHERE v.run_id = rn.id AND v.value IN ('fail', 'blocked')) AS failing,
+                 -- Conclusive verdicts: pass, fail, flaky, warn. A run made only
+                 -- of blocked or unverified proved nothing, so proved is zero and
+                 -- the standing is unknown rather than passed. Cast to text so
+                 -- the not-yet-in-the-enum warn label is a non match, not an error.
+                 (SELECT count(*) FROM verdicts v
+                   WHERE v.run_id = rn.id
+                     AND v.value::text IN ('pass', 'fail', 'flaky', 'warn')) AS proved
           FROM runs rn
           WHERE rn.environment_id = ${input.id}::uuid
           ORDER BY rn.created_at DESC
@@ -502,8 +513,14 @@ const twinsRouter = router({
             id: r.id,
             kind: r.kind,
             state: r.state,
-            standing: agentStanding(r.state, Number(r.verdicts), Number(r.failing)),
+            standing: agentStanding(
+              r.state,
+              Number(r.verdicts),
+              Number(r.failing),
+              Number(r.proved),
+            ),
             verdicts: Number(r.verdicts),
+            passing: Number(r.passing),
             failing: Number(r.failing),
             startedAt: isoOrNull(r.started_at),
             finishedAt: isoOrNull(r.finished_at),
@@ -663,15 +680,28 @@ const twinsRouter = router({
  *
  * `runs.state` says whether the job completed. The verdicts say what it found.
  * A `complete` run with a failing verdict is a failure, and a `complete` run
- * with no verdicts at all found nothing and reported nothing, which is its own
- * answer and not a pass.
+ * that proved nothing is its own answer and not a pass.
+ *
+ * `proved` is the count of CONCLUSIVE verdicts: pass, fail, flaky, warn. It is
+ * not the same as `verdicts`. A run can record several verdicts and prove
+ * nothing, when every one of them is `blocked` (the work never reached the
+ * app) or `unverified` (it finished and nothing could be evaluated). Keying
+ * the pass on `verdicts === 0` called such a run `passed`, which is the same
+ * lie the tenant runs list carried: nothing failing is not everything passing.
+ * So the gate is `proved === 0`, which covers the no-verdict run and the
+ * proved-nothing run alike.
  */
-function agentStanding(state: string, verdicts: number, failing: number): RunStanding {
+function agentStanding(
+  state: string,
+  verdicts: number,
+  failing: number,
+  proved: number,
+): RunStanding {
   if (state === 'queued' || state === 'running') return 'running'
   if (state === 'cancelled') return 'cancelled'
   if (state === 'failed') return 'failed'
   if (failing > 0) return 'failed'
-  if (verdicts === 0) return 'unknown'
+  if (proved === 0) return 'unknown'
   return 'passed'
 }
 
@@ -752,7 +782,9 @@ const runsRouter = router({
             finished_at: Date | string | null
             created_at: Date | string
             verdicts: string
+            passing: string
             failing: string
+            proved: string
             summary: string | null
           }>(sql`
             SELECT rn.id, rn.org_id, o.slug AS org_slug, rp.full_name AS repository,
@@ -760,7 +792,15 @@ const runsRouter = router({
                    rn.started_at, rn.finished_at, rn.created_at,
                    (SELECT count(*) FROM verdicts v WHERE v.run_id = rn.id) AS verdicts,
                    (SELECT count(*) FROM verdicts v
+                     WHERE v.run_id = rn.id AND v.value = 'pass') AS passing,
+                   (SELECT count(*) FROM verdicts v
                      WHERE v.run_id = rn.id AND v.value IN ('fail', 'blocked')) AS failing,
+                   -- Conclusive verdicts: pass, fail, flaky, warn. Cast to text
+                   -- so warn, which the enum does not carry yet, is a non match
+                   -- rather than an error. proved = 0 is a run that proved nothing.
+                   (SELECT count(*) FROM verdicts v
+                     WHERE v.run_id = rn.id
+                       AND v.value::text IN ('pass', 'fail', 'flaky', 'warn')) AS proved,
                    (SELECT v.summary FROM verdicts v
                      WHERE v.run_id = rn.id AND v.value IN ('fail', 'blocked')
                      ORDER BY v.created_at ASC LIMIT 1) AS summary
@@ -796,11 +836,19 @@ const runsRouter = router({
             pullRequest: r.pull_request,
             envId: r.env_id,
             state: r.state,
-            standing: agentStanding(r.state, Number(r.verdicts), Number(r.failing)),
+            standing: agentStanding(
+              r.state,
+              Number(r.verdicts),
+              Number(r.failing),
+              Number(r.proved),
+            ),
+            // Passed is the passes alone, not everything that did not fail. A
+            // blocked or unverified verdict did not pass, so counting it in the
+            // numerator is the list saying a run passed more than it proved.
             verdict:
               Number(r.verdicts) === 0
                 ? null
-                : `${Number(r.verdicts) - Number(r.failing)} of ${Number(r.verdicts)} passed`,
+                : `${Number(r.passing)} of ${Number(r.verdicts)} passed`,
             failure: r.summary,
             at: iso(r.created_at),
             startedAt: isoOrNull(r.started_at),
@@ -1007,6 +1055,12 @@ const runsRouter = router({
             ORDER BY step ASC NULLS LAST, created_at ASC LIMIT 200`)
 
           const failing = verdicts.filter((v) => v.value === 'fail' || v.value === 'blocked').length
+          // Conclusive verdicts: pass, fail, flaky, warn. A run whose verdicts
+          // are all blocked or unverified proved nothing, so proved is zero and
+          // the standing below is unknown rather than passed.
+          const proved = verdicts.filter(
+            (v) => v.value === 'pass' || v.value === 'fail' || v.value === 'flaky' || v.value === 'warn',
+          ).length
           return {
             kind: 'agent' as const,
             id: run.id,
@@ -1020,7 +1074,7 @@ const runsRouter = router({
             previewUrl: run.preview_url,
             runKind: run.kind,
             state: run.state,
-            standing: agentStanding(run.state, verdicts.length, failing),
+            standing: agentStanding(run.state, verdicts.length, failing, proved),
             startedAt: isoOrNull(run.started_at),
             finishedAt: isoOrNull(run.finished_at),
             createdAt: iso(run.created_at),
