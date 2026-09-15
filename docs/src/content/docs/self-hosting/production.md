@@ -5,9 +5,8 @@ sidebar:
   order: 3
 ---
 
-The production control plane is one `terraform apply` and nine things a person
-has to do in a browser or a shell, and the order matters because several of them
-fail if done early.
+The production control plane is one `terraform apply` and fifteen steps in a
+browser or a shell. The order matters: several fail if done early.
 
 Read [Azure](/docs/self-hosting/azure) first. Everything on that page about
 policy, regions, the Key Vault name and the revision mode trap applies here and
@@ -26,11 +25,10 @@ group.
 ## What Terraform cannot own, and why
 
 **The GitHub App's private key and webhook secret.** GitHub mints the key once
-and shows it once. Terraform can neither create it nor recreate it, and a
-resource that manages a value it cannot produce is one that will eventually set
-it to the empty string. The module reads both from Key Vault with a data source
-instead, which is also why setting `github_app_id` before those secrets exist
-fails at plan rather than at the first delivery.
+and shows it once, so Terraform can neither create it nor recreate it. The module
+reads both from Key Vault with a data source instead, which is also why setting
+`github_app_id` before those secrets exist fails at plan rather than at the first
+delivery.
 
 **The OAuth App's client secret.** Same reason. Terraform seeds a placeholder
 once and then carries `ignore_changes` on the value, so rotating it with `az
@@ -148,13 +146,12 @@ is fixed when the server is created.
 **The apply may need running twice.** The Key Vault Secrets Officer grant is
 created in the same apply that writes the first secrets, and Azure RBAC takes a
 minute or two to propagate, so a second apply after the first fails on a secret
-write is normal and is not a sign of anything wrong. It did not happen on the
-first real run of this stack, and it is still the likeliest reason you see one.
+write is normal.
 
-Whatever the cause, a partly finished apply is not a mess to clean up by hand.
-Terraform records every resource that succeeded, and running `plan` again asks
-for exactly the remainder. Read that plan the same way as the first: it should
-add what is missing and destroy nothing.
+A partly finished apply needs no hand cleanup. Terraform records every resource
+that succeeded, and running `plan` again asks for exactly the remainder. Read
+that plan the same way as the first: it should add what is missing and destroy
+nothing.
 
 Sign-in does not work yet. The OAuth values in the vault are placeholders and
 the next three steps replace them.
@@ -187,10 +184,7 @@ curl -sS -o /dev/null -w 'http=%{http_code} sslverify=%{ssl_verify_result}\n' \
   https://app.antifailure.dev/health
 ```
 
-`sslverify=0` is a certificate the client trusts, and if you see it here then
-Azure bound the certificate without you. That is the thing this page cannot yet
-tell you, so say so, and the next person to stand production up can delete the
-command below with evidence rather than with an argument.
+`sslverify=0` is a certificate the client trusts: Azure bound it without you.
 
 A connection reset means the binding did not take, and this is the remedy:
 
@@ -225,10 +219,8 @@ az monitor action-group test-notifications create \
   -a email email-0 "you@example.com" usecommonalertschema
 ```
 
-Do the second one. An action group that creates cleanly, attaches to every rule
-and delivers nothing looks exactly like one that works. A `Status` of
-`Succeeded` in the result is the proof; anything else is a page that will not
-arrive.
+Do the second one. A `Status` of `Succeeded` in the result is the proof; anything
+else is a page that will not arrive.
 
 THE RECEIVER NAME IS NOT FREE TEXT and neither is the alert type. Azure matches
 `email-0` against the receivers the action group already has and refuses
@@ -261,15 +253,11 @@ Leave wildcard matching off. The registered callback is exact and nothing needs
 it. While you are there, **untick it on the staging OAuth App too**: it is on,
 and nothing there needs it either.
 
-Leave Device Flow off, and it is worth knowing what it would be for so that the
-default does not survive by accident. GitHub's device flow is for a client with
-no browser to redirect: it shows a code, the user types it at
-`github.com/login/device`, and the client polls GitHub for a token. `af login`
-does look like that, and it is not that: it is this control plane's own device
-grant, in `web/apps/api/src/auth/device.ts`, minting `afu_` tokens against
-`/auth/device/code` on this server. Nothing here calls `github.com/login/device`
-at all. Ticking it adds a way to obtain a GitHub token in this application's
-name that nothing in the product would ever use.
+Leave Device Flow off. `af login` is this control plane's own device grant, in
+`web/apps/api/src/auth/device.ts`, minting `afu_` tokens against
+`/auth/device/code` on this server; nothing here calls `github.com/login/device`.
+Ticking it adds a way to obtain a GitHub token in this application's name that
+nothing in the product would ever use.
 
 Generate a client secret and keep the page open. GitHub shows it once.
 
@@ -318,11 +306,9 @@ workflow through `dispatchWorkflow` in `web/apps/api/src/auth/github.ts`, and
 without the permission GitHub refuses with
 `403 Resource not accessible by integration`.
 
-**Checks used to say "do not grant this" here, and that was right at the time:
-nothing called the Checks API.** Something does now. Without it, a pull request
-gets the comment and no check run, so no branch protection rule can require
-Antifailure, and the control plane says which grant is missing in the comment
-rather than failing quietly.
+**Grant Checks.** Without it, a pull request gets the comment and no check run,
+so no branch protection rule can require Antifailure, and the control plane says
+which grant is missing in the comment rather than failing quietly.
 
 Subscribe to events: **Installation**, **Installation repositories**,
 **Repository**, **Pull request**, **Workflow run**, **Check run**, **Check
@@ -343,8 +329,6 @@ run**, and that attempt then asks for a credential of its own. The control
 plane reads the attempt number GitHub signed into the run's identity and
 reopens the check for a later attempt of the run already checking the commit,
 so a re-run from either place produces a new check run with a fresh verdict.
-Before this, a re-run from the Actions tab was refused a credential and the
-check went on showing the verdict of the attempt it replaced.
 
 **Push** is still deliberately absent: nothing handles it, and an event nobody
 consumes is delivery-log noise that makes a real failed delivery harder to find.
@@ -470,8 +454,7 @@ is the ignored one. See
 ### 12. Install the App on the organization
 
 On the App's page, **Install App**, and choose the account and repositories.
-Nothing has a tenant until an installation exists: this is why everybody who
-signed in during the first week landed with no organization.
+Nothing has a tenant until an installation exists.
 
 **Installing is not the same as being installed, and the difference is a webhook
 this control plane may have refused.** Installing sends one `installation`
@@ -501,8 +484,7 @@ One trap if you script this instead. Delivery ids are past the range a double
 holds exactly, 3839993231035072512 being a real one, so a JSON parser backed by
 doubles rounds the last digits and JavaScript's `JSON.parse` turns that id into
 ...072500. A redelivery aimed at the rounded id is a 404 on a delivery
-that never existed, and it reads as "GitHub lost it" rather than as an
-arithmetic bug. Take the id out of the raw body as text.
+that never existed. Take the id out of the raw body as text.
 
 ### 13. Let continuous deployment reach production
 
@@ -575,14 +557,9 @@ it refuses cleanly if any of the above was skipped.
 
 ## Turning billing on
 
-Billing is off on a control plane that has never been told about Stripe, and off
-is a supported state rather than a half-finished one: a self-hosted installation
-takes no money, and every route that would charge answers `PRECONDITION_FAILED`
-naming the settings it needs. What follows turns it on, in the only order that
-works. The four sections below are deliberately not numbered, because this is
-not step sixteen of first setup: it is a separate procedure somebody runs later,
-possibly years later, on a control plane that is already serving. Run them in
-the order they are written.
+Billing is off on a control plane that has never been told about Stripe. Every
+route that would charge answers `PRECONDITION_FAILED` naming the settings it
+needs. What follows turns it on; run the sections in the order they are written.
 
 **Three settings, and two of them are credentials.** `web/apps/api/src/billing/plans.ts`
 requires exactly these:
@@ -602,8 +579,7 @@ customer pays and never gets what they bought.
 
 **There is no `AF_STRIPE_PRICE_ENTERPRISE` and there is not meant to be one.**
 Enterprise is agreed with a person, so no Stripe price exists behind it. Checkout
-refuses that plan by name and points at the contact route. A plan with no price
-is a plan that is not sold here, not a misconfiguration.
+refuses that plan by name and points at the contact route.
 
 ### First, create the webhook endpoint at Stripe
 
@@ -640,8 +616,7 @@ The vault name is `afcpprod-kv-centralus` for production. Use the `afsecret`
 helper on the [Azure page](/docs/self-hosting/azure), which takes the value at a
 prompt rather than as an argument, writes it with no trailing newline, and
 removes the file afterwards. A signing secret with a trailing newline fails every
-signature and the endpoint answers 401 to every delivery Stripe makes, while the
-plan, the deploy and the dashboard all look correct.
+signature and the endpoint answers 401 to every delivery Stripe makes.
 
 Confirm both are there before going on. This prints names, never values:
 
@@ -657,14 +632,11 @@ Two names, or stop here.
 `stripe_price_team` in `production.tfvars` is the switch. Setting it makes the
 container app reference both vault secrets by their versionless ids.
 
-**The plan cannot tell you the secrets are missing, and this is the one place
-that matters.** `keyvault.tf` addresses them by constructed id rather than
-reading them, because the identity that plans production holds nothing on the
-vault and the only way to give it a read is to grant a pull request identity
-access to production's credentials. So a plan is green whether or not the
-secrets exist, Azure discovers a missing one while resolving references during
-deployment, and the revision fails to start on a control plane that was serving
-a moment earlier. Putting the credentials in the vault is not optional and it is not
+**The plan cannot tell you the secrets are missing.** `keyvault.tf` addresses
+them by constructed id rather than reading them, so a plan is green whether or
+not the secrets exist, Azure discovers a missing one while resolving references
+during deployment, and the revision fails to start on a control plane that was
+serving a moment earlier. Putting the credentials in the vault is not
 reorderable.
 
 Apply, then shift traffic the way every other change to this app is shifted:
@@ -710,12 +682,11 @@ still built and published for self-hosted installations, and nothing here
 changes it.
 
 That image **will not start on an app that has not been given its edition.**
-Measured against the entry point rather than read off it: without
-`AF_EE_SSO_KEY` the process exits before it listens, whatever the licence says,
-and a licence with no `AF_ORG` or no trusted key stops it at start-up with exit
-status 2. So this is a one-time procedure per environment, and it runs before
-the first release that deploys the enterprise image there. Like billing, it is
-not a numbered step of first setup. Run the sections in the order written.
+Without `AF_EE_SSO_KEY` the process exits before it listens, whatever the licence
+says, and a licence with no `AF_ORG` or no trusted key stops it at start-up with
+exit status 2. This is a one-time procedure per environment, and it runs before
+the first release that deploys the enterprise image there. Run the sections in
+the order written.
 
 **Three settings in the tfvars file, and two secrets in the vault.**
 
@@ -779,11 +750,7 @@ rm -rf "$dir"
 **Read the receipt on standard error before going on.** Its second line names a
 public key. It must be exactly the value after `hosted-2026-09=` in
 `production.tfvars`, or every start refuses the licence as signed by a key this
-installation does not trust. The receipt also warns that `rbac` is gated nowhere
-by the licence, so withdrawing the licence would not withdraw it. That is
-expected here: on the hosted plane role based access is an entitlement of each
-organization's plan, and the licence names it so the installation's licence
-describes the whole enterprise plan.
+installation does not trust.
 
 `org` is `antifailure` because that is `license_org`, and the two are compared
 at start-up. It names the installation, not a customer: each customer

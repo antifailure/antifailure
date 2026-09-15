@@ -8,14 +8,9 @@ sidebar:
 *Requires an enterprise license with the `enterprise_secrets` feature, and the
 enterprise binary built from `ee/`.*
 
-The community edition looks for a declared variable in four places, all of them
-local: this shell, `.env`, the encrypted store beside it, and the system
-keyring. That is the right set for one person on one laptop and the wrong set
-for a company, where the credential already exists in a secret manager and the
-thing nobody wants is fifty developers copying it onto fifty machines so a
-preview environment can start.
-
-The enterprise edition adds four more, asked after every local one.
+The community edition looks for a declared variable in four local places: this
+shell, `.env`, the encrypted store beside it, and the system keyring. The
+enterprise edition adds four more, asked after every local one.
 
 ## Which stores are asked
 
@@ -28,15 +23,9 @@ export AF_SECRET_SOURCES=vault
 The order is the order you write, and it decides which of two stores holding the
 same variable answers.
 
-Nothing is auto-detected on purpose. A machine may carry AWS credentials for
-something entirely unrelated, and building a source out of them would be this
-tool deciding on its own behalf to send your variable names to somebody's AWS
-account.
-
-A store you named that cannot be built stops the engine at startup with the
-reason. That is deliberate too: starting without it means your variables resolve
-out of `.env` instead and the environment comes up holding the wrong values,
-which is worse than not coming up.
+Nothing is auto-detected. A store you named that cannot be built stops the engine
+at startup with the reason, rather than resolving your variables out of `.env`
+instead.
 
 ## Where they sit in the chain
 
@@ -46,11 +35,8 @@ which is worse than not coming up.
 4. The system keyring
 5. **Every store you named, in order**
 
-Last, for the same reason the keyring is fourth. An export you typed is for this
-run, a file is for this repository, and the company secret manager is the
-long-lived default the other two exist to override. A store asked first would
-make "try it with a different key" impossible without changing what every
-colleague resolves.
+Last, so an export you typed and a file in this repository both override the
+company secret manager.
 
 ## HashiCorp Vault
 
@@ -117,9 +103,7 @@ credential endpoint, and the EC2 instance role through IMDSv2. A profile in
 message says so rather than reporting "no credentials" and leaving you to guess
 which of five mechanisms was meant to supply them.
 
-IMDSv2 only. Version 1 answers an unauthenticated GET, which is what turns a
-server-side request forgery in an application on the instance into a credential
-disclosure.
+IMDSv2 only. Version 1 answers an unauthenticated GET.
 
 ## Azure Key Vault
 
@@ -146,11 +130,8 @@ stripping would map two different variables onto one secret.
 or the China cloud (`https://login.partner.microsoftonline.cn`).
 
 **The service principal needs `Key Vault Secrets User` and nothing more.** That
-role grants get and not list, which is deliberate and worth knowing before you
-read a log: this source can read a secret it is asked for and cannot enumerate
-the vault, so a 403 on a listing is the normal state of a correctly configured
-installation rather than a symptom. The source treats it that way and reports
-the vault as reachable, because a refusal is still an answer.
+role grants get and not list, so a 403 on a listing is the normal state of a
+correctly configured installation, and the source reports the vault as reachable.
 
 A vault that cannot be reached is reported as unreachable even when the
 credential is perfect. Microsoft Entra and the vault are different hosts, so a
@@ -186,10 +167,8 @@ were not found in any configured source.
   (secret/antifailure) (is sealed).
 ```
 
-"The variable was not found" on its own leaves you guessing which of five places
-to put it. A source that failed silently would make that list a lie, so a store
-that cannot be used is named with its reason: the vault is sealed, the token
-expired, the licence lapsed.
+A store that cannot be used is named with its reason: the vault is sealed, the
+token expired, the licence lapsed.
 
 Run `af explain` to see the same list without starting anything.
 
@@ -205,11 +184,8 @@ was rejected after one refresh: Key Vault answered 403 Forbidden.
   Next: Rotate the credential and store the new value where it reads it.
 ```
 
-Retrying will not help, so the message does not suggest it. One renewal rather
-than one per lookup is deliberate: twenty declared variables against a revoked
-credential would otherwise be twenty logins and twenty rejections, which is how
-a configuration mistake becomes a rate limit on the store everybody else is
-also using.
+Retrying will not help. One renewal per process rather than one per lookup, so
+twenty declared variables against a revoked credential are not twenty rejections.
 
 ## What happens when the licence lapses
 

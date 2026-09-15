@@ -22,15 +22,9 @@ which is the section after it. An organization that has named one is delivered
 there and nowhere else, and the installation destination covers every
 organization that has not.
 
-Until this page said so, only the first half existed. The control plane's audit
-log carried a tamper evident chain and reached no destination at all, so single
-organization sign on, directory provisioning and administrative actions were
-recorded and forwarded nowhere.
-
 ## What the engine forwards
 
-Five actions, and the list is deliberately short. An audit stream a security
-team can read is one where every entry is an act somebody could be asked about.
+Five actions:
 
 | Action | When |
 | --- | --- |
@@ -40,9 +34,8 @@ team can read is one where every entry is an act somebody could be asked about.
 | `golden.published` | a masked copy of production was written to a shared store |
 | `golden.pulled` | a published golden was restored onto this machine |
 
-Egress decisions and build steps are not forwarded. They are high volume, they
-are already reported through the event bus, and a stream nobody can read is
-worse than a smaller one they can.
+Egress decisions and build steps are not forwarded. They are high volume and are
+already reported through the event bus.
 
 ## What one entry looks like
 
@@ -53,13 +46,10 @@ against your SIEM works against your archive:
 {"occurred_at":"2026-09-07T11:22:33.456789Z","forwarded_at":"2026-09-07T11:22:33.481204Z","org":"acme","actor":"dana@acme.example","action":"golden.published","target_type":"golden","target_id":"gv_9f2c","origin":"engine","detail":{"repository":"acme/shop","store":"the bucket s3://acme-goldens/audit"}}
 ```
 
-Both timestamps are there because they are different instants. `occurred_at` is
-when the action happened and `forwarded_at` is when a sink succeeded in sending
-it, which a retry can put minutes later. A stream carrying only the second
-reorders itself whenever one destination is slow. An entry whose producer did
-not say when it happened carries no `occurred_at` at all rather than borrowing
-the sink's clock, because a guessed timestamp in an audit log is evidence that
-is wrong rather than evidence that is missing.
+`occurred_at` is when the action happened and `forwarded_at` is when a sink
+succeeded in sending it, which a retry can put minutes later. An entry whose
+producer did not say when it happened carries no `occurred_at` at all rather than
+borrowing the sink's clock.
 
 `org` and `actor` come from `AF_ORG` and from `AF_ACTOR`, falling back to
 `GITHUB_ACTOR` on a GitHub Actions runner. Neither is invented when it is
@@ -75,15 +65,8 @@ export AF_AUDIT_SINKS=syslog,webhook,object_store
 ```
 
 A sink named here that cannot be built stops the engine at startup with the
-reason. That is deliberate: somebody who sets this variable has said that every
-privileged action must be forwarded, and starting anyway with the sink absent
-means nothing is forwarded and nothing says so, which is indistinguishable from
-a quiet week.
-
-With the variable unset nothing is registered and nothing is printed. Nothing is
-ever detected automatically, so a machine that happens to carry cloud
-credentials for something unrelated does not start writing your audit trail into
-somebody's bucket.
+reason. With the variable unset nothing is registered and nothing is printed.
+Nothing is ever detected automatically.
 
 ### syslog over TLS
 
@@ -103,9 +86,7 @@ action is the message id, which is what a receiver filters on. Port 6514 is
 assumed when the address carries none.
 
 There is no plaintext option. An address written as `syslog://` or `tcp://` is
-refused rather than downgraded: the entries say who was given a copy of
-production, and sending that unencrypted to an unauthenticated receiver is the
-thing the entries exist to prove is not happening.
+refused rather than downgraded.
 
 ### HTTPS webhook
 
@@ -119,18 +100,13 @@ export AF_AUDIT_WEBHOOK_HEADER="Authorization: Bearer ..."
 ```
 
 With a secret set, every request carries `Af-Audit-Signature: sha256=<hex>` over
-the body, in the same shape GitHub and Stripe use. A receiver that accepts audit
-entries on an open endpoint accepts audit entries from anybody, and a forged
-entry in an audit log is worse than a missing one.
+the body, in the same shape GitHub and Stripe use.
 
 The dead letter file is required, and it is the reason the retry is allowed to
 be short. Three attempts, pausing 200 ms and then 600 ms between them, and the
 entry is appended to that file and flushed before the call returns, in the same
 JSON the receiver would have been given. The measured total, round trips
 included, is in the report `just benchmark` writes.
-
-A webhook that posts once and gives up loses an entry every time its receiver
-restarts, and loses it silently. A hole you can replay is not a hole.
 
 ### Object store
 
@@ -150,17 +126,11 @@ One object per entry, keyed by date:
 antifailure/2026/09/07/112233.456789000-golden.published-9f2ca10b.json
 ```
 
-Not a batch and not an append. An object written once can be locked, which is
-what a retention obligation is usually satisfied by, and an appended file has
-to be read, extended and rewritten, which is a race between two environments
-being torn down and cannot be locked at all. The date is a path so a lifecycle
-rule and a partitioned query both work without anybody parsing a filename. An
-object is never replaced.
-
-Two entries in the same nanosecond are two objects, because the key carries
-eight random characters as well as the time. Without them the second would
-silently replace the first, and an audit log that loses the entries which
-arrived together loses exactly the ones somebody is investigating.
+Not a batch and not an append: an object written once can be locked, and an
+object is never replaced. The date is a path so a lifecycle rule and a
+partitioned query both work without parsing a filename. Two entries in the same
+nanosecond are two objects, because the key carries eight random characters as
+well as the time.
 
 ## What a sink cannot do
 
@@ -168,11 +138,7 @@ A sink observes. It cannot refuse an environment, cannot change an entry, and
 cannot see what another sink received. An error from one is recorded and the
 lifecycle continues.
 
-That last part matters most on teardown. A forwarding outage that stopped an
-environment being destroyed would turn a logging problem into a resource leak,
-which is strictly worse than the problem it came from. So a SIEM you cannot
-reach costs you one progress line and nothing else, carrying the sink's own
-words about what went wrong:
+A SIEM you cannot reach costs one progress line, carrying the sink's own words:
 
 ```
 audit sink: forwarding to syslog over TLS at collector.example.com:6514: dial tcp
@@ -185,8 +151,7 @@ take is in the dead letter file before `Write` returns.
 
 ## The control plane's own audit log
 
-A different stream with a different shape, and the shape is the reason it is
-worth having. The engine forwards five actions from a machine with no database.
+The engine forwards five actions from a machine with no database.
 The control plane forwards `audit_entries`, the organization log covering
 actions including sign on, directory provisioning and administration. The
 separate global operator log, `admin_audit_entries`, is forwarded only where its
@@ -238,9 +203,7 @@ the delivery time. Catching up after an outage can deliver old events. Verify
 the signature and deduplicate by organization and sequence; signature
 verification alone does not reject replay.
 
-One batch holds one organization. A manifest names an organization, so a batch
-carrying two would name one and cover both, and a receiver checking it would be
-checking the wrong claim.
+One batch holds one organization.
 
 ### Turning the control plane's stream on
 
@@ -265,8 +228,7 @@ Its batch API ignores properties supplied only through HTTP headers.
 Splunk stores the same manifest in the indexed `antifailure_manifest` field,
 alongside the audit entry's event data.
 
-`AF_AUDIT_STREAM_KEY` is required whenever a sink is named. A manifest signed
-under a key nobody chose is decoration rather than evidence.
+`AF_AUDIT_STREAM_KEY` is required whenever a sink is named.
 
 Remote collector URLs require HTTPS and cannot contain user information.
 Loopback HTTP is permitted for a local collector. Redirects are refused, each
@@ -290,10 +252,8 @@ nowhere.
 
 ### Choosing your own destination, per organization
 
-On a hosted control plane the installation's environment is the operator's, not
-yours, so the destination is an API instead. One destination per organization:
-a second would make "where did sequence 41 go" a question with two answers, and
-the honest way to reach two collectors is one collector that fans out after
+On a hosted control plane the destination is an API instead. One destination per
+organization; to reach two collectors, use one collector that fans out after
 receiving.
 
 ```sh
@@ -315,11 +275,7 @@ answer carries the endpoint, the last four characters of the credential and a
 fingerprint of it, and never the credential itself.
 
 **The credential is required on every save, including a change of endpoint.**
-That is deliberate. If the endpoint could be moved while the stored credential
-was kept, somebody who had taken over an administrator's session could point the
-stream at a host they control and receive your collector token in the
-authorization header of the next delivery. Changing where a credential is sent
-requires having it.
+Changing where a credential is sent requires having it.
 
 **Your credential is stored sealed.** It is encrypted with AES-256-GCM under a
 key held in the deployment's key vault and never in the database, bound to your
@@ -333,8 +289,7 @@ organization's current audit sequence is recorded with the destination, and
 entries above it are what get delivered, so configuring a collector does not
 replay months of entries into it as a surprise. The configuration change is
 itself an audit entry, written after that sequence is read, so the first thing
-your collector receives is the record of its own creation. That is how you can
-tell a working destination from a wrong one without a test button.
+your collector receives is the record of its own creation.
 
 Switching a destination off stops delivery on the next pass and does not fall
 back to the installation destination: an organization that turned its stream off
@@ -432,9 +387,8 @@ installation, so nothing is forwarded
 
 `just benchmark` writes a dated report of how long an action takes to reach each
 destination, and how long an undeliverable entry takes to become durable on disk
-while a receiver is down. With nothing configured it measures loopback, which is
-the delay this product is responsible for and no more. Point it at your own
-collector and the number becomes the whole path, measured by you:
+while a receiver is down. With nothing configured it measures loopback. Point it
+at your own collector and the number becomes the whole path:
 
 ```sh
 AF_AUDIT_BENCHMARK_SYSLOG_ADDRESS=collector.example.com:6514 \

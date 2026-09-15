@@ -6,11 +6,7 @@ sidebar:
 ---
 
 The Terraform in `infra/terraform/modules/control-plane` puts eight secrets in
-one Key Vault. This page is one runbook for each: what it is, what stops working
-while it is being replaced, the steps, and how to check the new value is the one
-in use.
-
-Read the honesty note before you run any of it.
+one Key Vault. One runbook each below.
 
 ## What has been rehearsed
 
@@ -32,9 +28,6 @@ still opens.
 
 ## What is in the vault
 
-Ownership is the first thing to know, because it decides whether Terraform will
-put your new value back.
-
 | Secret | Who owns the value | What reads it |
 | --- | --- | --- |
 | `database-url` | Terraform generates it | the app, and the bootstrap job |
@@ -49,14 +42,12 @@ put your new value back.
 
 Three kinds, and the difference matters when you rotate:
 
-**Owned.** Terraform generated the value, so a difference between the
-configuration and the vault is drift it will correct. Rotating one of these by
-hand means the next `terraform apply` proposes to put the generated value back.
+**Owned.** Terraform generated the value, so the next `terraform apply`
+proposes to put the generated value back.
 
 **Seeded.** Terraform wrote a placeholder once and then stopped, through
-`ignore_changes` on the value in `keyvault.tf`. That line is what makes the
-instruction to rotate these by hand true. Without it, the next apply would put
-the placeholder back and break sign-in.
+`ignore_changes` on the value in `keyvault.tf`. Without that line the next
+apply would put the placeholder back and break sign-in.
 
 **Yours.** GitHub mints an App private key and shows it once, so Terraform can
 neither create it nor recreate it. The module reads both App secrets with a data
@@ -75,9 +66,7 @@ configuration change rather than a security operation.
 ## Before any of them
 
 **You need write access to the vault.** The role assignment that grants it is
-off by default, for the reason in `keyvault.tf`: a role assignment whose
-principal is whoever ran Terraform churns on every plan by a different caller.
-Grant it once, by hand:
+off by default; see `keyvault.tf`. Grant it once, by hand:
 
 ```sh
 az role assignment create \
@@ -121,11 +110,10 @@ new value. From that moment the app can only connect if Postgres knows the new
 password too.
 
 **The step nothing in this repository does for you.** The bootstrap job creates
-`af_app` only when the role is absent, and leaves an existing one alone. Read
-`deploy/docker/bootstrap.mjs`: it says so, and the reason is that silently
-resetting the credential of a running system is worse than refusing to. So
-changing the vault value alone gives the application a password the database has
-never heard of. The `ALTER ROLE` is yours to run.
+`af_app` only when the role is absent and leaves an existing one alone; see
+`deploy/docker/bootstrap.mjs`. Changing the vault value alone gives the
+application a password the database has never heard of. The `ALTER ROLE` is
+yours to run.
 
 Postgres has no public endpoint, so you cannot run it from a laptop. It has to
 come from inside the virtual network, which means a container app job using
@@ -175,18 +163,14 @@ curl -s https://your-control-plane/metrics | grep af_http_requests_total
 **Afterwards.** `random_password.app` still holds the old value in Terraform
 state, so the next plan will propose to put the old URL back into the vault.
 Either import the new value or accept that this rotation needs a Terraform
-change beside it. This is the sharpest edge on the page and it is a consequence
-of the secret being owned rather than seeded.
+change beside it.
 
 ---
 
 ## `migration-database-url`
 
 **What it is.** The owner's connection string, as `af_migrator`. It runs
-migrations and owns the tables. The serving app never holds it, which is the
-point of the two roles: a process on a public address should not be able to drop
-the policies that isolate tenants.
-
+migrations and owns the tables. The serving app never holds it.
 **What breaks while you rotate it.** Nothing that serves traffic. The bootstrap
 job and the nightly maintenance job both use it, so a deploy or a partition
 maintenance run inside the window fails.
@@ -209,8 +193,7 @@ maintenance run inside the window fails.
    ```
 
 **How to verify.** The bootstrap job reports `bootstrap complete` and exits
-zero. It asserts the end state it exists to produce, so a run that achieved
-nothing fails rather than reporting success.
+zero.
 
 **Afterwards.** `database.tf` carries `ignore_changes` on
 `administrator_password`, so Terraform will not fight the reset on the server
@@ -221,7 +204,7 @@ same reason as `database-url`.
 
 ## `provider-key-secret`
 
-**This can now be rotated, and before 2026-09-12 it could not.** The steps below
+**This can be rotated.** The steps below
 add a second key, move every stored credential onto it, and then take the first
 one away. Read all of them before starting: the order is the whole procedure.
 
@@ -230,33 +213,21 @@ under AES-256-GCM. `web/apps/api/src/providers/seal.ts` holds the shape. The
 sealing key never reaches Postgres, so a database dump on its own decrypts
 nothing.
 
-**What used to break, and why it was silent.** Replacing the value in place made
-every stored key stop opening, permanently. Rows recorded which key version
-sealed them and nothing read that column, so the application tried every row
-against the one key it held and reported the same failure for all of them: a value
-that will not decrypt is indistinguishable from a value somebody altered. An
-operator saw authentication failures across every organization and no sentence
-saying why.
-
-**What happens now instead.** The application holds a SET of sealing keys
+**How the keys are held.** The application holds a SET of sealing keys
 addressed by version, so the old key and the new one are open at the same time.
 A row names its version, is opened with the key that version names, and a row
-whose version is not held produces its own error naming the missing version. That
-error is the difference between a silent outage and a message, and it is the one
-thing to look for in the logs if any step below goes wrong.
+whose version is not held produces its own error naming the missing version.
+Look for that error in the logs if any step below goes wrong.
 
-**What breaks while you rotate.** Nothing, if the steps are run in this order.
-There is no window in which a stored key cannot be opened, because no key is
-removed until every row has been moved off it and that has been verified.
+**What breaks while you rotate.** Nothing, if the steps are run in this order:
+no key is removed until every row has been moved off it and verified.
 
 **One thing to decide first.** If the sealing key is rotating because it was
-COMPROMISED, re-sealing is the wrong operation: the keys it sealed are compromised
-with it, and re-sealing protects values that already need replacing. In that case
-tell each affected organization to revoke their provider key at the provider and
-store a new one, which is a normal operation for an owner or admin and is
-described in [provider keys](/docs/guides/provider-keys). Rotate the sealing
-secret afterwards, with these steps, so the new keys are sealed under a key
-nobody has seen.
+COMPROMISED, re-sealing is the wrong operation: the keys it sealed are
+compromised with it. Tell each affected organization to revoke their provider
+key at the provider and store a new one, described in
+[provider keys](/docs/guides/provider-keys). Rotate the sealing secret
+afterwards, with these steps.
 
 ### Steps
 
@@ -342,11 +313,10 @@ nobody has seen.
    `production.tfvars`, `afcpprod-app` and `afcpprod-reseal` in
    `af-cp-prod-centralus`, run after the tag's production deploy has finished.
 
-   The image is pinned on the command line because the job reads
-   `image_repository` and `image_tag` from the stack's defaults, and a job created
-   from a default older than this change would run an image with no
-   `backup-cli.mjs` and no re-sealing tool in it. The job ignores later image
-   changes from Terraform, so only `deploy.sh` moves it from then on.
+   The image is pinned on the command line because the job otherwise reads
+   `image_repository` and `image_tag` from the stack's defaults, which can
+   predate `backup-cli.mjs`. The job ignores later image changes from
+   Terraform, so only `deploy.sh` moves it from then on.
 
    **Confirm the revision actually holds both keys before going further.** The
    start-up log names the versions, which is the only way to check this without
@@ -369,11 +339,9 @@ nobody has seen.
    Merging this deploys it the same way. From here, a customer who saves a key
    gets it sealed under `v2` and every existing row still opens under `v1`.
 
-   This is a separate deploy from step 2 on purpose. Both revisions serve for a
-   few seconds during a traffic shift, and a key sealed under `v2` by the new
-   revision cannot be opened by a revision that has not got `v2` yet. Making the
-   set available first and switching which one seals second removes that window
-   rather than relying on it being short.
+   This is a separate deploy from step 2 on purpose: during a traffic shift
+   both revisions serve, and a key sealed under `v2` cannot be opened by a
+   revision that has not got `v2` yet.
 
 4. Move every stored credential onto the new key. This is the job that did not
    exist:
@@ -395,8 +363,7 @@ nobody has seen.
    the image's launcher, the same path in both images, and the enterprise copy
    registers the enterprise tables before the tool starts. Pointed at a database
    holding sealed values in a table it was not told about, the tool refuses to
-   run and names the table, rather than re-sealing everything else and letting
-   step 5 call the rotation complete.
+   run and names the table.
 
    Read its log. It prints a count per version and it prints no key material:
 
@@ -412,10 +379,7 @@ nobody has seen.
    moved between organizations, and they are a separate investigation. Nothing
    has been lost either way: a row the job cannot open is left exactly as it was.
 
-5. **Verify before removing anything.** This is the step that separates a
-   completed rotation from one that appears complete, and it asks a different
-   question from step 4: not "what is left to do" but "does what has been done
-   actually work".
+5. **Verify before removing anything.**
 
    ```sh
    az containerapp job show -n afcp-reseal -g af-cp-centralus -o json \
@@ -435,19 +399,15 @@ nobody has seen.
    four separate entries before you read anything the execution reports. Without
    `--check` it is step 4, which writes.
 
-   This is not `az containerapp job start --command`, and that is not a style
-   choice. The CLI takes that flag as a list, so a quoted command arrives as one
-   program name with spaces in it, and it sends a container named after the job
-   rather than `reseal` with no image and no environment. Every value the check
-   needs comes from the job itself here, including the second key and the version
-   a rotation adds in step 2, so the check runs with exactly the keys step 4 had.
-   This form was run against staging on 2026-09-13: the execution's own template
-   read those four entries, it exited 0, and it reported every row opened.
+   This is not `az containerapp job start --command`: the CLI takes that flag
+   as a list, so a quoted command arrives as one program name with spaces in
+   it, and it sends a container named after the job rather than `reseal` with
+   no image and no environment. Every value the check needs comes from the job
+   itself here, including the second key and the version a rotation adds in
+   step 2.
 
    It opens EVERY row whatever version it is at and writes nothing. It must
    report zero rows that could not be opened and zero rows not yet at `v2`.
-   Without this check, "nothing left to re-seal" and "every row is at the new
-   version and none of them open" look identical.
 
    A row still at `v1` here, reported as naming a key this revision does not
    hold or simply counted as not yet at `v2`, is not a failed job. It is a key a
@@ -660,9 +620,7 @@ and the OAuth credentials are used only to complete a sign-in.
 Step 5 is the whole reason for the ordering. GitHub allows both secrets to be
 live at once, so a rotation done in this order has no window at all.
 
-**How to verify.** A completed sign-in is the verification. There is no shortcut
-that proves the value without exercising it, because the failure mode is GitHub
-refusing the exchange rather than the app refusing to start.
+**How to verify.** A completed sign-in is the verification.
 
 The client id is public and changes only when the OAuth application itself
 changes. If you do change it, change `github-redirect-uri` in the same pass and
@@ -698,9 +656,8 @@ one.
 5. Delete the old key in GitHub.
 
 **How to verify.** The app refuses a half configured App at start-up, so a
-revision that starts has a key it could parse. That is a weaker statement than
-it looks: parsing is not the same as GitHub accepting the signature. Step 4 is
-the verification and step 3 is not.
+revision that starts has a key it could parse. Parsing is not GitHub accepting
+the signature: step 4 is the verification, not step 3.
 
 ---
 
@@ -712,8 +669,7 @@ old one are refused, and the app is still holding the old one until a revision
 starts.
 
 **What it is.** The shared secret GitHub signs webhook deliveries with. Without
-a valid signature the endpoint refuses the delivery, which is the behaviour you
-want and the reason the window exists.
+a valid signature the endpoint refuses the delivery.
 
 **What breaks.** Every delivery between the change in GitHub and the new
 revision serving. GitHub records each one as a failed delivery and they can be
@@ -754,5 +710,4 @@ plane database that leaks does not leak anything usable against it, and a
 revoked token stops working immediately.
 
 There is no automated expiry on any secret above and nothing warns you that one
-is old. Rotation here is a decision somebody makes, not a schedule the
-infrastructure keeps.
+is old.

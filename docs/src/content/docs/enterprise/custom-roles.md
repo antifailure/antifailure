@@ -5,11 +5,7 @@ sidebar:
   order: 11
 ---
 
-The four built-in roles, owner, admin, member and viewer, are the right four for
-a team and they are in every edition. A large organisation is shaped
-differently: somebody administers two repositories and reads the rest, a
-compliance team approves masking changes and creates no environments, a
-contractor sees one repository and nothing about the others.
+The four built-in roles, owner, admin, member and viewer, are in every edition.
 
 A custom role is a name, a description and a set of permissions from the same
 fixed catalogue every route already declares. A grant gives one person one role
@@ -93,8 +89,7 @@ one grant would be every grant.
 | `PUT /roles/policy` | Applies a file, whole, in one transaction. |
 | `GET /roles/members/<id>/permissions` | What one person can do and where each permission came from. You may always read your own. |
 
-A dry run is worth taking. The person applying a permission model is usually the
-person a wrong one would lock out.
+A dry run is worth taking.
 
 ```sh
 curl -X POST https://<your-control-plane>/roles/policy/dry-run \
@@ -123,9 +118,7 @@ it.
 ## What is not here
 
 `approvals` is part of the file format and nothing enforces it, so a file
-that carries a non-empty `approvals` section is refused whole, naming it. A
-stored approval requirement that nothing checks would be a control reporting
-itself as held, which is worse than not having one.
+that carries a non-empty `approvals` section is refused whole, naming it.
 
 ## What happens without the entitlement
 

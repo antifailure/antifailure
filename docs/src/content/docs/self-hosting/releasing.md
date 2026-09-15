@@ -14,7 +14,6 @@ hands to a stranger, and the installer follows `releases/latest`, so the
 download changes the moment the release is created. Two workflows fire on the
 same tag, they run in parallel, and neither knows the other exists.
 
-This page is the order to do it in and the thing to look at after each step.
 [Releases and how to verify one](/docs/security/releases) is the companion
 page, written for the person downloading a release rather than the person
 cutting one.
@@ -25,8 +24,6 @@ cutting one.
 | --- | --- | --- |
 | `.github/workflows/release.yml` | `push` of a tag matching `v*` | Waits for CI, builds four platforms, packages, signs, and creates the GitHub release |
 | `.github/workflows/cd.yml` | `push` to `main` **and** `push` of a tag matching `v*` | Waits for CI, builds the control plane image, applies staging's configuration from its tfvars and deploys staging, then waits for a human to approve production and does the same there |
-
-Two things follow from that table and both have bitten somebody somewhere.
 
 `release.yml` has a gate of its own, and until recently it did not. A `gate`
 job runs before the build, waits for CI's conclusion on the commit the tag
@@ -45,10 +42,6 @@ this is now rare rather than routine. Six merges once landed inside one run's
 length and each cancelled the one before it, and `main` went hours with no
 completed run. If you do meet a cancelled run on the commit you want to tag,
 re-run CI on it, wait for green, then re-run the release from the Actions page.
-
-Checking before you tag is still the cheaper order. The gate turns a mistake
-into a refused release rather than a published one, which is not the same as
-turning it into no mistake.
 
 `cd.yml` runs a second time on the tag, on the same commit it already ran on
 when that commit merged to `main`. Its concurrency group is keyed on the ref,
@@ -101,9 +94,7 @@ just coverage-profile   # about an hour, needs Docker and a Postgres
 just coverage
 ```
 
-Nothing else in `gate` is excused. A criterion nobody can meet is one people
-learn to skip, which is why this paragraph exists rather than a rule saying
-"all gates green" that is false on a fresh clone.
+Nothing else in `gate` is excused.
 
 **1b. Every branch that landed reached CI before it landed.**
 
@@ -179,11 +170,7 @@ cat .changes/*.md
 
 **5. Nothing in the release path has moved since it was last exercised.**
 
-Everything on this page was checked against a tree, not against the idea of a
-tree. Nothing in the mechanism depends on any particular branch having landed,
-so a release can be cut at any point. What does depend on the tree is whether
-the checks behind this page still describe what is about to run. Ask, rather
-than assume:
+Ask whether the checks behind this page still describe what is about to run:
 
 ```sh
 git diff --stat 8389faf..origin/main -- \
@@ -199,19 +186,8 @@ new file under `migrations/` means production is being asked to apply a
 migration nobody on this page has read, and that one is worth stopping for: a
 migration is the only part of a deploy that cannot be rolled back.
 
-**It is not empty today, and here is what has been done about each half.**
-`install.sh` and `tools/release/build.sh` have both moved since that revision,
-so the release build path was re-run rather than assumed: `just build-release
-v1.0.0` on this tree, the archive unpacked and the binary inside it run out of
-the unpacked directory, `af version` reporting the version passed to the script
-with the real commit and that commit's own date, the checksum file verified,
-`just reproducible` building twice with a cold cache and getting the same
-archive, and `just ldcheck`, `just relnotes`, `just tagsync` and
-`just releasecheck` green. That re-run is what found `build.sh` packaging an
-archive with no `af` in it, so the drift here was carrying a real defect and not
-only a stale sentence.
+### Tag it
 
-The `migrations/` half is not resolved and is read below rather than here.
 ```sh
 git tag -a v0.1.2 -m "v0.1.2"
 git push origin v0.1.2
@@ -420,12 +396,6 @@ git diff --name-only v0.1.1..v0.1.2 -- web/packages/db/migrations
 
 ### This is the first time production will deploy itself
 
-Every production `cd` run so far has been skipped. The script inside it has run
-against production once, by hand: `afcpprod-app` carries a revision named
-`afcpprod-app--cf66d6af2-164545`, which is `deploy.sh`'s own naming, and
-`afcpprod-bootstrap` has exactly one execution, `Succeeded`, a minute before it.
-So the script is not the untested part. The job around it is.
-
 What has no prior run behind it:
 
 * `azure/login` under the `production` environment needs a federated credential
@@ -449,9 +419,7 @@ carrying a number that goes stale between two merges:
 curl -sS https://app.antifailure.dev/readyz
 git rev-list --count f66d6af..origin/main
 ```
-
-At the time of writing that was 178, so the first tag is not a normal
-increment. It is every change since, arriving at once.
+At the time of writing that was 178.
 
 **Ask which migrations rather than reading a count off this page**, because the
 count has already gone stale once:
@@ -460,8 +428,7 @@ count has already gone stale once:
 git diff --name-only f66d6af..origin/main -- web/packages/db/migrations
 ```
 
-All of them have been checked, and the checks are recorded here so nobody
-repeats them nervously at tag time. Every migration from `0001` to `0023`
+All of them have been checked. Every migration from `0001` to `0023`
 applies cleanly to a real PostgreSQL 17 from an empty database, and `0023` was
 applied a second time to a database built to `0022` and then seeded, so that it
 met existing rows rather than an empty table. It validated its constraint and
@@ -523,12 +490,8 @@ applied to a real PostgreSQL 17, seeded with two organizations and three
   and every existing one carried `approved_at = created_at` with no approver,
   which is the true statement: nobody approved them because there was nothing
   to approve with. **No live egress rule stops enforcing.**
-* **`0019`** creates `runtimes`. Row level security is enabled and forced,
-  proved not by reading the catalog but by connecting as a real unprivileged
-  role that is a member of `antifailure_app`: the other tenant's runtime is
-  invisible, a query with no organization set returns zero rows, and an insert
-  aimed at another tenant is refused by the policy.
-
+* **`0019`** creates `runtimes`, with row level security enabled and forced,
+  proved by connecting as a real unprivileged member of `antifailure_app`.
 Every one of `0018` to `0023` is additive, which is what makes a rollback safe:
 `deploy.sh` can put traffic back on the old revision and cannot un-apply a
 schema change, so the old code has to tolerate the new schema. Nothing in the
@@ -552,10 +515,8 @@ the next patch immediately. If you want a version people cannot reach yet, the
 release has to be a GitHub prerelease, which `releases/latest` skips by
 definition, and `release.yml` does not currently create one.
 
-That same API has one more property, and it decides whether a recovery works
-rather than whether a release does, so it is written out under
-[If a release goes out wrong](#if-a-release-goes-out-wrong) where you will need
-it: `latest` follows the newest tagged **commit**, not the newest publish.
+`latest` follows the newest tagged **commit**, not the newest publish; see
+[If a release goes out wrong](#if-a-release-goes-out-wrong).
 
 ### Prove the thing a stranger gets
 
@@ -667,8 +628,7 @@ newest publish.
 
 A hotfix cut from an older commit therefore publishes perfectly, reports
 nothing wrong, and never reaches a single installer: `latest` stays on the bad
-release. There is no error anywhere, and it strikes at precisely the moment
-somebody is trying to pull a bad release back.
+release. There is no error anywhere.
 
 A patch branched off `main` is always newer, so the ordinary path is safe. The
 case to refuse is reverting to an earlier good commit and tagging that. If the

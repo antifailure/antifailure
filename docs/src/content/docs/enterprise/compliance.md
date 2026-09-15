@@ -19,10 +19,6 @@ It is not an audit report and it is not an opinion. It is a document that says
 what this system recorded, names the artifact so somebody can go and look, and
 leaves every conclusion to the person whose job that is.
 
-A tool that printed "SOC 2 compliant" would be worse than no tool: it reads as
-an opinion from somebody qualified to hold one and it is produced by a program
-that looked at four tables.
-
 ## The four outcomes, three of which are not "pass"
 
 **Evidenced.** The check ran, the artifact exists, and it says what the control
@@ -34,9 +30,7 @@ here on the first day.
 
 **Failed.** The check found evidence that the control is *not* holding: an audit
 chain with a break in it, a golden published without a clean scan, a membership
-removal that did not revoke the member's sessions. This is the most important of
-the four, because a compliance tool that cannot say no has no ability to say yes
-that means anything.
+removal that did not revoke the member's sessions.
 
 **Outside this product.** The control is real and nothing here can speak to it:
 physical security, background checks, a backup plan. Listed rather than quietly
@@ -58,8 +52,7 @@ never all of it.
 
 Exit 6 is what a nightly job watches, so a broken audit chain stops a pipeline
 without anybody having to parse the document. Controls that are merely not
-evidenced do not fail the command: a command that failed on the first day would
-be switched off within a week, taking the finding that matters with it.
+evidenced do not fail the command.
 
 ## What it reads
 
@@ -96,9 +89,6 @@ created from an unverified golden or left behind after teardown.
 
 ## The HIPAA de-identification control
 
-`164.514(b)` is where this product does the most work and where its limits
-matter most, so the pack says it plainly rather than in a footnote.
-
 Every golden is scanned for real data before it can be branched, and the scan is
 signed with what was looked at, how many rows were sampled, and the hash of the
 rules used. **A scan is a sample and not a proof.** It is evidence that a masking
@@ -114,13 +104,11 @@ export AF_APP_ROLE=antifailure_app        # the role the APPLICATION connects as
 export AF_AUDIT_RETENTION_DAYS=2555       # 0 means entries are never pruned
 ```
 
-Run this as a role that can `SELECT` and nothing else. The whole document is a
-read, and a tool that produces evidence about a database it can also write is a
-tool whose evidence is worth less.
+Run this as a role that can `SELECT` and nothing else.
 
 `AF_APP_ROLE` is the role the application connects as, whose privileges on the
 audit log are one of the things reported on. It is not the role this command
-connects as, and conflating the two would report on the wrong one.
+connects as.
 
 Retention is read from configuration rather than from the database, because a
 retention policy that has not yet deleted anything leaves no trace in the data.
@@ -164,9 +152,8 @@ break restored afterwards so no case depends on running before another:
   the failing control, and no longer named once it is switched on;
 - an application role granted `UPDATE` on the audit log, naming the privilege.
 
-The number of tables carrying an `org_id` is never asserted. It is a property of
-the schema on the day it runs, so what is checked is that none of them has row
-level security disabled.
+The number of tables carrying an `org_id` is never asserted; what is checked is
+that none of them has row level security disabled.
 
 The reports that run produces, and a note saying what it did not check, are kept
 as a build artifact. Run it yourself with `just compliance`.
