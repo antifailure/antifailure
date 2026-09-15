@@ -61,7 +61,13 @@ export interface Tenant {
   token: string
 }
 
-export async function start(): Promise<Harness> {
+/** What a test may vary about how the extension is mounted. Empty for every
+ *  suite written before the seat limit existed, which is all of them. */
+export interface StartOptions {
+  seats?: (orgId: string) => Promise<number | null>
+}
+
+export async function start(options: StartOptions = {}): Promise<Harness> {
   const admin = postgres(adminUrl, { max: 2, connect_timeout: 30, onnotice: () => {} })
   await migrate(admin)
   await admin.unsafe(`ALTER ROLE antifailure_app LOGIN PASSWORD 'app-test-password'`)
@@ -74,7 +80,9 @@ export async function start(): Promise<Harness> {
   const clock = new FakeClock()
 
   clearExtensions()
-  registerExtension(scimExtension({ pool, clock, baseUrl: BASE_URL, defaultRole: 'member' }))
+  registerExtension(
+    scimExtension({ pool, clock, baseUrl: BASE_URL, defaultRole: 'member', seats: options.seats }),
+  )
 
   const { app } = createServer({
     pool,

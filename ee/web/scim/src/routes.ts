@@ -72,6 +72,12 @@ export interface ScimOptions {
   baseUrl: string
   /** The role a provisioned member gets when no group maps them to one. */
   defaultRole?: 'admin' | 'member' | 'viewer'
+  /** How many members the licence covers, or null for no limit. Asked per
+   *  request rather than captured once, so a licence that lapses or grows takes
+   *  effect on the next provisioning call rather than at the next restart. The
+   *  same shape ee/web/sso takes, because a seat limit one provisioning path
+   *  enforces and the other ignores is not a limit. */
+  seats?: (orgId: string) => Promise<number | null>
   /** Where an unexpected failure is reported. Defaults to stderr, because a
    *  500 nobody can see is a provisioning integration that stays broken. */
   log?: (line: string) => void
@@ -319,6 +325,11 @@ async function usersGet(c: Context, options: ScimOptions, caller: Caller): Promi
   return json(c, 200, userResource(user, options.baseUrl), { etag: etag(user.version) })
 }
 
+/** The seat limit for this organisation, or null when the host supplies none. */
+async function seatsFor(options: ScimOptions, caller: Caller): Promise<number | null> {
+  return options.seats ? await options.seats(caller.orgId) : null
+}
+
 async function usersCreate(c: Context, options: ScimOptions, caller: Caller): Promise<Response> {
   const body = await bodyOf(c)
   const user = await createUser(
@@ -327,6 +338,7 @@ async function usersCreate(c: Context, options: ScimOptions, caller: Caller): Pr
     readUserBody(body),
     options.clock.now(),
     options.defaultRole ?? 'member',
+    await seatsFor(options, caller),
   )
   return json(c, 201, userResource(user, options.baseUrl), {
     etag: etag(user.version),
@@ -359,6 +371,7 @@ async function usersReplace(c: Context, options: ScimOptions, caller: Caller): P
     },
     options.clock.now(),
     options.defaultRole ?? 'member',
+    await seatsFor(options, caller),
   )
   return json(c, 200, userResource(user, options.baseUrl), { etag: etag(user.version) })
 }
@@ -441,6 +454,7 @@ async function usersPatch(c: Context, options: ScimOptions, caller: Caller): Pro
     update,
     options.clock.now(),
     options.defaultRole ?? 'member',
+    await seatsFor(options, caller),
   )
   return json(c, 200, userResource(user, options.baseUrl), { etag: etag(user.version) })
 }
