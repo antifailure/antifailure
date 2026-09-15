@@ -29,7 +29,6 @@ export function DevtoolsPage() {
         items={[
           { title: "Large tables", body: "Exclusive locks and rewrites that never show up on a laptop database." },
           { title: "Query plans", body: "Plan regressions under production-shaped volume." },
-          { title: "Pools", body: "Connection-pool exhaustion during migrate-and-serve." },
         ]}
         visual={<LockWaitChain />}
       />

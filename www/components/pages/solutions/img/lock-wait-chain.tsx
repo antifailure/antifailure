@@ -16,13 +16,6 @@ const CHAIN = [
     mode: "ACCESS SHARE",
     tone: "block" as const,
   },
-  {
-    who: "pool",
-    title: "migrate-and-serve",
-    wait: "connections queued",
-    mode: "pool wait",
-    tone: "warn" as const,
-  },
 ];
 
 const INK = { block: "#C43D3D", warn: "#8A6A12" } as const;

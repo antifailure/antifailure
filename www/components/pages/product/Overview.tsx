@@ -165,7 +165,7 @@ export function OverviewPage() {
         <Split visual={<POV03 />}>
           <PageHeading kicker="Scope" title="<strong>Postgres migrations first.</strong> Not universal multicloud cloning." />
           <p className="mt-6 max-w-[560px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-            Exclusive locks, table rewrites, pool exhaustion, query-plan regressions, and old binaries
+            Exclusive locks, table rewrites, query-plan regressions, and old binaries
             that cannot read candidate writes. Conventional tests miss all of them. So the first thing
             built completely is the check for a risky Postgres-backed deployment, rather than a shallow
             version of everything.

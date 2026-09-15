@@ -1,12 +1,12 @@
 import { cn } from "@/lib/cn";
 import { FloatWindow, SageWell } from "../well";
 
-type Mode = "block" | "allow" | "capture" | "mock";
+type Mode = "block" | "allow" | "capture" | "sandbox";
 
-const MODES: Mode[] = ["block", "allow", "capture", "mock"];
+const MODES: Mode[] = ["block", "allow", "capture", "sandbox"];
 
 const MATRIX: { host: string; mode: Mode }[] = [
-  { host: "api.stripe.com", mode: "mock" },
+  { host: "api.stripe.com", mode: "sandbox" },
   { host: "api.sendgrid.com", mode: "capture" },
   { host: "hooks.slack.com", mode: "capture" },
   { host: "unknown TCP", mode: "block" },
@@ -17,14 +17,14 @@ const MODE_INK: Record<Mode, string> = {
   block: "#C43D3D",
   allow: "#61646b",
   capture: "#8A6A12",
-  mock: "#285D49",
+  sandbox: "#8A6A12",
 };
 
 const MODE_WELL: Record<Mode, string> = {
   block: "bg-[#f8e4e4]",
   allow: "bg-[#E4F1EB]",
   capture: "bg-[#f4edd6]",
-  mock: "bg-[#dceee6]",
+  sandbox: "bg-[#f4edd6]",
 };
 
 function ModeMark({ mode, on }: { mode: Mode; on: boolean }) {
@@ -48,7 +48,7 @@ function ModeMark({ mode, on }: { mode: Mode; on: boolean }) {
           <path d="M6 2.1 L9.9 6 L6 9.9 L2.1 6 Z" fill="none" stroke={ink} strokeWidth="1.25" />
         )
       ) : null}
-      {mode === "mock" ? (
+      {mode === "sandbox" ? (
         on ? (
           <circle cx="6" cy="6" r="3.4" fill={ink} />
         ) : (

@@ -29,7 +29,7 @@ const CARDS = [
   },
   {
     title: "Pass or fail, with evidence.",
-    description: "A gate on the pull request carrying the rows, the trace, and the video behind it.",
+    description: "A gate on the pull request carrying the rows and the trace behind it.",
     Visual: VerdictCard,
   },
 ];
