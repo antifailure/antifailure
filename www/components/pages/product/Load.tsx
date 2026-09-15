@@ -71,7 +71,7 @@ export function LoadPage() {
         <p className="mt-8 max-w-[560px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
           What breaks under real traffic is the mix: the page nobody thinks about that is nine
           percent of requests, and the endpoint that is fine alone and holds a lock the hot path
-          wants. So the traffic is a weighted mix read from what production actually served.
+          wants.
         </p>
         <FeatureGrid items={PROPERTIES} />
       </PageSection>
@@ -91,12 +91,6 @@ export function LoadPage() {
             weights and the arrival rate, and no baseline to measure a regression against. Setting{" "}
             <code className="font-mono text-[15px] text-black/70">p95_increase</code> under the log
             is refused when the manifest is read, rather than accepted and quietly skipped.
-          </p>
-          <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-            There were four sources once. Two of them existed only in the schema and were refused
-            when a run reached them, which is worse than not offering them: a key you can set that
-            cannot work reads as a broken product rather than an unfinished one. They are gone, and
-            anything unrecognised is refused when the manifest is read, before anything is built.
           </p>
           {/*
             Both refusals under one label because both really are AF-MAN-002:

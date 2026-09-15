@@ -77,8 +77,8 @@ export function Trust() {
                 "[&>strong]:font-normal [&>strong]:text-black",
               )}
             >
-              <strong>Fail closed. Customer-hosted.</strong> Production data stays in your
-              boundary. Cleanup is journaled as it happens, not reconstructed afterwards.
+              <strong>Fail closed. Customer-hosted.</strong> Cleanup is journaled as it happens, not
+              reconstructed afterwards.
             </h2>
             {/* Equal columns rather than the two hand-set widths this used to
                 carry. Those were measured against one viewport and left 230px

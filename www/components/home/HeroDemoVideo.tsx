@@ -265,8 +265,7 @@ export function HeroDemoVideo() {
           <p className="mt-6 text-base tracking-extra-tight text-gray-new-40 max-md:mt-5">
             Antifailure makes a copy of production, the same size and the same
             shape and the same load, with every real name replaced. Your change
-            runs there first, on every pull request, before it merges, whether a
-            person wrote it or an agent did. Then the copy deletes itself.
+            runs there whether a person wrote it or an agent did.
           </p>
         </div>
         {/* The site's own list mark, which is SectionLabel's arrow in the neon

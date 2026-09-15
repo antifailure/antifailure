@@ -139,8 +139,7 @@ export function TwinsPage() {
           <p className="mt-6 max-w-[640px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
             The shared suite defines thirty-eight runtime conformance behaviours. These seven isolation
             properties are implemented by the Docker runtime. Kubernetes and cloud runtimes are written;
-            their live verification has separate limits documented in the provider guides. Convenience
-            must not silently override containment.
+            their live verification has separate limits documented in the provider guides.
           </p>
         </Split>
       </PageSection>
@@ -150,7 +149,7 @@ export function TwinsPage() {
           <PageHeading title="<strong>A preview URL is not the product.</strong> The twin exists to answer whether the deployment is safe, then it is destroyed." />
           <p className="mt-6 max-w-[520px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
             The output is a pass or a fail on the pull request, with the rows and the trace behind
-            it. Not a dataset, and not an address somebody has to remember to shut down.
+            it.
           </p>
           <div className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-2">
             <Node label="af up" lit />
