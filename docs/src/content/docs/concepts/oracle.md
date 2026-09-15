@@ -130,7 +130,7 @@ compared, and every normaliser is narrow on purpose.
 | Random identifiers | Two strings that are both UUIDs are equal. |
 | Sequence identifiers | Compared exactly, deliberately. See below. |
 | Floating point | Numbers are equal within a relative tolerance of 1e-9, so representation noise is not news. |
-| Session cookies, request ids | `Set-Cookie`, `ETag`, `Date`, `X-Request-Id` and nine others are not compared. The full list is printed on every run. |
+| Session cookies, request ids | `Set-Cookie`, `ETag`, `Date`, `X-Request-Id` and ten others are not compared. The full list is printed on every run. |
 | Ordering of writes | Requests are sent one at a time, and rows are matched on the primary key, so storage order is never a difference. |
 
 The hour is configurable, and every run says how wide a gap the timestamp

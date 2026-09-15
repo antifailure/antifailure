@@ -138,7 +138,7 @@ exists to make sure it does.
 v1.0.0, so a rename fails in the pull request that proposes it rather than in
 somebody's upgrade.
 
-The chart carries its own version, and it is 1.0.0 for this reason. A chart at
+The chart carries its own version, past 1.0.0 for this reason. A chart at
 0.x says in the only language its ecosystem has that its values may be
 rearranged at any time.
 

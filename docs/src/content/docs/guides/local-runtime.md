@@ -224,7 +224,7 @@ info` is where that number comes from.
 
 ```
 AF-RUN-010 Writing to /Users/you/.antifailure failed because the disk is full;
-2.0 GiB is required.
+the state directory is required.
 AF-RUN-020 Docker has no room left for the environment: no space left on device
 ```
 

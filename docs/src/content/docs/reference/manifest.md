@@ -759,7 +759,7 @@ AF-MAN-002 The manifest at ./antifailure.yaml is not valid: services[0].port
 must be between 1 and 65535
 AF-MAN-003 The manifest declares schema version 2, which this build does not
 understand.
-AF-MAN-005 The manifest is larger than the 256 KiB limit.
+AF-MAN-005 The manifest is larger than the 1.0 MiB limit.
 AF-MAN-006 The path ../secrets in the manifest resolves outside the repository.
 ```
 

@@ -73,9 +73,11 @@ plane records about its own failures](#what-the-control-plane-records-about-its-
 
 ## What the alerts mean
 
-Every rule in `observability/alerts/antifailure.rules.yml` links back here. They
-read the counters the control plane keeps itself, so they need a Prometheus
-scraping `/metrics`.
+Six of the ten rules in `observability/alerts/antifailure.rules.yml` have a
+section here. `ControlPlaneAvailabilityBudgetBurningSlowly`, `ControlPlaneIsSlow`,
+`TheFailureStoreIsLosingFailures` and `TheFailureStoreCannotWrite` do not; read
+their annotations. They read the counters the control plane keeps itself, so they
+need a Prometheus scraping `/metrics`.
 
 The hosted control plane on Azure has a second, smaller set that needs no
 Prometheus and watches the platform rather than the process: the database, the
