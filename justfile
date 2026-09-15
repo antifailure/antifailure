@@ -321,6 +321,115 @@ db-down:
     @docker rm -f af-cp-test af-cp-target > /dev/null 2>&1 || true
     @echo "removed"
 
+# The object storage the golden store round trip suites need.
+#
+# THE FAILURE THIS RECIPE AND ITS CI TWIN EXIST FOR. engine/internal/golden
+# holds three round trip suites, one per remote store, and each one skipped
+# when no server answered. The engine job set AF_REQUIRE_DOCKER,
+# AF_REQUIRE_DATABASE and AF_REQUIRE_RUNNER and nothing for object storage, so
+# on every pull request all three skipped, `go test` printed nothing for a skip
+# as it always does, and the package reported ok having driven none of the four
+# operations against a server. The hand written Signature Version 4 signing in
+# store_s3.go, the account shared access signature in store_azure.go and the
+# JSON API paths in store_gcs.go are what those suites are for, and a fixture
+# cannot tell a correct signature from a plausible one.
+#
+# So the stores are PROVIDED rather than merely required. Setting
+# AF_REQUIRE_OBJECT_STORE with no server to point it at turns a vacuous pass
+# into a permanent red, which is a worse instrument and not a better one.
+#
+# This starts what ci.yml starts, at the same digests, deliberately, so a
+# developer's run and the runner's run examine the same servers. The skip
+# messages in store_test.go name this recipe.
+#
+# PINNED BY DIGEST, for the reason the Postgres above gives at length: a tag
+# moves, nothing in this repository updates it, and the server a suite was read
+# against then differs from the one it runs against by the publisher's
+# schedule. The refresh procedure is the same one written above the af-cp-test
+# container, and TestEveryPinnedImageAgreesOnOneDigest refuses a tree where
+# this recipe and ci.yml name one image at two digests.
+#
+# MINIO COMES FROM quay.io AND NOT FROM DOCKER HUB, which is a real constraint
+# rather than a preference. An anonymous pull token for docker.io/minio/minio
+# comes back carrying an EMPTY access list, so a pull of `minio/minio` from
+# Docker Hub needs a login that a fresh clone and a runner do not have. quay.io
+# serves the same image anonymously and is what MinIO's own documentation uses.
+# Written as a pull rather than as the command, because the pin gate reads a
+# bare image after `docker` plus `run` even inside a comment, and it is right
+# to: a bare name there cannot be told from a subcommand.
+#
+# THESE CREDENTIALS ARE FIXTURES AND NOT SECRETS, stated because a scanner
+# cannot tell the difference and neither can somebody reading the diff. They
+# are the defaults store_test.go already carries in tracked source, they grant
+# access to a container on loopback on this machine, and MinIO refuses a root
+# password under eight characters, which is the only reason this one is long.
+stores:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    docker rm -f af-minio af-azurite af-fakegcs > /dev/null 2>&1 || true
+
+    docker run -d --name af-minio -p 49000:9000 \
+      -e MINIO_ROOT_USER=aftestaccess -e MINIO_ROOT_PASSWORD=aftestsecret123 \
+      quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e \
+      server /data > /dev/null
+    # No `-f`, because the wait is for a RESPONSE rather than for a 200, which
+    # is also what the suite's own reachability probe asks for.
+    for _ in $(seq 1 60); do
+      curl -s -o /dev/null http://127.0.0.1:49000/minio/health/live && break
+      sleep 1
+    done
+    curl -s -o /dev/null http://127.0.0.1:49000/minio/health/live \
+      || { docker logs af-minio; echo "minio never answered"; exit 1; }
+    # The bucket, because the store deliberately does not create one: a product
+    # that quietly creates buckets is a product that quietly creates bills, and
+    # store_test.go says so at both the S3 and the GCS suite. `mc` ships inside
+    # the MinIO image, so this needs no second image and no second pin.
+    docker exec af-minio mc alias set af http://127.0.0.1:9000 \
+      aftestaccess aftestsecret123 > /dev/null
+    docker exec af-minio mc mb --ignore-existing af/afgoldens > /dev/null
+    # Proof rather than hope: the bucket the suite will address, read back.
+    docker exec af-minio mc ls af/afgoldens > /dev/null
+    echo "minio up on 49000, bucket afgoldens"
+
+    docker run -d --name af-azurite -p 41000:10000 \
+      mcr.microsoft.com/azure-storage/azurite:3.37.0@sha256:830430c1da1a2d537e08f3e6764dd1f5ae00cf0346bcaf625b968ec3f0971fd5 \
+      azurite-blob --blobHost 0.0.0.0 > /dev/null
+    for _ in $(seq 1 60); do
+      curl -s -o /dev/null "http://127.0.0.1:41000/devstoreaccount1?comp=list" && break
+      sleep 1
+    done
+    curl -s -o /dev/null "http://127.0.0.1:41000/devstoreaccount1?comp=list" \
+      || { docker logs af-azurite; echo "azurite never answered"; exit 1; }
+    echo "azurite up on 41000"
+
+    # fake-gcs-server rather than an official emulator because Google ships
+    # none for Cloud Storage, which TestGCSStore says at length and names as a
+    # real dependency on somebody else's project.
+    #
+    # No tag in front of this one, and that is deliberate rather than sloppy.
+    # engine/pkg/emulator/testdata/probe pins fake-gcs-server at this exact
+    # digest and names no tag, because it is what `latest` pointed at rather
+    # than a numbered release. Naming a version here would have made the
+    # repository run two different fake-gcs-servers, which is what
+    # TestEveryPinnedImageAgreesOnOneDigest refuses.
+    docker run -d --name af-fakegcs -p 44443:4443 \
+      fsouza/fake-gcs-server@sha256:797ce226d62f947c009dc40246b30cfb456b8473d8241407f9d6f2c04e4d69ef \
+      -scheme http -backend memory > /dev/null
+    for _ in $(seq 1 60); do
+      curl -s -o /dev/null "http://127.0.0.1:44443/storage/v1/b?project=af" && break
+      sleep 1
+    done
+    curl -s -o /dev/null "http://127.0.0.1:44443/storage/v1/b?project=af" \
+      || { docker logs af-fakegcs; echo "fake-gcs-server never answered"; exit 1; }
+    echo "fake-gcs-server up on 44443"
+    echo "the three golden stores are up; export AF_REQUIRE_OBJECT_STORE=1 to make an absent one fail rather than skip"
+
+# Remove them again.
+stores-down:
+    @docker rm -f af-minio af-azurite af-fakegcs > /dev/null 2>&1 || true
+    @echo "removed"
+
 # Install the JavaScript dependencies.
 deps:
     #!/usr/bin/env bash

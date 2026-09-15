@@ -2191,26 +2191,58 @@ func TestPinningIgnoresABuildMatrixAndStillRefusesABareName(t *testing.T) {
 	}
 }
 
+// pinnedImage matches an image reference that names a digest, capturing the
+// name with its optional tag and the digest separately.
+//
+// THE TAG HALF TAKES UPPERCASE AND THE NAME HALF DOES NOT, which is the
+// difference between seeing an image and silently not seeing it. This used to
+// be one character class covering name, colon and tag together, and it was
+// lowercase only. A registry name is lowercase by the distribution
+// specification, so that was right for the name and wrong for the tag: a tag
+// may carry uppercase, and MinIO publishes NOTHING ELSE. Its only tags are
+// `RELEASE.2025-09-07T16-13-09Z` and its siblings, so
+// `quay.io/minio/minio:RELEASE...@sha256:...` matched nothing at all, the image
+// was absent from the map below, and the gate held it equal to nothing while
+// reporting success. A pinned image this cannot see is exactly the half
+// finished bump the gate exists to refuse, and it would have read as a clean
+// tree. TestAnUppercaseTagIsStillHeldToOneDigest is the arm that says no.
+var pinnedImage = regexp.MustCompile(`([a-z0-9][a-z0-9._/-]*(?::[A-Za-z0-9_][A-Za-z0-9._-]*)?)@(sha256:[0-9a-f]{64})`)
+
+// digestsByImage groups every pinned reference in bodies by image name and then
+// by digest, so a name carrying more than one digest is a half finished bump.
+//
+// A function rather than a block inside the test, because the falsification arm
+// has to drive THIS code. An arm that re-implements the pattern proves the copy
+// works and says nothing about the gate, which is the defect this repository
+// keeps finding in its own instruments.
+func digestsByImage(bodies map[string]string) map[string]map[string][]string {
+	digests := map[string]map[string][]string{}
+	for name, body := range bodies {
+		for _, m := range pinnedImage.FindAllStringSubmatch(body, -1) {
+			image := strings.SplitN(m[1], ":", 2)[0]
+			if digests[image] == nil {
+				digests[image] = map[string][]string{}
+			}
+			digests[image][m[2]] = append(digests[image][m[2]], name)
+		}
+	}
+	return digests
+}
+
 func TestEveryPinnedImageAgreesOnOneDigest(t *testing.T) {
 	// Twelve sites name the same Postgres and no mechanism holds them equal.
 	// A bump that changes eleven of them leaves one job testing against a
 	// different server, and every job still passes, which is the shape of a
 	// defect nobody finds. This is the check that a partial bump fails on.
-	pinned := regexp.MustCompile(`([a-z0-9][a-z0-9._/:-]*)@(sha256:[0-9a-f]{64})`)
-	digests := map[string]map[string][]string{}
+	bodies := map[string]string{}
 	for _, file := range filesThatStartContainers(t) {
 		body, err := os.ReadFile(file)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, m := range pinned.FindAllStringSubmatch(string(body), -1) {
-			name := strings.SplitN(m[1], ":", 2)[0]
-			if digests[name] == nil {
-				digests[name] = map[string][]string{}
-			}
-			digests[name][m[2]] = append(digests[name][m[2]], filepath.ToSlash(file))
-		}
+		bodies[filepath.ToSlash(file)] = string(body)
 	}
+	digests := digestsByImage(bodies)
 	if len(digests) == 0 {
 		t.Fatal("no pinned image was found at all; the pattern has stopped matching")
 	}
@@ -2222,6 +2254,56 @@ func TestEveryPinnedImageAgreesOnOneDigest(t *testing.T) {
 			t.Errorf("%s is pinned to %d different digests; a bump changed some sites and not others",
 				name, len(byDigest))
 		}
+	}
+}
+
+// TestAnUppercaseTagIsStillHeldToOneDigest is the arm that proves the gate above
+// can say no about an image whose tag is not lowercase.
+//
+// It exists because the gate could not. MinIO publishes no lowercase tag at all,
+// so `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:...` in the
+// justfile and the same reference in ci.yml were invisible to the pattern: the
+// name never entered the map, so nothing could disagree, and a tree where the
+// two sites named two different digests passed. Both directions are checked
+// here, because a pattern widened until it matches everything reports a
+// disagreement that is not there and gets deleted for crying wolf.
+func TestAnUppercaseTagIsStillHeldToOneDigest(t *testing.T) {
+	const a = "sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e"
+	const b = "sha256:cf3dadcfa1fb0324f43958bad1abba986d53c4ecc04d4d50b46c7dcda28bd3cd"
+	ref := func(digest string) string {
+		return "    docker run -d --name af-minio quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@" +
+			digest + " server /data\n"
+	}
+
+	// The reference is SEEN at all, which is the half that was missing.
+	one := digestsByImage(map[string]string{"justfile": ref(a)})
+	if _, ok := one["quay.io/minio/minio"]; !ok {
+		t.Fatalf("an uppercase tag was not seen at all, so nothing could be held equal; got %v", one)
+	}
+	if got := len(one["quay.io/minio/minio"]); got != 1 {
+		t.Errorf("one site naming one digest should be one digest, got %d", got)
+	}
+
+	// And a half finished bump across two sites is reported rather than passed.
+	two := digestsByImage(map[string]string{"justfile": ref(a), ".github/workflows/ci.yml": ref(b)})
+	if got := len(two["quay.io/minio/minio"]); got != 2 {
+		t.Errorf("two sites naming two digests is the half finished bump this gate exists to refuse; "+
+			"the gate saw %d digests", got)
+	}
+
+	// The same two sites agreeing is not a finding. Without this the pattern
+	// could be widened into something that reports every tree.
+	agree := digestsByImage(map[string]string{"justfile": ref(a), ".github/workflows/ci.yml": ref(a)})
+	if got := len(agree["quay.io/minio/minio"]); got != 1 {
+		t.Errorf("two sites naming the SAME digest is a pinned tree and not a finding; "+
+			"the gate saw %d digests", got)
+	}
+
+	// A lowercase tag still works, so widening the tag half did not cost the
+	// case that already passed.
+	pg := digestsByImage(map[string]string{"ci.yml": "        image: postgres:17-alpine@" + a + "\n"})
+	if _, ok := pg["postgres"]; !ok {
+		t.Errorf("the lowercase case regressed; got %v", pg)
 	}
 }
 

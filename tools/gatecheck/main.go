@@ -768,9 +768,15 @@ func uncalledByGate(recipes []recipe, reachable map[string]bool) []string {
 	}
 
 	// Recipes that are gates rather than conveniences. A recipe that mutates
-	// (fmt, generate, db, build, clean) is not something `gate` should run.
+	// (fmt, generate, db, stores, build, clean) is not something `gate` should
+	// run. `stores` and `stores-down` are here for exactly the reason `db` and
+	// `db-down` are: they start and remove the servers a suite needs, which is
+	// setting up an answer rather than deciding one. What KEEPS them honest is
+	// a gate and already runs inside `gate`, because the suites they serve fail
+	// rather than skip under AF_REQUIRE_OBJECT_STORE.
 	convenience := map[string]bool{
 		"default": true, "setup": true, "db": true, "db-down": true, "deps": true,
+		"stores": true, "stores-down": true,
 		"build": true, "build-release": true, "test": true, "test-short": true,
 		"fmt": true, "generate": true, "clean": true, "gate": true, "leaks": true,
 		// Re-runs ONE package that `gate` already runs, and prints the note it

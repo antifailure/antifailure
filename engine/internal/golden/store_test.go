@@ -241,10 +241,12 @@ func TestS3Store(t *testing.T) {
 	bucket := envOr("AF_TEST_S3_BUCKET", "afgoldens")
 	secret := envOr("AF_TEST_S3_SECRET_KEY", "aftestsecret123")
 	if !reachable(endpoint + "/minio/health/live") {
-		t.Skipf("skipped: no S3 compatible server at %s. Start one with: "+
+		storeOrSkip(t, "no S3 compatible server at %s. Start one with `just stores`, "+
+			"which also creates the %s bucket. The store deliberately creates no "+
+			"bucket of its own, so a server started by hand needs one made in it: "+
 			"docker run -d --name af-minio -p 49000:9000 "+
 			"-e MINIO_ROOT_USER=%s -e MINIO_ROOT_PASSWORD=<secret> "+
-			"minio/minio server /data", endpoint, access)
+			"quay.io/minio/minio server /data", endpoint, bucket, access)
 	}
 	env := func(name string) string {
 		switch name {
@@ -278,7 +280,7 @@ func TestAzureStore(t *testing.T) {
 	endpoint := envOr("AF_TEST_AZURITE", "http://127.0.0.1:41000")
 	account := "devstoreaccount1"
 	if !reachable(endpoint + "/" + account + "?comp=list") {
-		t.Skipf("skipped: no Azurite at %s. Start one with: "+
+		storeOrSkip(t, "no Azurite at %s. Start one with `just stores`, or by hand: "+
 			"docker run -d --name af-azurite -p 41000:10000 "+
 			"mcr.microsoft.com/azure-storage/azurite azurite-blob --blobHost 0.0.0.0", endpoint)
 	}
@@ -317,9 +319,10 @@ func TestGCSStore(t *testing.T) {
 	endpoint := envOr("AF_TEST_GCS_ENDPOINT", "http://127.0.0.1:44443")
 	bucket := envOr("AF_TEST_GCS_BUCKET", "afgoldens")
 	if !reachable(endpoint + "/storage/v1/b?project=af") {
-		t.Skipf("skipped: no Cloud Storage compatible server at %s. Start one with: "+
-			"docker run -d --name af-fakegcs -p 44443:4443 "+
-			"fsouza/fake-gcs-server:1.52.2 -scheme http -backend memory", endpoint)
+		storeOrSkip(t, "no Cloud Storage compatible server at %s. Start one with "+
+			"`just stores`, which pins the digest CI uses, or by hand: docker run -d "+
+			"--name af-fakegcs -p 44443:4443 fsouza/fake-gcs-server "+
+			"-scheme http -backend memory", endpoint)
 	}
 	require.NoError(t, makeGCSBucket(endpoint, bucket))
 
@@ -373,7 +376,7 @@ func TestGCSStore_ReadsWithoutAltMediaWouldReturnMetadata(t *testing.T) {
 	endpoint := envOr("AF_TEST_GCS_ENDPOINT", "http://127.0.0.1:44443")
 	bucket := envOr("AF_TEST_GCS_BUCKET", "afgoldens")
 	if !reachable(endpoint + "/storage/v1/b?project=af") {
-		t.Skipf("skipped: no Cloud Storage compatible server at %s", endpoint)
+		storeOrSkip(t, "no Cloud Storage compatible server at %s", endpoint)
 	}
 	require.NoError(t, makeGCSBucket(endpoint, bucket))
 
@@ -683,6 +686,37 @@ func envOr(name, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// storeOrSkip decides what an absent object storage server means.
+//
+// It is the same decision AF_REQUIRE_DATABASE makes for Postgres and
+// AF_REQUIRE_DOCKER makes for the daemon, in the same shape, for the same
+// reason. On a laptop with no MinIO, no Azurite and no fake-gcs-server a skip
+// is honest: that machine has not found a bug. On a machine that was SUPPOSED
+// to have them it is a lie, because `go test` prints nothing for a skip and
+// the package reports ok having examined none of the four operations against a
+// server that answers.
+//
+// Every one of these suites was in exactly that state on every pull request.
+// The engine job set AF_REQUIRE_DOCKER, AF_REQUIRE_DATABASE and
+// AF_REQUIRE_RUNNER and there was no equivalent for object storage, so the
+// Signature Version 4 signing implemented by hand in store_s3.go, the account
+// shared access signature assembled in store_azure.go, and the JSON API paths
+// in store_gcs.go were unexamined every time, and the job was green. The three
+// round trip suites are the only thing in this repository that drives those
+// against a server, and a fixture cannot tell a correct signature from a
+// plausible one, which the comment above TestS3Store already says.
+//
+// ONE VARIABLE FOR ALL THREE, named for the resource rather than for a vendor,
+// because three variables is three chances to wire two of them and forget the
+// third, and the forgotten one goes back to reporting ok having run nothing.
+func storeOrSkip(t *testing.T, format string, args ...any) {
+	t.Helper()
+	if os.Getenv("AF_REQUIRE_OBJECT_STORE") != "" {
+		t.Fatalf("AF_REQUIRE_OBJECT_STORE is set, so this cannot be skipped: "+format, args...)
+	}
+	t.Skipf("skipped: "+format, args...)
 }
 
 func reachable(probe string) bool {
