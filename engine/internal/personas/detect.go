@@ -84,11 +84,15 @@ func DetectFromSchema(ctx context.Context, p SchemaProbe) (Scheme, bool, error) 
 	return Scheme{}, false, nil
 }
 
-// candidateUserTables are the names an application's own users table is
+// CandidateUserTables are the names an application's own users table is
 // called, most likely first. A list rather than a search because a search
 // finds "user_sessions" and "users_audit" too, and picking wrong is worse
 // than not picking.
-var candidateUserTables = []string{"users", "user", "accounts", "app_users", "members"}
+// Exported because engine/internal/detect answers the same question at af init
+// time, from the repository rather than from the database, and two lists of
+// table names that drift apart would have detection propose a persona form
+// provisioning then refuses.
+var CandidateUserTables = []string{"users", "user", "accounts", "app_users", "members"}
 
 // candidatePasswordColumns are what a password column is called.
 var candidatePasswordColumns = []string{
@@ -107,7 +111,7 @@ var candidateRoleColumns = []string{"role", "user_role", "role_name", "type"}
 // password column gives a scheme with no password column, and provisioning
 // then says so rather than writing a hash into a column that is not there.
 func InferGeneric(ctx context.Context, p SchemaProbe) (Scheme, bool, error) {
-	for _, name := range candidateUserTables {
+	for _, name := range CandidateUserTables {
 		found, err := p.HasTable(ctx, "public", name)
 		if err != nil {
 			return Scheme{}, false, err

@@ -399,8 +399,18 @@ func assumedByConstruction(draft *schema.Manifest) map[string]string {
 		return out
 	}
 	if n := len(draft.Personas); n > 0 {
-		out["personas"] = fmt.Sprintf(
-			"%s written for every project, not read from this one", plural(n, "account", "accounts"))
+		// How they sign in is disclosed beside the fact that they were
+		// written, because it is the one thing about them that is read from
+		// this repository, and because login: none is deliberately an account
+		// nobody can sign in as. A reader who does have a sign in page needs
+		// to know that line is there and that it is a guess.
+		how := "they sign in with a password"
+		if noPersonaSignsIn(draft.Personas) {
+			how = "they never sign in (login: none), because nothing here declares a users table " +
+				"and nothing renders a page to sign in on"
+		}
+		out["personas"] = fmt.Sprintf("%s written for every project, not read from this one, and %s",
+			plural(n, "account", "accounts"), how)
 	}
 	if n := len(draft.Workflows); n > 0 {
 		out["workflows"] = fmt.Sprintf(
@@ -408,6 +418,16 @@ func assumedByConstruction(draft *schema.Manifest) map[string]string {
 			plural(n, "workflow", "workflows"))
 	}
 	return out
+}
+
+// noPersonaSignsIn reports whether every drafted persona skips signing in.
+func noPersonaSignsIn(list []schema.Persona) bool {
+	for _, p := range list {
+		if p.Login != schema.LoginNone {
+			return false
+		}
+	}
+	return len(list) > 0
 }
 
 func resolveQuestions(env *Env, res *detect.Result, opts initOptions, assumed map[string]string) error {
@@ -808,20 +828,43 @@ func renderManifest(m *schema.Manifest) ([]byte, error) {
 	// Marked where they appear, not only in the summary the command prints
 	// once. The manifest is committed and read later by people who never ran
 	// af init, and for them the printed summary does not exist.
-	body = noteBefore(body, "personas", []string{
+	personaNote := []string{
 		"Starting points, not detected. Nothing in a repository says who its users are,",
 		"so these two are written for every project: an admin and an ordinary member.",
 		"Change the addresses and roles to ones your application would accept.",
 		"A persona that never signs in wants 'login: none', and then no account is",
 		"created and no users table has to exist.",
-	})
-	body = noteBefore(body, "workflows", []string{
+	}
+	workflowNote := []string{
 		"Starting points, not detected. These are guessed from the dependencies above,",
 		"so they describe what an application like this usually does rather than what",
 		"yours does. Read each one as a sentence and rewrite it to match a real task,",
 		"or delete it. af test refuses a manifest with none rather than reporting a run",
 		"that examined nothing.",
-	})
+	}
+	if noPersonaSignsIn(m.Personas) {
+		// Why they are written this way, in the file, for the reader who never
+		// ran the command. A password persona here cannot be created at all:
+		// there is nowhere to write the account, which af up refuses with
+		// AF-DB-022, and no form to type the password into.
+		personaNote = []string{
+			"Starting points, not detected. Nothing in a repository says who its users are,",
+			"so these two are written for every project: an admin and an ordinary member.",
+			"They sign in with 'none' because nothing here declares a users table and",
+			"nothing here renders a page to sign in on, so an account could neither be",
+			"created nor used. If your application does have a sign in, change these to",
+			"'login: password' and say where the accounts live under 'auth'.",
+		}
+		workflowNote = append(workflowNote,
+			"",
+			"These describe filling in forms, and a service with no pages has no form to",
+			"fill: rewrite each one as a read and a judgement, with a 'start_path' and",
+			"expectations naming words the response actually contains. Left as they are,",
+			"they will not pass here, and a run that verified nothing is reported as such",
+			"rather than as a pass.")
+	}
+	body = noteBefore(body, "personas", personaNote)
+	body = noteBefore(body, "workflows", workflowNote)
 	b.WriteString(body)
 
 	if m.Database != nil && m.Database.SourceURLEnv == "" {
