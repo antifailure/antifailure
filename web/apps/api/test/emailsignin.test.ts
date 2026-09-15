@@ -276,6 +276,29 @@ describe('signing in with a link', { skip: hasDatabase ? false : 'no Postgres at
     }
   })
 
+  it('stores no invitation token, and still returns to the invitation', async () => {
+    // The email path stores a return target the same way the handshake does, so
+    // fixing only the GitHub path would leave half of the exposure.
+    const address = `invite-${randomUUID().slice(0, 6)}@example.test`
+    await member(address)
+    const secret = `sekrit-${randomUUID()}`
+    await ask(address, `/invite?token=${secret}`)
+    await settled()
+
+    const [row] = await h.admin<{ redirect_to: string | null }[]>`
+      SELECT redirect_to FROM email_signin_tokens WHERE email = ${address}
+      ORDER BY created_at DESC LIMIT 1`
+    assert.ok(row, 'no row was written for a link that was sent')
+    assert.ok(
+      !(row.redirect_to ?? '').includes(secret),
+      `the raw invitation token is in email_signin_tokens.redirect_to: ${row.redirect_to}`,
+    )
+    assert.equal(row.redirect_to, '/invite')
+
+    const opened = await open(tokenSentTo(address))
+    assert.equal(opened.headers.get('location'), 'http://app.test/invite')
+  })
+
   it('destroys the session the browser already held', async () => {
     // Fixation. A cookie planted before sign-in must not survive it.
     const address = `rotate-${randomUUID().slice(0, 6)}@example.test`

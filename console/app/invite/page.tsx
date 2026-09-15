@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { ApiError, rest, useSession } from "@/lib/api";
 import { LogoMark } from "@/components/icons";
 import { Badge, Button, Lede, LinkButton, Standalone, When } from "@/components/ui";
+import { forgetInviteToken, inviteToken, rememberInviteToken, tabStore } from "@/lib/invite-token";
 
 interface Invitation {
   organization: string;
@@ -39,8 +40,21 @@ interface Accepted {
  */
 function Accept() {
   const params = useSearchParams();
-  const token = params.get("token") ?? "";
+  const queried = params.get("token");
   const session = useSession();
+
+  // null until this tab has been asked. The token arrives in the invitation
+  // link, and after a sign-in round trip it comes back from sessionStorage
+  // rather than from the URL: the control plane strips a token parameter out of
+  // any return target, because it stores that target in plain text beside the
+  // sha256 that is meant to be the only copy.
+  const [token, setToken] = useState<string | null>(null);
+  useEffect(() => {
+    const store = tabStore();
+    const resolved = inviteToken(queried, store);
+    rememberInviteToken(store, resolved);
+    setToken(resolved);
+  }, [queried]);
 
   const [invitation, setInvitation] = useState<Invitation | null>(null);
   const [lookupError, setLookupError] = useState<string | null>(null);
@@ -51,7 +65,9 @@ function Accept() {
 
   useEffect(() => {
     let alive = true;
-    if (!token) {
+    // Not resolved yet: the effect above runs first and this one runs again.
+    if (token === null) return;
+    if (token === "") {
       setLooking(false);
       setLookupError("This link is missing its token. Ask for a new invitation.");
       return;
@@ -177,6 +193,8 @@ function Accept() {
                       csrf,
                     }),
                   );
+                  // Accepted, so the tab has no further use for it.
+                  forgetInviteToken(tabStore());
                 } catch (err) {
                   setError(
                     err instanceof ApiError
@@ -204,7 +222,7 @@ function Accept() {
       ) : (
         <>
           <div className="mt-7">
-            <LinkButton href={`/auth/github?redirect_to=${encodeURIComponent(`/invite?token=${token}`)}`} full>
+            <LinkButton href={`/auth/github?redirect_to=${encodeURIComponent("/invite")}`} full>
               Sign in with GitHub to accept
             </LinkButton>
           </div>

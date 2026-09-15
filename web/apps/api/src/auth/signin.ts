@@ -247,7 +247,57 @@ export function safeRedirect(value: string | undefined | null): string | null {
   // slash, and it is the form that gets past a naive check.
   if (value.startsWith('//')) return null
   if (value.includes('\\')) return null
-  return value
+  return withoutToken(value)
+}
+
+/**
+ * The same return target with any `token` parameter taken out of its query.
+ *
+ * An invitation is stored as a sha256 and nothing else, so that a copy of the
+ * table is not a list of working invitations. The console asked to be sent back
+ * to `/invite?token=<the raw token>` after sign-in, and a return target is
+ * stored verbatim in two tables: oauth_states.redirect_to for the GitHub
+ * handshake, and email_signin_tokens.redirect_to for a sign-in link. Both are
+ * plain text. That put the raw token in the database beside the hash that
+ * exists to keep it out, for the ten minutes a handshake lives and for up to a
+ * day when nobody comes back to redeem it.
+ *
+ * It is removed here rather than at either writer because both call this, and
+ * so does every other caller of a return target: the console's /device and
+ * /connect-mcp screens and the email form in its shell. A writer fixed on its
+ * own leaves the other one, and the next caller to be added starts out broken.
+ *
+ * The token still reaches the person who was invited. It travels in the
+ * invitation link they were sent and, across a sign-in, in their own browser.
+ */
+export function withoutToken(value: string): string {
+  const fragmentAt = value.indexOf('#')
+  const fragment = fragmentAt === -1 ? '' : value.slice(fragmentAt)
+  const addressed = fragmentAt === -1 ? value : value.slice(0, fragmentAt)
+  const queryAt = addressed.indexOf('?')
+  if (queryAt === -1) return value
+  const path = addressed.slice(0, queryAt)
+  const kept = addressed
+    .slice(queryAt + 1)
+    .split('&')
+    .filter((pair) => pair !== '' && parameterName(pair) !== 'token')
+  if (kept.length === 0) return path + fragment
+  return `${path}?${kept.join('&')}${fragment}`
+}
+
+/**
+ * The name a query pair carries, lower cased, decoded when it can be.
+ *
+ * A malformed escape is not a reason to throw on a sign-in path, and a name
+ * this cannot read is a name that is not `token`.
+ */
+function parameterName(pair: string): string {
+  const raw = pair.split('=', 1)[0] ?? ''
+  try {
+    return decodeURIComponent(raw.replace(/\+/g, ' ')).trim().toLowerCase()
+  } catch {
+    return raw.trim().toLowerCase()
+  }
 }
 
 export interface CompletedSignIn {
