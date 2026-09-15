@@ -277,14 +277,16 @@ empty conclusion are all reasons to wait.
 | The release notes | `tools/relnotes` prints the notes it wrote, opening with the verification instructions and then this version's changelog section | `CHANGELOG.md` has no `## vX.Y.Z` section for this tag, or the section is empty. `just relnotes` before tagging is the same question, and the only remedy here is deleting a tag people may already have fetched |
 | Release | The tag appears under Releases with nine assets | The publish itself failed. A `files:` pattern matching nothing is one of the ways, because `fail_on_unmatched_files` is set, which turns the silent version of this into a red stage. Nothing was signed with a key, so there is nothing to revoke |
 
-### The two stages nobody has watched, and the two checks only a person can do
+### The two stages to watch, and the two checks only a person can do
 
-**The signing and the bill of materials have never run in a real release.**
-v0.1.1 predates both, and its assets are four archives, `checksums.txt` and
-`THIRD_PARTY_NOTICES.md` and nothing else. So the first real run of both is the
-release you are cutting. That is correct-looking code that has never executed,
-which is the category this project keeps getting caught by, and the answer is
-that somebody watches it rather than assuming it.
+**The signing and the bill of materials run in every release.**
+v0.1.0 and v0.1.1 predate both, and their assets are four archives, `checksums.txt`
+and `THIRD_PARTY_NOTICES.md` and nothing else. Both stages have signed and
+catalogued every release since v1.0.0, and the tags from v1.3.2 through v1.4.1 each
+published the full nine assets, so they are proven rather than assumed. They stay
+the two stages worth watching on every release anyway, because the failure this
+project keeps getting caught by is a stage that reads green while producing less
+than it should, and the answer to that is a person who looks rather than a tick.
 
 Every step of both has been rehearsed locally against the real artifacts: four
 platforms built, unpacked, catalogued by the exact syft version
