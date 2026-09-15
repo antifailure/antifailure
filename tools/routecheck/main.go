@@ -64,6 +64,11 @@ import (
 	"time"
 )
 
+// apiSrcPath holds the control plane's source, whose appRouter mount table says
+// which procedure each console path has to name. The whole tree, because a
+// mounted router can be declared outside routers/ and admin's is.
+const apiSrcPath = "web/apps/api/src"
+
 func main() {
 	root := flag.String("root", ".", "repository root")
 	origin := flag.String("origin", "", "control plane origin to probe, for example https://app.antifailure.dev. Omitted runs the offline half only.")
@@ -119,6 +124,23 @@ func run(root, origin string, allowWrites bool, timeout time.Duration, attempts 
 		return fmt.Errorf("the site calls %d route(s) this repository's control plane does not serve at all:\n  %s\n\n%s classifies every route the router mounts, and route-boundary.test.ts\nfails on one that is missing from it, so a route absent from that register is a\nroute absent from the server", len(undeclared), strings.Join(undeclared, "\n  "), boundaryPath)
 	}
 	_, _ = fmt.Fprintf(out, "every route it declares is one this repository's control plane mounts\n")
+
+	// The console half. The site builds control plane URLs; the console names
+	// tRPC procedures. Both are strings nothing joins to the server, and until
+	// this ran, only the site's half was read.
+	calls, unresolved, forwarders, err := FindConsoleCalls(filepath.Join(root, "console"))
+	if err != nil {
+		return err
+	}
+	procedures, mounts, err := ParseServerProcedures(filepath.Join(root, apiSrcPath))
+	if err != nil {
+		return err
+	}
+	if err := CheckConsoleCalls(calls, unresolved, procedures, mounts); err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(out, "the console names %d procedure path(s), and the control plane registers every one\n", len(calls))
+	_, _ = fmt.Fprintf(out, "%d transport call(s) forward a path from their caller, which is where it is read\n", len(forwarders))
 
 	if origin == "" {
 		_, _ = fmt.Fprintf(out, "\nno -origin given, so what is DEPLOYED was not checked. The offline half cannot\nsee the failure this command exists for: it passed on the day the careers form\nbroke, because main's API did declare the route.\n")

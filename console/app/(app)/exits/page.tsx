@@ -48,8 +48,15 @@ import {
  * including viewer. Not `deletion.status`, which is `organization.delete` and
  * therefore owner only: an admin on a lapsed plan holds `data.export` and
  * `sessions.manage` and would have had no page at all.
+ *
+ * The name is `account.context` because that is the procedure the server
+ * registers. This read was written as `account.exits`, a placeholder for a name
+ * the enterprise side had not chosen yet, and the enterprise side chose
+ * `context`. Nothing ever joined the two, so every render of this page asked for
+ * a procedure that does not exist, got a 404, and drew its error card: the data
+ * export and the account deletion, on the one screen a lapsed customer needs.
  */
-const EXITS_READ = "account.exits";
+const EXITS_READ = "account.context";
 
 interface Exits {
   organization: { slug: string; name: string; plan: string };
@@ -62,9 +69,11 @@ interface Exits {
   permissions: string[];
   deletion: Deletion | null;
   exportRetentionDays: number;
-  /** A count and not the list. This route answers for a member who does not
-   *  hold `sessions.manage`, and who therefore may not see who is signed in. */
-  sessions: { count: number };
+  /** A count and not the list, and NULL for anybody without `sessions.manage`.
+   *  The server fills this only for a caller who holds that permission and
+   *  leaves it null otherwise, which is the case this route exists to answer:
+   *  a member sees that sessions exist and not who is signed in or from where. */
+  sessions: { count: number } | null;
 }
 
 export default function ExitsPage() {
@@ -129,7 +138,7 @@ export default function ExitsPage() {
               {holds("sessions.manage") ? (
                 <Sessions csrf={csrf} />
               ) : (
-                <SessionsWithoutPermission count={exits.sessions.count} />
+                <SessionsWithoutPermission />
               )}
 
               {holds("data.export") ? (
@@ -172,13 +181,15 @@ export default function ExitsPage() {
 /**
  * What a member sees where the session table would be.
  *
- * A count rather than the list, because the read that reaches this page
- * answers for somebody who does not hold `sessions.manage` and must not hand
- * them who is signed in and from where. Saying the number and who can act on
- * it is the difference between a page with a hole in it and a page that
- * explains itself.
+ * No number, because there is never one to show here. This card renders in
+ * exactly the branch where the caller does NOT hold `sessions.manage`, and the
+ * server fills the count only for a caller who does, so the count it used to
+ * read was null on every single render of this card. That was not a risk of a
+ * crash, it was a crash, for every member and every viewer who reached the
+ * page. Withholding the number is also the server's decision rather than an
+ * omission: reading who is signed in is the permission this caller lacks.
  */
-function SessionsWithoutPermission({ count }: { count: number }) {
+function SessionsWithoutPermission() {
   return (
     <section className="overflow-hidden rounded-lg border border-rule bg-card">
       <div className="border-b border-rule px-4 py-3">
@@ -186,12 +197,9 @@ function SessionsWithoutPermission({ count }: { count: number }) {
       </div>
       <div className="px-4 py-4">
         <p className="max-w-[62ch] text-[13px] leading-6 text-muted">
-          {count === 1
-            ? "There is 1 live session in this organization."
-            : `There are ${count} live sessions in this organization.`}{" "}
-          Signing one out needs the sessions.manage permission, which an owner or an admin
-          holds. Closing your own account below ends every session of yours, whatever your
-          role.
+          Who is signed in, and from where, needs the sessions.manage permission, which an
+          owner or an admin holds. Closing your own account below ends every session of
+          yours, whatever your role.
         </p>
       </div>
     </section>
