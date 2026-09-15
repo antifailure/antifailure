@@ -857,8 +857,8 @@ func renderManifest(m *schema.Manifest) ([]byte, error) {
 		}
 		workflowNote = append(workflowNote,
 			"",
-			"These describe filling in forms, and a service with no pages has no form to",
-			"fill: rewrite each one as a read and a judgement, with a 'start_path' and",
+			"These describe filling in forms. A service with no pages has no form to fill,",
+			"so rewrite each one as a read and a judgement, with a 'start_path' and",
 			"expectations naming words the response actually contains. Left as they are,",
 			"they will not pass here, and a run that verified nothing is reported as such",
 			"rather than as a pass.")
