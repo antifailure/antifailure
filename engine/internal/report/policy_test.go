@@ -150,6 +150,18 @@ func TestConfigure_ANilBlockIsTheGateTheProductDescribes(t *testing.T) {
 	require.Equal(t, report.LevelWarn, p.LoadRegression)
 	require.EqualValues(t, report.DefaultLockWarnMS, p.LockWarnMS)
 	require.EqualValues(t, report.DefaultLockFailMS, p.LockFailMS)
+	require.Equal(t, report.LevelWarn, p.Review,
+		"the static code reviewer is advisory by default, never a build breaker on a model's say-so")
+}
+
+// TestConfigure_ReviewCanBeRaised proves the reviewer's level is the manifest's
+// to decide: a project that trusts it raises it to fail, and the finding then
+// stops the merge. It is the guard on the whole point of making the level come
+// from policy rather than hard-coding it in the collector.
+func TestConfigure_ReviewCanBeRaised(t *testing.T) {
+	t.Parallel()
+	p := report.Configure(&schema.Policy{Review: schema.PolicyFail})
+	require.Equal(t, report.LevelFail, p.Review)
 }
 
 func TestConfigure_TheManifestOverridesEveryLevel(t *testing.T) {

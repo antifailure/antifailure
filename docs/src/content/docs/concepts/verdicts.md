@@ -95,6 +95,7 @@ policy:
   egress_surprise: fail
   masking: fail
   cleanup: fail
+  review: warn
 ```
 
 That block is the default written out, so a project that says nothing about
@@ -114,6 +115,7 @@ the verdict.
 | `egress_surprise` | The environment tried to reach a host the manifest does not mention. The request was refused either way; this decides whether the attempt stops the merge. |
 | `masking` | The environment's own branch read back with something in it that still parses as real data. |
 | `cleanup` | Teardown left a resource behind. |
+| `review` | The static code reviewer read the change's added lines and flagged a correctness defect. It defaults to `warn` because the reviewer is model backed and its findings are probabilistic, and it runs only when a model key is configured. |
 
 A level this file does not list is refused when the manifest is read, rather
 than quietly treated as the weakest one. A manifest that said `block` and

@@ -154,6 +154,10 @@ change.`),
 			// The security families' findings, run against the twin while it is
 			// up and appended in finish in one line, exactly as migration is.
 			var securityResults []report.Finding
+			// The static code reviewer's findings. It reads the diff and not the
+			// twin, so it is computed below before the environment is brought up
+			// and appended in finish in one line, beside the security results.
+			var reviewResults []report.Finding
 			// The families register HERE, in the cli layer, rather than in
 			// security.Default. Default cannot import a family package: a family
 			// imports the security spine for the Family contract, so a spine that
@@ -182,6 +186,17 @@ change.`),
 			// per run; like the others it registers here, not in
 			// security.Default, to avoid the import cycle.
 			reg.Register(supply.New())
+
+			// The static code reviewer runs here, before the environment is
+			// brought up, because it reads the diff and not the twin: an
+			// off-by-one, a nil dereference or a new code path with no caller is
+			// in the change whether or not the environment starts, so the review
+			// is worth having even on a run whose environment never comes up. Its
+			// findings are advisory by default and folded into the verdict by the
+			// same one append line in finish that carries the security results.
+			// A nil client means no model key resolved, which the collector
+			// records as an honest skip note when there is code to review.
+			reviewResults = reviewFindings(ctx, e, o, reviewClient(ctx, e), gate, &run, branch)
 
 			// Teardown runs at most once and it runs BEFORE the report is
 			// written, which is the change that makes a failed cleanup mean
@@ -240,6 +255,12 @@ change.`),
 				// code, the pull request comment and read_security_findings like
 				// every other finding.
 				run.Findings = append(run.Findings, securityResults...)
+				// The static code reviewer's findings, computed above from the
+				// diff before the environment came up. One append line, the whole
+				// of the reviewer's wiring into the verdict: from here they ride
+				// Verdict, the exit code and the pull request comment like every
+				// other finding, at the advisory level the policy resolved.
+				run.Findings = append(run.Findings, reviewResults...)
 				run.Duration = e.Clock.Since(started).Round(time.Second).String()
 				writeReport(e, run, output, jsonOutput)
 			}

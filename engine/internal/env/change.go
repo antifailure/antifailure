@@ -75,3 +75,41 @@ func (o *Orchestrator) DependencyFiles(ctx context.Context, opts ChangeOptions) 
 	}
 	return deps, nil
 }
+
+// CodeFiles reads the same diff Change classifies and returns the code files it
+// touched, each with the lines the change adds. It is the counterpart of
+// DependencyFiles for the static code reviewer, which reasons about what a diff
+// ADDS to application code the way the supply_chain family reasons about what a
+// dependency change adds, and the profile Change returns carries the
+// classification but not the added lines. Like Change and DependencyFiles it
+// reads the diff and not the environment, so it opens no session and touches no
+// database.
+//
+// A file is a code file when its BASE surface is code, application authorization
+// code, or a schema migration, which are the surfaces a line-by-line correctness
+// review reads. Service attribution is deliberately not consulted here:
+// SurfaceService is an additive fact layered onto a file that is already code by
+// its path, never a base surface SurfaceOf returns, so filtering on the base
+// surface already includes a service's own code and excludes the config and
+// docs a review has nothing to say about.
+func (o *Orchestrator) CodeFiles(ctx context.Context, opts ChangeOptions) ([]change.File, error) {
+	files, _, _, _, err := change.Read(ctx, change.Source{
+		Root:     o.opts.Root,
+		Base:     opts.Base,
+		Head:     opts.Head,
+		DiffPath: opts.DiffPath,
+		Getenv:   opts.Getenv,
+		Progress: o.progress,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var code []change.File
+	for _, f := range files {
+		switch change.SurfaceOf(f.Path, o.opts.Manifest) {
+		case change.SurfaceCode, change.SurfaceAuth, change.SurfaceSchema:
+			code = append(code, f)
+		}
+	}
+	return code, nil
+}

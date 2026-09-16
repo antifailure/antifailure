@@ -1930,6 +1930,7 @@ func (v *validator) policy(m *schema.Manifest) {
 		"workflows_unverified": p.WorkflowsUnverified,
 		"masking":              p.Masking,
 		"cleanup":              p.Cleanup,
+		"review":               p.Review,
 	}
 	keys := make([]string, 0, len(levels))
 	for k := range levels {

@@ -641,6 +641,7 @@ func normalizePolicy(m *schema.Manifest) {
 	level(&p.WorkflowsUnverified, schema.PolicyFail)
 	level(&p.Masking, schema.PolicyFail)
 	level(&p.Cleanup, schema.PolicyFail)
+	level(&p.Review, schema.PolicyWarn)
 }
 
 // normalizeRoute cleans a safe or unsafe route pattern without destroying it.
