@@ -174,7 +174,45 @@ type Exploration struct {
 		DOM       []string `json:"dom,omitempty"`
 		Responses []string `json:"responses,omitempty"`
 	} `json:"evidence"`
-	DurationMs int64 `json:"durationMs"`
+	// Observations are the structured per-persona authorization readings the
+	// runner made against the twin: which persona reached which object class at
+	// which route, what the twin answered, and whether the object's planted
+	// canary came back. The authz family reads them to decide access control by
+	// content presence rather than by status code. Every field is a bounded
+	// location, an identity comparison or a flag, and none is a raw value; the
+	// runner decides content presence against the golden's canary inside the run
+	// and emits only the flag. Empty until the runner has the ownership and canary
+	// metadata to make a reading, which a reader fails closed on rather than
+	// reading as "no violation".
+	Observations []Observation `json:"observations,omitempty"`
+	DurationMs   int64         `json:"durationMs"`
+}
+
+// Observation is one per-persona authorization reading the runner made against
+// the twin, the wire form the authz family consumes. It carries a bounded
+// location, the acting and owning identities so a boundary crossing can be
+// decided, the status the reach returned, and the two flags a sound reading
+// needs: whether the object's planted canary was present, and whether the object
+// was seeded before the reach so a refusal proves a boundary held rather than
+// that the id was invented. No field is a raw value: Route is a template,
+// ObjectClass is a category label, and content presence is the golden canary's
+// verdict, never the body. The field names and JSON tags mirror the runner's
+// emission and the engine's security.RawObservation exactly, so the shape cannot
+// drift across the boundary.
+type Observation struct {
+	Route                string `json:"route"`
+	Method               string `json:"method"`
+	Anonymous            bool   `json:"anonymous,omitempty"`
+	ActorTenant          string `json:"actorTenant,omitempty"`
+	ActorUser            string `json:"actorUser,omitempty"`
+	ActorRole            string `json:"actorRole,omitempty"`
+	ObjectClass          string `json:"objectClass,omitempty"`
+	OwnerTenant          string `json:"ownerTenant,omitempty"`
+	OwnerUser            string `json:"ownerUser,omitempty"`
+	OwnerRole            string `json:"ownerRole,omitempty"`
+	Status               int    `json:"status"`
+	VictimContentPresent bool   `json:"victimContentPresent,omitempty"`
+	SetupConfirmed       bool   `json:"setupConfirmed,omitempty"`
 }
 
 // Setting is the one line saying how an exploration was pointed.

@@ -55,29 +55,56 @@ const maxBodyBytes = 1 << 20
 // reporting it as a pass with no findings is the single most damaging answer
 // this family could give.
 //
-// Today the live path exercises the unauthenticated reach, which is the one
+// The Go-driven live path exercises the unauthenticated reach, which is the one
 // authorization question a Go probe can ask soundly without a session: no
 // credential is derived, no login is driven, the request simply carries no
 // identity. It fires only when a planted marker from the golden comes back to an
 // anonymous caller, so a 200 that returns public content never flags. The
 // horizontal, vertical and escalation classes need an authenticated identity,
 // which is established by the runner's browser session and not reachable from Go
-// here; those are decided by Assess over observations a caller supplies, and the
-// live collection of them lands when the session transport does. The seam is the
-// same: Assess is the brain, and the transport is what changes.
+// here; those are decided by Assess over the structured per-persona observations
+// the runner emits and a caller supplies through in.Observations(). The seam is
+// the same: Assess is the brain, and the transport is what changes. This func is
+// that caller: the authenticated differential is wired below over BuildSnapshot,
+// so the observation contract has a live reader rather than an accessor nothing
+// calls.
 func (f *family) Probe(ctx context.Context, in security.Input) ([]report.Finding, error) {
 	snap, err := f.collect(ctx, in.Env.BaseURL, in.Targets, markersOf(in.Golden))
 	if err != nil {
 		return nil, err
 	}
-	// No baseline is available through the merged Input; the router supplies the
-	// second environment when it lands. Until then the candidate is judged
-	// against the absolute expectation, which is exactly right for the
-	// unauthenticated reach: an added endpoint that returns planted content to
-	// anon is a regression whether or not there was ever a base reading, because
-	// there is nothing on the baseline for a newly unprotected endpoint to
-	// differ from.
-	return Assess(nil, snap, in.Policy), nil
+	// The unauthenticated reach, judged against the absolute expectation: an added
+	// endpoint that returns planted content to anon is a regression whether or not
+	// there was ever a base reading, because there is nothing on the baseline for
+	// a newly unprotected endpoint to differ from. This path is Go-driven and
+	// works with no observations at all, so it is never regressed by the
+	// authenticated path below.
+	findings := Assess(nil, snap, in.Policy)
+
+	// The authenticated differential: idor, cross_tenant and privilege_escalation,
+	// decided over the runner's structured observations. BuildSnapshot returns nil
+	// when in.Observations() is nil, which is the NOT MEASURED state: the runner
+	// emitted nothing, so the authenticated classes are not exercised and this
+	// appends no finding rather than a clean pass it did not earn. It never blocks
+	// the whole family on the missing observations, because that would silence the
+	// unauthenticated reach above, which needs none; the honest signal for "the
+	// runner did not emit observations" is the absence of an authenticated
+	// finding, not a red build over a working anonymous probe.
+	//
+	// When observations ARE present the differential runs: a cross-owner reach
+	// that returned the victim's content fires on its class's key, and a reach the
+	// boundary refused with a live arm produces nothing. A base twin, when one was
+	// built, suppresses a pre-existing reach the base already allowed; without one
+	// every candidate leak is judged against the absolute expectation, which still
+	// fires, so the feature delivers value before the base-twin lane lands.
+	if cand := BuildSnapshot(in.Observations(), in.Golden); cand != nil {
+		var base *Snapshot
+		if b, ok := in.Baseline(); ok {
+			base = BuildSnapshot(b.Observations, in.Golden)
+		}
+		findings = append(findings, Assess(base, cand, in.Policy)...)
+	}
+	return findings, nil
 }
 
 // collect drives the twin and builds the candidate snapshot. It proves its own
