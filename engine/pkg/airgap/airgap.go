@@ -72,6 +72,7 @@ const (
 	SiteReleaseCheck    Site = "the release check"
 	SiteTelemetry       Site = "the telemetry exporter"
 	SiteModelProbe      Site = "the model key probe"
+	SiteReviewer        Site = "the code reviewer"
 	SiteOracle          Site = "the workflow oracle"
 	SitePersonas        Site = "the identity provider seeding"
 	SiteControlPlane    Site = "the control plane client"

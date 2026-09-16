@@ -1325,7 +1325,13 @@ func TestSchemaConstraintReport(t *testing.T) {
 // per base, diversity.personalities[].id and workflows[].personality set to a
 // real built in, without which the generator fills them with the app name and
 // the validator refuses the base itself, which is the #315 failure exactly.
-const wantConstraints = 661
+// Then 663. The static code reviewer added the policy.review key, a string with
+// the same three-level enum every other policy key carries. Two constraints, its
+// type and its enum, both ENFORCED and measured in every base: the decoder
+// refuses a non-string and the validator refuses a level that is not one of the
+// three by name, exactly as it does for masking and cleanup. The generated base
+// fills it with a valid level, so no base is refused.
+const wantConstraints = 663
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and

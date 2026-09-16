@@ -58,6 +58,7 @@ recorded with the site that made it.
 | the release check | `api.github.com`, and the release download `af update` fetches |
 | the telemetry exporter | `OTEL_EXPORTER_OTLP_ENDPOINT` |
 | the model key probe | your model provider, from `af model test` and from the MCP server |
+| the code reviewer | your model provider, from the static code review lane in `af ci` |
 | the workflow oracle | the two deployments `af oracle` compares |
 | the identity provider seeding | Clerk, Auth0, WorkOS |
 | the control plane client | the control plane |

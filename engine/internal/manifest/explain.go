@@ -556,6 +556,7 @@ func failingPolicies(p *schema.Policy) string {
 		{"workflows_unverified", p.WorkflowsUnverified},
 		{"masking", p.Masking},
 		{"cleanup", p.Cleanup},
+		{"review", p.Review},
 	}
 	var names []string
 	for _, pair := range pairs {

@@ -1748,6 +1748,16 @@
           "default": "fail",
           "description": "A run in which no workflow reached a verdict about the application, because every one was blocked or unverified or because none was declared. Distinct from a single blocked workflow, which is never counted against the application: one gap in the tooling is not evidence, and a run where every workflow was a gap has tested nothing at all, so reporting it as a pass says the application was checked when it was not. Set it to warn if the project has no workflows yet and you would rather record that choice than be told about it."
         },
+        "review": {
+          "type": "string",
+          "enum": [
+            "ignore",
+            "warn",
+            "fail"
+          ],
+          "default": "warn",
+          "description": "A finding from the static code reviewer, the model-backed lane that reads the change's added lines and reports the correctness defects a diff introduces: an off-by-one, a nil dereference, an unhandled error, a boundary the new code does not hold, a new code path with no caller. It defaults to warn rather than fail because the reviewer is an LLM reading a diff and its findings are probabilistic, so it advises without blocking a merge on a model's say-so. Raise it to fail once the project trusts it, or set it to ignore to drop the findings. The reviewer runs only when the change touched code and only when a model key is configured; with no key it is skipped and the run says so."
+        },
         "security": {
           "type": "object",
           "additionalProperties": {

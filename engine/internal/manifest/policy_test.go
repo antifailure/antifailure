@@ -25,6 +25,8 @@ func TestPolicy_DefaultsAreFilledIn(t *testing.T) {
 	require.Equal(t, schema.PolicyWarn, m.Policy.PlanRegression)
 	require.Equal(t, schema.PolicyWarn, m.Policy.QueryRegression)
 	require.Equal(t, schema.PolicyWarn, m.Policy.LoadRegression)
+	require.Equal(t, schema.PolicyWarn, m.Policy.Review,
+		"the static code reviewer is advisory by default, so its normalized level is warn")
 }
 
 func TestPolicy_AnExplicitLevelSurvivesNormalisation(t *testing.T) {

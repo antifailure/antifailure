@@ -78,6 +78,13 @@ type Policy struct {
 	// a broken application. All of them blocked is a different claim, and
 	// exiting zero on it says "tested, fine" about a run that tested nothing.
 	WorkflowsUnverified Level
+	// Review is what a static code reviewer finding does to the check. It
+	// defaults to warn, not fail, because the reviewer is an LLM reading a diff
+	// and its findings are probabilistic: a warn advises without blocking a
+	// merge on a model's say-so, and a project that trusts the reviewer can
+	// raise it. Every review finding, whatever its category, carries this one
+	// level, the same way every load finding carries LoadRegression.
+	Review Level
 
 	// Security is the resolved level for each security policy key, keyed by the
 	// full "security.<family>.<rule>" name.
@@ -115,6 +122,9 @@ func Configure(in *schema.Policy) Policy {
 		// warn and have that choice recorded in its manifest, which is better
 		// than the silent pass it used to get for free.
 		WorkflowsUnverified: LevelFail,
+		// Advisory by default: an LLM review must not fail a build on its own
+		// account, so a project raises this deliberately when it trusts it.
+		Review: LevelWarn,
 	}
 	if in == nil {
 		return p
@@ -142,6 +152,7 @@ func Configure(in *schema.Policy) Policy {
 	set(&p.Masking, in.Masking)
 	set(&p.Cleanup, in.Cleanup)
 	set(&p.WorkflowsUnverified, in.WorkflowsUnverified)
+	set(&p.Review, in.Review)
 
 	// The security overrides. Each is a "security.<family>.<rule>" key mapped to
 	// a level. A value the manifest validator already refused never reaches

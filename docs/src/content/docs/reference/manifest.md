@@ -563,6 +563,7 @@ refused at the line rather than treated as the weakest one.
 | `masking` | `fail` | The branch read back with data that still parses as real. |
 | `cleanup` | `fail` | Teardown left a resource behind. |
 | `workflows_unverified` | `fail` | No workflow reached a verdict about the application, because every one was blocked or unverified or because none was declared. |
+| `review` | `warn` | The static code reviewer flagged a correctness defect in the change's added lines. Advisory by default because the reviewer is model backed; runs only when a model key is configured. |
 
 See [verdicts](/docs/concepts/verdicts) for what each level does to the run
 and to the exit code.

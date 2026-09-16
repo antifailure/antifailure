@@ -1148,6 +1148,12 @@ type Policy struct {
 	// about the application, because every one was blocked or unverified or
 	// because none was declared.
 	WorkflowsUnverified PolicyLevel `json:"workflows_unverified,omitempty" yaml:"workflows_unverified,omitempty"`
+	// Review is a finding from the static code reviewer, the LLM-backed lane
+	// that reads the change's added lines for correctness defects. It defaults
+	// to warn rather than fail, because the reviewer is probabilistic and must
+	// not block a merge on a model's say-so; raise it to fail once the project
+	// trusts it.
+	Review PolicyLevel `json:"review,omitempty" yaml:"review,omitempty"`
 	// Security maps each dynamic security check key, "security.<family>.<rule>"
 	// such as security.authz.idor, to what a finding on it does to the check.
 	//

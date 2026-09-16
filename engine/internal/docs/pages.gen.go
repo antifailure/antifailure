@@ -3849,6 +3849,7 @@ policy:
   egress_surprise: fail
   masking: fail
   cleanup: fail
+  review: warn
 ` + "`" + "`" + "`" + `
 
 That block is the default written out, so a project that says nothing about
@@ -3868,6 +3869,7 @@ the verdict.
 | ` + "`" + `egress_surprise` + "`" + ` | The environment tried to reach a host the manifest does not mention. The request was refused either way; this decides whether the attempt stops the merge. |
 | ` + "`" + `masking` + "`" + ` | The environment's own branch read back with something in it that still parses as real data. |
 | ` + "`" + `cleanup` + "`" + ` | Teardown left a resource behind. |
+| ` + "`" + `review` + "`" + ` | The static code reviewer read the change's added lines and flagged a correctness defect. It defaults to ` + "`" + `warn` + "`" + ` because the reviewer is model backed and its findings are probabilistic, and it runs only when a model key is configured. |
 
 A level this file does not list is refused when the manifest is read, rather
 than quietly treated as the weakest one. A manifest that said ` + "`" + `block` + "`" + ` and
@@ -4914,6 +4916,7 @@ recorded with the site that made it.
 | the release check | ` + "`" + `api.github.com` + "`" + `, and the release download ` + "`" + `af update` + "`" + ` fetches |
 | the telemetry exporter | ` + "`" + `OTEL_EXPORTER_OTLP_ENDPOINT` + "`" + ` |
 | the model key probe | your model provider, from ` + "`" + `af model test` + "`" + ` and from the MCP server |
+| the code reviewer | your model provider, from the static code review lane in ` + "`" + `af ci` + "`" + ` |
 | the workflow oracle | the two deployments ` + "`" + `af oracle` + "`" + ` compares |
 | the identity provider seeding | Clerk, Auth0, WorkOS |
 | the control plane client | the control plane |
@@ -22322,6 +22325,7 @@ refused at the line rather than treated as the weakest one.
 | ` + "`" + `masking` + "`" + ` | ` + "`" + `fail` + "`" + ` | The branch read back with data that still parses as real. |
 | ` + "`" + `cleanup` + "`" + ` | ` + "`" + `fail` + "`" + ` | Teardown left a resource behind. |
 | ` + "`" + `workflows_unverified` + "`" + ` | ` + "`" + `fail` + "`" + ` | No workflow reached a verdict about the application, because every one was blocked or unverified or because none was declared. |
+| ` + "`" + `review` + "`" + ` | ` + "`" + `warn` + "`" + ` | The static code reviewer flagged a correctness defect in the change's added lines. Advisory by default because the reviewer is model backed; runs only when a model key is configured. |
 
 See [verdicts](/docs/concepts/verdicts) for what each level does to the run
 and to the exit code.
@@ -23988,6 +23992,7 @@ What each class of finding does to the pull request check. A finding at 'fail' f
 | ` + "`" + `migration_rewrite` + "`" + ` | ` + "`" + `ignore` + "`" + `, ` + "`" + `warn` + "`" + `, ` + "`" + `fail` + "`" + ` | no | A statement Postgres reported as rewriting a table, which copies every row under a lock nothing can read through. Defaults to ` + "`" + `warn` + "`" + `. |
 | ` + "`" + `plan_regression` + "`" + ` | ` + "`" + `ignore` + "`" + `, ` + "`" + `warn` + "`" + `, ` + "`" + `fail` + "`" + ` | no | A query plan that got worse in one of three plan regressions: a table is now read end to end, an index is no longer used, or the planner's estimate grew. Defaults to ` + "`" + `warn` + "`" + `. |
 | ` + "`" + `query_regression` + "`" + ` | ` + "`" + `ignore` + "`" + `, ` + "`" + `warn` + "`" + `, ` + "`" + `fail` + "`" + ` | no | A statement that runs more often, or slower, than the saved baseline did. Needs a baseline to compare against. Defaults to ` + "`" + `warn` + "`" + `. |
+| ` + "`" + `review` + "`" + ` | ` + "`" + `ignore` + "`" + `, ` + "`" + `warn` + "`" + `, ` + "`" + `fail` + "`" + ` | no | A finding from the static code reviewer, the model-backed lane that reads the change's added lines and reports the correctness defects a diff introduces: an off-by-one, a nil dereference, an unhandled error, a boundary the new code does not hold, a new code path with no caller. It defaults to warn rather than fail because the reviewer is an LLM reading a diff and its findings are probabilistic, so it advises without blocking a merge on a model's say-so. Raise it to fail once the project trusts it, or set it to ignore to drop the findings. The reviewer runs only when the change touched code and only when a model key is configured; with no key it is skipped and the run says so. Defaults to ` + "`" + `warn` + "`" + `. |
 | ` + "`" + `security` + "`" + ` | object | no | What each dynamic security check finding does to the pull request check, keyed by the finding's rule such as security.authz.idor or security.headers.cookie_not_secure. A finding at fail stops the merge, one at warn is reported and the check still passes, and one at ignore is dropped. The keys are open on purpose: the legal ones are the keys the security check families declare, which the engine knows and this document does not, so a key set here that no family reads is carried until the family that reads it lands. Only the level is constrained, the same three values every other policy key takes. |
 | ` + "`" + `workflows_unverified` + "`" + ` | ` + "`" + `ignore` + "`" + `, ` + "`" + `warn` + "`" + `, ` + "`" + `fail` + "`" + ` | no | A run in which no workflow reached a verdict about the application, because every one was blocked or unverified or because none was declared. Distinct from a single blocked workflow, which is never counted against the application: one gap in the tooling is not evidence, and a run where every workflow was a gap has tested nothing at all, so reporting it as a pass says the application was checked when it was not. Set it to warn if the project has no workflows yet and you would rather record that choice than be told about it. Defaults to ` + "`" + `fail` + "`" + `. |
 
