@@ -8,7 +8,7 @@
 import {
   chromium, devices, type Browser, type BrowserContext, type Page as PWPage,
 } from 'playwright';
-import type { Request as PWRequest } from 'playwright';
+import type { Request as PWRequest, Response as PWResponse } from 'playwright';
 import type { Page } from './login.ts';
 import type { Snapshot } from './workflow.ts';
 import { FramePump, type LiveSink } from './live.ts';
@@ -86,6 +86,70 @@ export interface Evidence {
    *  the egress policy and is worth saying so rather than leaving somebody to
    *  guess. */
   readonly failed: readonly string[];
+  /** DOM is the rendered text of each page the run stood on, and Responses is
+   *  the bounded body of each same-origin document, JSON or text response it
+   *  received. They exist so a leak family can scan for a secret by SHAPE, a
+   *  Stripe key or a private key that reached a response, without a second pass
+   *  over the environment. Both stay inside the engine as evidence: a finding
+   *  reports a location and a kind, never a captured byte. Bounded in count and
+   *  in bytes so a chatty page cannot fill memory, and a cross-origin third
+   *  party's body is never captured, because it is neither this run's secret to
+   *  find nor a body this run is responsible for. */
+  readonly dom: readonly string[];
+  readonly responses: readonly string[];
+}
+
+/** How much captured evidence one session keeps, so a run against a chatty or
+ *  large application cannot grow without bound. A body over the per-body cap is
+ *  truncated rather than dropped, since a secret shape near the front is still
+ *  worth catching; a body whose declared length is already over it is skipped
+ *  before it is read at all. The total cap is the backstop across every stream. */
+const MAX_RESPONSES = 200;
+const MAX_RESPONSE_BYTES = 64 * 1024;
+const MAX_DOM = 100;
+const MAX_EVIDENCE_BYTES = 4 * 1024 * 1024;
+/** How many distinct reached requests one session records. The injection family
+ *  fuzzes a de-duplicated set of routes, so this bounds the raw reach before the
+ *  dedup, and a page that fetches thousands of times cannot grow it unboundedly. */
+const MAX_REACHED = 1_000;
+
+/** originOf is the scheme://host:port of a URL, or undefined when it has none to
+ *  speak of, so an about:blank or a data URL is never treated as same-origin. */
+function originOf(raw: string): string | undefined {
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return undefined;
+    return u.origin;
+  } catch {
+    return undefined;
+  }
+}
+
+/** pathWithQuery is a URL's path and query, without its origin, so a reached
+ *  request carries a location and the query parameter names a fuzzer varies. The
+ *  values are reduced to names only by the engine before a route can leave it,
+ *  and the runner strips anything it typed on the way out. */
+function pathWithQuery(raw: string): string | undefined {
+  try {
+    const u = new URL(raw);
+    return u.pathname + u.search;
+  } catch {
+    return undefined;
+  }
+}
+
+/** isTextResponse reports whether a content type is one a leak family can scan
+ *  as text: a document, JSON, or another text or XML body. An image, a font or
+ *  an opaque binary is not, and capturing it would spend the byte budget on
+ *  something no detector reads. */
+function isTextResponse(contentType: string): boolean {
+  return (
+    contentType.includes('text/')
+    || contentType.includes('application/json')
+    || contentType.includes('+json')
+    || contentType.includes('application/xml')
+    || contentType.includes('+xml')
+  );
 }
 
 /** Waits for the page to stop fetching, and gives up quietly.
@@ -177,6 +241,21 @@ export class Session {
   readonly #page: PWPage;
   readonly #console: string[] = [];
   readonly #failed: string[] = [];
+  /** The rendered text of each page the run stood on and the bounded body of
+   *  each same-origin text response it received, for a leak family to scan by
+   *  shape. Bounded by the caps above; #evidenceBytes is the running total. */
+  readonly #dom: string[] = [];
+  readonly #responses: string[] = [];
+  #evidenceBytes = 0;
+  /** Every same-origin request that reached the server, deduped by method and
+   *  path, so the injection family can fuzz a POST or fetch route and not only
+   *  a GET navigation. #reachedSeen is the dedup key set. */
+  readonly #reached: { method: string; path: string }[] = [];
+  readonly #reachedSeen = new Set<string>();
+  /** The origin of the first document this page navigated to, so a third party
+   *  the page pulls in (analytics, a font CDN) is never captured as evidence or
+   *  fuzzed as a route. Undefined until the first navigation. */
+  #baseOrigin: string | undefined;
   /** How many requests this page has in the air right now. See quiet. */
   #inFlight = 0;
   /** The main frame's navigation that has not answered yet, if any. See click. */
@@ -245,8 +324,15 @@ export class Session {
 
     page.on('request', (r) => {
       session.#inFlight++;
-      if (r.isNavigationRequest() && r.frame() === page.mainFrame()) session.#navigating = r;
+      if (r.isNavigationRequest() && r.frame() === page.mainFrame()) {
+        session.#navigating = r;
+        // The first document the page navigated to fixes the origin every later
+        // capture is measured against, so a third party the page pulls in is
+        // never mistaken for the application's own surface.
+        if (session.#baseOrigin === undefined) session.#baseOrigin = originOf(r.url());
+      }
     });
+    page.on('response', (r) => { void session.#record(r); });
     page.on('requestfinished', (r) => {
       session.#inFlight--;
       if (r === session.#navigating) session.#navigating = undefined;
@@ -293,6 +379,73 @@ export class Session {
     } catch {
       return undefined;
     }
+  }
+
+  /** record folds one response into the run's evidence: the request that
+   *  reached the server, so a POST or fetch route can be fuzzed and not only a
+   *  GET navigation, and the response body, so a leak family can scan it for a
+   *  secret by shape. Same-origin only, text-like only, and bounded in count and
+   *  in bytes, so a third party's body, a large download or an image never
+   *  enters the evidence. Best effort: a body that cannot be read is skipped,
+   *  never thrown, exactly like the live frame and the durable video, because a
+   *  response that raced teardown must never fail a run.
+   */
+  async #record(resp: PWResponse): Promise<void> {
+    try {
+      const origin = originOf(resp.url());
+      // A third party the page pulled in is neither a route this run reached in
+      // the sense the fuzzer means nor a body this run is responsible for.
+      if (origin === undefined || origin !== this.#baseOrigin) return;
+
+      // The request reached the server: record its method and location, deduped.
+      // The path carries its query for the engine to reduce to parameter names;
+      // no value leaves in a route.
+      const path = pathWithQuery(resp.url());
+      if (path !== undefined) {
+        const method = resp.request().method();
+        const key = `${method} ${path}`;
+        if (!this.#reachedSeen.has(key) && this.#reached.length < MAX_REACHED) {
+          this.#reachedSeen.add(key);
+          this.#reached.push({ method, path });
+        }
+      }
+
+      // The body, for a leak family to scan. Text-like only, bounded per body
+      // and in total, so a large or binary response never sits in memory.
+      if (this.#responses.length >= MAX_RESPONSES) return;
+      if (this.#evidenceBytes >= MAX_EVIDENCE_BYTES) return;
+      const type = (resp.headers()['content-type'] ?? '').toLowerCase();
+      if (!isTextResponse(type)) return;
+      const declared = Number(resp.headers()['content-length'] ?? '');
+      if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) return;
+      const body = await resp.text().catch(() => '');
+      this.#keep(this.#responses, MAX_RESPONSES, body);
+    } catch {
+      // Best effort: capturing evidence never changes the run.
+    }
+  }
+
+  /** keep adds one bounded, de-duplicated text to a stream, respecting the
+   *  stream's count cap and the total byte budget. A body longer than the
+   *  per-body cap is truncated rather than dropped, since a secret shape near
+   *  its front is still worth catching. */
+  #keep(stream: string[], limit: number, text: string): void {
+    if (!text) return;
+    if (stream.length >= limit) return;
+    if (this.#evidenceBytes >= MAX_EVIDENCE_BYTES) return;
+    const bounded = text.length > MAX_RESPONSE_BYTES ? text.slice(0, MAX_RESPONSE_BYTES) : text;
+    if (stream.includes(bounded)) return;
+    if (this.#evidenceBytes + bounded.length > MAX_EVIDENCE_BYTES) return;
+    this.#evidenceBytes += bounded.length;
+    stream.push(bounded);
+  }
+
+  /** reached is every same-origin request the run made, deduped by method and
+   *  path, so the injection family can fuzz a POST or fetch route and not only a
+   *  GET navigation. The path carries its query for the engine to reduce to
+   *  parameter names; no value leaves in a route. */
+  reached(): readonly { method: string; path: string }[] {
+    return this.#reached;
   }
 
   /** page returns the adapter the login and workflow code drives. */
@@ -533,6 +686,10 @@ export class Session {
       return { controls: out, unnamed, submits };
     }).catch(() => ({ controls: [] as string[], unnamed: 0, submits: [] as string[] }));
 
+    const text = await pw.locator('body').innerText().catch(() => '');
+    // The rendered text of a page the run observed, kept for a leak family to
+    // scan by shape, deduped and bounded like the response bodies.
+    this.#keep(this.#dom, MAX_DOM, text);
     return {
       url: pw.url(),
       title: await pw.title().catch(() => ''),
@@ -540,7 +697,7 @@ export class Session {
       controls: interactive.controls,
       submits: interactive.submits,
       unnamed: interactive.unnamed,
-      text: await pw.locator('body').innerText().catch(() => ''),
+      text,
       status: this.#lastStatus,
     };
   }
@@ -592,7 +749,13 @@ export class Session {
     }
     await this.#browser.close();
 
-    this.#closed = { ...evidence, console: this.#console, failed: this.#failed };
+    this.#closed = {
+      ...evidence,
+      console: this.#console,
+      failed: this.#failed,
+      dom: this.#dom,
+      responses: this.#responses,
+    };
     return this.#closed;
   }
 }

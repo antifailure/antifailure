@@ -185,7 +185,28 @@ type Exploration struct {
 	// metadata to make a reading, which a reader fails closed on rather than
 	// reading as "no violation".
 	Observations []Observation `json:"observations,omitempty"`
-	DurationMs   int64         `json:"durationMs"`
+	// Requests are the ingress requests the runner's browser actually reached,
+	// every method and location, deduped. observedRoutes folds them into the
+	// routes the injection family fuzzes, so a POST or fetch API route is
+	// exercised and not only a GET page navigation, which is where most real
+	// injection lives. A location, never a value: the runner strips what it
+	// typed and observedRoutes reduces the query to parameter names before a
+	// Route can leave the engine. Empty when the exploration reached nothing,
+	// absent on an older runner that did not emit it, which observedRoutes reads
+	// as simply no request source to add.
+	Requests   []Request `json:"requests,omitempty"`
+	DurationMs int64     `json:"durationMs"`
+}
+
+// Request is one ingress request the runner's browser reached, the wire form
+// observedRoutes consumes. It is a method and a location, never a captured body:
+// Path carries the query for observedRoutes to reduce to parameter names, and
+// Method is what lets a POST or fetch route be fuzzed and not only a GET
+// navigation. The field names and JSON tags mirror the runner's emission, so the
+// shape cannot drift across the boundary.
+type Request struct {
+	Method string `json:"method"`
+	Path   string `json:"path"`
 }
 
 // Observation is one per-persona authorization reading the runner made against

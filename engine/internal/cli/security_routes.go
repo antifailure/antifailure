@@ -18,17 +18,18 @@ import (
 // family dormant: it reported blocked and fuzzed nothing.
 //
 // WHERE THE ROUTES COME FROM, AND WHY THAT IS HONEST. The runner records every
-// page the browser stood on (report.Exploration.Results[].Visited) and every
-// navigation it made (the goto moves in Journey). Those are URLs the run
-// genuinely reached, observed rather than assumed. It is deliberately NOT the
-// manifest's declared workflows or probes: a declared route is a claim about
-// what should be reachable, and the injection family's contract is to fuzz what
-// the run OBSERVED reaching. The one honest limit is the method. Visited and
-// the goto moves are GET page loads, the addresses the browser navigated to; a
-// form POST's target is not recorded as a method and path by the runner today,
-// so a route sourced here is a GET. Emitting a POST we did not observe would be
-// the declared-versus-observed mistake this producer exists to avoid, so the
-// method is GET and the follow-on is a runner that emits every reached request.
+// page the browser stood on (report.Exploration.Results[].Visited), every
+// navigation it made (the goto moves in Journey), and every request it actually
+// reached, with its method (report.Exploration.Results[].Requests). Those are
+// URLs and requests the run genuinely reached, observed rather than assumed. It
+// is deliberately NOT the manifest's declared workflows or probes: a declared
+// route is a claim about what should be reachable, and the injection family's
+// contract is to fuzz what the run OBSERVED reaching. Visited and the goto moves
+// are GET page loads, so a route sourced from them is a GET. A recorded request
+// carries its own method, so a form POST or a fetch/XHR the page made is fuzzed
+// as the POST it was: the runner now emits every reached request, which is where
+// most real SQL injection lives, and emitting a method we did not observe is the
+// declared-versus-observed mistake this producer still avoids.
 //
 // THE VALUE BOUNDARY. A Route is a location and never a value, the same rule the
 // rest of the security layer holds: a concrete id in a path (/api/orders/123) is
@@ -71,7 +72,7 @@ func observedRoutes(run *report.Run) []security.Route {
 	params := map[string]map[string]bool{}
 	var order []string
 
-	add := func(raw string) {
+	add := func(method, raw string) {
 		u, err := url.Parse(strings.TrimSpace(raw))
 		if err != nil {
 			return
@@ -93,10 +94,18 @@ func observedRoutes(run *report.Run) []security.Route {
 		if isStaticAsset(p) {
 			return
 		}
+		// A reach with no method is a GET page load; a recorded request carries
+		// its own, so a POST or fetch route is fuzzed as the method it was. The
+		// method and path together key the route, so the same path reached by
+		// GET and by POST is two routes and not one.
+		method = strings.ToUpper(strings.TrimSpace(method))
+		if method == "" {
+			method = http.MethodGet
+		}
 		tmpl := templatePath(p)
-		key := http.MethodGet + " " + tmpl
+		key := method + " " + tmpl
 		if _, ok := index[key]; !ok {
-			index[key] = &security.Route{Method: http.MethodGet, Path: tmpl}
+			index[key] = &security.Route{Method: method, Path: tmpl}
 			params[key] = map[string]bool{}
 			order = append(order, key)
 		}
@@ -107,12 +116,17 @@ func observedRoutes(run *report.Run) []security.Route {
 
 	for _, x := range run.Exploration.Results {
 		for _, v := range x.Visited {
-			add(v)
+			add(http.MethodGet, v)
 		}
 		for _, m := range x.Journey {
 			if m.Kind == "goto" && m.URL != "" {
-				add(m.URL)
+				add(http.MethodGet, m.URL)
 			}
+		}
+		// Every reached request the runner recorded, with its own method, so a
+		// POST or fetch API route reaches the fuzzer and not only a GET page.
+		for _, rq := range x.Requests {
+			add(rq.Method, rq.Path)
 		}
 	}
 

@@ -220,3 +220,108 @@ func reflectingServer() *httptest.Server {
 		fmt.Fprintf(w, "you said: %s", r.URL.Query().Get("q"))
 	}))
 }
+
+// runWithRequests builds a report.Run whose exploration recorded the given
+// reached requests, the shape the runner now emits and ci fills before the
+// security collector runs.
+func runWithRequests(base string, reqs ...explore.Request) *report.Run {
+	return &report.Run{
+		URL: base,
+		Exploration: &report.Exploration{
+			Results: []explore.Exploration{{Requests: reqs}},
+		},
+	}
+}
+
+// TestObservedRoutes_SourcesPostRequestMethodAndParam proves the seam this lane
+// adds: a reached request carries its own method, so a POST or fetch API route
+// is sourced as the POST it was and not flattened to a GET, with the same value
+// stripping as a navigation.
+func TestObservedRoutes_SourcesPostRequestMethodAndParam(t *testing.T) {
+	got := observedRoutes(runWithRequests("http://twin",
+		explore.Request{Method: "POST", Path: "/api/orders/123?status=open"}))
+	require.Equal(t, []security.Route{{
+		Method: http.MethodPost, Path: "/api/orders/{id}", Params: []string{"status"},
+	}}, got, "the POST route keeps its method, templates the id, and carries the param name only")
+	for _, r := range got {
+		require.NotContains(t, r.Path, "123", "a row id must not survive into a Route")
+		for _, p := range r.Params {
+			require.NotContains(t, p, "open", "a query value must not survive into a Route")
+		}
+	}
+}
+
+// TestObservedRoutes_SamePathTwoMethodsAreTwoRoutes proves the method is part of
+// a route's identity: the same path reached by a GET navigation and by a POST
+// request is two routes, so the fuzzer exercises each method rather than
+// collapsing them and missing the write path.
+func TestObservedRoutes_SamePathTwoMethodsAreTwoRoutes(t *testing.T) {
+	run := &report.Run{
+		URL: "http://twin",
+		Exploration: &report.Exploration{
+			Results: []explore.Exploration{{
+				Visited:  []string{"http://twin/api/orders?q=chair"},
+				Requests: []explore.Request{{Method: "POST", Path: "/api/orders?q=chair"}},
+			}},
+		},
+	}
+	got := observedRoutes(run)
+	require.Equal(t, []security.Route{
+		{Method: http.MethodGet, Path: "/api/orders", Params: []string{"q"}},
+		{Method: http.MethodPost, Path: "/api/orders", Params: []string{"q"}},
+	}, got, "one path reached by two methods is two routes")
+}
+
+// TestObservedRoutes_FeedsPostRequestToInjectionFinding is the end-to-end proof
+// for the POST path: a reached POST request with a query parameter becomes a
+// POST security.Route, is handed to the REAL injection family, and fuzzed
+// against an endpoint that concatenates the parameter into SQL, which emits a
+// proven finding. This is the request producer -> Input.Routes -> consumer path
+// firing live, the path that was GET-only before the runner emitted methods.
+func TestObservedRoutes_FeedsPostRequestToInjectionFinding(t *testing.T) {
+	srv := sqlInjectableServer()
+	defer srv.Close()
+
+	run := runWithRequests(srv.URL,
+		explore.Request{Method: "POST", Path: "/api/search?q=chair"})
+	routes := observedRoutes(run)
+	require.Equal(t, []security.Route{{
+		Method: http.MethodPost, Path: "/api/search", Params: []string{"q"},
+	}}, routes, "the observed POST route is sourced as a POST")
+
+	fam := injection.New()
+	in := security.Input{
+		Env:    security.Environment{BaseURL: run.URL},
+		Policy: failOn(fam.Keys()),
+	}.WithRunArtifacts(security.RunArtifacts{Routes: routes})
+
+	findings, err := fam.Probe(context.Background(), in)
+	require.NoError(t, err, "a wired request source is not blocked")
+	require.NotEmpty(t, findings, "the injection family fuzzed the observed POST route and proved the SQL injection")
+	for _, f := range findings {
+		require.Equal(t, "/api/search", f.Where, "the finding names the observed route")
+		require.NotContains(t, f.Detail, "chair", "no observed value crosses into a finding")
+	}
+}
+
+// TestObservedRoutes_SafePostRequestFeedsNoFinding is the liveness arm of the
+// POST seam: the identical wiring against a route that escapes its input must
+// produce no finding, so the POST end-to-end path can say no.
+func TestObservedRoutes_SafePostRequestFeedsNoFinding(t *testing.T) {
+	srv := reflectingServer()
+	defer srv.Close()
+
+	routes := observedRoutes(runWithRequests(srv.URL,
+		explore.Request{Method: "POST", Path: "/api/search?q=chair"}))
+	require.NotEmpty(t, routes, "the POST route is still sourced")
+
+	fam := injection.New()
+	in := security.Input{
+		Env:    security.Environment{BaseURL: srv.URL},
+		Policy: failOn(fam.Keys()),
+	}.WithRunArtifacts(security.RunArtifacts{Routes: routes})
+
+	findings, err := fam.Probe(context.Background(), in)
+	require.NoError(t, err)
+	require.Empty(t, findings, "a route that escapes its input proves nothing")
+}
