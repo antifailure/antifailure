@@ -215,3 +215,28 @@ func TestPolicyDefaults_MirrorTheManifestPackage(t *testing.T) {
 	require.Equal(t, report.LevelFail, p.EgressSurprise)
 	require.Equal(t, report.LevelWarn, p.MigrationLint)
 }
+
+func TestConfigure_ParsesSecurityKeysAndRefusesAnUnknownLevel(t *testing.T) {
+	t.Parallel()
+	p := report.Configure(&schema.Policy{
+		Security: map[string]schema.PolicyLevel{
+			"security.authz.idor":           schema.PolicyFail,
+			"security.headers.missing_hsts": schema.PolicyWarn,
+			"security.injection.sql":        schema.PolicyLevel("block"), // not a level
+		},
+	})
+	require.Equal(t, report.LevelFail, p.Level("security.authz.idor"))
+	require.Equal(t, report.LevelWarn, p.Level("security.headers.missing_hsts"))
+	// The bad level was dropped rather than coerced, so the key falls back to
+	// ignore rather than quietly becoming the weakest real level.
+	require.Equal(t, report.LevelIgnore, p.Level("security.injection.sql"),
+		"an unrecognised level must never silently become a real one")
+}
+
+func TestLevel_AnUnconfiguredKeyIsIgnoreNotEmpty(t *testing.T) {
+	t.Parallel()
+	p := report.Configure(nil)
+	require.Equal(t, report.LevelIgnore, p.Level("security.authz.idor"),
+		"a key no family owns and no manifest set does nothing, and that is a real level, never the empty string")
+	require.NotEqual(t, report.Level(""), p.Level("security.side_effect.external_call"))
+}

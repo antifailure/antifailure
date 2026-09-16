@@ -1297,7 +1297,16 @@ func TestSchemaConstraintReport(t *testing.T) {
 // refused outright by it, which is the #315 failure exactly: the gate reported
 // red while measuring nothing. The seed base prunes value, so it is the base
 // the two new constraints are measured in.
-const wantConstraints = 632
+//
+// Then 635. The security spine added the policy.security object, and it carries
+// three constraints the walk counts: the object's own type, the value schema it
+// declares under additionalProperties, and the enum of three levels on that
+// value. All three come back ENFORCED: the decoder refuses a non-object and a
+// non-string level, and the validator refuses a level that is not one of the
+// three by name, the same way every other policy key is checked. The generated
+// base carries security: {sample_key: ignore}, which validates, so no base is
+// refused and the enum is measured in every base.
+const wantConstraints = 635
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and

@@ -545,6 +545,24 @@ risky and neither does this. A path no rule recognises selects every check
 rather than none, and that case is reported as `everything_selected` rather than
 hidden, because a thorough answer and a fallback are not the same answer.
 
+### `read_security_findings`
+
+The security findings a rehearsal produced, grouped by family, for a coding
+agent fixing them.
+
+A projection over the findings already in a finished run, not a new run: give a
+`run_id`, or omit it for the latest finished run. It filters by family, by level
+and by location, and returns each finding's rule, level, title, bounded
+description, fix and location, grouped by family with totals.
+
+It never returns the offending request body, the response or the row. Those
+live in the copy of production the run drove, and the finding carries a location
+and a description and nothing else, the same boundary every other read surface
+honours. The loop is to read a finding's rule, fix and location, change the
+code, re-run the rehearsal, and read again, rather than scraping the pull
+request comment. A client that has run nothing yet is told so rather than handed
+an empty page, because an empty result and a clean one are not the same answer.
+
 ### `check_data_invariants`
 
 Whether the data is still correct after the change ran.

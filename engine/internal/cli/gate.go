@@ -10,6 +10,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/gate"
 	"github.com/antifailure/antifailure/engine/internal/insights"
 	"github.com/antifailure/antifailure/engine/internal/report"
+	"github.com/antifailure/antifailure/engine/internal/security"
 )
 
 // The release gate: everything a run measured, turned into findings a policy
@@ -236,6 +237,21 @@ func gateError(f report.Finding) error {
 		}
 		return aferrors.Coded(aferrors.AFAGT007, "detail", f.Detail)
 	default:
+		// A security finding rides the same path as everything else: its rule
+		// is "security.<family>.<rule>", and it routes to one of two dynamic
+		// security codes by its declared exit. A family that PROVED a
+		// vulnerability by exercising the change is a verification failure
+		// (exit 7); one that REFUSED the change on policy grounds is a policy
+		// denial (exit 6). The exit is read from the security package rather
+		// than switched on here, so a new key inherits the right code from its
+		// shape and the gate cannot disagree with the key the family declared.
+		if strings.HasPrefix(f.Rule, security.Prefix()) {
+			code := aferrors.AFDSC002
+			if security.ExitFor(report.PolicyKey(f.Rule)) == report.ExitVerification {
+				code = aferrors.AFDSC001
+			}
+			return aferrors.Coded(code, "rule", f.Rule, "detail", f.Title)
+		}
 		// Every migration finding, including the seventeen lint rules, which have
 		// rule names of their own.
 		return aferrors.Coded(aferrors.AFDB031, "rule", f.Rule, "detail", f.Title)

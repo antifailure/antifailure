@@ -51,7 +51,7 @@ func classify(f File, m *schema.Manifest, engine *policy.Engine) []Fact {
 func attributable(s Surface) bool {
 	switch s {
 	case SurfaceCode, SurfaceAsset, SurfaceBuild, SurfaceDependency,
-		SurfaceConfig, SurfaceSchema:
+		SurfaceConfig, SurfaceSchema, SurfaceAuth:
 		return true
 	}
 	return false
@@ -237,6 +237,32 @@ var pathRules = []pathRule{
 				".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".avif",
 				".woff", ".woff2", ".ttf", ".otf", ".eot",
 				".mp3", ".mp4", ".webm", ".wav", ".pdf")
+		},
+	},
+	{
+		name: "path.auth", surface: SurfaceAuth,
+		why: "it governs who may do what",
+		// Above path.code on purpose, so a guard reads as a security boundary
+		// rather than as ordinary source, and BROAD on purpose. lane-rbac: a
+		// real control was evaded not by a wrong rule but by an ABSENT one (a
+		// field present that no policy read), so the routing must reach the
+		// whole who-may-do-what surface: authentication and authorization
+		// middleware, route guards, the organisation policy package, the
+		// entitlement catalogue, licence gating and the extension request
+		// shape. Below the test, docs and pipeline rules that come before it,
+		// so an auth_test file stays a test and a doc about auth stays prose;
+		// row level security in a migration is tagged as a schema subject
+		// rather than pulled onto this surface, which keeps first rule wins.
+		match: func(p, base, ext string) bool {
+			return segment(p, "auth", "authn", "authz", "authentication",
+				"authorization", "middleware", "middlewares", "guard", "guards",
+				"rbac", "abac", "permission", "permissions", "policy", "policies",
+				"entitlement", "entitlements", "licence", "licences", "license",
+				"licenses", "licensing", "gating", "session", "sessions") ||
+				isBase(base, "middleware.ts", "middleware.js", "auth.ts", "auth.js",
+					"authz.ts", "authorization.ts", "policy.rb", "ability.rb",
+					"casl.ts", "entitlements.ts", "entitlement.ts", "licensing.ts",
+					"gate.ts", "guard.ts")
 		},
 	},
 	{

@@ -3466,6 +3466,80 @@ a cluster, rather than by a second implementation that agrees until it does not.
 
 Related: [provider limits](/docs/providers/limits), [the journal](/docs/concepts/journal), [multiple runtimes](/docs/enterprise/runtimes).
 `,
+	"concepts/security.md": `---
+title: Security checks
+description: How Antifailure routes security check families at exactly what a change touched, and the boundary every finding respects.
+sidebar:
+  order: 18
+---
+
+A security check is an ordinary finding in a new namespace. It rehearses the
+change against the sanitized twin the rest of the product already builds, at
+exactly the routes, screens and boundaries the diff touched, and folds what it
+finds into the same verdict, exit code and pull request comment every other
+check uses. There is no second pipeline and no second report.
+
+## What a finding carries, and what it never does
+
+A security finding is a ` + "`" + `report.Finding` + "`" + `: a rule, a level, a one line title, a
+bounded description, a fix, and a location. The rule is the stable name you
+grep for and the manifest key that decides what the finding does, both at once,
+so ` + "`" + `security.authz.idor` + "`" + ` is what a report shows, what the manifest configures,
+and what a coding agent reads back.
+
+It never carries the value that proved it. The offending request body, the
+leaked row, the response and the screenshot stay inside the copy of production
+the run drove; the finding reports the location and a bounded, neutralized
+description and nothing else. That boundary is the product: these findings come
+from real data, so the one place a value must not travel is out of the run.
+
+## Routing, so a check runs where the change is
+
+A docs only or test only change routes no security family, exactly as it routes
+no workflow today, which is what keeps the check fast. A change to a route runs
+the families that read a route; a change to a guard, a policy or a migration
+runs the families that read who may do what. The router names the units it
+routed, each carrying the facts that produced it, so the reasoning is auditable
+rather than a black box.
+
+A change to who may do what is its own surface, ` + "`" + `auth` + "`" + `, and it is deliberately
+broad: authentication and authorization middleware, route guards, the
+organisation policy package, the entitlement catalogue, licence gating and the
+extension request shape all route there. A control is as often evaded by an
+absent rule as by a wrong one, so a change anywhere near the security edge is
+treated as a security change rather than as ordinary code.
+
+## Configuring what a finding does
+
+Every security key is a ` + "`" + `security.<family>.<rule>` + "`" + ` entry in the manifest's
+` + "`" + `policy` + "`" + ` block, and it takes the same three levels every other policy key does. Each
+key becomes available when its family lands, so once the authz family ships you
+set ` + "`" + `security.authz.idor` + "`" + ` to ` + "`" + `fail` + "`" + `, ` + "`" + `warn` + "`" + ` or ` + "`" + `ignore` + "`" + ` in ` + "`" + `policy` + "`" + ` just as you
+set any other key.
+
+A finding at ` + "`" + `fail` + "`" + ` stops the merge, one at ` + "`" + `warn` + "`" + ` is reported and the check
+still passes, and one at ` + "`" + `ignore` + "`" + ` is dropped. A level the manifest does not
+recognise is refused rather than quietly coerced, the same way every other
+policy value is, so a manifest that says ` + "`" + `block` + "`" + ` is told ` + "`" + `block` + "`" + ` is not a level
+rather than silently warning.
+
+## Exit codes
+
+A security finding that is the worst failure decides the process exit, so a
+script reading only the exit knows which kind of problem it hit. A family that
+proved the running application is insecure by exercising it exits with the
+verification code; a family that refused a change on policy or configuration
+grounds, without exercising a runtime hole, exits with the policy denial code.
+The catalog carries both, and the rule's own key decides which one applies.
+
+## Reading findings from a coding agent
+
+The ` + "`" + `read_security_findings` + "`" + ` tool projects the security findings out of a run
+already in the store, grouped by family and filterable by level and location.
+It returns the rule, the level, the title, the bounded description, the fix and
+the location, and never a value, so the loop is read a finding, read its fix
+and its location, change the code, re-run the rehearsal, and read again.
+`,
 	"concepts/subsetting.md": `---
 title: Subsetting
 description: Taking a production shaped slice of a database instead of all of it, and keeping every foreign key resolvable.
@@ -20471,6 +20545,32 @@ The diff at {path} could not be read: {detail}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/change-analysis](/docs/concepts/change-analysis) |
 
+## Dynamic security checks
+
+### AF-DSC-001
+
+The security check {rule} proved a vulnerability against the sanitized twin: {detail}
+
+**What to do.** Open the finding for the location it was proved at and its fix, then re-run the rehearsal. The offending value is never shown; it lives in the copy of production.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `7` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/security](/docs/concepts/security) |
+
+### AF-DSC-002
+
+The security check {rule} refused this change on policy grounds: {detail}
+
+**What to do.** Open the finding for what to change. If the change is intended, set its key in the manifest's policy block. The offending value is never shown.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `6` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/security](/docs/concepts/security) |
+
 ## Enterprise
 
 ### AF-EE-004
@@ -22909,6 +23009,24 @@ risky and neither does this. A path no rule recognises selects every check
 rather than none, and that case is reported as ` + "`" + `everything_selected` + "`" + ` rather than
 hidden, because a thorough answer and a fallback are not the same answer.
 
+### ` + "`" + `read_security_findings` + "`" + `
+
+The security findings a rehearsal produced, grouped by family, for a coding
+agent fixing them.
+
+A projection over the findings already in a finished run, not a new run: give a
+` + "`" + `run_id` + "`" + `, or omit it for the latest finished run. It filters by family, by level
+and by location, and returns each finding's rule, level, title, bounded
+description, fix and location, grouped by family with totals.
+
+It never returns the offending request body, the response or the row. Those
+live in the copy of production the run drove, and the finding carries a location
+and a description and nothing else, the same boundary every other read surface
+honours. The loop is to read a finding's rule, fix and location, change the
+code, re-run the rehearsal, and read again, rather than scraping the pull
+request comment. A client that has run nothing yet is told so rather than handed
+an empty page, because an empty result and a clean one are not the same answer.
+
 ### ` + "`" + `check_data_invariants` + "`" + `
 
 Whether the data is still correct after the change ran.
@@ -23772,6 +23890,7 @@ What each class of finding does to the pull request check. A finding at 'fail' f
 | ` + "`" + `migration_rewrite` + "`" + ` | ` + "`" + `ignore` + "`" + `, ` + "`" + `warn` + "`" + `, ` + "`" + `fail` + "`" + ` | no | A statement Postgres reported as rewriting a table, which copies every row under a lock nothing can read through. Defaults to ` + "`" + `warn` + "`" + `. |
 | ` + "`" + `plan_regression` + "`" + ` | ` + "`" + `ignore` + "`" + `, ` + "`" + `warn` + "`" + `, ` + "`" + `fail` + "`" + ` | no | A query plan that got worse in one of three plan regressions: a table is now read end to end, an index is no longer used, or the planner's estimate grew. Defaults to ` + "`" + `warn` + "`" + `. |
 | ` + "`" + `query_regression` + "`" + ` | ` + "`" + `ignore` + "`" + `, ` + "`" + `warn` + "`" + `, ` + "`" + `fail` + "`" + ` | no | A statement that runs more often, or slower, than the saved baseline did. Needs a baseline to compare against. Defaults to ` + "`" + `warn` + "`" + `. |
+| ` + "`" + `security` + "`" + ` | object | no | What each dynamic security check finding does to the pull request check, keyed by the finding's rule such as security.authz.idor or security.headers.cookie_not_secure. A finding at fail stops the merge, one at warn is reported and the check still passes, and one at ignore is dropped. The keys are open on purpose: the legal ones are the keys the security check families declare, which the engine knows and this document does not, so a key set here that no family reads is carried until the family that reads it lands. Only the level is constrained, the same three values every other policy key takes. |
 | ` + "`" + `workflows_unverified` + "`" + ` | ` + "`" + `ignore` + "`" + `, ` + "`" + `warn` + "`" + `, ` + "`" + `fail` + "`" + ` | no | A run in which no workflow reached a verdict about the application, because every one was blocked or unverified or because none was declared. Distinct from a single blocked workflow, which is never counted against the application: one gap in the tooling is not evidence, and a run where every workflow was a gap has tested nothing at all, so reporting it as a pass says the application was checked when it was not. Set it to warn if the project has no workflows yet and you would rather record that choice than be told about it. Defaults to ` + "`" + `fail` + "`" + `. |
 
 ## Probe

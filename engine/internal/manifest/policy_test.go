@@ -55,6 +55,30 @@ policy:
 	require.Contains(t, messages(problems(t, err)), "not a policy level")
 }
 
+func TestPolicy_ASecurityKeyTakesALevelAndRefusesAnUnknownOne(t *testing.T) {
+	t.Parallel()
+	// A security override is the same three levels as every other key, and an
+	// unrecognised one is refused rather than coerced. The KEY is not
+	// constrained: a family declares the legal keys, and until it lands a
+	// manifest may name one, so security.authz.idor parses whether or not a
+	// family reads it yet.
+	m, err := parse(t, minimal+`
+policy:
+  security:
+    security.authz.idor: fail
+    security.headers.missing_hsts: warn
+`)
+	require.NoError(t, err)
+	require.Equal(t, schema.PolicyFail, m.Policy.Security["security.authz.idor"])
+
+	_, err = parse(t, minimal+`
+policy:
+  security:
+    security.authz.idor: block
+`)
+	require.Contains(t, messages(problems(t, err)), "not a policy level")
+}
+
 func TestPolicy_AFailingThresholdBelowTheWarningOneIsRefused(t *testing.T) {
 	t.Parallel()
 	// A lock long enough to fail the check is always long enough to be worth

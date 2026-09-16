@@ -1034,6 +1034,18 @@ type Policy struct {
 	// about the application, because every one was blocked or unverified or
 	// because none was declared.
 	WorkflowsUnverified PolicyLevel `json:"workflows_unverified,omitempty" yaml:"workflows_unverified,omitempty"`
+	// Security maps each dynamic security check key, "security.<family>.<rule>"
+	// such as security.authz.idor, to what a finding on it does to the check.
+	//
+	// A map rather than a field per key, because the security check families
+	// land in parallel and each owns a slice of this namespace; a field per key
+	// would have three lanes editing one struct. The values are the same three
+	// levels every other key uses, and an unrecognised level is refused the way
+	// every other policy value is. The KEY is not constrained by the schema:
+	// the legal keys are the ones the registered families declare, which the
+	// engine knows and this file does not, so a manifest may set a key ahead of
+	// the family that reads it.
+	Security map[string]PolicyLevel `json:"security,omitempty" yaml:"security,omitempty"`
 }
 
 // LockPolicy is the two thresholds on how long a migration held a lock.

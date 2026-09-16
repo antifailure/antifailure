@@ -1901,6 +1901,26 @@ func (v *validator) policy(m *schema.Manifest) {
 		}
 	}
 
+	// The security overrides carry the same three levels, and an unrecognised
+	// one is refused the same way. Sorted so the reported errors are stable
+	// across runs. The key itself is not checked: the legal keys are the ones
+	// the registered families declare, which the engine knows and this package
+	// does not, so a manifest may name a security key ahead of the family that
+	// reads it. It is the LEVEL that has to parse, exactly as it does for every
+	// scalar key above.
+	secKeys := make([]string, 0, len(p.Security))
+	for k := range p.Security {
+		secKeys = append(secKeys, k)
+	}
+	sort.Strings(secKeys)
+	for _, k := range secKeys {
+		if !knownPolicyLevel(p.Security[k]) {
+			v.add("policy.security."+k,
+				fmt.Sprintf("%q is not a policy level.", string(p.Security[k])),
+				"The levels are ignore, warn and fail. Use fail to stop the merge, warn to report the finding and let it through, and ignore to drop it.")
+		}
+	}
+
 	if l := p.MigrationLock; l != nil && l.FailMS > 0 && l.WarnMS > l.FailMS {
 		v.add("policy.migration_lock.fail_ms",
 			fmt.Sprintf("The failing threshold %.0fms is below the warning threshold %.0fms.", l.FailMS, l.WarnMS),

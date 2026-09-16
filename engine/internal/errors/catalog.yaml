@@ -11,7 +11,7 @@
 #              MSK masking, BLD build, RUN runtime, NET egress, AGT agent,
 #              LOD load, ORC differential oracle, GH GitHub, CP control plane,
 #              INF infrastructure, EE enterprise, SCH scheduling,
-#              EXT extension registrations.
+#              EXT extension registrations, DSC dynamic security checks.
 #   message    One sentence naming what failed. Second person. {placeholders}
 #              are filled at the call site.
 #   next_step  One sentence saying what to do. Never "contact support".
@@ -1377,3 +1377,32 @@ errors:
     docs: contributing/provider-authoring
     retryable: false
     exit_code: 3
+
+  # Dynamic security checks. A finding the security check families produced by
+  # exercising the sanitized twin, distinct from AF-SEC static secret scanning:
+  # DSC is a claim about the running application's behaviour, SEC a claim about
+  # a value found in the source. Every security finding rule is "security.*"
+  # and the gate routes it to one of these two by its exit: a family that
+  # PROVED a vulnerability by exercising the change is a verification failure,
+  # and a family that REFUSED a change on policy or configuration grounds
+  # without exercising a hole is a policy denial. Two codes rather than one per
+  # family, because the exit is a per-key fact and two keys of one family can
+  # split across the two: side_effect.external_call and db_security.broad_grant
+  # deny where the rest of their families prove, so a code per family could not
+  # carry the right exit for both. The value that was leaked, the row that was
+  # reached and the request that proved it are never in the message; the
+  # finding carries a location and a bounded description and nothing else.
+  - code: AF-DSC-001
+    area: DSC
+    message: "The security check {rule} proved a vulnerability against the sanitized twin: {detail}"
+    next_step: "Open the finding for the location it was proved at and its fix, then re-run the rehearsal. The offending value is never shown; it lives in the copy of production."
+    docs: concepts/security
+    retryable: false
+    exit_code: 7
+  - code: AF-DSC-002
+    area: DSC
+    message: "The security check {rule} refused this change on policy grounds: {detail}"
+    next_step: "Open the finding for what to change. If the change is intended, set its key in the manifest's policy block. The offending value is never shown."
+    docs: concepts/security
+    retryable: false
+    exit_code: 6

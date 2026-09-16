@@ -12,7 +12,7 @@ func TestCoverage_EverySurfaceIsDecidedOneWayOrTheOther(t *testing.T) {
 		SurfaceSchema, SurfaceService, SurfaceCode, SurfaceAsset,
 		SurfaceBuild, SurfaceDependency, SurfaceConfig, SurfaceInfrastructure,
 		SurfacePipeline, SurfaceManifest, SurfaceMasking, SurfaceTest,
-		SurfaceDocs, SurfaceEgress,
+		SurfaceDocs, SurfaceEgress, SurfaceAuth,
 	}
 	for _, s := range all {
 		if _, ok := coverage[s]; !ok {
