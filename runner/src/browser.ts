@@ -448,6 +448,37 @@ export class Session {
     return this.#reached;
   }
 
+  /** reach performs a GET of url within this session's own context, carrying
+   *  exactly the cookies the browser holds, and returns the response status and
+   *  a bounded body. It is what the access-probe pass reads an ownership-scoped
+   *  object with: after a persona signs in through the browser, the context
+   *  holds that persona's session, so this reads the object as that persona and
+   *  a signed-out session reads it as nobody. Redirects are not followed, for
+   *  the same reason the engine's anonymous probe does not follow them: a 302 to
+   *  a sign-in page is a refusal this must read as a refusal rather than chase
+   *  into a 200 login screen and misread as a read. The body is bounded and
+   *  stays inside the runner; only whether a canary is in it ever leaves, as a
+   *  flag. A transport error is a zero status and an empty body, which the pass
+   *  reads as a reach that answered nothing rather than as a read. */
+  async reach(url: string): Promise<{ status: number; body: string }> {
+    try {
+      const resp = await this.#context.request.get(url, {
+        maxRedirects: 0,
+        failOnStatusCode: false,
+        timeout: 15_000,
+      });
+      const status = resp.status();
+      const raw = await resp.text().catch(() => '');
+      const body = raw.length > MAX_RESPONSE_BYTES ? raw.slice(0, MAX_RESPONSE_BYTES) : raw;
+      return { status, body };
+    } catch {
+      // A request that never completed says nothing about authorization: a zero
+      // status and no body, which the pass classifies as an error reach, never
+      // as content the persona was allowed to see.
+      return { status: 0, body: '' };
+    }
+  }
+
   /** page returns the adapter the login and workflow code drives. */
   page(): Page {
     const pw = this.#page;

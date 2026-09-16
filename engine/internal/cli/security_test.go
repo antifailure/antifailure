@@ -137,7 +137,7 @@ func TestSecurityFindings_ProbesASelectedFamilyAndCollectsItsFinding(t *testing.
 	run := report.Run{URL: "http://twin.local"}
 
 	got := securityFindings(context.Background(), testEnv(), &fakeReader{profile: codeProfile()},
-		reg, report.Configure(nil), &run, nil, "", "", 0)
+		reg, report.Configure(nil), &run, nil, nil, "", "", 0)
 
 	require.True(t, fam.probed, "a family whose surface the change touched must be probed")
 	require.Len(t, got, 1)
@@ -170,7 +170,7 @@ func TestSecurityFindings_ARealFamilyFlowsAProvenFindingThrough(t *testing.T) {
 	}
 
 	got := securityFindings(context.Background(), testEnv(), &fakeReader{profile: codeProfile()},
-		reg, report.Configure(nil), &run, decisions, "", "", 0)
+		reg, report.Configure(nil), &run, nil, decisions, "", "", 0)
 
 	require.Len(t, got, 1, "the real ssrf family's proven internal reach flows through the collector")
 	require.Equal(t, "security.ssrf.internal_host", got[0].Rule)
@@ -193,7 +193,7 @@ func TestSecurityFindings_DoesNotProbeAFamilyTheChangeDidNotTouch(t *testing.T) 
 	run := report.Run{URL: "http://twin.local"}
 
 	got := securityFindings(context.Background(), testEnv(), &fakeReader{profile: codeProfile()},
-		reg, report.Configure(nil), &run, nil, "", "", 0)
+		reg, report.Configure(nil), &run, nil, nil, "", "", 0)
 
 	require.True(t, authz.probed, "authz's surface was touched, so it runs")
 	require.False(t, db.probed, "schema was not touched, so db_security must never be probed")
@@ -215,7 +215,7 @@ func TestSecurityFindings_SkipsAnUnlicensedFamilyAndRecordsWhy(t *testing.T) {
 
 	// No status on the context: Permits says no, the family is skipped.
 	got := securityFindings(context.Background(), testEnv(), &fakeReader{profile: codeProfile()},
-		reg, report.Configure(nil), &run, nil, "", "", 0)
+		reg, report.Configure(nil), &run, nil, nil, "", "", 0)
 	require.False(t, refused.probed, "a family the edition does not license must not be probed")
 	require.Empty(t, got, "a skipped family produces no finding")
 	require.Len(t, run.Notes, 1, "the skip is recorded, so refused is not a silent absence")
@@ -230,7 +230,7 @@ func TestSecurityFindings_SkipsAnUnlicensedFamilyAndRecordsWhy(t *testing.T) {
 	run2 := report.Run{URL: "http://twin.local"}
 	ctx := edition.With(context.Background(), edition.Status{Features: []string{feature}})
 	got2 := securityFindings(ctx, testEnv(), &fakeReader{profile: codeProfile()},
-		reg2, report.Configure(nil), &run2, nil, "", "", 0)
+		reg2, report.Configure(nil), &run2, nil, nil, "", "", 0)
 	require.True(t, granted.probed, "with the feature licensed the family runs")
 	require.Len(t, got2, 1)
 }
@@ -240,7 +240,7 @@ func TestSecurityFindings_EmptyRegistryProducesNothingAndReadsNoDiff(t *testing.
 	run := report.Run{URL: "http://twin.local"}
 
 	got := securityFindings(context.Background(), testEnv(), reader,
-		security.Default(), report.Configure(nil), &run, nil, "", "", 0)
+		security.Default(), report.Configure(nil), &run, nil, nil, "", "", 0)
 
 	require.Nil(t, got, "the spine's empty registry produces no security finding")
 	require.False(t, reader.changed, "with no family the collector reads no diff, so a docs change pays nothing")
@@ -271,7 +271,7 @@ func TestSecurityFindings_EnrichesInputWithTheRunArtifacts(t *testing.T) {
 
 	securityFindings(context.Background(), testEnv(),
 		&fakeReader{profile: codeProfile(), messages: messages},
-		reg, report.Configure(nil), &run, decisions, "", "", 0)
+		reg, report.Configure(nil), &run, nil, decisions, "", "", 0)
 	seen = fam.gotInput
 
 	require.Equal(t, decisions, seen.Decisions(), "the egress log the run captured reaches the family")
@@ -314,7 +314,7 @@ func TestSecurityFindings_HandsObservedRoutesToTheFamily(t *testing.T) {
 	}}
 
 	securityFindings(context.Background(), testEnv(),
-		&fakeReader{profile: codeProfile()}, reg, report.Configure(nil), &run, nil, "", "", 0)
+		&fakeReader{profile: codeProfile()}, reg, report.Configure(nil), &run, nil, nil, "", "", 0)
 
 	require.Equal(t, []security.Route{{
 		Method: "GET", Path: "/api/search", Params: []string{"q"},
@@ -330,7 +330,7 @@ func TestSecurityFindings_AChangeThatCannotBeReadIsANoteNotAFailure(t *testing.T
 	reader := &fakeReader{changeErr: errors.New("no base ref")}
 
 	got := securityFindings(context.Background(), testEnv(), reader,
-		reg, report.Configure(nil), &run, nil, "", "", 0)
+		reg, report.Configure(nil), &run, nil, nil, "", "", 0)
 
 	require.Nil(t, got, "a diff we could not read is not evidence about the change")
 	require.Len(t, run.Notes, 1)
@@ -348,7 +348,7 @@ func TestSecurityFindings_ABlockedProbeIsANoteNotAFinding(t *testing.T) {
 	run := report.Run{URL: "http://twin.local"}
 
 	got := securityFindings(context.Background(), testEnv(), &fakeReader{profile: codeProfile()},
-		reg, report.Configure(nil), &run, nil, "", "", 0)
+		reg, report.Configure(nil), &run, nil, nil, "", "", 0)
 
 	require.Empty(t, got, "a probe that could not complete reaches no verdict")
 	require.Len(t, run.Notes, 1)
@@ -419,7 +419,7 @@ func TestSecurityFindings_BuildsABaseTwinAndSideEffectFiresTheIncrease(t *testin
 	}
 
 	got := securityFindings(context.Background(), testEnv(), reader,
-		reg, report.Configure(nil), &run, nil, "", "runner.js", time.Hour)
+		reg, report.Configure(nil), &run, nil, nil, "", "runner.js", time.Hour)
 
 	require.True(t, reader.baselineCalled, "a selected baseline reader must make the collector build a base twin")
 	require.Equal(t, "golden-abc", reader.baselineOpts.Golden,
@@ -447,7 +447,7 @@ func TestSecurityFindings_NoBaselineReaderBuildsNoTwin(t *testing.T) {
 	reader := &fakeReader{profile: codeProfile()}
 
 	securityFindings(context.Background(), testEnv(), reader,
-		reg, report.Configure(nil), &run, nil, "", "runner.js", time.Hour)
+		reg, report.Configure(nil), &run, nil, nil, "", "runner.js", time.Hour)
 
 	require.False(t, reader.baselineCalled,
 		"no selected family reads a baseline, so no second environment is built")
@@ -469,7 +469,7 @@ func TestSecurityFindings_SameCommitBaselineIsANoteNotAComparison(t *testing.T) 
 	}
 
 	got := securityFindings(context.Background(), testEnv(), reader,
-		reg, report.Configure(nil), &run, nil, "", "runner.js", time.Hour)
+		reg, report.Configure(nil), &run, nil, nil, "", "runner.js", time.Hour)
 
 	require.True(t, reader.baselineCalled)
 	require.Empty(t, got, "with no measured base the increase comparison is not made, never against a base of zero")
@@ -497,7 +497,7 @@ func TestSecurityFindings_UnmeasurableBaselineFailsClosedToANote(t *testing.T) {
 	}
 
 	got := securityFindings(context.Background(), testEnv(), reader,
-		reg, report.Configure(nil), &run, nil, "", "runner.js", time.Hour)
+		reg, report.Configure(nil), &run, nil, nil, "", "runner.js", time.Hour)
 
 	require.Empty(t, got, "an unmeasurable base leaves the comparison unmade rather than diffing against zero")
 	require.Len(t, run.Notes, 1)
@@ -522,7 +522,7 @@ func TestSecurityFindings_ABaseTwinLeftUpIsNamedForHandTeardown(t *testing.T) {
 	}
 
 	securityFindings(context.Background(), testEnv(), reader,
-		reg, report.Configure(nil), &run, nil, "", "runner.js", time.Hour)
+		reg, report.Configure(nil), &run, nil, nil, "", "runner.js", time.Hour)
 
 	require.Len(t, run.Notes, 1)
 	require.Contains(t, run.Notes[0], "af down --branch")
@@ -559,7 +559,7 @@ func TestSecurityFindings_SupplyChainReadsTheDependencyDiff(t *testing.T) {
 	}
 
 	got := securityFindings(context.Background(), testEnv(), reader,
-		reg, report.Configure(nil), &run, nil, "", "", 0)
+		reg, report.Configure(nil), &run, nil, nil, "", "", 0)
 
 	require.True(t, reader.depCalled, "the collector must read the dependency diff for a dependency change")
 	require.NotEmpty(t, got, "the added install hook and download must produce findings")
@@ -582,7 +582,7 @@ func TestSecurityFindings_CodeOnlyChangeDoesNotReadTheDependencyDiff(t *testing.
 	reader := &fakeReader{profile: codeProfile()}
 
 	securityFindings(context.Background(), testEnv(), reader,
-		reg, report.Configure(nil), &run, nil, "", "", 0)
+		reg, report.Configure(nil), &run, nil, nil, "", "", 0)
 
 	require.False(t, reader.depCalled, "a code-only change must not trigger a dependency-diff read")
 }

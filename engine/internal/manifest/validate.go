@@ -50,6 +50,7 @@ func validate(m *schema.Manifest, doc *yaml.Node, root string) []Problem {
 	v.runtime(m)
 	v.change(m)
 	v.github(m)
+	v.security(m)
 
 	// Last, so that a hand written message wins wherever both would speak.
 	v.boundsPass()
@@ -1211,6 +1212,82 @@ func (v *validator) personas(m *schema.Manifest) {
 					"Each persona needs its own number, because the inbox routes messages by recipient.")
 			}
 			phones[p.Phone] = i
+		}
+	}
+}
+
+// security checks the access-probe fixtures: a fixture must name a real object
+// and a real owner, and a fixture that names a persona must name one the
+// manifest declares. A fixture the runner cannot reach or cannot attribute is a
+// probe that would silently do nothing, which is the dead check this suite
+// exists to prevent, so it is refused at read time rather than skipped at run
+// time.
+func (v *validator) security(m *schema.Manifest) {
+	if m.Security == nil || m.Security.Access == nil {
+		return
+	}
+	personas := map[string]bool{}
+	for _, p := range m.Personas {
+		personas[p.Name] = true
+	}
+	// A fixture is identified by its route and id together: the same route with
+	// two ids is two objects, and the same id at two routes is two objects, but
+	// the same route and id twice is one object declared twice, which would only
+	// re-ask the same question and inflate a finding's count.
+	seen := map[string]int{}
+	for i := range m.Security.Access.Objects {
+		o := &m.Security.Access.Objects[i]
+		base := fmt.Sprintf("security.access.objects[%d]", i)
+
+		if strings.TrimSpace(o.Route) == "" {
+			v.add(base+".route",
+				"An access object names no route.",
+				"Give the object's location template, for example /api/orders/{id}.")
+		} else if !strings.HasPrefix(o.Route, "/") {
+			v.add(base+".route",
+				fmt.Sprintf("The route %q does not start with a slash.", o.Route),
+				"Give a path from the application root, for example /api/orders/{id}.")
+		}
+		if strings.TrimSpace(o.ID) == "" {
+			v.add(base+".id",
+				"An access object names no id.",
+				"Give the concrete id of one seeded object, so a refusal proves a boundary held rather than that the id was invented.")
+		}
+		if strings.TrimSpace(o.ObjectClass) == "" {
+			v.add(base+".object_class",
+				"An access object has no object_class.",
+				"Give a category label such as \"another customer's order\". It is a label and never an id or a value.")
+		}
+		if strings.TrimSpace(o.Canary) == "" {
+			v.add(base+".canary",
+				"An access object plants no canary.",
+				"Give the token the application's seed planted into the object, so a leak is proven by the canary coming back rather than guessed from a status code.")
+		}
+		if o.CanaryKind != "" && o.CanaryKind != schema.CanaryPII && o.CanaryKind != schema.CanarySecret {
+			v.add(base+".canary_kind",
+				fmt.Sprintf("The canary_kind %q is not one this suite understands.", o.CanaryKind),
+				"Use pii for another party's data or secret for a planted credential.")
+		}
+
+		key := o.Route + " " + o.ID
+		if prev, dup := seen[key]; dup {
+			v.add(base,
+				fmt.Sprintf("Access objects %d and %d both declare the object %q at %q.", prev, i, o.ID, o.Route),
+				"Declare each object once; the same route and id twice only re-asks the same question.")
+		}
+		seen[key] = i
+
+		owner := o.Owner
+		named := owner.Persona != "" || owner.Tenant != "" || owner.User != "" || owner.Role != ""
+		if !named {
+			v.add(base+".owner",
+				"An access object names no owner.",
+				"Name a declared persona, or give an explicit tenant, user or role, so a cross-owner reach can be told from a self read.")
+		}
+		if owner.Persona != "" && !personas[owner.Persona] {
+			v.add(base+".owner.persona",
+				fmt.Sprintf("The owner %q is not a declared persona.", owner.Persona),
+				"Check the spelling against the persona names, or give an explicit owner instead.")
 		}
 	}
 }

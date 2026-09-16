@@ -291,6 +291,17 @@ change.`),
 				exploreConfigured(ctx, o, env.ExploreOptions{RunnerPath: runner}, run.Exploration)
 			}
 
+			// The access-probe pass, when the manifest declares access
+			// fixtures. It reaches each declared object as every persona so the
+			// authenticated authorization differential has observations to
+			// assess, and it is what turns that differential from a reader with
+			// no producer into a live check. Off entirely when no fixtures are
+			// declared, which is every manifest that has not opted in.
+			if env.HasAccessProbes(m) {
+				e.Out.Section("Probing declared access objects")
+				accessProbeConfigured(ctx, o, env.AccessProbeOptions{RunnerPath: runner}, &run)
+			}
+
 			e.Out.Section("Running workflows")
 			test, testErr := o.Test(ctx, env.TestOptions{Attempts: 2, RunnerPath: runner})
 			if testErr != nil {
@@ -349,7 +360,7 @@ change.`),
 			// still up: the active families drive it and the readers read what
 			// the run captured above. Their findings are folded into the verdict
 			// by the one append line in finish. Empty registry, empty result.
-			securityResults = securityFindings(ctx, e, o, reg, gate, &run, decisions, branch,
+			securityResults = securityFindings(ctx, e, o, reg, gate, &run, m, decisions, branch,
 				runner, ciRunTTL(timeout, m))
 
 			finish()
@@ -506,6 +517,36 @@ func exploreConfigured(
 	}
 	if observed != nil {
 		into.Results = observed.Explorations
+	}
+}
+
+// accessProber runs the security access-probe pass. An interface for the same
+// reason explorer is: the call site is reachable only through a live
+// environment, so the ci wiring is tested against a fake prober rather than only
+// through Docker. *env.Orchestrator satisfies it.
+type accessProber interface {
+	AccessProbe(context.Context, env.AccessProbeOptions) (*explore.Report, error)
+}
+
+// accessProbeConfigured runs the access-probe pass and folds the observations it
+// made into the run's own access-probe channel, which the security collector
+// reads for the authz differential. A refusal is a note rather than a failure,
+// exactly as an exploration's is: an access probe that could not run is our
+// tooling's gap and not a verdict about the change, and it must never redden a
+// build. The observations ride a separate channel from the exploration so they
+// are not judged by the exploration's completeness rules; nothing renders this
+// channel as an exploration section.
+func accessProbeConfigured(
+	ctx context.Context, x accessProber, opts env.AccessProbeOptions, run *report.Run,
+) {
+	observed, err := x.AccessProbe(ctx, opts)
+	if err != nil {
+		run.Notes = append(run.Notes,
+			"the security access probe could not run, so the authenticated authorization differential was not exercised: "+err.Error())
+		return
+	}
+	if observed != nil {
+		run.AccessProbe = &report.Exploration{Results: observed.Explorations}
 	}
 }
 

@@ -554,6 +554,13 @@ var knownKeys = []string{
 	"oracle", "baseline", "base_ref", "fail_on", "probes", "method", "body",
 	"compare_timestamps", "compare_uuids", "ignore", "headers", "fields",
 	"tables", "exclude",
+	// The security access-probe block: the ownership-scoped objects the
+	// authenticated authorization differential reaches and who owns them. A
+	// typo of any of these is a key the parser refuses, and it deserves the
+	// same suggestion as every other key. security, persona, role and id are
+	// already above.
+	"access", "objects", "route", "object_class", "canary", "canary_kind",
+	"owner", "tenant", "user",
 }
 
 func editDistance(a, b string) int {

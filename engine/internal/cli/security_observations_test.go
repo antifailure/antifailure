@@ -75,7 +75,7 @@ func TestSecurityFindings_ObservationsReachTheFamily(t *testing.T) {
 	}}
 
 	securityFindings(context.Background(), testEnv(), &fakeReader{profile: codeProfile()},
-		reg, report.Configure(nil), &run, nil, "", "", 0)
+		reg, report.Configure(nil), &run, nil, nil, "", "", 0)
 
 	got := fam.gotInput.Observations()
 	require.Len(t, got, 1, "the exploration's observation reached the family through in.Observations()")

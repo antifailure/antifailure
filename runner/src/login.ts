@@ -43,6 +43,11 @@ export interface Persona {
   readonly phone?: string;
   readonly password?: string;
   readonly role?: string;
+  /** The account boundary this persona belongs to, an identity label only. The
+   *  sign-in flow ignores it; the access-probe pass stamps it as the acting
+   *  tenant on an observation so a cross-tenant reach can be decided. Absent
+   *  when the application has no tenant boundary. */
+  readonly tenant?: string;
   readonly login: LoginStrategy;
   /** Where this persona's sign-in form lives, when it is not where the
    *  workflow starts. The search for a form begins at the workflow's start

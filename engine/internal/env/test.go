@@ -156,8 +156,13 @@ type jobDocument struct {
 	Workflows []workflowDoc `json:"workflows"`
 	// Goals are the exploratory runs, empty for 'af test'. One document shape
 	// rather than two, because everything around the planner is identical.
-	Goals    []goalDoc    `json:"goals,omitempty"`
-	Personas []personaDoc `json:"personas"`
+	Goals []goalDoc `json:"goals,omitempty"`
+	// AccessProbes are the declared ownership-scoped objects the runner reaches
+	// as each persona for the authenticated authorization differential. Empty
+	// for a run with no access fixtures, which is every run today, and then the
+	// runner does no access probing.
+	AccessProbes []accessProbeDoc `json:"accessProbes,omitempty"`
+	Personas     []personaDoc     `json:"personas"`
 	// Diversity is the resolved per-agent personality plan. Absent means one
 	// neutral agent per workflow, today's behavior. The engine resolves it so
 	// the runner stays a mechanism that consumes a fixed plan rather than
@@ -192,13 +197,37 @@ type workflowDoc struct {
 	MaxMs    int64 `json:"maxMs,omitempty"`
 }
 
+// accessProbeDoc is one declared object the runner reaches as each persona. The
+// owner identity is already resolved by the engine, so the runner compares the
+// acting persona's identity to it and never has to know a persona's fields; the
+// canary value rides along so the runner can decide content presence inside the
+// run and emit only the flag.
+type accessProbeDoc struct {
+	Route       string         `json:"route"`
+	ID          string         `json:"id"`
+	ObjectClass string         `json:"objectClass"`
+	Canary      string         `json:"canary"`
+	Owner       accessOwnerDoc `json:"owner"`
+}
+
+// accessOwnerDoc is the resolved owning identity of an access object.
+type accessOwnerDoc struct {
+	Tenant string `json:"tenant,omitempty"`
+	User   string `json:"user,omitempty"`
+	Role   string `json:"role,omitempty"`
+}
+
 type personaDoc struct {
 	Name     string `json:"name"`
 	Email    string `json:"email"`
 	Phone    string `json:"phone,omitempty"`
 	Password string `json:"password,omitempty"`
 	Role     string `json:"role,omitempty"`
-	Login    string `json:"login"`
+	// Tenant is the persona's account boundary, carried so the runner can stamp
+	// the acting identity on an access-probe observation and a cross-tenant
+	// reach can be decided. An identity label only, never a credential.
+	Tenant string `json:"tenant,omitempty"`
+	Login  string `json:"login"`
 	// SignInPath is where this persona's form lives when it is not where the
 	// workflow starts, carried so the runner looks there first.
 	SignInPath string `json:"signInPath,omitempty"`
@@ -681,7 +710,7 @@ func (o *Orchestrator) personaDocs(provisioned *personas.Result) []personaDoc {
 		}
 		doc := personaDoc{
 			Name: p.Name, Email: p.Email, Phone: p.Phone, Role: p.Role, Login: login,
-			SignInPath: p.SignInPath,
+			Tenant: p.Tenant, SignInPath: p.SignInPath,
 		}
 
 		// Taken from what provisioning actually created, rather than derived
