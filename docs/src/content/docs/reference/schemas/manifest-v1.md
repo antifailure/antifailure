@@ -17,6 +17,7 @@ This page is generated from `schemas/manifest.v1.json`. Edit the schema, then ru
 | `change` | [Change](#change) | no | How a pull request's diff is classified. |
 | `database` | [Database](#database) | no | Where the environment's Postgres comes from, and how the production copy is made safe before anyone can branch from it. |
 | `datastores` | list of [Datastore](#datastore) | no | Every store the environment holds, and what is done about each one's contents. The database: block above normalizes into the entry named primary, so a manifest that declares only database: already has this list and does not have to write it. A stance is declared rather than defaulted, because an empty ClickHouse nobody chose looks exactly like an empty ClickHouse somebody decided on. Max items 25. |
+| `diversity` | [Diversity](#diversity) | no | Behavioral variance for the agents that drive the workflows. |
 | `egress` | [Egress](#egress) | no | What the environment may reach on the network. |
 | `explore` | [Explore](#explore) | no | Agents that pursue a goal with no declared workflow, discover the paths an application offers, and report where it costs somebody effort without failing. |
 | `fidelity` | [Fidelity](#fidelity) | no | The component inventory: what the environment reproduces, what stands in for something, and what it could not reproduce at all. |
@@ -152,6 +153,19 @@ One topic a topics_only broker is created with. An empty broker is not a twin of
 | `consumer_groups` | list of string | no | The groups created against this topic, with their offsets committed to the earliest message and nothing behind them. Created rather than left to appear on their own, because a consumer joining a group nobody created reads from the END by default, so the twin's first run of a consumer silently skips everything the twin's own producers wrote before it started. Max items 100. |
 | `name` | string | **yes** | The topic, named the way production names it. Unique within the store. Max length 249, matches `^[a-zA-Z0-9._-]{1,249}$`. |
 | `partitions` | integer | no | How many partitions the topic is created with. Not cosmetic: ordering is per partition and a consumer group with more members than partitions leaves members idle, so a twin whose topic has one partition where production has twelve cannot reproduce a reordering bug at all. Defaults to `1`. Minimum 1, maximum 10000. |
+
+## Diversity
+
+Behavioral variance for the agents that drive the workflows. A personality is HOW an agent behaves while pursuing a workflow's goal, a separate axis from the persona it signs in as, and it changes only which listed control the agent prefers, never what the agent can do. Off by default, reproducible from a seed, and never a reason a workflow fails: it widens the paths a change is exercised over, so a behavioral regression that one scripted path misses is surfaced by another personality taking a different one.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `agents_per_workflow` | integer | no | How many personality varied agents drive each workflow. One is the default and reproduces a single run; more produces one result per agent, each labelled with its personality, so behavior coverage is visible in the report. Defaults to `1`. Minimum 1, maximum 10. |
+| `enabled` | boolean | no | Whether personality varied agents drive the workflows. Off is today's behavior: one neutral agent per workflow, identical to a manifest with no diversity block. Defaults to `false`. |
+| `mix` | `balanced`, `realistic_population`, `aggressive_diversity` | no | How the population is drawn. balanced spreads a few common strategies evenly, realistic_population follows the built in population weights, and aggressive_diversity spreads strategies as widely across agents as the count allows. Defaults to `balanced`. |
+| `personalities` | list of [Personality](#personality) | no | Which personalities may be drawn, and their weights. Absent means the ten built in personalities at their default population weights. Max items 50. |
+| `seed` | string | no | Decides which personality drives which workflow and the behavioral profile layered on top. The same seed against the same application assigns the same personalities, step for step, which is what lets a personality driven finding be replayed. Defaults to the run id and is echoed into the report. Max length 200. |
+| `variance` | `low`, `medium`, `high` | no | How far each agent's behavioral profile may drift from the neutral centre. low keeps agents close to regular behavior, high lets them diverge. Defaults to `medium`. |
 
 ## Egress
 
@@ -372,6 +386,15 @@ One account an agent logs in as. Personas are created or reconciled in the golde
 | `role` | string | no | Application role to provision, for example admin or member. Interpreted by the authentication adapter. Max length 64. |
 | `sign_in_path` | string | no | Where this persona's sign-in form lives, when it is not where the workflow starts. The runner looks for a form at the workflow's start path first and then at the usual paths, which finds the wrong form for a persona whose sign-in surface is elsewhere on the same origin, such as an operator portal beside a customer console. Max length 512. |
 
+## Personality
+
+One personality that may drive a workflow, selected from the built in catalogue by id and optionally reweighted. A personality is a behavioral lens, not an account: it changes which listed control an agent prefers and how it phrases its reasoning, never the set of controls the page offers.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `id` | string | **yes** | The built in personality this entry selects: one of explorer, fast_actor, cautious_analyst, goal_oriented, distracted, skeptic, text_oriented, visual_follower, keyboard_user, edge_case. Max length 40, matches `^[a-z0-9]([a-z0-9_-]{0,38}[a-z0-9])?$`. |
+| `weight` | number | no | How likely this personality is to be drawn, relative to the others listed. Weights are renormalized to sum to one hundred. Defaults to the personality's built in population weight. Minimum 0, maximum 100. |
+
 ## Policy
 
 What each class of finding does to the pull request check. A finding at 'fail' fails the check, one at 'warn' is reported and the check still passes, and one at 'ignore' is not reported at all. Every key here is read when the report is built, so the answer to why a check failed is always one of these keys.
@@ -514,6 +537,7 @@ One thing the agents do, written as a goal rather than a script. The runner deci
 | `independent` | boolean | no | Whether this workflow can run at the same time as others. Workflows that share an environment run one at a time unless this says otherwise, because two agents mutating the same data produce failures nobody can reproduce. Defaults to `false`. |
 | `name` | string | **yes** | Max length 64, matches `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`. |
 | `persona` | string | no | Which persona runs it. Defaults to the first persona. Max length 40. |
+| `personality` | string | no | Pin one personality to this workflow rather than drawing from the diversity mix. One of the built in ids: explorer, fast_actor, cautious_analyst, goal_oriented, distracted, skeptic, text_oriented, visual_follower, keyboard_user, edge_case. This is the HOW the agent behaves and is independent of persona, the WHO it signs in as. Absent means the personality is assigned from the mix by the seed, which is the usual case. Read only when diversity is enabled. Max length 40, matches `^[a-z0-9]([a-z0-9_-]{0,38}[a-z0-9])?$`. |
 | `personas` | list of string | no | The personas this workflow signs in as, in order, in one browser, for a person who holds more than one session at once: an operator who is also a customer, an account with a second sign-in surface. Each is signed in through its own strategy and the sessions accumulate; the last one named is the identity the workflow acts as. Mutually exclusive with persona. Min items 1, max items 5. |
 | `start_path` | string | no | Where to begin. Defaults to the application root. Defaults to `/`. Max length 512. |
 | `tags` | list of string | no | Labels for the person reading the manifest, and nothing else. The engine does not read them: no command selects workflows by tag and no report prints one, so grouping workflows here groups them for a reader and not for a run. Name the workflows with --only to run a subset. This key had no description at all until somebody counted the fields nothing reads, which is how a label and a broken promise came to look alike. Max items 20. |

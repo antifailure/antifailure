@@ -356,7 +356,44 @@ func Explain(m *schema.Manifest, width int) string {
 		fmt.Fprintf(&b, "  source       %s at %.0f%% of production rate for %s\n",
 			m.Load.Source, m.Load.Scale*100, m.Load.Duration)
 	}
+
+	if m.Diversity != nil && m.Diversity.Enabled {
+		b.WriteString("\nDiversity\n")
+		agents := m.Diversity.AgentsPerWorkflow
+		if agents < 1 {
+			agents = 1
+		}
+		mix := m.Diversity.Mix
+		if mix == "" {
+			mix = schema.MixBalanced
+		}
+		variance := m.Diversity.Variance
+		if variance == "" {
+			variance = schema.VarianceMedium
+		}
+		fmt.Fprintf(&b, "  agents       %d per workflow, %s mix, %s variance\n", agents, mix, variance)
+		fmt.Fprintf(&b, "  personalities %s\n",
+			value(diversityPersonalities(m.Diversity.Personalities), 15, width))
+		if m.Diversity.Seed != "" {
+			fmt.Fprintf(&b, "  seed         %s\n", value(m.Diversity.Seed, 15, width))
+		} else {
+			b.WriteString("  seed         the run id, echoed into the report\n")
+		}
+	}
 	return b.String()
+}
+
+// diversityPersonalities names the selected personalities, or the whole built
+// in catalogue when none is named.
+func diversityPersonalities(sel []schema.Personality) string {
+	if len(sel) == 0 {
+		return "all ten built in, at their default weights"
+	}
+	ids := make([]string, 0, len(sel))
+	for _, p := range sel {
+		ids = append(ids, p.ID)
+	}
+	return strings.Join(ids, ", ")
 }
 
 // value wraps an unbounded value under the column it starts in.

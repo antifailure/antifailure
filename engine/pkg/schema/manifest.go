@@ -28,6 +28,7 @@ type Manifest struct {
 	Change     *Change     `json:"change,omitempty" yaml:"change,omitempty"`
 	Oracle     *Oracle     `json:"oracle,omitempty" yaml:"oracle,omitempty"`
 	Explore    *Explore    `json:"explore,omitempty" yaml:"explore,omitempty"`
+	Diversity  *Diversity  `json:"diversity,omitempty" yaml:"diversity,omitempty"`
 	Fidelity   *Fidelity   `json:"fidelity,omitempty" yaml:"fidelity,omitempty"`
 	Load       *Load       `json:"load,omitempty" yaml:"load,omitempty"`
 	Policy     *Policy     `json:"policy,omitempty" yaml:"policy,omitempty"`
@@ -642,7 +643,12 @@ type Workflow struct {
 	// session at once. The last one named is the identity the workflow acts
 	// as; the ones before it are signed in first and their sessions kept.
 	// Mutually exclusive with Persona.
-	Personas    []string `json:"personas,omitempty" yaml:"personas,omitempty"`
+	Personas []string `json:"personas,omitempty" yaml:"personas,omitempty"`
+	// Personality pins one built in personality (HOW the agent behaves) to this
+	// workflow instead of drawing one from the diversity mix. Independent of
+	// Persona, the account the workflow signs in as (WHO). Read only when
+	// diversity is enabled; empty means the mix assigns one from the seed.
+	Personality string   `json:"personality,omitempty" yaml:"personality,omitempty"`
 	StartPath   string   `json:"start_path,omitempty" yaml:"start_path,omitempty"`
 	Independent bool     `json:"independent,omitempty" yaml:"independent,omitempty"`
 	Budget      *Budget  `json:"budget,omitempty" yaml:"budget,omitempty"`
@@ -786,6 +792,114 @@ type Goal struct {
 	// SlowMs is how long one step may take before it is reported as friction.
 	SlowMs int     `json:"slow_ms,omitempty" yaml:"slow_ms,omitempty"`
 	Budget *Budget `json:"budget,omitempty" yaml:"budget,omitempty"`
+}
+
+// Diversity configures the behavioral variance of the agents that drive the
+// workflows.
+//
+// A SEPARATE axis from the identity persona, and deliberately not a field on
+// it. A persona is WHO an agent signs in as: an account provisioned in the
+// golden, a few of them, each a write. A personality is HOW an agent behaves
+// while pursuing a workflow's goal: a behavioral lens assigned per agent per
+// run, drawn from a weighted population, that reaches no provisioning and
+// changes only which of the controls already on the page the agent prefers.
+// Conflating the two would drag a reasoning lens into the auth adapter and tie
+// behavioral variance to which accounts are signed in, so they are kept apart.
+//
+// Off by default: an absent block, or Enabled false, is exactly today's
+// behavior of one neutral agent per workflow. Reproducible from Seed, so a
+// personality driven finding replays step for step the way an exploration
+// does.
+type Diversity struct {
+	Enabled bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	// Seed decides which personality drives which workflow and the behavioral
+	// profile layered on top. Defaults to the run id, and is echoed into the
+	// report so a run can be replayed. Deliberately separate from the identity
+	// seed, which stays wall-clock fresh because a signup retry needs a
+	// genuinely new email; personality assignment is a replay need, not a
+	// freshness one.
+	Seed string `json:"seed,omitempty" yaml:"seed,omitempty"`
+	// Mix is how the population is drawn: balanced, realistic_population, or
+	// aggressive_diversity. Empty means balanced.
+	Mix PersonaMixMode `json:"mix,omitempty" yaml:"mix,omitempty"`
+	// Variance is how far each agent's profile may drift from the neutral
+	// centre: low, medium, or high. Empty means medium.
+	Variance BehaviorVariance `json:"variance,omitempty" yaml:"variance,omitempty"`
+	// AgentsPerWorkflow is how many personality varied agents drive each
+	// workflow. Zero and one both mean one. More produces one result per
+	// agent, each labelled with its personality.
+	AgentsPerWorkflow int `json:"agents_per_workflow,omitempty" yaml:"agents_per_workflow,omitempty"`
+	// Personalities selects which built in personalities may be drawn and
+	// reweights them. Absent means all ten built ins at their default weights.
+	Personalities []Personality `json:"personalities,omitempty" yaml:"personalities,omitempty"`
+}
+
+// Personality selects one built in personality by id and optionally reweights
+// it. The catalogue of built ins lives in engine/internal/personality; this is
+// only the manifest's way of choosing among them.
+type Personality struct {
+	ID string `json:"id" yaml:"id"`
+	// Weight is how likely this personality is to be drawn relative to the
+	// others listed. Weights are renormalized to sum to one hundred. Zero
+	// falls back to the personality's built in population weight.
+	Weight float64 `json:"weight,omitempty" yaml:"weight,omitempty"`
+}
+
+// PersonaMixMode is how a personality population is drawn.
+type PersonaMixMode string
+
+const (
+	// MixBalanced spreads a few common strategies evenly. The default.
+	MixBalanced PersonaMixMode = "balanced"
+	// MixRealistic follows the built in population weights.
+	MixRealistic PersonaMixMode = "realistic_population"
+	// MixAggressive spreads strategies as widely as the agent count allows.
+	MixAggressive PersonaMixMode = "aggressive_diversity"
+)
+
+// BehaviorVariance is how far an agent's profile may drift from neutral.
+type BehaviorVariance string
+
+const (
+	// VarianceLow keeps agents close to regular behavior.
+	VarianceLow BehaviorVariance = "low"
+	// VarianceMedium is the default.
+	VarianceMedium BehaviorVariance = "medium"
+	// VarianceHigh lets agents diverge.
+	VarianceHigh BehaviorVariance = "high"
+)
+
+// BuiltInPersonalityIDs are the ten built in personality ids, in the order the
+// catalogue and the schema describe them. It is the shared vocabulary that the
+// manifest validator checks a `personality:` pin against and that the
+// engine/internal/personality catalogue must cover exactly, so the two cannot
+// disagree about which ids exist.
+//
+// The list lives here rather than in the catalogue package so the manifest
+// validator can reference it without importing the catalogue, and the
+// catalogue asserts it covers this list exactly in its own test.
+var BuiltInPersonalityIDs = []string{
+	"explorer",
+	"fast_actor",
+	"cautious_analyst",
+	"goal_oriented",
+	"distracted",
+	"skeptic",
+	"text_oriented",
+	"visual_follower",
+	"keyboard_user",
+	"edge_case",
+}
+
+// IsBuiltInPersonality reports whether id names one of the built in
+// personalities.
+func IsBuiltInPersonality(id string) bool {
+	for _, b := range BuiltInPersonalityIDs {
+		if b == id {
+			return true
+		}
+	}
+	return false
 }
 
 // FidelityDimension names one part of the environment the inventory measures.

@@ -17,6 +17,7 @@
 import type { Action, Planner, Snapshot, Workflow } from './workflow.ts';
 import { anchored, judgeAll } from './workflow.ts';
 import { CassetteMiss } from './cassette.ts';
+import { preamble, type Assignment } from './personality.ts';
 
 /** Which provider a key belongs to. */
 export type Provider = 'anthropic' | 'openai';
@@ -72,11 +73,16 @@ export class ModelPlanner implements Planner {
   readonly #config: ModelConfig;
   readonly #complete: Complete;
   readonly #fallback: Planner | undefined;
+  readonly #personality: Assignment | undefined;
 
-  constructor(config: ModelConfig, complete: Complete = callModel, fallback?: Planner) {
+  constructor(
+    config: ModelConfig, complete: Complete = callModel, fallback?: Planner,
+    personality?: Assignment,
+  ) {
     this.#config = config;
     this.#complete = complete;
     this.#fallback = fallback;
+    this.#personality = personality;
   }
 
   async next(
@@ -91,7 +97,7 @@ export class ModelPlanner implements Planner {
 
     let raw: string;
     try {
-      raw = await this.#complete(prompt(workflow, snapshot, history), this.#config);
+      raw = await this.#complete(prompt(workflow, snapshot, history, this.#personality), this.#config);
     } catch (err) {
       // A cassette with no recording for this page is not a model outage, and
       // falling back would hide it: the run would quietly become a
@@ -169,6 +175,7 @@ function toAction(decision: Decision, snapshot: Snapshot, strict: boolean): Acti
  */
 export function prompt(
   workflow: Workflow, snapshot: Snapshot, history: readonly Action[],
+  personality?: Assignment,
 ): string {
   const done = history
     .slice(-8)
@@ -176,6 +183,11 @@ export function prompt(
     .join('\n');
 
   return [
+    // The personality preamble, when one drives this run, comes first, so it
+    // frames the task before the page. It is part of the prompt, so the
+    // cassette keys on it and each personality records its own answers; a run
+    // with no personality produces the exact prompt it always did.
+    ...(personality ? [preamble(personality), ``] : []),
     `You are driving a web application to carry out one task, the way a person would.`,
     ``,
     `The task: ${workflow.description}`,

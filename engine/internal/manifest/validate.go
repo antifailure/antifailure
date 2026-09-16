@@ -39,6 +39,7 @@ func validate(m *schema.Manifest, doc *yaml.Node, root string) []Problem {
 	v.personas(m)
 	v.auth(m)
 	v.workflows(m)
+	v.diversity(m)
 	v.invariants(m)
 	v.oracle(m)
 	v.explore(m)
@@ -1374,6 +1375,15 @@ func (v *validator) workflows(m *schema.Manifest) {
 			}
 			seen[name] = true
 		}
+		// The personality pin is HOW the agent behaves, independent of the
+		// persona it signs in as. It must name a built in, because an unknown
+		// one would silently fall back to neutral and the author would never
+		// learn the pin did nothing.
+		if w.Personality != "" && !schema.IsBuiltInPersonality(w.Personality) {
+			v.add(base+".personality",
+				fmt.Sprintf("Workflow %q pins the personality %q, which is not a built in personality.", w.Name, w.Personality),
+				"Use one of: "+strings.Join(schema.BuiltInPersonalityIDs, ", ")+".")
+		}
 		if w.Budget != nil {
 			if _, err := ParseDuration(w.Budget.Duration); err != nil {
 				v.add(base+".budget.duration",
@@ -1389,6 +1399,39 @@ func (v *validator) workflows(m *schema.Manifest) {
 				fmt.Sprintf("The description of %q is too short to plan from.", w.Name),
 				"Say what a person would do and what proves it worked. The agent plans from this text.")
 		}
+	}
+}
+
+// diversity checks the personality population selection. The ranges and enums
+// are enforced by the bounds pass from the schema; this is the cross field part
+// the schema cannot express: an id must name a built in personality, and a
+// personality is not listed twice.
+func (v *validator) diversity(m *schema.Manifest) {
+	d := m.Diversity
+	if d == nil {
+		return
+	}
+	seen := map[string]bool{}
+	for i := range d.Personalities {
+		p := d.Personalities[i]
+		if p.ID == "" {
+			// The schema's required rule speaks about a missing id; leave that
+			// to the bounds pass rather than say it twice.
+			continue
+		}
+		base := fmt.Sprintf("diversity.personalities[%d]", i)
+		if !schema.IsBuiltInPersonality(p.ID) {
+			v.add(base+".id",
+				fmt.Sprintf("The personality %q is not a built in personality.", p.ID),
+				"Use one of: "+strings.Join(schema.BuiltInPersonalityIDs, ", ")+".")
+			continue
+		}
+		if seen[p.ID] {
+			v.add(base+".id",
+				fmt.Sprintf("The personality %q is listed twice.", p.ID),
+				"List each personality once; set its weight to change how often it is drawn.")
+		}
+		seen[p.ID] = true
 	}
 }
 

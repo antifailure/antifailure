@@ -13,6 +13,7 @@ import (
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/load"
 	"github.com/antifailure/antifailure/engine/internal/manifest"
+	"github.com/antifailure/antifailure/engine/internal/personality"
 	"github.com/antifailure/antifailure/engine/internal/personas"
 	"github.com/antifailure/antifailure/engine/internal/runnerpath"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
@@ -87,7 +88,11 @@ func (r TestReport) InvariantsBlocked() int {
 // WorkflowResult is one workflow's outcome.
 type WorkflowResult struct {
 	Workflow string `json:"workflow"`
-	Outcome  struct {
+	// Personality is the id of the personality that drove this run, empty for
+	// a neutral run. Present so the report can show which behavioral lens
+	// produced a verdict when several agents drive one workflow.
+	Personality string `json:"personality,omitempty"`
+	Outcome     struct {
 		Verdict      string   `json:"verdict"`
 		Cause        string   `json:"cause"`
 		Detail       string   `json:"detail"`
@@ -149,10 +154,15 @@ type jobDocument struct {
 	// rather than two, because everything around the planner is identical.
 	Goals    []goalDoc    `json:"goals,omitempty"`
 	Personas []personaDoc `json:"personas"`
-	AF       string       `json:"af,omitempty"`
-	WorkDir  string       `json:"work_dir,omitempty"`
-	Attempts int          `json:"attempts,omitempty"`
-	Headless bool         `json:"headless"`
+	// Diversity is the resolved per-agent personality plan. Absent means one
+	// neutral agent per workflow, today's behavior. The engine resolves it so
+	// the runner stays a mechanism that consumes a fixed plan rather than
+	// drawing anything itself, which is what keeps a run replayable.
+	Diversity *personality.Resolved `json:"diversity,omitempty"`
+	AF        string                `json:"af,omitempty"`
+	WorkDir   string                `json:"work_dir,omitempty"`
+	Attempts  int                   `json:"attempts,omitempty"`
+	Headless  bool                  `json:"headless"`
 }
 
 type workflowDoc struct {
@@ -248,10 +258,23 @@ func (o *Orchestrator) Test(ctx context.Context, opts TestOptions) (*TestReport,
 	id := runID(runStartedAt, o.envID)
 	o.reportRunStarted(rs, id, "workflows", runStartedAt, len(workflows))
 
+	// The personality plan is resolved here, in the process that owns the run
+	// identity and the seed, so the runner consumes a fixed assignment rather
+	// than drawing one and the run replays. Disabled or absent yields no plan,
+	// which the runner reads as one neutral agent per workflow. The run id is
+	// the default seed, so a run with no explicit seed still replays within
+	// itself and records the seed it used.
+	div := personality.Resolve(o.opts.Manifest.Diversity, o.diversityRefs(opts.Only), id)
+	var divPtr *personality.Resolved
+	if len(div.Assignments) > 0 {
+		divPtr = &div
+	}
+
 	report, err := o.driveRunner(ctx, runnerJob{
 		Runner: runner, BaseURL: status.URL, Artifacts: artifacts,
 		Workflows: workflows, Personas: o.personaDocs(provisioned),
-		WorkDir: o.opts.Root, Attempts: opts.Attempts, Headless: !opts.Headed,
+		Diversity: divPtr,
+		WorkDir:   o.opts.Root, Attempts: opts.Attempts, Headless: !opts.Headed,
 	})
 	if err != nil {
 		// Failed, not complete. The runner could not be driven, so nothing was
@@ -259,6 +282,16 @@ func (o *Orchestrator) Test(ctx context.Context, opts TestOptions) (*TestReport,
 		// verdicts under it says the opposite.
 		o.reportRunFinished(rs, id, runStartedAt, nil, "failed")
 		return nil, err
+	}
+
+	// The diversity plan is reported as a note, so a reader learns how much
+	// behavioral spread the run actually achieved and the seed that replays
+	// it. A plan nobody is told about is a plan nobody can reproduce.
+	if divPtr != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf(
+			"personalities: %d built in used across the run, %d distinct strategies, uniqueness %.2f, seed %q. Replay with diversity.seed set to this seed.",
+			divPtr.Diagnostics.PersonaCount, divPtr.Diagnostics.StrategyCount,
+			divPtr.Diagnostics.UniquenessScore, divPtr.Seed))
 	}
 
 	// Asked after the workflows, of the rows they left behind. This is the
@@ -470,6 +503,7 @@ type runnerJob struct {
 	WorkDir   string
 	Workflows []workflowDoc
 	Personas  []personaDoc
+	Diversity *personality.Resolved
 	Attempts  int
 	Headless  bool
 }
@@ -497,7 +531,8 @@ func (o *Orchestrator) driveRunner(ctx context.Context, job runnerJob) (*TestRep
 	stdout, err := o.invokeRunner(ctx, job.Runner, jobDocument{
 		BaseURL: job.BaseURL, Artifacts: job.Artifacts,
 		Workflows: job.Workflows, Personas: job.Personas,
-		AF: self, WorkDir: job.WorkDir,
+		Diversity: job.Diversity,
+		AF:        self, WorkDir: job.WorkDir,
 		Attempts: job.Attempts, Headless: job.Headless,
 	})
 	if err != nil {
@@ -602,6 +637,24 @@ func (o *Orchestrator) workflowDocs(only []string) []workflowDoc {
 			}
 		}
 		out = append(out, doc)
+	}
+	return out
+}
+
+// diversityRefs is the workflow name and personality pin the resolver needs,
+// filtered by the same --only set that workflowDocs uses, so the personality
+// plan covers exactly the workflows that run and no others.
+func (o *Orchestrator) diversityRefs(only []string) []personality.WorkflowRef {
+	wanted := map[string]bool{}
+	for _, n := range only {
+		wanted[n] = true
+	}
+	var out []personality.WorkflowRef
+	for _, w := range o.opts.Manifest.Workflows {
+		if len(wanted) > 0 && !wanted[w.Name] {
+			continue
+		}
+		out = append(out, personality.WorkflowRef{Name: w.Name, Personality: w.Personality})
 	}
 	return out
 }

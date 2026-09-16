@@ -81,6 +81,9 @@
     "explore": {
       "$ref": "#/$defs/explore"
     },
+    "diversity": {
+      "$ref": "#/$defs/diversity"
+    },
     "fidelity": {
       "$ref": "#/$defs/fidelity"
     },
@@ -900,6 +903,12 @@
           },
           "description": "The personas this workflow signs in as, in order, in one browser, for a person who holds more than one session at once: an operator who is also a customer, an account with a second sign-in surface. Each is signed in through its own strategy and the sessions accumulate; the last one named is the identity the workflow acts as. Mutually exclusive with persona."
         },
+        "personality": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9_-]{0,38}[a-z0-9])?$",
+          "maxLength": 40,
+          "description": "Pin one personality to this workflow rather than drawing from the diversity mix. One of the built in ids: explorer, fast_actor, cautious_analyst, goal_oriented, distracted, skeptic, text_oriented, visual_follower, keyboard_user, edge_case. This is the HOW the agent behaves and is independent of persona, the WHO it signs in as. Absent means the personality is assigned from the mix by the seed, which is the usual case. Read only when diversity is enabled."
+        },
         "start_path": {
           "type": "string",
           "maxLength": 512,
@@ -1316,6 +1325,82 @@
               "default": "10m"
             }
           }
+        }
+      }
+    },
+    "diversity": {
+      "title": "Diversity",
+      "description": "Behavioral variance for the agents that drive the workflows. A personality is HOW an agent behaves while pursuing a workflow's goal, a separate axis from the persona it signs in as, and it changes only which listed control the agent prefers, never what the agent can do. Off by default, reproducible from a seed, and never a reason a workflow fails: it widens the paths a change is exercised over, so a behavioral regression that one scripted path misses is surfaced by another personality taking a different one.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether personality varied agents drive the workflows. Off is today's behavior: one neutral agent per workflow, identical to a manifest with no diversity block."
+        },
+        "seed": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Decides which personality drives which workflow and the behavioral profile layered on top. The same seed against the same application assigns the same personalities, step for step, which is what lets a personality driven finding be replayed. Defaults to the run id and is echoed into the report."
+        },
+        "mix": {
+          "type": "string",
+          "enum": [
+            "balanced",
+            "realistic_population",
+            "aggressive_diversity"
+          ],
+          "default": "balanced",
+          "description": "How the population is drawn. balanced spreads a few common strategies evenly, realistic_population follows the built in population weights, and aggressive_diversity spreads strategies as widely across agents as the count allows."
+        },
+        "variance": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "default": "medium",
+          "description": "How far each agent's behavioral profile may drift from the neutral centre. low keeps agents close to regular behavior, high lets them diverge."
+        },
+        "agents_per_workflow": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 1,
+          "description": "How many personality varied agents drive each workflow. One is the default and reproduces a single run; more produces one result per agent, each labelled with its personality, so behavior coverage is visible in the report."
+        },
+        "personalities": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/personality"
+          },
+          "description": "Which personalities may be drawn, and their weights. Absent means the ten built in personalities at their default population weights."
+        }
+      }
+    },
+    "personality": {
+      "title": "Personality",
+      "description": "One personality that may drive a workflow, selected from the built in catalogue by id and optionally reweighted. A personality is a behavioral lens, not an account: it changes which listed control an agent prefers and how it phrases its reasoning, never the set of controls the page offers.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9_-]{0,38}[a-z0-9])?$",
+          "maxLength": 40,
+          "description": "The built in personality this entry selects: one of explorer, fast_actor, cautious_analyst, goal_oriented, distracted, skeptic, text_oriented, visual_follower, keyboard_user, edge_case."
+        },
+        "weight": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "How likely this personality is to be drawn, relative to the others listed. Weights are renormalized to sum to one hundred. Defaults to the personality's built in population weight."
         }
       }
     },

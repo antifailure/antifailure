@@ -523,6 +523,12 @@ var knownKeys = []string{
 	"description", "persona", "start_path", "independent", "budget", "expect", "tags",
 	"steps", "usd", "duration", "sql",
 	"goals", "goal", "slow_ms",
+	// The diversity block: how many personality varied agents drive each
+	// workflow, which personalities may be drawn, and a workflow's personality
+	// pin. A typo of any of these is a key the parser refuses, and it deserves
+	// the same suggestion as every other key. seed, enabled and id are already
+	// above.
+	"diversity", "mix", "variance", "agents_per_workflow", "personalities", "personality", "weight",
 	"migration_rehearsal", "query_regression", "plan_diff", "regression_factor",
 	"regression_min_ms", "large_table_rows", "rolling_compatibility", "when", "against",
 	"source", "source_config", "scale", "safe_routes", "unsafe_routes", "thresholds",

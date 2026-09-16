@@ -15,6 +15,7 @@ import {
 } from './workflow.ts';
 import { classify, type Attempt, type Cause, type Outcome } from './verdict.ts';
 import { ModelPlanner } from './model.ts';
+import { agentsFor, type Assignment, type ResolvedDiversity } from './personality.ts';
 
 /** Everything one run needs. */
 export interface Job {
@@ -36,11 +37,18 @@ export interface Job {
   readonly attempts?: number;
   readonly headless?: boolean;
   readonly stepTimeoutMs?: number;
+  /** diversity is the resolved per-agent personality plan from the engine.
+   *  Absent means one neutral agent per workflow, today's behavior. */
+  readonly diversity?: ResolvedDiversity;
 }
 
 /** What one workflow produced. */
 export interface WorkflowResult {
   readonly workflow: string;
+  /** personality is the id of the personality that drove this run, absent for
+   *  a neutral run. Present so a report shows which behavioral lens produced a
+   *  verdict when several agents drive one workflow. */
+  readonly personality?: string;
   readonly outcome: Outcome;
   readonly steps: readonly string[];
   readonly evidence: {
@@ -65,16 +73,26 @@ export interface WorkflowResult {
 
 const MAX_STEPS = 40;
 
-/** run drives every workflow and returns a result for each. */
+/** run drives every workflow and returns a result for each.
+ *
+ * When a diversity plan is present a workflow is driven once per assigned
+ * personality, each its own result labelled with the personality, so behavior
+ * coverage is visible. With no plan the inner list is a single neutral run,
+ * which is exactly the one result per workflow this produced before.
+ */
 export async function run(job: Job): Promise<WorkflowResult[]> {
   const results: WorkflowResult[] = [];
   for (const workflow of job.workflows) {
-    results.push(await runOne(job, workflow));
+    for (const assignment of agentsFor(job.diversity, workflow.name)) {
+      results.push(await runOne(job, workflow, assignment));
+    }
   }
   return results;
 }
 
-async function runOne(job: Job, workflow: Workflow): Promise<WorkflowResult> {
+async function runOne(
+  job: Job, workflow: Workflow, assignment?: Assignment,
+): Promise<WorkflowResult> {
   const started = Date.now();
   const attempts: Attempt[] = [];
   const steps: string[] = [];
@@ -100,7 +118,7 @@ async function runOne(job: Job, workflow: Workflow): Promise<WorkflowResult> {
           ...(job.headless === undefined ? {} : { headless: job.headless }),
         });
         session = await opening;
-        return attemptOnce(job, workflow, session, attempt, taken);
+        return attemptOnce(job, workflow, session, attempt, taken, assignment);
       })();
       // Raced rather than checked between steps, because a check between
       // steps is not a cap: one page that never answers holds the workflow for
@@ -161,6 +179,7 @@ async function runOne(job: Job, workflow: Workflow): Promise<WorkflowResult> {
   const outcome = classify(attempts);
   return {
     workflow: workflow.name,
+    ...(assignment ? { personality: assignment.personality.id } : {}),
     outcome: { ...outcome, reproduction: reproduction(workflow, steps, outcome) },
     steps,
     evidence,
@@ -178,6 +197,7 @@ interface AttemptResult {
 
 async function attemptOnce(
   job: Job, workflow: Workflow, session: Session, attempt: number, taken: string[],
+  assignment?: Assignment,
 ): Promise<AttemptResult> {
   const page = session.page();
 
@@ -226,9 +246,13 @@ async function attemptOnce(
   // planner is its fallback rather than its replacement: a model that is
   // unreachable mid run should not end the workflow, and the shapes every
   // application shares do not need one.
+  // A personality reaches the model planner as a prompt preamble; the
+  // deterministic fallback stays neutral, which is honest, because without a
+  // model key there is nothing a behavioral lens could act on. So a
+  // personality with no key runs exactly as a neutral run does today.
   const planner = job.planner
     ?? (job.model
-      ? new ModelPlanner(job.model, job.complete, deterministic)
+      ? new ModelPlanner(job.model, job.complete, deterministic, assignment)
       : deterministic);
 
   const history: Action[] = [];
