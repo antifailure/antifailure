@@ -21,6 +21,24 @@ import (
 type reviewReader interface {
 	Change(ctx context.Context, opts env.ChangeOptions) (*change.Profile, error)
 	CodeFiles(ctx context.Context, opts env.ChangeOptions) ([]change.File, error)
+	// FileContent returns the head side contents of a changed path, so the
+	// reviewer shows the model the whole file as context around the lines a
+	// change added. A path absent at head returns ok=false, never an error, so a
+	// file whose context cannot be fetched is reviewed on its added lines alone.
+	FileContent(ctx context.Context, head, path string) (string, bool, error)
+}
+
+// reviewContext adapts the orchestrator's FileContent, which needs the head ref,
+// to the review package's FileReader, which asks by path alone. It carries the
+// head the change is being read at, so the file content the model sees is the
+// same side of the comparison the added lines came from.
+type reviewContext struct {
+	o    reviewReader
+	head string
+}
+
+func (r reviewContext) FullFile(ctx context.Context, path string) (string, bool, error) {
+	return r.o.FileContent(ctx, r.head, path)
 }
 
 // reviewFindings runs the static, model-backed code reviewer against the change
@@ -91,7 +109,8 @@ func reviewFindings(
 		return nil
 	}
 
-	res, err := review.Review(ctx, client, files, gate.Review, review.DefaultCaps)
+	res, err := review.Review(ctx, client, reviewContext{o: o, head: branch},
+		files, gate.Review, review.DefaultCaps)
 	// The reviewer's own notes ride along whether or not the call succeeded: a
 	// cap note is a fact about what was read, and it is true even when the model
 	// then failed to answer.

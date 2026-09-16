@@ -113,3 +113,16 @@ func (o *Orchestrator) CodeFiles(ctx context.Context, opts ChangeOptions) ([]cha
 	}
 	return code, nil
 }
+
+// FileContent returns the head side contents of a changed path, so the static
+// code reviewer can show the model the whole file as context around the lines a
+// diff added rather than only the added lines. It reads the checkout with git
+// and touches no environment, the same as Change and CodeFiles.
+//
+// A path absent at head, which a deletion or a ref with no such file produces,
+// returns ok=false rather than an error: the reviewer falls back to the added
+// lines alone, so a file it cannot fetch context for is reviewed narrowly, never
+// dropped.
+func (o *Orchestrator) FileContent(ctx context.Context, head, path string) (string, bool, error) {
+	return change.FileAtRef(ctx, o.opts.Root, head, path)
+}
