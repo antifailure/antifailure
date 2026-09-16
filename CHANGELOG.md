@@ -14,6 +14,217 @@ and the per change entries are what make it a wall. `just relnotes` refuses an
 unbalanced marker, a second region in one section, an empty region, and a
 section that omits all of itself.
 
+## v1.5.0
+
+Where the releases before it made the product rehearse a change against a copy
+of production and report what the change did when it ran, this one makes it
+catch the change that is wrong. A dynamic security suite now drives the same
+twin and reads the same logs to prove a vulnerability rather than match a
+string: broken access control, injection, a leaked secret, a dangerous side
+effect, row level security turned off in a migration, a supply chain shape a
+version scan cannot see. A static reviewer reads the diff itself for the
+correctness bug no workflow happened to exercise. Agents now drive the run as a
+population of personalities rather than one scripted path, and a run can be
+watched live rather than only read once it is over. And the marketing site
+stopped offering a stranger an account that the hosted plane admits no one to
+make.
+
+### For operators, before you upgrade
+
+**A manifest with `runtime.ttl: 0h` used to pass and leak an environment that
+never expired.** `0h` is a duration, so the check that a lifetime is a duration
+accepted it, and the runtimes label the reaper's expiry only when the lifetime
+is positive, so the environment was born with no label and no sweep ever
+collected it. A non positive `ttl` is now refused at load, naming the fix: set a
+positive duration or leave it unset for the `24h` default. **A manifest that
+stated `ttl: 0h` will now be refused;** a manifest that states no `ttl` is
+unchanged and still inherits the default.
+
+**A crashed `af ci` run no longer leaks its throwaway environment for a day.** A
+run killed for memory or with its runner pulled out from under it never reached
+the teardown that removes the environment, and the environment carried the day
+long default until somebody read the bill. `af ci` now bounds its environment to
+the run's own budget, its `--timeout` plus a grace and never more than
+`runtime.ttl`, so a crashed run's environment is collected within the hour. The
+normal path still tears it down at once. To sweep on a schedule regardless,
+`examples/github-reaper-workflow.yml` runs `af env reap --yes` beside the
+workflow that creates environments, which matters most on Kubernetes where a
+namespace a killed run left up keeps costing until something removes it.
+
+**A pull request check may now report security findings it never did before,
+and the defaults are chosen so a clean tree stays green.** The new families
+carry their own `security.*` policy keys and the release gate gives each a
+security exit code, a verification failure where a family proved a hole and a
+policy denial where it refused a change on policy grounds. Access control,
+injection, secrets in a response and the database security rules default to
+fail; the supply chain rules and the static reviewer default to warn, because a
+dependency change and a model's reading are noisy and a check that reddens every
+one is a check a team mutes. Every default is the manifest's to lower or raise
+through `policy.security` and `policy.review`.
+
+### The security suite
+
+The suite shipped as a contract with nothing behind it and now has seven
+families and a reader that run. First the spine: a security finding is an
+ordinary report finding in a new policy namespace, so it inherits the verdict,
+the exit code, the pull request comment and the control plane data boundary
+rather than each family reinventing them and drifting. The change router gained
+an authorization surface and emits the routed units a family exercises, so a
+check runs at exactly the endpoint or boundary a diff touched. A
+`read_security_findings` tool projects the findings for a coding agent, carrying
+a rule, a level, a location and a bounded description and never the offending
+body, response or row. Then the seam that made it live: `af ci`'s finish gained
+a security collector beside migration, egress, masking, load and cleanup, so
+each selected family's Probe runs against the diff's targets while the twin is
+up, gated on its edition feature at the call site, and an unlicensed family is
+skipped with a note that names the feature rather than dropped.
+
+**Broken access control.** The authorization family answers the question a
+static reviewer cannot: not "is a 200 bad" but "did the base revision refuse
+this and the change allow it," so a route that was already open is not false
+red. It decides an outcome by whether the victim's content came back rather than
+by the status code, because row level security refuses by dropping the row and
+returns an empty 200 or a 404, never a 403, and it trusts a refusal only when a
+liveness arm proves it is a refusal and not a route that was renamed or an app
+that is down. The anonymous reach shipped first; the authenticated differential
+that catches an IDOR, a cross tenant read and a privilege escalation shipped
+built but with no caller, and now has one: Probe builds a candidate snapshot
+from the run's observations and a base snapshot from the base twin and runs the
+differential, reading the outcome by a planted canary and arming liveness from
+whether the object was seeded. The runner's population of those observations,
+the browser response capture and the per object ownership and canary seeding, is
+the remaining producer; until it lands the path is live and reports the
+authenticated classes absent rather than falsely clean.
+
+**Injection, SSRF and side effects.** The injection family fires SQL, command,
+template, NoSQL, path traversal and dynamic query payloads at the endpoints a
+change touched and reports only the ones it can prove altered the application,
+each measured against a benign control so a slow endpoint or a reflected value
+is never mistaken for a proven one. It shipped able to fuzz and then fuzzed
+nothing, because the routes it exercises were wired to a source that did not
+exist; the source is now the browser exploration the run performed, every page
+it stood on and every navigation it made, with a concrete id in a path templated
+to `{id}` and only parameter names crossing into a route. The SSRF family reads
+the egress decision log for a request the application was coaxed into making
+against a loopback, private or metadata address and takes the firewall's refusal
+as the proof, telling a callback the application produced apart from a reach it
+was tricked into. The side effect family counts dangerous effects by meaning, a
+charge, a refund, an email, an SMS, a webhook, a cloud create or delete, a queue
+publish, and reports the ones this change added over the base branch. It read a
+base twin to do that and handled a missing one correctly, but `af ci` never
+built the base twin, so the increase rule sat dormant; `af ci` now brings a
+second environment up from the base revision, pinned to the candidate's own
+golden and running the same workflows, so "the base made 1 and this change made
+3" is measured rather than assumed, and a base that could not be built leaves
+the increase unmeasured rather than reading every effect as new.
+
+**Secrets, database security and the supply chain.** A sensitive data family
+reads the DOM and response bodies the run already captured and catches a value
+planted in the twin that must never appear in output and a secret or a piece of
+personal data by shape: a Stripe secret key or a private key in a response fails
+the merge, a national id or a bank account number is reported, and a finding
+names the stream and the kind and never the value. Database security rules on the
+migration path catch the change that quietly opens the data where the lint only
+watched for a lock or a rewrite: row level security disabled, a policy rewritten
+to admit every row, a table granted to PUBLIC, the tenant column dropped, a role
+handed BYPASSRLS, and they reason about the statements the change adds rather
+than a restored twin's inherited grants. A supply chain family on the dependency
+surface reads the lines a change adds to a manifest or lockfile and catches a
+lifecycle install hook, an install step that downloads and runs a payload, and a
+dependency whose source moved off the registry to a version control URL, none of
+which a known vulnerable version scan can see.
+
+**The change read for its own bugs.** A static reviewer now runs as one more
+collector, reading the diff and not the twin, so it is worth having even on a run
+whose environment never started. It sends the change's added lines, with the
+line numbers they carry in the new file, to the model the user already
+configured, and maps what comes back into ordinary findings pointing at a line
+the author just wrote: an off by one, a nil dereference on a new path, an error
+checked and dropped, a boundary the new code does not hold, a function nothing
+calls, a value decoded as the wrong shape. It is advisory by default. It is
+honest about absence, skipping with a note when no model key is configured
+rather than reporting a pass it never earned, and it carries the user's own
+source to the user's own provider through the air gap guard under its own site,
+so a sealed installation refuses it at the dial.
+
+### Agents, and watching a run
+
+A workflow used to be pursued by one agent one way, so a regression only a
+different kind of user provokes went unseen. A top level `diversity` block now
+draws agents from a catalogue of ten personalities, each a behavioral lens, an
+explorer, a fast actor, a cautious analyst, a skeptic, an edge case prober and
+five more. A personality is how an agent behaves and is kept separate from the
+persona it signs in as; it changes only which of the controls already on the
+page an agent prefers and can never name a control that is not there. The whole
+plan is resolved from a seed, so a personality driven finding replays the way an
+exploration does, and it is off by default. The personalities run on the user's
+own key on the ungated model path, and a test refuses the import that would gate
+them behind an edition.
+
+A run could also only be read once it was over, and the video the browser
+recorded reached no screen. There is a live channel now: the runner streams
+agent state, steps and frames over a local socket while the run is still going,
+a new `af watch` draws them in the terminal one pane per agent, and the console
+gains the same multi agent view. A run targets a surface, web and terminal are
+driven for real and desktop and iOS are refused loudly rather than reported as a
+green run that tested nothing. The frames stay on the machine that produced them
+and never reach the control plane, which holds counts, verdicts and a reference
+to the recording and never a body, and a test fails if a frame's bytes ever
+reach the control plane shape.
+
+### The site
+
+Every "Start free" and "Create an account" button pointed a stranger at a door
+that does not open: self serve signup is gated off, so a GitHub exchange from
+`/signup` created nothing while the header, the hero, the pricing and the footer
+all promised an account anybody could make. The hosted plane is reached by
+talking to a person now, and the site says so. A `/request-demo` page carries the
+sign in screen's split shell and a request form a sales team reads, posting to
+the same `POST /v1/leads` the enterprise form does with a demo source, and it is
+built to the site's bar: it validates every field before the network, keeps
+everything typed on a refusal, carries a honeypot that answers a bot with the
+same confirmation and writes nothing, and renders idle, sending, error and a
+confirmation that replaces the form, with no borrowed logo wall. `/signup` 301s
+to it so an indexed link still lands somewhere true, and every self serve call to
+action and the copy beside it is corrected to match. The page was then made to
+hold still inside the viewport rather than scroll, measured over CDP at 1280x800,
+1440x900 and 1512x982, the same as the login page it copies, and a clean single
+column on a phone. Four safety claims that said more than the design does were
+each shortened to what is true.
+
+<!-- relnotes:omit -->
+
+The per change entries, with the pull request that carried each. The security
+suite: the shared spine a family lands on, so the verdict, the exit code and the
+data boundary are decided once rather than seven times (#468), and the collector
+in `af ci`'s finish that made a registered family actually run against a change
+(#472). Broken access control, decided by whether the victim's content came back
+rather than by a status code (#470), and the authenticated differential that
+catches an IDOR or a cross tenant read given a caller at last (#483). The
+injection, SSRF and side effect families that prove behavior rather than match a
+string (#471), the observed route source that let injection fuzz something
+(#479), and the base twin that let the side effect count have a base to compare
+against (#481). The migration rules that catch row level security turned off or
+a table opened to everyone (#477), the sensitive data family that reads a secret
+out of a response (#477), and the supply chain family that reads an install hook
+out of a diff (#478). The static reviewer that reads the change's added lines for
+the correctness bug no workflow ran (#482).
+
+Agents and the run: a population of ten personalities resolved from a seed
+(#473), and a live channel that streams a run to the terminal and the console
+while it happens (#474).
+
+Cost: a non positive `ttl` refused at load and a crashed `af ci` run's
+environment bounded to its own budget (#475), and a scheduled reaper so a sweep
+does not depend on remembering (#475).
+
+The site: a `/request-demo` page and form where a signup call to action used to
+promise an account nobody could make (#467), the same page made to hold still in
+the viewport rather than scroll (#476), and four safety claims shortened to what
+the design does (#460).
+
+<!-- relnotes:end -->
+
 ## v1.4.1
 
 Where v1.4.0 was about things that had been sold or declared and were not true,
