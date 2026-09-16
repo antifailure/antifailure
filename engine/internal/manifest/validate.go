@@ -2085,6 +2085,23 @@ func (v *validator) runtime(m *schema.Manifest) {
 	// author is the only one who knows which they meant.
 	ttl, ttlErr := ParseDuration(r.TTL)
 	maxTTL, maxErr := ParseDuration(r.MaxTTL)
+	// A lifetime of zero or less is the immortal-environment hole. ParseDuration
+	// accepts "0h", "0s" and "0", so a manifest can pass the duration check above
+	// and still say an environment has no positive lifetime. The runtimes stamp
+	// the reaper's expiry label only when the ttl is positive, so a non-positive
+	// ttl produces an environment carrying no expiry: the reaper never sees it,
+	// and it lives until somebody remembers it and its bill. There is no
+	// "never expires" here on purpose. A machine-wide resource that outlives
+	// every environment, such as the shared sidecar image, is not an environment
+	// and gets its lifetime from having no environment at all, never from a ttl
+	// of zero.
+	if ttlErr == nil && ttl <= 0 {
+		v.add("runtime.ttl",
+			fmt.Sprintf("The lifetime %q is not positive.", r.TTL),
+			"Set ttl to a positive duration such as 24h. An environment with no positive "+
+				"lifetime is never collected by 'af env reap' and lives until somebody removes "+
+				"it by hand. Leave ttl unset to take the default of "+DefaultTTL+".")
+	}
 	if ttlErr == nil && maxErr == nil && maxTTL < ttl {
 		v.add("runtime.max_ttl",
 			fmt.Sprintf("The maximum lifetime %q is shorter than the lifetime %q.", r.MaxTTL, r.TTL),

@@ -1,0 +1,85 @@
+# Remove environments whose lifetime has ended, on a schedule, so cost never
+# depends on a human remembering to run `af env reap`.
+#
+# Every environment Antifailure creates is stamped with a lifetime at creation
+# (runtime.ttl, a day by default; a `af ci` run stamps a much shorter one bounded
+# by its own budget). `af env reap` removes the ones whose lifetime has passed
+# and NOTHING ELSE: it never touches an environment still inside its lifetime, one
+# something is running against, or one created before lifetimes existed. That is
+# what makes it safe to run unattended, which is what this file does.
+#
+# WHY A SCHEDULE AND NOT JUST TEARDOWN. A run tears its own environment down when
+# it finishes, is cancelled, or fails. What it cannot do is tear it down when the
+# process is KILLED: an out-of-memory kill, a runner pulled out from under the
+# job, a crash. That environment is left up, and on the kubernetes runtime it is
+# a namespace on a cluster that keeps costing money until something removes it.
+# This sweep is that something. A short lifetime plus this sweep turns "a crashed
+# run leaks for a day" into "a crashed run leaks for an hour".
+#
+# WHERE IT MUST RUN. On the same runner, with the same credentials, as the
+# workflow that CREATES your environments (examples/github-workflow.yml). The
+# sweep reads the machine or cluster your manifest's runtime points at:
+#   - local runtime: the Docker daemon on the runner. A GitHub-hosted runner is
+#     fresh every job and holds no leaked environments, so schedule this on a
+#     PERSISTENT self-hosted runner where the environments actually accumulate.
+#   - kubernetes runtime: the cluster your manifest's kubeconfig_context names.
+#     Give this job the same cluster access the create workflow has (a kubeconfig
+#     secret, an OIDC role, or a self-hosted runner in the cluster).
+# It needs your antifailure.yaml on disk, which the checkout provides, to know
+# which runtime to sweep. It never reads a lifetime from it: each environment
+# carries its own.
+#
+# https://antifailure.dev/docs/reference/environment-lifetime
+name: Antifailure reaper
+
+on:
+  schedule:
+    # Every half hour. A leaked environment is collected within roughly the
+    # sweep interval after its lifetime ends, so the interval is the ceiling on
+    # how long a crashed run's environment sits before it goes. Tighten or relax
+    # it to taste; a late sweep still takes everything an on-time one would.
+    - cron: "*/30 * * * *"
+  # Run it by hand from the Actions tab, to collect a known leak now. It removes
+  # what has expired, the same as the scheduled run: an unattended sweep that
+  # only listed would leave the leak in place, which is the opposite of the
+  # point. Run `af env reap` yourself, without --yes, to preview first.
+  workflow_dispatch:
+
+# One sweep at a time. Two racing sweeps would both try to tear the same
+# environments down, and the loser would report failures that are not real.
+concurrency:
+  group: antifailure-reaper
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  # The kubernetes runtime reaches its cluster through a workload-identity
+  # token when you use OIDC. Drop this line if you authenticate another way.
+  id-token: write
+
+jobs:
+  reap:
+    name: Reap expired environments
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        # The manifest at the repository root is all this needs; a shallow
+        # checkout is fine because the sweep reads the daemon, not the history.
+
+      - name: Install Antifailure
+        run: |
+          set -euo pipefail
+          curl -fsSL https://antifailure.dev/install.sh | sh
+
+      # Add the step your create workflow uses to reach the environments here,
+      # if any: `az aks get-credentials`, `aws eks update-kubeconfig`, writing a
+      # KUBECONFIG secret, and so on. The local runtime needs nothing extra.
+
+      - name: Reap
+        run: |
+          set -euo pipefail
+          # An unattended sweep removes; --yes is what tells it to. Without it it
+          # would print a plan and remove nothing, so a scheduled reaper that
+          # dropped --yes would leak exactly what it was installed to collect.
+          af env reap --yes

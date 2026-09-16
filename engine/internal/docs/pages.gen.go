@@ -19550,7 +19550,19 @@ runtime:
 ` + "`" + "`" + "`" + `
 
 ` + "`" + `ttl` + "`" + ` defaults to ` + "`" + `24h` + "`" + `. ` + "`" + `max_ttl` + "`" + ` defaults to ` + "`" + `168h` + "`" + ` and is the furthest an
-environment can ever be extended to.
+environment can ever be extended to. A manifest that states no ` + "`" + `ttl` + "`" + ` inherits
+the ` + "`" + `24h` + "`" + ` default rather than living forever: nothing is created without an
+expiry. A ` + "`" + `ttl` + "`" + ` of ` + "`" + `0` + "`" + ` (or any non-positive duration) is refused for the same
+reason, because it would be an environment born with no lifetime and no way for
+a sweep to ever collect it. There is no "never expires".
+
+A ` + "`" + `af ci` + "`" + ` run does not use the day-long default. It stamps its throwaway
+environment with a much shorter lifetime, its own run budget (the ` + "`" + `--timeout` + "`" + `,
+30 minutes by default) plus a grace, and never more than ` + "`" + `runtime.ttl` + "`" + `. The run
+tears the environment down when it finishes, is cancelled, or fails; the short
+lifetime is the backstop for the one path the run cannot clean up itself, a
+process killed before its teardown runs. On that path the sweep below collects
+the environment within the hour instead of a day later.
 
 The lifetime is stamped onto the environment's resources when they are created.
 That matters more than it sounds: a sweep reads the expiry off each
@@ -19593,6 +19605,32 @@ Three things it will never remove:
 
 A deferral is not a failure and does not change the exit code. A teardown that
 errored is, because something is then neither removed nor accounted for.
+
+## Running the sweep automatically
+
+Cost should never depend on a human remembering to run ` + "`" + `af env reap` + "`" + `. Run it on
+a schedule, on the same machine or cluster your environments live on, with the
+same credentials the workflow that creates them uses.
+
+The ready-made way is a scheduled GitHub Actions workflow. Copy
+[` + "`" + `examples/github-reaper-workflow.yml` + "`" + `](https://github.com/antifailure/antifailure/blob/main/examples/github-reaper-workflow.yml)
+to ` + "`" + `.github/workflows/` + "`" + `; it checks the repository out, installs ` + "`" + `af` + "`" + `, and runs
+` + "`" + `af env reap --yes` + "`" + ` on a cron. It belongs beside the create workflow because it
+needs the same access:
+
+- **Local (Docker) runtime.** The sweep reads the Docker daemon on the runner. A
+  GitHub-hosted runner is fresh every job and holds nothing, so schedule this on
+  a persistent self-hosted runner, where environments actually accumulate.
+- **Kubernetes runtime.** The sweep reads the cluster the manifest's
+  ` + "`" + `kubeconfig_context` + "`" + ` names. Give the scheduled job the same cluster access the
+  create workflow has. This is where the sweep earns its keep: a namespace left
+  up by a killed run keeps costing money until something removes it.
+
+` + "`" + `af env reap` + "`" + ` needs the repository's ` + "`" + `antifailure.yaml` + "`" + ` on disk, which the
+checkout provides, to know which runtime to sweep. It never reads a lifetime
+from it; each environment carries its own. Any scheduler works: the same command
+under a host ` + "`" + `cron` + "`" + `, a systemd timer, or an in-cluster ` + "`" + `CronJob` + "`" + ` running an image
+that carries ` + "`" + `af` + "`" + `, does the same thing.
 
 ## Keeping one you are using
 

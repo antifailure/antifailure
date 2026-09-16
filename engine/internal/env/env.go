@@ -168,6 +168,41 @@ type Orchestrator struct {
 	envID    string
 	progress func(string)
 	sinks    []events.Sink
+	// ephemeralTTL, when positive, is the lifetime this orchestrator stamps on
+	// the environment it creates INSTEAD of the manifest's runtime.ttl. It is
+	// set by MarkEphemeral for a throwaway run, af ci above all: a run bounded
+	// by its own budget has no use for the day-long default lifetime, and the
+	// day is exactly what turns a crashed run into a day of paying for an
+	// environment nobody will look at again. A short lifetime bounded by the
+	// run's budget means the reaper collects a leaked run env within the hour
+	// rather than the next day. Zero leaves the manifest's ttl in force, which
+	// is what af up, the oracle's baseline and every long-lived environment
+	// want.
+	ephemeralTTL time.Duration
+}
+
+// MarkEphemeral bounds the lifetime of the environment this orchestrator
+// creates to a throwaway run's budget rather than the manifest's day-long
+// default.
+//
+// Called by af ci and the other run-once commands after the orchestrator is
+// built and before it brings an environment up. The value is the run's own
+// budget plus a grace, so an environment that outlives a CRASHED run, where the
+// deferred teardown never fired, is collected by the reaper within that budget
+// rather than a day later. The normal path still tears the environment down at
+// the end of the run; this is the backstop for the path where the process
+// dies before it can.
+//
+// A non-positive value is ignored, so a caller that could not work out a budget
+// leaves the manifest's lifetime in force rather than stamping an environment
+// with no lifetime at all. It never lengthens a lifetime: the caller is
+// expected to pass min(budget+grace, runtime.ttl), and stamping is the same
+// code either way, so a value longer than the manifest's ttl would simply be
+// a longer-lived throwaway, never an escape from the ceiling max_ttl fixes.
+func (o *Orchestrator) MarkEphemeral(ttl time.Duration) {
+	if ttl > 0 {
+		o.ephemeralTTL = ttl
+	}
 }
 
 // ControlPlane reports where this orchestrator will report, and with what.
@@ -820,6 +855,15 @@ func needsInspection(e *schema.Egress) bool {
 // as long as the manifest has existed, and read by nothing. Until the reaper,
 // every environment lived until somebody remembered it.
 func (o *Orchestrator) ttl() time.Duration {
+	// A throwaway run's budget wins over the manifest, so that a crashed af ci
+	// leaves an environment the reaper takes within the hour rather than a day
+	// later. Read before the manifest and not after, because this is the whole
+	// point of MarkEphemeral: the day-long default is exactly what it is
+	// overriding. ttlSeconds rides this same method, so the control plane is
+	// told the short expiry too and the console and the reaper agree.
+	if o.ephemeralTTL > 0 {
+		return o.ephemeralTTL
+	}
 	m := o.opts.Manifest
 	if m == nil || m.Runtime == nil {
 		return 0
