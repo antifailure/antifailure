@@ -21,6 +21,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/report"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
 	"github.com/antifailure/antifailure/engine/internal/security"
+	"github.com/antifailure/antifailure/engine/internal/security/authz"
 	"github.com/antifailure/antifailure/engine/internal/security/injection"
 	"github.com/antifailure/antifailure/engine/internal/security/sideeffect"
 	"github.com/antifailure/antifailure/engine/internal/security/ssrf"
@@ -139,16 +140,21 @@ change.`),
 			var migration []report.Finding
 			// The security families' findings, run against the twin while it is
 			// up and appended in finish in one line, exactly as migration is.
-			// Empty until a family registers in security.Default, so the spine
-			// adds nothing here until one lands.
 			var securityResults []report.Finding
+			// The families register HERE, in the cli layer, rather than in
+			// security.Default. Default cannot import a family package: a family
+			// imports the security spine for the Family contract, so a spine that
+			// imported the families back would be an import cycle the compiler
+			// refuses. The cli layer already sits above both, so this is where
+			// the wiring belongs, one Register line per family as each lands.
 			reg := security.Default()
-			// The injection, ssrf and side_effect families register here, in the
-			// cli assembly layer rather than in security.Default, because a family
-			// package imports the security package and security.Default importing
-			// the families back would be a cycle. securityFindings takes the
-			// registry as a parameter for exactly this reason, so registration
-			// lives with the command that runs them.
+			// The security families register here, in the cli assembly layer
+			// rather than in security.Default, because a family package imports
+			// the security package and security.Default importing the families
+			// back would be a cycle. securityFindings takes the registry as a
+			// parameter for exactly this reason, so registration lives with the
+			// command that runs them, one Register line per family as each lands.
+			reg.Register(authz.New())
 			reg.Register(injection.New())
 			reg.Register(ssrf.New())
 			reg.Register(sideeffect.New())
