@@ -134,12 +134,13 @@ type Input struct {
 	// These are the CANDIDATE run's artifacts, flat. The base twin's artifacts,
 	// when one was built, arrive together in baseline, so a reader diffs a
 	// candidate against a base through Baseline() and never confuses the two.
-	decisions    []local.Decision
-	messages     []local.Message
-	observations []RawObservation
-	routes       []Route
-	evidence     Evidence
-	baseline     *Baseline
+	decisions       []local.Decision
+	messages        []local.Message
+	observations    []RawObservation
+	routes          []Route
+	evidence        Evidence
+	baseline        *Baseline
+	dependencyFiles []DependencyFile
 }
 
 // Environment is the sanitized twin a family drives.

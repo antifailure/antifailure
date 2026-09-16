@@ -42,3 +42,36 @@ func (o *Orchestrator) Change(ctx context.Context, opts ChangeOptions) (*change.
 		Progress: o.progress,
 	})
 }
+
+// DependencyFiles reads the same diff Change classifies and returns the
+// dependency manifests and lockfiles it touched, each with the lines the change
+// adds. It exists because the profile Change returns carries the classification
+// but not the added lines, and the supply_chain family reasons about what a
+// dependency change ADDS: an install hook, a binary download, a source moved
+// off the registry. It reads the diff, not the environment, so like Change it
+// opens no session and touches no database.
+//
+// A file the diff deleted carries no added lines and is returned all the same,
+// so a caller can tell a removed manifest from an absent one. A non-dependency
+// file is dropped here rather than handed on, so the family reads only what it
+// is meant to.
+func (o *Orchestrator) DependencyFiles(ctx context.Context, opts ChangeOptions) ([]change.File, error) {
+	files, _, _, _, err := change.Read(ctx, change.Source{
+		Root:     o.opts.Root,
+		Base:     opts.Base,
+		Head:     opts.Head,
+		DiffPath: opts.DiffPath,
+		Getenv:   opts.Getenv,
+		Progress: o.progress,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var deps []change.File
+	for _, f := range files {
+		if change.SurfaceOf(f.Path, o.opts.Manifest) == change.SurfaceDependency {
+			deps = append(deps, f)
+		}
+	}
+	return deps, nil
+}

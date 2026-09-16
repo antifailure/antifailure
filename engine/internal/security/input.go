@@ -60,6 +60,33 @@ func (in Input) Evidence() Evidence { return in.evidence }
 // probe never reads a missing source as a clean bill of health.
 func (in Input) Routes() []Route { return in.routes }
 
+// DependencyDiff returns the changed dependency files, each with the lines the
+// change adds, for the supply_chain family to reason about what a dependency
+// change loosened. ok reports whether the router attached the diff at all: a
+// non-nil slice, even an empty one, means "read and there was nothing", while
+// nil means "not measured", which the family fails closed on rather than
+// reading as a clean bill of health. It is the added lines, never removed ones
+// and never full file content, because the supply rules key on what a change
+// ADDS: an install hook, a binary download, a source moved off the registry.
+func (in Input) DependencyDiff() ([]DependencyFile, bool) {
+	if in.dependencyFiles == nil {
+		return nil, false
+	}
+	return in.dependencyFiles, true
+}
+
+// DependencyFile is one changed dependency manifest or lockfile, reduced to
+// what the supply rules read: its path, what the change did to it, and the
+// lines it adds. The added lines are the diff's own, without the leading plus.
+type DependencyFile struct {
+	// Path is the changed file, for example package.json or go.mod.
+	Path string
+	// Status is what the change did: added, modified or deleted.
+	Status string
+	// Added are the lines the change adds, without the leading plus.
+	Added []string
+}
+
 // Baseline returns the BASE twin's artifacts as one bundle, and ok reporting
 // whether a base twin was actually built and run. side_effect reads
 // base.Decisions and base.Messages to diff its candidate counts; authz reads
@@ -175,6 +202,10 @@ type RunArtifacts struct {
 	// Baseline is the base twin's bundle, or nil when no base twin was run,
 	// which Input.Baseline surfaces as ok=false.
 	Baseline *Baseline
+	// DependencyFiles is the changed dependency files with their added lines,
+	// or nil when no dependency-diff source was attached, which
+	// Input.DependencyDiff surfaces as ok=false.
+	DependencyFiles []DependencyFile
 }
 
 // WithRunArtifacts returns a copy of the Input carrying the per-run reader
@@ -189,5 +220,6 @@ func (in Input) WithRunArtifacts(a RunArtifacts) Input {
 	in.evidence = a.Evidence
 	in.routes = a.Routes
 	in.baseline = a.Baseline
+	in.dependencyFiles = a.DependencyFiles
 	return in
 }

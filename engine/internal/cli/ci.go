@@ -27,6 +27,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/security/injection"
 	"github.com/antifailure/antifailure/engine/internal/security/sideeffect"
 	"github.com/antifailure/antifailure/engine/internal/security/ssrf"
+	"github.com/antifailure/antifailure/engine/internal/supply"
 	"github.com/antifailure/antifailure/engine/internal/verify"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
@@ -167,6 +168,10 @@ change.`),
 			reg.Register(sideeffect.New())
 			reg.Register(dbsecurity.New())
 			reg.Register(canaryleak.New())
+			// supply_chain reads the dependency diff the collector attaches
+			// per run; like the others it registers here, not in
+			// security.Default, to avoid the import cycle.
+			reg.Register(supply.New())
 
 			// Teardown runs at most once and it runs BEFORE the report is
 			// written, which is the change that makes a failed cleanup mean
