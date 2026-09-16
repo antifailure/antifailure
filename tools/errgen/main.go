@@ -67,6 +67,7 @@ var areaNames = map[string]string{
 	"CPL": "Control plane",
 	"WLD": "Workloads",
 	"EXT": "Extensions",
+	"DSC": "Dynamic security checks",
 }
 
 func main() {

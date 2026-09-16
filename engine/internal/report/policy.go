@@ -32,6 +32,28 @@ const (
 	DefaultLockFailMS = 2000.0
 )
 
+// The security exit codes, exported so a security family and the gate that
+// turns its findings into a process exit agree on the same two numbers rather
+// than each spelling them out. They mirror the catalog: 6 is a policy denial,
+// a change refused on policy or configuration grounds, and 7 is a verification
+// failure, a vulnerability the run proved by exercising the application. 8 is
+// the test failure code, exported beside them so a family that ever needs it
+// does not reintroduce a bare literal.
+const (
+	// ExitPolicyDenial is the exit code for a change refused on policy grounds.
+	ExitPolicyDenial = 6
+	// ExitVerification is the exit code for a proven vulnerability.
+	ExitVerification = 7
+	// ExitTestFailure is the exit code for a failed test.
+	ExitTestFailure = 8
+)
+
+// PolicyKey is one security policy key, "security.<family>.<rule>", which is
+// also the Rule a security finding carries. Its own type rather than a bare
+// string so a caller cannot pass an ordinary finding rule where a security key
+// belongs, and so the security namespace reads as one thing across the engine.
+type PolicyKey string
+
 // Policy is the manifest's policy block with every default resolved.
 //
 // It exists so that "does this finding stop the merge" is answered in one
@@ -56,6 +78,20 @@ type Policy struct {
 	// a broken application. All of them blocked is a different claim, and
 	// exiting zero on it says "tested, fine" about a run that tested nothing.
 	WorkflowsUnverified Level
+
+	// Security is the resolved level for each security policy key, keyed by the
+	// full "security.<family>.<rule>" name.
+	//
+	// A map rather than a field per key, because the security families fan out
+	// in parallel and three of them adding a struct field would collide on one
+	// struct the way two lanes editing one file do. The map is filled by
+	// overlaying the manifest's overrides onto the family defaults: the
+	// security router resolves the family defaults from the registry (which the
+	// families own) and Configure fills in the manifest's overrides here, so a
+	// key set in the manifest wins and a key left unset keeps its family
+	// default. It is nil until a security key is configured or a family default
+	// is resolved into it.
+	Security map[PolicyKey]Level
 }
 
 // Configure resolves the manifest block. A nil block is the default, which is
@@ -106,7 +142,40 @@ func Configure(in *schema.Policy) Policy {
 	set(&p.Masking, in.Masking)
 	set(&p.Cleanup, in.Cleanup)
 	set(&p.WorkflowsUnverified, in.WorkflowsUnverified)
+
+	// The security overrides. Each is a "security.<family>.<rule>" key mapped to
+	// a level. A value the manifest validator already refused never reaches
+	// here, and levelOf refuses one again rather than coercing it, so a key
+	// whose level will not parse is dropped rather than silently turned into a
+	// warning. The key itself is NOT validated against the family registry
+	// here: a family declares its keys when it lands, and until then a manifest
+	// may name a security key ahead of the family that will read it, so the key
+	// is carried and the level is what is checked. A key with no family and no
+	// override is owned by nobody and Level reports it as ignore.
+	for key, lvl := range in.Security {
+		if resolved, ok := levelOf(lvl); ok {
+			if p.Security == nil {
+				p.Security = map[PolicyKey]Level{}
+			}
+			p.Security[PolicyKey(key)] = resolved
+		}
+	}
 	return p
+}
+
+// Level is the level a security finding on this key carries.
+//
+// It returns the resolved value from the Security map when the key is there,
+// which is the manifest's override if it set one and otherwise the family
+// default the router overlaid. A key that is in neither, because no family owns
+// it and the manifest did not name it, returns LevelIgnore rather than the
+// empty string: an unowned key does nothing, which is a real level and not an
+// absent one, so a caller comparing against a level never meets "".
+func (p Policy) Level(key PolicyKey) Level {
+	if lvl, ok := p.Security[key]; ok {
+		return lvl
+	}
+	return LevelIgnore
 }
 
 // levelOf maps a manifest level onto a report level.

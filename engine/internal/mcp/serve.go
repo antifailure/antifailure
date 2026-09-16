@@ -119,6 +119,7 @@ func Serve(ctx context.Context, cfg Config) error {
 	server := NewServer(project.ID, store, cfg.Log)
 	server.Register(newGetRunTool(project, store))
 	server.Register(newCancelRunTool(project, store))
+	server.Register(newReadSecurityFindingsTool(project, store))
 	server.Register(newInspectEgressTool(project, orch.observe))
 	server.Register(newRehearseMigrationTool(project, engine, orch.rehearse))
 	server.Register(newRunLoadTestTool(project, engine, orch.sendLoad))

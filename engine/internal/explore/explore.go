@@ -162,6 +162,17 @@ type Exploration struct {
 		Screenshot string   `json:"screenshot"`
 		Console    []string `json:"console"`
 		Failed     []string `json:"failed"`
+		// DOM and Responses are what the authz and canary_leak families read to
+		// decide whether a persona reached content it should not have: the DOM
+		// the page rendered and the bodies of the responses the browser
+		// received. They are the runner's observations, decoded from the same
+		// JSON as the rest of this struct, and empty is fine for now: the runner
+		// populates them where it is cheap to, and a family that finds them
+		// empty has simply not been handed that evidence rather than been told
+		// there was none. They stay inside the run, against the sanitized twin;
+		// a finding that reads them reports a location and never a body.
+		DOM       []string `json:"dom,omitempty"`
+		Responses []string `json:"responses,omitempty"`
 	} `json:"evidence"`
 	DurationMs int64 `json:"durationMs"`
 }

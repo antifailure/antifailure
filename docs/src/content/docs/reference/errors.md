@@ -882,6 +882,32 @@ The diff at {path} could not be read: {detail}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/change-analysis](/docs/concepts/change-analysis) |
 
+## Dynamic security checks
+
+### AF-DSC-001
+
+The security check {rule} proved a vulnerability against the sanitized twin: {detail}
+
+**What to do.** Open the finding for the location it was proved at and its fix, then re-run the rehearsal. The offending value is never shown; it lives in the copy of production.
+
+| | |
+| --- | --- |
+| Exit code | `7` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/security](/docs/concepts/security) |
+
+### AF-DSC-002
+
+The security check {rule} refused this change on policy grounds: {detail}
+
+**What to do.** Open the finding for what to change. If the change is intended, set its key in the manifest's policy block. The offending value is never shown.
+
+| | |
+| --- | --- |
+| Exit code | `6` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/security](/docs/concepts/security) |
+
 ## Enterprise
 
 ### AF-EE-004

@@ -36,6 +36,7 @@ goleak
 gosec
 govulncheck
 hardlinks
+idor
 kubeconfig
 kubelet
 livekey

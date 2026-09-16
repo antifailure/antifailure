@@ -202,6 +202,14 @@ const (
 	// The diff at {path} could not be read: {detail}
 	AFDET011 Code = "AF-DET-011"
 
+	// Dynamic security checks
+	// The security check {rule} proved a vulnerability against the
+	// sanitized twin: {detail}
+	AFDSC001 Code = "AF-DSC-001"
+	// The security check {rule} refused this change on policy grounds:
+	// {detail}
+	AFDSC002 Code = "AF-DSC-002"
+
 	// Enterprise
 	// The enterprise license could not be verified.
 	AFEE001 Code = "AF-EE-001"
@@ -1176,6 +1184,24 @@ var catalog = map[Code]Entry{
 		Docs:      "concepts/change-analysis",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
+	},
+	AFDSC001: {
+		Code:      AFDSC001,
+		Area:      "DSC",
+		Message:   "The security check {rule} proved a vulnerability against the sanitized twin: {detail}",
+		NextStep:  "Open the finding for the location it was proved at and its fix, then re-run the rehearsal. The offending value is never shown; it lives in the copy of production.",
+		Docs:      "concepts/security",
+		Retryable: false,
+		ExitCode:  ExitVerification,
+	},
+	AFDSC002: {
+		Code:      AFDSC002,
+		Area:      "DSC",
+		Message:   "The security check {rule} refused this change on policy grounds: {detail}",
+		NextStep:  "Open the finding for what to change. If the change is intended, set its key in the manifest's policy block. The offending value is never shown.",
+		Docs:      "concepts/security",
+		Retryable: false,
+		ExitCode:  ExitPolicyDenied,
 	},
 	AFEE001: {
 		Code:      AFEE001,

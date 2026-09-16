@@ -342,6 +342,33 @@ func (s *Store) Get(ctx context.Context, caller, project, id string) (Run, *Faul
 	return run, nil
 }
 
+// LatestFinished returns the most recently updated finished run for a caller
+// and project, or reports that there is none.
+//
+// It is what read_security_findings falls back to when no run id is given: the
+// last run this caller finished against this project, which is the run whose
+// findings a coding agent most likely wants to read. Scoped to the caller and
+// project in the WHERE clause for the same reason Get is, so it can never
+// surface another project's run. Only a finished run is a candidate: a failed,
+// cancelled or in-flight run reached no verdict and its findings, if any, are
+// not a report about the change.
+func (s *Store) LatestFinished(ctx context.Context, caller, project string) (Run, bool, *Fault) {
+	var run Run
+	var found bool
+	err := s.db.Tx(ctx, func(tx *sql.Tx) error {
+		var err error
+		run, found, err = scanOne(tx.QueryRowContext(ctx,
+			selectRunSQL+` WHERE caller = ? AND project = ? AND status = ?`+
+				` ORDER BY updated_at DESC, id DESC LIMIT 1`,
+			caller, project, string(StatusFinished)))
+		return err
+	})
+	if err != nil {
+		return Run{}, false, asFault(err)
+	}
+	return run, found, nil
+}
+
 // Start moves a queued run to running.
 func (s *Store) Start(ctx context.Context, id, phase string) error {
 	return s.setStatus(ctx, id, StatusRunning, phase)

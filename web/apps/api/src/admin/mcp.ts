@@ -348,6 +348,19 @@ export const MCP_TOOLS: readonly McpToolFact[] = [
     servedBy: 'engine/internal/mcp/tools_env.go:newReadMessagesTool',
   },
   {
+    name: 'read_security_findings',
+    does:
+      'Read the security findings a rehearsal produced, grouped by family and filterable by ' +
+      'family, level and location. Each finding carries a rule, a level, a title, a bounded ' +
+      'description, a fix and a location, so an agent reads what to change and where and then ' +
+      're-runs the rehearsal, rather than scraping the pull request comment.',
+    refuses:
+      'It never returns the offending request body, the response or the row: those stay in the ' +
+      'copy of production the run drove, because a security finding read out of a sanitized twin ' +
+      'must not carry the value that made it a finding. It reads a finished run and runs nothing.',
+    servedBy: 'engine/internal/mcp/tools_security.go:newReadSecurityFindingsTool',
+  },
+  {
     name: 'read_documentation_page',
     does:
       'Read one page of this build\'s documentation, or one section of it named by an anchor from ' +

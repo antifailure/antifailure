@@ -126,6 +126,20 @@ const (
 	SurfaceDocs Surface = "docs"
 	// SurfaceEgress marks an outbound host found in an added line.
 	SurfaceEgress Surface = "egress"
+	// SurfaceAuth is a change to who may do what: authentication and
+	// authorization middleware, route guards, session and token handling, the
+	// organisation policy package, the entitlement catalogue, licence gating
+	// and the extension request shape. It is the sharpest security edge, and
+	// it was invisible before this constant because every one of those files
+	// fell into SurfaceCode and read as ordinary source.
+	//
+	// It is added ABOVE path.code in rules.go so it wins over the general code
+	// rule, and it is deliberately BROAD: a control is as often evaded by an
+	// absent rule as by a wrong one (a field present that no policy reads), so
+	// a change anywhere near who-may-do-what routes here rather than passing as
+	// plain code. It is additive: unknown still selects everything, and auth
+	// never subtracts a check from a file that would otherwise have selected it.
+	SurfaceAuth Surface = "auth"
 	// SurfaceUnknown is a path no rule claimed. It is the fail safe: one of
 	// these selects every check.
 	SurfaceUnknown Surface = "unknown"
@@ -177,7 +191,56 @@ const (
 	CheckMasking Check = "masking"
 )
 
-// Checks returns every check, in the order a report renders them.
+// The reserved security check vocabulary.
+//
+// These are the change.Check ids the security check families contribute, one
+// per family, RESERVED here so a family only registers against a name that
+// already exists rather than minting its own: two lanes adding a constant at
+// different positions in a file is a bug git and the compiler both pass, and
+// the whole security suite fans out in parallel from this one spine. A check
+// is routable only once its family is registered in engine/internal/security,
+// so the names below name nothing runnable on their own; they are the slots
+// the families plug into. They are DELIBERATELY absent from Checks(), which
+// stays the built-in vocabulary the engine has always had, so a diff with no
+// registered family plans exactly the checks it did before.
+const (
+	// CheckAuthz is broken access control proven by exercising it: a missing
+	// authorization check, an insecure direct object reference, a privilege
+	// escalation, an unauthenticated reach, a control evaded by an absent rule.
+	CheckAuthz Check = "authz"
+	// CheckInjection is a payload that changed how a query or command was
+	// interpreted: SQL, shell, a server side template, reflected markup.
+	CheckInjection Check = "injection"
+	// CheckSSRF is the application coaxed into making a request it should not,
+	// read from the existing egress decisions rather than a new mechanism.
+	CheckSSRF Check = "ssrf"
+	// CheckSideEffect is a state change a read should not have made, an
+	// unexpected write, or an external call, counted over the capture log.
+	CheckSideEffect Check = "side_effect"
+	// CheckCanaryLeak is a planted token reaching a response it should not:
+	// personal data, a secret, or another tenant's row.
+	CheckCanaryLeak Check = "canary_leak"
+	// CheckDBSecurity is row level security disabled or bypassable, a missing
+	// policy, or a grant broader than the change needed, read from the diff.
+	CheckDBSecurity Check = "db_security"
+	// CheckHeaders is a response header that weakens the browser's defences:
+	// permissive CORS, a cookie without Secure, a missing HSTS or CSP.
+	CheckHeaders Check = "headers"
+	// CheckSupplyChain is a dependency change worth a second look: a known
+	// vulnerability, a new dependency, a new outbound host, an install script.
+	CheckSupplyChain Check = "supply_chain"
+	// CheckSecretExposure is a secret shown to be reachable through a surface
+	// the change touched.
+	CheckSecretExposure Check = "secret_exposure"
+)
+
+// Checks returns every BUILT-IN check, in the order a report renders them.
+//
+// It stays the fixed vocabulary the engine actually has. The reserved security
+// checks above are DELIBERATELY not here: a security check appears in a plan
+// only once its family is registered in engine/internal/security, and listing
+// it here would let a report name a check nobody implemented, which is the one
+// thing this package refuses to do.
 func Checks() []Check {
 	return []Check{
 		CheckEnvironment, CheckMigration, CheckInvariants,
@@ -232,6 +295,14 @@ type Profile struct {
 	// classification was incomplete, rather than because the diff selected
 	// them one by one.
 	Everything bool `json:"everything"`
+
+	// mani is the manifest this profile was analysed against, kept unexported
+	// so it never crosses the wire: it is read only by Targets, to name the
+	// personas that may drive each routed unit. A profile decoded from JSON
+	// carries none, so Targets on one returns targets with no personas, which
+	// is correct: the personas are a fact about the manifest that produced the
+	// analysis, not about the analysis document.
+	mani *schema.Manifest
 }
 
 // Options are the inputs to one analysis.
@@ -256,7 +327,7 @@ type Options struct {
 // the same profile forever, which is what makes the output reviewable in a
 // pull request comment.
 func Analyze(opts Options) *Profile {
-	p := &Profile{Base: opts.Base, Head: opts.Head}
+	p := &Profile{Base: opts.Base, Head: opts.Head, mani: opts.Manifest}
 
 	files := opts.Files
 	p.Truncated = opts.Truncated
@@ -430,6 +501,15 @@ var coverage = map[Surface][]Check{
 	SurfaceManifest:   {CheckEnvironment, CheckEgress},
 	SurfaceMasking:    {CheckMasking},
 	SurfaceEgress:     {CheckEgress},
+
+	// A change to who may do what is exercised by driving the application: the
+	// environment comes up and the workflows drive it through the guard that
+	// changed. The security families that also route to auth (authz,
+	// db_security, headers) are NOT built-in checks and so are not named here;
+	// they are routed from the family registry, which is empty until they
+	// register. So an auth file selects the same built-in checks a code file
+	// does, and the security layer is added on top rather than replacing it.
+	SurfaceAuth: {CheckEnvironment, CheckWorkflows},
 
 	// A service attribution adds the workflows, because a workflow drives the
 	// application through its interface and a web service is what that
