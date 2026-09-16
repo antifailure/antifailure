@@ -35,7 +35,18 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/change"
 	"github.com/antifailure/antifailure/engine/internal/report"
 	"github.com/antifailure/antifailure/engine/internal/security"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 )
+
+// airgapSite names this prober in the air gap ledger. The injection family is
+// an active prober: it opens real outbound connections to the twin's own
+// endpoints, so its client MUST go through engine/pkg/airgap like every other
+// outbound client in the product, or an air gapped installation would reach the
+// network through it and the guard test would refuse the build. The twin is
+// loopback or inside the operator's own network, which the guard permits; the
+// site is a descriptive label for the ledger, defined here rather than in the
+// airgap package so this lane touches no shared file.
+const airgapSite = airgap.Site("the injection prober")
 
 // The policy keys this family owns, one per payload class. Every one is a
 // verification failure (exit 7): the family proved the vulnerability by
@@ -352,7 +363,7 @@ type family struct {
 // supplies the per run routes through security.Input.Routes.
 func New() security.Family {
 	return &family{
-		client:  &http.Client{Timeout: 30 * time.Second},
+		client:  airgap.Client(airgapSite, 30*time.Second),
 		sleep:   3 * time.Second,
 		maxBody: 64 << 10,
 	}
