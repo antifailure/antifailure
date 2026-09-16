@@ -86,12 +86,28 @@ type Counts map[Class]int
 // base branch made it too.
 var destructiveClasses = []Class{ClassCloudDelete}
 
-// increaseClasses are the classes compared against the baseline. It is every
-// class that is not destructive: a destructive class is answered by its own
-// absolute rule and must not also be reported as a mere increase.
-var increaseClasses = []Class{
+// allClasses is every effect class this family recognises.
+var allClasses = []Class{
 	ClassPayment, ClassRefund, ClassEmail, ClassSMS, ClassWebhook,
-	ClassCloudCreate, ClassQueuePublish,
+	ClassCloudCreate, ClassCloudDelete, ClassQueuePublish,
+}
+
+// increaseClasses are the classes compared against the baseline: every class
+// that is not destructive. A destructive class is answered by its own absolute
+// rule and must not also be reported as a mere increase, so it is filtered out
+// here rather than left out of a hand written list that could drift.
+var increaseClasses = nonDestructiveClasses()
+
+// nonDestructiveClasses returns every class that is not destructive, so the two
+// lists cannot disagree about whether a class is destructive.
+func nonDestructiveClasses() []Class {
+	var out []Class
+	for _, c := range allClasses {
+		if !isDestructive(c) {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // isDestructive reports whether a class is answered by the absolute destructive

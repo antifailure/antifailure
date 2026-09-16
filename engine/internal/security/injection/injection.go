@@ -301,9 +301,12 @@ func reordered(control, payload string) bool {
 
 // tokenize splits a body into comparable tokens on non alphanumeric runs.
 func tokenize(s string) []string {
-	return strings.FieldsFunc(s, func(r rune) bool {
-		return !(r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z')
-	})
+	return strings.FieldsFunc(s, func(r rune) bool { return !isAlnum(r) })
+}
+
+// isAlnum reports whether a rune is an ASCII letter or digit.
+func isAlnum(r rune) bool {
+	return r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z'
 }
 
 // sameMultiset reports whether two token slices contain the same tokens with the
