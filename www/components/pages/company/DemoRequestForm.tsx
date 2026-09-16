@@ -138,7 +138,7 @@ export function DemoRequestForm() {
 
   if (state.kind === "sent") {
     return (
-      <div role="status" className="rounded-[8px] bg-white p-7 ring-1 ring-black/10 max-md:p-6">
+      <div role="status" className="rounded-[8px] bg-white p-5 ring-1 ring-black/10 sm:p-6">
         <h2 className="text-[20px] leading-snug tracking-tighter text-black">
           It is in the queue.
         </h2>
@@ -167,9 +167,9 @@ export function DemoRequestForm() {
       ref={formRef}
       onSubmit={submit}
       noValidate
-      className="rounded-[8px] bg-white p-7 ring-1 ring-black/10 max-md:p-6"
+      className="rounded-[8px] bg-white p-5 ring-1 ring-black/10 sm:p-6"
     >
-      <div className="grid grid-cols-2 gap-x-5 gap-y-5 max-sm:grid-cols-1">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-3.5 max-sm:grid-cols-1">
         <div>
           <label className={LABEL} htmlFor={`${id}-firstName`}>
             First name
@@ -319,7 +319,7 @@ export function DemoRequestForm() {
         />
       </div>
 
-      <label className="mt-5 flex items-start gap-3">
+      <label className="mt-4 flex items-start gap-3">
         <input
           type="checkbox"
           name="marketingOptIn"
@@ -327,21 +327,21 @@ export function DemoRequestForm() {
           className="mt-0.5 size-4 shrink-0 rounded-[4px] border-black/25 text-black accent-black focus-visible:ring-2 focus-visible:ring-black/10"
         />
         <span className="text-[13px] leading-5 tracking-extra-tight text-gray-new-40">
-          Send me the occasional product update. No newsletter by default, and
-          unchecked is the answer we keep if you leave it alone.
+          Send me the occasional product update. Unchecked by default, no
+          newsletter.
         </span>
       </label>
 
       {state.kind === "failed" ? (
         <p
           role="alert"
-          className="mt-5 rounded-[8px] bg-[#fdf2f0] px-4 py-3 text-[14px] leading-6 tracking-extra-tight text-[#b32d18]"
+          className="mt-4 rounded-[8px] bg-[#fdf2f0] px-4 py-3 text-[14px] leading-6 tracking-extra-tight text-[#b32d18]"
         >
           {state.message}
         </p>
       ) : null}
 
-      <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-3">
+      <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2">
         <button
           type="submit"
           disabled={sending}
@@ -352,8 +352,7 @@ export function DemoRequestForm() {
           {sending ? "Requesting" : "Request a demo"}
         </button>
         <p className="text-[13px] leading-5 tracking-extra-tight text-gray-new-40">
-          It is stored in the product database, read by a person, and never sold
-          or added to a newsletter.
+          Stored in the product database, read by a person, never sold.
         </p>
       </div>
     </form>
