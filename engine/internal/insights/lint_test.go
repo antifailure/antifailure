@@ -601,6 +601,14 @@ func TestLint_EveryRuleCarriesARationaleAndAFix(t *testing.T) {
 		insights.RuleCluster:           "CLUSTER orders USING orders_email_idx;",
 		insights.RuleDropTable:         "DROP TABLE orders;",
 		insights.RuleTruncate:          "TRUNCATE orders;",
+		// The database-security rules. Each fires exactly one finding against
+		// bigSchema: a table with a lock_timeout set, so the availability rules
+		// stay quiet, and no view over the columns these touch.
+		insights.RuleRLSDisabled:         "ALTER TABLE profiles DISABLE ROW LEVEL SECURITY;",
+		insights.RuleRLSPolicyPermissive: "CREATE POLICY read_all ON profiles FOR SELECT USING (true);",
+		insights.RuleBroadGrant:          "GRANT SELECT ON profiles TO PUBLIC;",
+		insights.RuleTenantColumnRemoved: "ALTER TABLE profiles DROP COLUMN org_id;",
+		insights.RuleDBRolePrivBroadened: "ALTER ROLE app_worker BYPASSRLS;",
 	}
 	for _, rule := range insights.AllRules() {
 		sql, ok := fixtures[rule]

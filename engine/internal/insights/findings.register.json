@@ -68,6 +68,26 @@
     {
       "id": "LINT-017",
       "first_named": "truncate"
+    },
+    {
+      "id": "LINT-018",
+      "first_named": "rls_disabled"
+    },
+    {
+      "id": "LINT-019",
+      "first_named": "rls_policy_permissive"
+    },
+    {
+      "id": "LINT-020",
+      "first_named": "broad_grant"
+    },
+    {
+      "id": "LINT-021",
+      "first_named": "tenant_column_removed"
+    },
+    {
+      "id": "LINT-022",
+      "first_named": "db_role_privilege_broadened"
     }
   ]
 }

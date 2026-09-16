@@ -18,6 +18,7 @@ BYPASSRLS
 bytea
 cobra
 CREATEDB
+CREATEROLE
 cspell
 dblab
 dbname

@@ -80,3 +80,18 @@ findings:
   - id: LINT-017
     rule: truncate
     title: "table truncated"
+  - id: LINT-018
+    rule: rls_disabled
+    title: "row level security disabled on a table"
+  - id: LINT-019
+    rule: rls_policy_permissive
+    title: "policy admits every row through a tautological clause"
+  - id: LINT-020
+    rule: broad_grant
+    title: "table privilege granted to PUBLIC, anon or authenticated"
+  - id: LINT-021
+    rule: tenant_column_removed
+    title: "tenant scoping column dropped"
+  - id: LINT-022
+    rule: db_role_privilege_broadened
+    title: "role given SUPERUSER, BYPASSRLS or CREATEROLE"

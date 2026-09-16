@@ -66,6 +66,12 @@ func AllRules() []Rule {
 		RuleBackfillWithDDL,
 		RuleRenameColumnInUse, RuleDropColumnInView,
 		RuleVacuumFull, RuleCluster, RuleDropTable, RuleTruncate,
+		// The database-security rules, declared in lint_security.go. They are
+		// listed here because the findings machinery, the catalogue guard and
+		// the identifier stamping all walk AllRules; they route to their own
+		// policy key at the gate, not to migration_lint.
+		RuleRLSDisabled, RuleRLSPolicyPermissive, RuleBroadGrant,
+		RuleTenantColumnRemoved, RuleDBRolePrivBroadened,
 	}
 }
 
@@ -284,6 +290,10 @@ func lintStatement(
 
 	out = append(out, lintMaintenance(st, upper, schema)...)
 	out = append(out, lintBackfill(st, upper, schema, locking)...)
+	// The database-security rules run over every statement, not only ALTER
+	// TABLE, because a GRANT, a CREATE POLICY and an ALTER ROLE are none of
+	// them ALTER TABLE and each is a way a migration loosens who reads what.
+	out = append(out, lintSecurity(st, upper)...)
 
 	if !strings.HasPrefix(upper, "ALTER TABLE") {
 		return out
