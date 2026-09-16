@@ -21,6 +21,9 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/report"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
 	"github.com/antifailure/antifailure/engine/internal/security"
+	"github.com/antifailure/antifailure/engine/internal/security/injection"
+	"github.com/antifailure/antifailure/engine/internal/security/sideeffect"
+	"github.com/antifailure/antifailure/engine/internal/security/ssrf"
 	"github.com/antifailure/antifailure/engine/internal/verify"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
@@ -140,6 +143,15 @@ change.`),
 			// adds nothing here until one lands.
 			var securityResults []report.Finding
 			reg := security.Default()
+			// The injection, ssrf and side_effect families register here, in the
+			// cli assembly layer rather than in security.Default, because a family
+			// package imports the security package and security.Default importing
+			// the families back would be a cycle. securityFindings takes the
+			// registry as a parameter for exactly this reason, so registration
+			// lives with the command that runs them.
+			reg.Register(injection.New())
+			reg.Register(ssrf.New())
+			reg.Register(sideeffect.New())
 
 			// Teardown runs at most once and it runs BEFORE the report is
 			// written, which is the change that makes a failed cleanup mean

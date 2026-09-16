@@ -15,6 +15,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/report"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
 	"github.com/antifailure/antifailure/engine/internal/security"
+	"github.com/antifailure/antifailure/engine/internal/security/ssrf"
 	"github.com/antifailure/antifailure/engine/pkg/edition"
 )
 
@@ -123,6 +124,33 @@ func TestSecurityFindings_ProbesASelectedFamilyAndCollectsItsFinding(t *testing.
 	require.Len(t, fam.gotInput.Targets, 1)
 	require.Equal(t, change.TargetEndpoint, fam.gotInput.Targets[0].Kind)
 	require.Equal(t, "http://twin.local", fam.gotInput.Env.BaseURL)
+}
+
+// TestSecurityFindings_ARealFamilyFlowsAProvenFindingThrough registers the real
+// ssrf family, not a spy, and drives the collector with an egress decision the
+// firewall refused to an internal target. It proves the whole wired path: the
+// family the change routed is probed, it reads the run's decisions off the Input
+// the collector built, its real Detect proves an internal reach, and the finding
+// comes back in the security namespace at the level resolveSecurityPolicy
+// overlaid from the family's own default. It is the end to end complement to the
+// spyFamily tests: those prove the collector's plumbing, this proves a shipping
+// family plugs into it.
+func TestSecurityFindings_ARealFamilyFlowsAProvenFindingThrough(t *testing.T) {
+	reg := security.NewRegistry()
+	reg.Register(ssrf.New())
+	run := report.Run{URL: "http://twin.local"}
+	decisions := []local.Decision{
+		{Host: "169.254.169.254", Method: "GET", Path: "/latest/meta-data", Allowed: false},
+	}
+
+	got := securityFindings(context.Background(), testEnv(), &fakeReader{profile: codeProfile()},
+		reg, report.Configure(nil), &run, decisions, "")
+
+	require.Len(t, got, 1, "the real ssrf family's proven internal reach flows through the collector")
+	require.Equal(t, "security.ssrf.internal_host", got[0].Rule)
+	require.Equal(t, report.LevelFail, got[0].Level,
+		"resolveSecurityPolicy overlaid the family's fail default with no manifest override")
+	require.NotContains(t, got[0].Detail, "169.254.169.254", "the raw internal address never reaches a finding")
 }
 
 func TestSecurityFindings_DoesNotProbeAFamilyTheChangeDidNotTouch(t *testing.T) {
