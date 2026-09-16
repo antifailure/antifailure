@@ -219,6 +219,9 @@ var commandExamples = map[string]string{
 	"af test": "" +
 		"af test\n" +
 		"af test --only checkout --headed",
+	"af watch": "" +
+		"af watch\n" +
+		"af watch --only checkout",
 	"af token":      "af token list",
 	"af token list": "af token list",
 	"af token create": "" +

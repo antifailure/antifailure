@@ -18,6 +18,9 @@ import { CommandInbox } from './inbox.ts';
 import { exitCodeFor } from './verdict.ts';
 import { callModel, fromEnvironment, type ModelConfig } from './model.ts';
 import { cassetteFromEnvironment } from './cassette.ts';
+import { nullSink, socketSink, type LiveSink } from './live.ts';
+import { assertAvailable, type Surface } from './drivers/driver.ts';
+import { runTerminal, type TerminalWorkflow } from './drivers/terminal.ts';
 import type { Persona } from './login.ts';
 import type { Workflow } from './workflow.ts';
 import type { ResolvedDiversity } from './personality.ts';
@@ -56,6 +59,19 @@ interface JobDocument {
   readonly work_dir?: string;
   readonly attempts?: number;
   readonly headless?: boolean;
+  /** surface names what this run drives. Absent means 'web', which is every
+   *  run the engine sends today. A run that names a surface whose driver is not
+   *  built (desktop, ios) is refused loudly rather than reported as green. */
+  readonly surface?: Surface;
+  /** terminal are the command line workflows a terminal-surface run drives.
+   *  Present only when surface is 'terminal'. */
+  readonly terminal?: readonly TerminalWorkflow[];
+  /** live is the path to a local socket the engine is listening on, present
+   *  only when somebody is watching this run. Absent means no watcher, which is
+   *  the ordinary case: the sink becomes a no-op and the run is unchanged. The
+   *  frames this streams never leave the machine the engine relays them from,
+   *  and never reach the control plane. */
+  readonly live?: string;
 }
 
 /** The document the engine reads back. */
@@ -77,6 +93,12 @@ async function main(): Promise<number> {
   }
   const doc = JSON.parse(raw) as JobDocument;
   mkdirSync(doc.artifacts, { recursive: true });
+
+  // The live channel, if the engine gave us a socket to reach a watcher on.
+  // Best effort throughout: a socket that will not connect degrades to the
+  // no-op sink and the run is exactly what it would have been.
+  const live: LiveSink = doc.live ? socketSink(doc.live) : nullSink();
+  live.hello(doc.work_dir ?? doc.artifacts);
 
   // A cassette, if one is configured, and the model configuration that goes
   // with it. The two interact in one way worth spelling out: in replay mode
@@ -132,6 +154,7 @@ async function main(): Promise<number> {
     ...(model ? { model } : {}),
     ...(complete ? { complete } : {}),
     ...(doc.diversity ? { diversity: doc.diversity } : {}),
+    live,
     ...(doc.headless === undefined ? {} : { headless: doc.headless }),
     ...(doc.af
       ? {
@@ -152,17 +175,37 @@ async function main(): Promise<number> {
   // every exploration, so af explore died here with a TypeError before it
   // reached the goals it was given. A caller that sends no workflows means no
   // workflows, which is a legal document and not a fault.
-  const results = workflows.length > 0 ? await run(job) : [];
-  const explorations = doc.goals?.length
-    ? await explore({
-        baseURL: doc.base_url,
-        artifacts: doc.artifacts,
-        goals: doc.goals,
-        personas,
-        ...(job.inbox ? { inbox: job.inbox } : {}),
-        ...(doc.headless === undefined ? {} : { headless: doc.headless }),
-      })
-    : [];
+  // Which surface this run drives. Web is the default and the only surface the
+  // engine sends today. Terminal drives command line programs. Desktop and ios
+  // are declared but not built, and a run that asks for one is refused here
+  // rather than returning an empty, misleadingly green result.
+  const surface: Surface = doc.surface ?? 'web';
+  let results: WorkflowResult[] = [];
+  let explorations: Exploration[] = [];
+  if (surface === 'terminal') {
+    results = await runTerminal({
+      workflows: doc.terminal ?? [],
+      live,
+      ...(doc.work_dir ? { cwd: doc.work_dir } : {}),
+    });
+  } else if (surface !== 'web') {
+    // desktop or ios: throws NotImplementedError, which main's catch reports as
+    // the runner's own failure with a clear reason.
+    assertAvailable(surface);
+  } else {
+    results = workflows.length > 0 ? await run(job) : [];
+    explorations = doc.goals?.length
+      ? await explore({
+          baseURL: doc.base_url,
+          artifacts: doc.artifacts,
+          goals: doc.goals,
+          personas,
+          live,
+          ...(job.inbox ? { inbox: job.inbox } : {}),
+          ...(doc.headless === undefined ? {} : { headless: doc.headless }),
+        })
+      : [];
+  }
 
 
   if (cassette) {
@@ -183,6 +226,12 @@ async function main(): Promise<number> {
       case 'unverified': counted.unverified++; break;
     }
   }
+  // The run is over. Tell any watcher the final tally and drain the socket
+  // before the process exits, so the last frames and the done event make it
+  // out rather than being lost with the connection.
+  live.done(counted);
+  await live.close();
+
   const out: ResultDocument = { results, explorations, ...counted };
   process.stdout.write(JSON.stringify(out, replaceRegExp, 2) + '\n');
   return exitCodeFor([

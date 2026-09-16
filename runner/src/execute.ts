@@ -16,6 +16,7 @@ import {
 import { classify, type Attempt, type Cause, type Outcome } from './verdict.ts';
 import { ModelPlanner } from './model.ts';
 import { agentsFor, type Assignment, type ResolvedDiversity } from './personality.ts';
+import { nullSink, type LiveSink } from './live.ts';
 
 /** Everything one run needs. */
 export interface Job {
@@ -40,6 +41,10 @@ export interface Job {
   /** diversity is the resolved per-agent personality plan from the engine.
    *  Absent means one neutral agent per workflow, today's behavior. */
   readonly diversity?: ResolvedDiversity;
+  /** live, when set, streams agent state, steps, and frames to a watcher while
+   *  the run is going. Defaults to a no-op sink, so a run nobody is watching is
+   *  byte for byte the run it was before this existed. */
+  readonly live?: LiveSink;
 }
 
 /** What one workflow produced. */
@@ -73,6 +78,25 @@ export interface WorkflowResult {
 
 const MAX_STEPS = 40;
 
+/** The agent a workflow shows up as in a live view. Its id is unique within a
+ *  run so a watcher can follow or switch to it: a diversity plan drives the
+ *  same workflow once per personality, and those are different agents, so the
+ *  personality's own index distinguishes them and its name labels the pane. */
+function agentFor(job: Job, workflow: Workflow, assignment?: Assignment) {
+  const persona = workflow.personas?.[0] ?? workflow.persona
+    ?? job.personas[0]?.name;
+  const id = assignment ? `${workflow.name}#${assignment.agentIndex}` : workflow.name;
+  const label = assignment
+    ? `${workflow.name} (${assignment.personality.id})`
+    : workflow.name;
+  return {
+    id,
+    workflow: label,
+    surface: 'web' as const,
+    ...(persona ? { persona } : {}),
+  };
+}
+
 /** run drives every workflow and returns a result for each.
  *
  * When a diversity plan is present a workflow is driven once per assigned
@@ -81,6 +105,15 @@ const MAX_STEPS = 40;
  * which is exactly the one result per workflow this produced before.
  */
 export async function run(job: Job): Promise<WorkflowResult[]> {
+  const sink = job.live ?? nullSink();
+  // The whole cast is announced up front, each pending, so a watcher sees every
+  // agent that is going to run and can switch to one before it starts rather
+  // than watching them appear one at a time.
+  for (const workflow of job.workflows) {
+    for (const assignment of agentsFor(job.diversity, workflow.name)) {
+      sink.agent(agentFor(job, workflow, assignment), 'pending');
+    }
+  }
   const results: WorkflowResult[] = [];
   for (const workflow of job.workflows) {
     for (const assignment of agentsFor(job.diversity, workflow.name)) {
@@ -94,6 +127,8 @@ async function runOne(
   job: Job, workflow: Workflow, assignment?: Assignment,
 ): Promise<WorkflowResult> {
   const started = Date.now();
+  const sink = job.live ?? nullSink();
+  const desc = agentFor(job, workflow, assignment);
   const attempts: Attempt[] = [];
   const steps: string[] = [];
   let evidence: WorkflowResult['evidence'] = { console: [], failed: [] };
@@ -113,12 +148,16 @@ async function runOne(
     const taken: string[] = [];
     try {
       const attemptRun = (async () => {
+        sink.agent(desc, 'connecting');
         opening = Session.open({
           artifacts: job.artifacts,
           ...(job.headless === undefined ? {} : { headless: job.headless }),
+          live: { sink, agent: desc.id },
         });
         session = await opening;
-        return attemptOnce(job, workflow, session, attempt, taken, assignment);
+        sink.agent(desc, 'live');
+        return attemptOnce(job, workflow, session, attempt, taken, assignment, (text, url, action) =>
+          sink.step(desc.id, { text, ...(url ? { url } : {}), ...(action ? { action } : {}) }));
       })();
       // Raced rather than checked between steps, because a check between
       // steps is not a cap: one page that never answers holds the workflow for
@@ -177,6 +216,9 @@ async function runOne(
   }
 
   const outcome = classify(attempts);
+  // The agent has a verdict now, so the watcher's pane can settle from live to
+  // ended and show it. This is the last event an agent sends.
+  sink.agent(desc, 'ended', outcome.verdict);
   return {
     workflow: workflow.name,
     ...(assignment ? { personality: assignment.personality.id } : {}),
@@ -195,11 +237,24 @@ interface AttemptResult {
   readonly taken: readonly string[];
 }
 
+/** How a step reaches a live watcher: the human sentence, and optionally the
+ *  url it happened on and the kind of action it was. A no-op by default, so the
+ *  loop below reads the same whether or not anybody is watching. */
+type EmitStep = (text: string, url?: string, action?: string) => void;
+
 async function attemptOnce(
   job: Job, workflow: Workflow, session: Session, attempt: number, taken: string[],
   assignment?: Assignment,
+  emit: EmitStep = () => {},
 ): Promise<AttemptResult> {
   const page = session.page();
+  // Every step is pushed to the transcript and streamed to a watcher in one
+  // place, so the two can never drift: a step a watcher saw is a step the
+  // report has, and the reverse.
+  const record = (text: string, action?: string) => {
+    taken.push(text);
+    emit(text, page.url(), action);
+  };
 
   const chosen = sessionsFor(workflow, job.personas);
   if (chosen.missing) {
@@ -224,7 +279,7 @@ async function attemptOnce(
       ...(workflow.startPath ? { signInPath: workflow.startPath } : {}),
       ...(job.inbox ? { inbox: job.inbox } : {}),
     });
-    taken.push(`Sign in as ${persona.name}: ${login.detail}`);
+    record(`Sign in as ${persona.name}: ${login.detail}`, 'signin');
     if (!login.ok) {
       return {
         cause: login.blocked ? 'environment-incomplete' : 'application-error',
@@ -235,7 +290,7 @@ async function attemptOnce(
   }
 
   await page.goto(join(job.baseURL, workflow.startPath ?? '/'));
-  taken.push(`Open ${join(job.baseURL, workflow.startPath ?? '/')}`);
+  record(`Open ${join(job.baseURL, workflow.startPath ?? '/')}`, 'goto');
 
   // A fresh identity per attempt, so a retry of a sign up is a sign up rather
   // than a duplicate address the application rightly refuses.
@@ -269,19 +324,19 @@ async function attemptOnce(
         return finalJudgement(workflow, snapshot, action.why, taken);
       case 'fill':
         await page.fill(action.field, action.value);
-        taken.push(`Fill ${action.field.source.replace(/[\^$]/g, '')}: ${action.why}`);
+        record(`Fill ${action.field.source.replace(/[\^$]/g, '')}: ${action.why}`, 'fill');
         break;
       case 'check':
         await page.check(action.field);
-        taken.push(`Choose ${action.field.source.replace(/[\^$]/g, '')}: ${action.why}`);
+        record(`Choose ${action.field.source.replace(/[\^$]/g, '')}: ${action.why}`, 'check');
         break;
       case 'click':
         await page.click(action.control);
-        taken.push(`Press ${action.control.source.replace(/[\^$]/g, '')}: ${action.why}`);
+        record(`Press ${action.control.source.replace(/[\^$]/g, '')}: ${action.why}`, 'click');
         break;
       case 'goto':
         await page.goto(action.url);
-        taken.push(`Open ${action.url}: ${action.why}`);
+        record(`Open ${action.url}: ${action.why}`, 'goto');
         break;
     }
   }

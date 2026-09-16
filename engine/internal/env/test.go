@@ -39,6 +39,10 @@ type TestOptions struct {
 	Headed bool
 	// RunnerPath overrides where the runner lives.
 	RunnerPath string
+	// LiveSocket, when set, is a local socket path the runner streams frames and
+	// events to while the run is going, for a watcher. Empty runs with no live
+	// channel, exactly as before.
+	LiveSocket string
 }
 
 // TestReport is what a run produced.
@@ -163,6 +167,11 @@ type jobDocument struct {
 	WorkDir   string                `json:"work_dir,omitempty"`
 	Attempts  int                   `json:"attempts,omitempty"`
 	Headless  bool                  `json:"headless"`
+	// Live is the path to a local socket the engine listens on so a watcher can
+	// follow the run as it happens. Empty means nobody is watching, which is the
+	// ordinary case: the runner streams nothing and the run is unchanged. The
+	// frames it carries never leave this machine for the control plane.
+	Live string `json:"live,omitempty"`
 }
 
 type workflowDoc struct {
@@ -275,6 +284,7 @@ func (o *Orchestrator) Test(ctx context.Context, opts TestOptions) (*TestReport,
 		Workflows: workflows, Personas: o.personaDocs(provisioned),
 		Diversity: divPtr,
 		WorkDir:   o.opts.Root, Attempts: opts.Attempts, Headless: !opts.Headed,
+		LiveSocket: opts.LiveSocket,
 	})
 	if err != nil {
 		// Failed, not complete. The runner could not be driven, so nothing was
@@ -506,6 +516,8 @@ type runnerJob struct {
 	Diversity *personality.Resolved
 	Attempts  int
 	Headless  bool
+	// LiveSocket is the watcher's socket path, empty when nobody is watching.
+	LiveSocket string
 }
 
 // driveRunner writes the job document, runs the runner, and reads its verdict.
@@ -534,6 +546,7 @@ func (o *Orchestrator) driveRunner(ctx context.Context, job runnerJob) (*TestRep
 		Diversity: job.Diversity,
 		AF:        self, WorkDir: job.WorkDir,
 		Attempts: job.Attempts, Headless: job.Headless,
+		Live: job.LiveSocket,
 	})
 	if err != nil {
 		return nil, err

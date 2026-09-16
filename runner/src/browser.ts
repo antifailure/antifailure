@@ -11,6 +11,7 @@ import {
 import type { Request as PWRequest } from 'playwright';
 import type { Page } from './login.ts';
 import type { Snapshot } from './workflow.ts';
+import { FramePump, type LiveSink } from './live.ts';
 
 /** The same pattern with its anchors taken off.
  *
@@ -185,12 +186,22 @@ export class Session {
    *  exists at all. */
   #lastStatus: number | undefined;
   readonly #artifacts: string;
+  /** The width and height of the window, so a live frame can name its own
+   *  dimensions without asking the page on every shot. */
+  readonly #viewport: { readonly width: number; readonly height: number };
+  /** The live frame pump, running only when somebody is watching. Undefined
+   *  when no live sink was given, which is the ordinary case and costs nothing. */
+  #pump: FramePump | undefined;
 
-  private constructor(browser: Browser, context: BrowserContext, page: PWPage, artifacts: string) {
+  private constructor(
+    browser: Browser, context: BrowserContext, page: PWPage, artifacts: string,
+    viewport: { readonly width: number; readonly height: number },
+  ) {
     this.#browser = browser;
     this.#context = context;
     this.#page = page;
     this.#artifacts = artifacts;
+    this.#viewport = viewport;
   }
 
   /** open starts a browser with recording on.
@@ -209,11 +220,17 @@ export class Session {
      *  one that switches on the user agent or on touch does not, so a window
      *  size with nothing else changed finds only half of what a phone does. */
     readonly mobile?: boolean;
+    /** live, when given, streams frames from this session to a watcher while
+     *  the run is still going. Absent means nobody is watching and no frame is
+     *  ever taken for this purpose: the ordinary run pays nothing. The sink is
+     *  best effort and never changes the run, exactly like the durable video. */
+    readonly live?: { readonly sink: LiveSink; readonly agent: string };
   }): Promise<Session> {
     const browser = await chromium.launch({ headless: options.headless ?? true });
+    const viewport = options.viewport ?? DEFAULT_VIEWPORT;
     const context = await browser.newContext({
       recordVideo: { dir: options.artifacts },
-      viewport: options.viewport ?? DEFAULT_VIEWPORT,
+      viewport,
       ...(options.mobile
         ? { isMobile: true, hasTouch: true, deviceScaleFactor: 3, userAgent: PHONE_USER_AGENT }
         : {}),
@@ -224,7 +241,7 @@ export class Session {
     await context.tracing.start({ screenshots: true, snapshots: true, sources: false });
 
     const page = await context.newPage();
-    const session = new Session(browser, context, page, options.artifacts);
+    const session = new Session(browser, context, page, options.artifacts, viewport);
 
     page.on('request', (r) => {
       session.#inFlight++;
@@ -246,7 +263,36 @@ export class Session {
       // difference between a mystery and a one line fix.
       session.#failed.push(`${r.method()} ${r.url()}: ${r.failure()?.errorText ?? 'failed'}`);
     });
+
+    // The live frame pump samples the page while the run is going, for a
+    // watcher only. It reuses the same screenshot the tracing path already
+    // knows how to take, at a lower fidelity and on an interval, and feeds it
+    // to the sink. A run with no watcher never constructs one.
+    if (options.live) {
+      session.#pump = new FramePump(
+        () => session.liveFrame(),
+        options.live.sink,
+        options.live.agent,
+      );
+      session.#pump.start();
+    }
     return session;
+  }
+
+  /** liveFrame takes one low-fidelity JPEG of the current viewport for a
+   *  watcher. Viewport rather than full page, and a short timeout, because a
+   *  live frame is worth having only if it is cheap and current: a slow full
+   *  page shot mid navigation is neither. Returns undefined when a frame could
+   *  not be taken, which the pump treats as a frame to skip, not an error. */
+  async liveFrame(): Promise<{ w: number; h: number; b64: string } | undefined> {
+    try {
+      const buffer = await this.#page.screenshot({
+        type: 'jpeg', quality: 45, timeout: 2_500, fullPage: false,
+      });
+      return { w: this.#viewport.width, h: this.#viewport.height, b64: buffer.toString('base64') };
+    } catch {
+      return undefined;
+    }
   }
 
   /** page returns the adapter the login and workflow code drives. */
@@ -510,6 +556,10 @@ export class Session {
    */
   async close(name: string, options: { readonly interrupted?: boolean } = {}): Promise<Evidence> {
     if (this.#closed) return this.#closed;
+    // The pump stops before the final screenshot so a live sample cannot race
+    // the full page shot the evidence needs. Stopping is idempotent and safe
+    // even when no pump was ever started.
+    this.#pump?.stop();
     const evidence: { video?: string; trace?: string; screenshot?: string } = {};
     const safe = name.replace(/[^a-z0-9._-]/gi, '-');
 
