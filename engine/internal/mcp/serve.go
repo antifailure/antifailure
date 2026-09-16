@@ -10,10 +10,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/antifailure/antifailure/engine/internal/change"
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	"github.com/antifailure/antifailure/engine/internal/env"
 	"github.com/antifailure/antifailure/engine/internal/insights"
+	"github.com/antifailure/antifailure/engine/internal/model"
 	"github.com/antifailure/antifailure/engine/internal/redact"
+	"github.com/antifailure/antifailure/engine/internal/review"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
 	"github.com/antifailure/antifailure/engine/internal/state"
 )
@@ -156,6 +159,7 @@ func Serve(ctx context.Context, cfg Config) error {
 		project, orch.goldens, orch.goldenPolicy, orch.destroyGolden))
 	server.Register(newDescribeModelKeyTool(project, orch.modelKey))
 	server.Register(newVerifyModelKeyTool(project, orch.probeModel))
+	server.Register(newReviewChangeTool(project, orch.reviewChange))
 
 	_, _ = fmt.Fprintf(cfg.Log, "af mcp: serving project %q from %s\n", project.ID, project.Root)
 
@@ -260,6 +264,111 @@ func (f *orchestratorFactory) rehearse(ctx context.Context, _ string) (insights.
 		return insights.Full{}, err
 	}
 	return o.RunInsights(ctx, env.InsightsOptions{Limit: 20})
+}
+
+// reviewChange runs the static, model-backed code reviewer against the change
+// and returns its findings beside the meta the projection needs.
+//
+// It replicates internal/cli's reviewFindings orchestration rather than calling
+// it, because that lives in the cli package and this package must never import
+// cli: cli imports this one, and importing back would be a cycle. So the small
+// orchestration is copied and the safety it depends on is the same. Every input
+// is decided by this server: the orchestrator is built from the server's own
+// root, manifest and branch and no argument reaches build(), the model key
+// resolves through the one chain the whole product uses, and the review level
+// is the project's own resolved policy, not a value a call could carry. The
+// only caller-supplied input is the head branch, which reaches ChangeOptions.Head
+// and nothing else, exactly as plan_checks_for_change already allows.
+//
+// It reads the diff, not the twin, so it opens no session and touches no
+// database. A gap in the reviewer itself, a missing key or a model that would
+// not answer, is folded into the result's notes and produces no finding, the
+// same way the cli collector treats it, because a gap in our tooling is a fact
+// about us and must never read as a defect in the change. Only a diff that could
+// not be read at all comes back as an error, which the tool reports as a refusal.
+func (f *orchestratorFactory) reviewChange(
+	ctx context.Context, branch string,
+) (review.Result, reviewMeta, error) {
+	o, err := f.build()
+	if err != nil {
+		return review.Result{}, reviewMeta{}, err
+	}
+	opts := env.ChangeOptions{Head: branch, Getenv: f.cfg.Getenv}
+
+	profile, err := o.Change(ctx, opts)
+	if err != nil {
+		return review.Result{}, reviewMeta{}, err
+	}
+	if !profileTouchesCode(profile) {
+		// A docs-only or configuration-only change routes no reviewer and pays
+		// nothing: no code files read, no model call. Reported as touched-no-code,
+		// not as a clean review.
+		return review.Result{}, reviewMeta{TouchedCode: false}, nil
+	}
+
+	// The model client, resolved through the one chain the CLI and af up use. A
+	// resolution error is treated as no key, since the outcome for the reviewer
+	// is the same: it cannot call a model, and it says so rather than pretending
+	// it ran.
+	var client review.Client
+	hadKey := false
+	if cfg, rerr := model.Resolve(ctx, f.modelChain()); rerr == nil && cfg != nil {
+		client = review.NewProviderClient(*cfg)
+		hadKey = true
+	}
+	if !hadKey {
+		return review.Result{}, reviewMeta{TouchedCode: true, HadKey: false}, nil
+	}
+
+	files, err := o.CodeFiles(ctx, opts)
+	if err != nil {
+		return review.Result{}, reviewMeta{}, err
+	}
+
+	res, err := review.Review(ctx, client, mcpReviewReader{o: o, head: branch},
+		files, f.project.Gate.Review, review.DefaultCaps)
+	meta := reviewMeta{TouchedCode: true, HadKey: true, FilesReviewed: len(files)}
+	if err != nil {
+		// The model call itself failed. A fact about the call, not a verdict about
+		// the change, so it is a note and no finding, the same as the cli collector.
+		res.Notes = append(res.Notes,
+			"the code reviewer could not complete, so it reached no verdict: "+err.Error())
+		return res, meta, nil
+	}
+	return res, meta, nil
+}
+
+// profileTouchesCode reports whether the classified change touched a code,
+// authorization-code or schema surface, so the reviewer runs only when there is
+// code to read. It mirrors internal/cli's function of the same name and the
+// surfaces CodeFiles selects, so the routing decision and the file selection
+// cannot disagree. It is copied rather than imported because the cli package
+// cannot be imported from here.
+func profileTouchesCode(profile *change.Profile) bool {
+	if profile == nil {
+		return false
+	}
+	for _, fact := range profile.Facts {
+		switch fact.Surface {
+		case change.SurfaceCode, change.SurfaceAuth, change.SurfaceSchema:
+			return true
+		}
+	}
+	return false
+}
+
+// mcpReviewReader adapts the orchestrator's FileContent, which needs the head
+// ref, to the review package's FileReader, which asks by path alone. It carries
+// the head the change is read at, so the file content the model sees is the same
+// side of the comparison the added lines came from. It mirrors internal/cli's
+// reviewContext, copied for the same no-import-cycle reason.
+type mcpReviewReader struct {
+	o    *env.Orchestrator
+	head string
+}
+
+func (r mcpReviewReader) FullFile(ctx context.Context, path string) (string, bool, error) {
+	return r.o.FileContent(ctx, r.head, path)
 }
 
 // currentBranch asks git what is checked out.
