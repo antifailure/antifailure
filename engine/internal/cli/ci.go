@@ -12,6 +12,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/antifailure/antifailure/engine/internal/canaryleak"
+	"github.com/antifailure/antifailure/engine/internal/dbsecurity"
 	"github.com/antifailure/antifailure/engine/internal/egress"
 	"github.com/antifailure/antifailure/engine/internal/env"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
@@ -154,10 +156,17 @@ change.`),
 			// back would be a cycle. securityFindings takes the registry as a
 			// parameter for exactly this reason, so registration lives with the
 			// command that runs them, one Register line per family as each lands.
+			//
+			// db_security registers so its Keys reach the catalogue the manifest
+			// validator and the documentation read; its findings ride the
+			// migration path and its Probe is a no-op, but the registry is where
+			// its policy keys live.
 			reg.Register(authz.New())
 			reg.Register(injection.New())
 			reg.Register(ssrf.New())
 			reg.Register(sideeffect.New())
+			reg.Register(dbsecurity.New())
+			reg.Register(canaryleak.New())
 
 			// Teardown runs at most once and it runs BEFORE the report is
 			// written, which is the change that makes a failed cleanup mean
