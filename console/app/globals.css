@@ -374,3 +374,64 @@ body {
     transition-duration: 0.001ms !important;
   }
 }
+
+/*
+ * The watch wall's film skin, and only the panes wear it.
+ *
+ * The console chrome stays on the Geist tokens above so a person arriving from
+ * the run list is not somewhere that looks like a different product. The agent
+ * panes, and the panes alone, get the launch film's terminal look: a warm paper
+ * mat, a fixed scanline overlay, a faint vignette, and a Menlo caption. The
+ * colours are measured off the film (paper reading near 236,233,224, ink near
+ * 46,45,39), not picked by eye.
+ *
+ * Every rule here is STATIC. There is no keyframe, no animation and no pulse:
+ * tools/motioncheck reads the built stylesheet and a looping rule or an
+ * animate-pulse would fail the build, which is exactly the ban this console
+ * already documents beside its skeletons. A live pane says it is live with a
+ * static chip and a frame timestamp, never with motion.
+ */
+.watch-mat {
+  background-color: rgb(236, 233, 224);
+  color: rgb(46, 45, 39);
+}
+.watch-screen {
+  position: relative;
+  background-color: #14130f;
+  overflow: hidden;
+}
+/* The scanlines: a 3px period of a barely darker line over the frame. Fixed,
+   so it reads as a screen and never scrolls or shimmers. */
+.watch-scanlines::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0) 0,
+    rgba(0, 0, 0, 0) 2px,
+    rgba(0, 0, 0, 0.12) 2px,
+    rgba(0, 0, 0, 0.12) 3px
+  );
+}
+/* The vignette: a soft darkening at the edges, the film's elliptical falloff
+   reduced to something honest at this size. */
+.watch-vignette::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 44px rgba(0, 0, 0, 0.45);
+}
+.watch-caption {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+.watch-cast {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  background-color: #14130f;
+  color: rgb(214, 211, 201);
+}

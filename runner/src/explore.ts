@@ -35,6 +35,7 @@ import {
   type Identity, type Snapshot,
 } from './workflow.ts';
 import { classify, type Attempt, type Cause, type Outcome } from './verdict.ts';
+import { nullSink, type LiveSink } from './live.ts';
 
 /** What an exploration is asked to pursue. */
 export interface Goal {
@@ -654,10 +655,14 @@ export interface Pursuit {
  *  reaches the goal, or has nothing left it has not tried. */
 export async function pursue(
   goal: Goal, surface: Surface, clock: Clock = systemClock,
+  onStep: (text: string, url: string) => void = () => {},
 ): Promise<Pursuit> {
   const explorer = new Explorer(goal);
-  const steps: string[] = [];
   const journey: Move[] = [];
+  // Every step lands in the transcript and reaches a watcher in one place, so
+  // the two cannot drift. The url is the best one known when the step happened.
+  const steps: string[] = [];
+  const record = (text: string, url: string) => { steps.push(text); onStep(text, url); };
 
   const start = goal.startPath ?? '/';
   // Measured from before the first page opens, because a time budget is what
@@ -665,14 +670,14 @@ export async function pursue(
   const begun = clock.monotonicMs();
   await surface.goto(start);
   journey.push({ kind: 'goto', url: start });
-  steps.push(`Open ${start}`);
+  record(`Open ${start}`, start);
 
   const limit = goal.maxSteps ?? DEFAULT_STEPS;
   let lastURL = start;
   let step = 0;
   for (; step < limit; step++) {
     if (goal.maxMs !== undefined && clock.monotonicMs() - begun >= goal.maxMs) {
-      steps.push(`The time budget of ${goal.maxMs} ms ran out.`);
+      record(`The time budget of ${goal.maxMs} ms ran out.`, lastURL);
       break;
     }
     const before = await surface.snapshot();
@@ -684,13 +689,13 @@ export async function pursue(
       if (destructive(control)) explorer.refuse(control, before.url);
     }
     if (explorer.observe(before, step)) {
-      steps.push(`The page now says the goal is met: ${before.url}`);
+      record(`The page now says the goal is met: ${before.url}`, before.url);
       break;
     }
 
     const move = explorer.decide(before, step);
     if (!move) {
-      steps.push('Nothing left to explore that had not already been tried.');
+      record('Nothing left to explore that had not already been tried.', before.url);
       break;
     }
 
@@ -707,7 +712,7 @@ export async function pursue(
         break;
     }
     journey.push(move);
-    steps.push(describeMove(move));
+    record(describeMove(move), before.url);
 
     const after = await surface.snapshot();
     explorer.settle(move, before, after, clock.monotonicMs() - at, step);
@@ -727,10 +732,29 @@ export interface ExploreJob {
   readonly inbox?: InboxSource;
   readonly clock?: Clock;
   readonly headless?: boolean;
+  /** live streams each goal's state, steps, and frames to a watcher. Defaults
+   *  to a no-op sink, so an unwatched exploration is unchanged. */
+  readonly live?: LiveSink;
+}
+
+/** The agent a goal shows up as in a live view: the goal name is the id, and
+ *  the persona is who it explores as, empty when nobody signs in. */
+function agentForGoal(job: ExploreJob, goal: Goal) {
+  const persona = goal.persona ?? job.personas[0]?.name;
+  return {
+    id: goal.name,
+    workflow: goal.goal,
+    surface: 'web' as const,
+    ...(persona ? { persona } : {}),
+  };
 }
 
 /** explore pursues every goal and returns what each one found. */
 export async function explore(job: ExploreJob): Promise<Exploration[]> {
+  const sink = job.live ?? nullSink();
+  for (const goal of job.goals) {
+    sink.agent(agentForGoal(job, goal), 'pending');
+  }
   const out: Exploration[] = [];
   for (const goal of job.goals) {
     out.push(await exploreOne(job, goal));
@@ -741,6 +765,8 @@ export async function explore(job: ExploreJob): Promise<Exploration[]> {
 async function exploreOne(job: ExploreJob, goal: Goal): Promise<Exploration> {
   const clock = job.clock ?? systemClock;
   const started = clock.monotonicMs();
+  const sink = job.live ?? nullSink();
+  const desc = agentForGoal(job, goal);
   const signIns: string[] = [];
   let pursuit: Pursuit | undefined;
   let evidence: Exploration['evidence'] = { console: [], failed: [] };
@@ -759,13 +785,16 @@ async function exploreOne(job: ExploreJob, goal: Goal): Promise<Exploration> {
         `The viewport ${JSON.stringify(goal.viewport)} is not a size this runner can open.`,
       );
     }
+    sink.agent(desc, 'connecting');
     session = await Session.open({
       artifacts: job.artifacts,
       ...(job.headless === undefined ? {} : { headless: job.headless }),
+      live: { sink, agent: desc.id },
       ...(goal.viewport
         ? { viewport: { width: viewport.width, height: viewport.height }, mobile: viewport.mobile }
         : {}),
     });
+    sink.agent(desc, 'live');
     const page = session.page();
 
     const persona = job.personas.find((p) => p.name === goal.persona) ?? job.personas[0];
@@ -802,6 +831,7 @@ async function exploreOne(job: ExploreJob, goal: Goal): Promise<Exploration> {
         click: (control) => page.click(anchor(control)),
       },
       clock,
+      (text, url) => sink.step(desc.id, { text, url }),
     );
     attempt = {
       cause: 'explored',
@@ -824,6 +854,7 @@ async function exploreOne(job: ExploreJob, goal: Goal): Promise<Exploration> {
   }
 
   const outcome = classify([attempt]);
+  sink.agent(desc, 'ended', outcome.verdict);
   const journey = pursuit?.journey ?? [];
   return {
     name: goal.name,

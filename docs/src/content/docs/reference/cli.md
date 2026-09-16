@@ -2455,6 +2455,38 @@ af volume show
 | --- | --- | --- |
 | `--branch` | - | Branch context to use, defaulting to the checked out one. |
 
+### `af watch`
+
+Watch the manifest's workflows run live in the terminal.
+
+Runs the workflows and streams them as they happen, one pane per agent, so you
+can see the run rather than read what it did afterwards.
+
+Switch between agents with the number keys, the arrows, or tab, and quit with q.
+An agent on a browser or app surface streams frames to the console watch view;
+here its pane shows the live step and the frame's own detail, because a terminal
+cannot show the image itself. An agent on a terminal surface shows its cast
+directly. The frames never leave this machine for the control plane.
+
+The verdict is the same one a plain run produces, printed when it finishes.
+
+```
+af watch [flags]
+```
+
+```
+af watch
+af watch --only checkout
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--attempts` | `0` | how many times to try a workflow. |
+| `--branch` | - | the branch to watch, defaulting to the checkout's. |
+| `--headed` | `false` | show the browser window as well. |
+| `--only` | - | watch just these workflows. |
+| `--runner` | - | override where the runner lives. |
+
 ### `af webhook`
 
 Send the inbound events a flow is waiting on.
