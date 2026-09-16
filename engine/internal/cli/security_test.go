@@ -280,9 +280,11 @@ func TestSecurityFindings_EnrichesInputWithTheRunArtifacts(t *testing.T) {
 		"the DOM exploration captured reaches the leak family")
 	require.Equal(t, []string{`{"ok":true}`}, seen.Evidence().Responses,
 		"the response bodies exploration captured reach the leak family")
-	// ci builds no base twin and emits no structured observations yet, so those
-	// stay in their honest absent states rather than a misleading empty one.
-	require.Nil(t, seen.Observations(), "the runner emits no observations yet, so authz fails closed")
+	// This exploration recorded no per-persona observations, so the collector
+	// folds none and Observations stays nil: the honest absent state authz fails
+	// closed on, never a misleading empty. ci also builds no base twin, so that
+	// stays absent too.
+	require.Nil(t, seen.Observations(), "an exploration with no observations folds to nil, so authz fails closed")
 	_, ok := seen.Baseline()
 	require.False(t, ok, "no base twin was built, so Baseline is ok=false, never a base of zero")
 	// The ingress source IS wired now: observedRoutes read this exploration. It

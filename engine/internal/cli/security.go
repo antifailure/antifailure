@@ -111,22 +111,26 @@ func securityFindings(
 	// the egress summary and are passed in rather than fetched twice; the
 	// browser evidence is folded out of what exploration already captured.
 	//
-	// Two of these three are sourced now, and one stays honestly absent. Routes
-	// is sourced from the exploration the run observed: observedRoutes returns
-	// the routes the browser reached and nil when there was no exploration to
-	// read, which the injection family reads as UNAVAILABLE rather than as a
-	// clean pass. The base twin is built here, but only when a selected family
-	// reads it and only when there is a change to compare: baselineArtifact
-	// returns nil for a change that routes no baseline reader, which a reader
-	// reads as "not measured" and skips its baseline comparison rather than
-	// diffing against a base of zero. Observations stays nil until the runner
-	// emits structured per-persona observations, which authz fails closed on.
-	// Nil here is absent, never a misleading empty.
+	// All three of these are sourced now, each honestly absent when its data is
+	// not present. Routes is sourced from the exploration the run observed:
+	// observedRoutes returns the routes the browser reached and nil when there
+	// was no exploration to read, which the injection family reads as
+	// UNAVAILABLE rather than as a clean pass. Observations are folded out of
+	// what the exploration recorded: the runner emits a structured per-persona
+	// reading for each object it reached across an ownership boundary, and
+	// observationsFrom collects them into the candidate artifact the authz
+	// differential reads, nil when no such reading was made, which authz fails
+	// closed on rather than reading as "no violation". The base twin is built
+	// here, but only when a selected family reads it and only when there is a
+	// change to compare: baselineArtifact returns nil for a change that routes
+	// no baseline reader, which a reader reads as "not measured" and skips its
+	// comparison rather than diffing against a base of zero. Nil here is absent,
+	// never a misleading empty.
 	messages, _ := o.Messages(ctx, securityLogLimit)
 	artifacts := security.RunArtifacts{
 		Decisions:    decisions,
 		Messages:     messages,
-		Observations: nil,
+		Observations: observationsFrom(run.Exploration),
 		Evidence:     explorationEvidence(run.Exploration),
 		Routes:       observedRoutes(run),
 		Baseline:     baselineArtifact(ctx, o, selections, run, runner, baseTTL),
@@ -319,4 +323,47 @@ func explorationEvidence(x *report.Exploration) security.Evidence {
 		ev.Responses = append(ev.Responses, r.Evidence.Responses...)
 	}
 	return ev
+}
+
+// observationsFrom folds the structured per-persona observations every
+// exploration recorded into the flat slice the authz family reads. It is the
+// producer half of the observation contract: the runner emits a reading for each
+// object it reached across an ownership boundary, the reading rides the same JSON
+// as the rest of the exploration, and this collects them so the authz
+// differential has a candidate to assess.
+//
+// The nil discipline is load bearing and mirrors the reader's. Nil is NOT
+// MEASURED: no exploration ran, or none made an authorization reading, so authz
+// must fail closed rather than read the absence as "no violation". A non-nil
+// slice is MEASURED: the runner reached the twin and made these readings, so even
+// an empty one is the honest "measured, nothing crossed a boundary". So this
+// returns nil when no exploration recorded an observation and a populated slice
+// otherwise, and never a zero-length non-nil slice standing in for absence. The
+// values stay inside the engine here; each observation is a bounded location and
+// an identity comparison, never a body or an id.
+func observationsFrom(x *report.Exploration) []security.RawObservation {
+	if x == nil {
+		return nil
+	}
+	var out []security.RawObservation
+	for _, r := range x.Results {
+		for _, o := range r.Observations {
+			out = append(out, security.RawObservation{
+				Route:                o.Route,
+				Method:               o.Method,
+				Anonymous:            o.Anonymous,
+				ActorTenant:          o.ActorTenant,
+				ActorUser:            o.ActorUser,
+				ActorRole:            o.ActorRole,
+				ObjectClass:          o.ObjectClass,
+				OwnerTenant:          o.OwnerTenant,
+				OwnerUser:            o.OwnerUser,
+				OwnerRole:            o.OwnerRole,
+				Status:               o.Status,
+				VictimContentPresent: o.VictimContentPresent,
+				SetupConfirmed:       o.SetupConfirmed,
+			})
+		}
+	}
+	return out
 }

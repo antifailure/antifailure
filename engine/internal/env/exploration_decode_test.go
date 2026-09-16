@@ -66,3 +66,33 @@ func TestANamelessExplorationIsBlocked(t *testing.T) {
 		t.Fatalf("a result the runner did not name is %q", got)
 	}
 }
+
+// The runner emits structured per-persona observations on the same JSON as the
+// rest of an exploration, and they must survive the boundary field for field so
+// the authz differential reads what the browser observed. This decodes a runner
+// document carrying one cross-user reach and asserts every bounded field lands,
+// which is the shape contract the collector then folds for the authz family.
+func TestExplorationObservationsCrossTheRunnerBoundary(t *testing.T) {
+	const doc = `{"explorations":[{"name":"reach an order","outcome":{"verdict":"pass"},"observations":[{"route":"/api/orders/{id}","method":"GET","actorTenant":"org_a","actorUser":"alice","actorRole":"member","objectClass":"another user's order","ownerTenant":"org_a","ownerUser":"bob","ownerRole":"member","status":200,"victimContentPresent":true,"setupConfirmed":true}]}]}`
+	r, err := decodeExplorationReport([]byte(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Explorations) != 1 {
+		t.Fatalf("want one exploration, got %d", len(r.Explorations))
+	}
+	obs := r.Explorations[0].Observations
+	if len(obs) != 1 {
+		t.Fatalf("want one observation across the boundary, got %d", len(obs))
+	}
+	o := obs[0]
+	if o.Route != "/api/orders/{id}" || o.Method != "GET" {
+		t.Fatalf("location did not survive: %q %q", o.Route, o.Method)
+	}
+	if o.ActorUser != "alice" || o.OwnerUser != "bob" || o.ActorTenant != "org_a" || o.OwnerTenant != "org_a" {
+		t.Fatalf("identities did not survive: actor=%s owner=%s", o.ActorUser, o.OwnerUser)
+	}
+	if o.Status != 200 || !o.VictimContentPresent || !o.SetupConfirmed {
+		t.Fatalf("outcome flags did not survive: status=%d present=%v setup=%v", o.Status, o.VictimContentPresent, o.SetupConfirmed)
+	}
+}

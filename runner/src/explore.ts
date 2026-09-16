@@ -184,7 +184,46 @@ export interface Exploration {
     readonly console: readonly string[];
     readonly failed: readonly string[];
   };
+  /** observations are the structured per-persona authorization readings this
+   *  exploration made against the twin: which persona reached which object
+   *  class at which route, what the twin answered, and whether the object's
+   *  planted canary came back. The engine's authz family reads them to decide
+   *  access control by content presence rather than by status code. Every field
+   *  is a bounded location, an identity comparison or a flag, and none is a raw
+   *  value: content presence is the golden canary's verdict, decided here inside
+   *  the run and emitted as a flag, never the body. Absent until the run has the
+   *  ownership and canary metadata to make a reading, which the engine fails
+   *  closed on rather than reading as "no violation". The field name and shape
+   *  mirror the engine's explore.Observation exactly; the boundary test holds
+   *  the two in lockstep. */
+  readonly observations?: readonly Observation[];
   readonly durationMs: number;
+}
+
+/** Observation is one per-persona authorization reading the runner made against
+ *  the twin, the wire form the engine's authz family consumes. It carries a
+ *  bounded location, the acting and owning identities so a boundary crossing can
+ *  be decided, the status the reach returned, and the two flags a sound reading
+ *  needs: whether the object's planted canary was present, and whether the
+ *  object was seeded before the reach so a refusal proves a boundary held rather
+ *  than that the id was invented. No field is a raw value: route is a template,
+ *  objectClass is a category label, and content presence is the golden canary's
+ *  verdict, never the body. The field names mirror the engine's
+ *  explore.Observation and security.RawObservation exactly. */
+export interface Observation {
+  readonly route: string;
+  readonly method: string;
+  readonly anonymous?: boolean;
+  readonly actorTenant?: string;
+  readonly actorUser?: string;
+  readonly actorRole?: string;
+  readonly objectClass?: string;
+  readonly ownerTenant?: string;
+  readonly ownerUser?: string;
+  readonly ownerRole?: string;
+  readonly status: number;
+  readonly victimContentPresent?: boolean;
+  readonly setupConfirmed?: boolean;
 }
 
 /** Controls an exploration will not press.
