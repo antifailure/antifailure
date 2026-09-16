@@ -20,6 +20,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/explore"
 	"github.com/antifailure/antifailure/engine/internal/insights"
 	"github.com/antifailure/antifailure/engine/internal/load"
+	"github.com/antifailure/antifailure/engine/internal/manifest"
 	"github.com/antifailure/antifailure/engine/internal/report"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
 	"github.com/antifailure/antifailure/engine/internal/security"
@@ -115,6 +116,15 @@ change.`),
 			if err != nil {
 				return err
 			}
+			// A crashed af ci is where the money leaks. The teardown below runs
+			// on a return, a panic and an interrupt, but not on a SIGKILL, an
+			// OOM kill or the runner being torn out from under the process, and
+			// on those paths the environment is left up carrying the manifest's
+			// day-long default lifetime. Bounding it to this run's budget means
+			// the reaper collects it within the hour instead. The normal path
+			// still tears it down at once; this only changes when the BACKSTOP
+			// fires. Set before Up, because Up is what stamps the lifetime.
+			o.MarkEphemeral(ciRunTTL(timeout, m))
 			// github.comment, which nothing read until now. Resolved once
 			// here rather than at each of the three places a report is
 			// written, so the two exits from this command cannot disagree
@@ -356,6 +366,68 @@ change.`),
 	cmd.Flags().StringVar(&saveBaseline, "save-baseline", "",
 		"Save this run's queries and plans, to compare a later branch against")
 	return cmd
+}
+
+// ciRunGrace is how long after a run's budget the environment is left before
+// the reaper may take it.
+//
+// It is not slack in the run. The run is over by its budget or it has crashed;
+// this is the window between "the budget passed" and "the reaper's next sweep
+// noticed", plus enough margin that a sweep does not race a teardown that is
+// still finishing. An hour is comfortably more than any sweep interval and
+// still an order of magnitude below the day-long default it replaces. The env
+// lock is the real protection against reaping live work, and it holds
+// regardless of this value; this only sets how long a CRASHED run's husk sits
+// before collection.
+const ciRunGrace = time.Hour
+
+// ciFallbackBudget is the run budget assumed when the deadline was switched off
+// with --timeout 0. A run with no deadline still gets a bounded environment,
+// because the alternative is the day-long default and a day of paying for a
+// crash. Generous, because a run that removed its deadline expects to be long,
+// and the env lock defers the reaper for as long as the run is actually alive
+// no matter how short this is.
+const ciFallbackBudget = 2 * time.Hour
+
+// ciRunTTL is the lifetime af ci stamps on its throwaway environment: the run's
+// own budget plus a grace, never longer than the environment would ordinarily
+// live.
+//
+// The budget is af ci's own --timeout, which is the hard deadline the run will
+// not exceed and so is exactly the right bound. The environment cannot usefully
+// outlive the run by more than the grace, and a day-long lifetime on a run that
+// is over in thirty minutes is the difference between a reaper that collects a
+// crashed run within the hour and one that collects it tomorrow.
+//
+// Capped at the manifest's ordinary lifetime because the only direction this
+// moves is shorter: a repository that already chose a lifetime below
+// budget+grace meant it, and a throwaway run has no business living longer than
+// a real environment on the same machine.
+func ciRunTTL(timeout time.Duration, m *schema.Manifest) time.Duration {
+	budget := timeout
+	if budget <= 0 {
+		budget = ciFallbackBudget
+	}
+	ttl := budget + ciRunGrace
+	if mt := manifestTTL(m); mt > 0 && ttl > mt {
+		ttl = mt
+	}
+	return ttl
+}
+
+// manifestTTL is the manifest's own runtime.ttl as a duration, or zero when
+// there is no manifest, no runtime block, or an unparseable value. Zero means
+// "no ceiling to cap against", which is the safe reading here: it leaves the
+// budget-derived lifetime in force rather than lengthening it.
+func manifestTTL(m *schema.Manifest) time.Duration {
+	if m == nil || m.Runtime == nil {
+		return 0
+	}
+	d, err := manifest.ParseDuration(m.Runtime.TTL)
+	if err != nil || d <= 0 {
+		return 0
+	}
+	return d
 }
 
 // undraftableRun is the report for a repository with no manifest and nothing
