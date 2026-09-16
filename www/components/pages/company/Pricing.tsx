@@ -54,9 +54,9 @@ const PLANS: Plan[] = [
     name: "Team",
     price: "$500",
     period: "per month · one organization",
-    tagline: "The hosted control plane, bought from the console with a card. Cancel from the same page.",
+    tagline: "The hosted control plane. Book a demo and we set your organization up on it.",
     featured: true,
-    cta: { href: "/signup", label: "Subscribe in the console", theme: "green" },
+    cta: { href: "/request-demo", label: "Request a demo", theme: "green" },
     includes: [
       "Flat platform fee per organization, not per person",
       `Up to ${members("team")} members, counting invitations not yet accepted`,
@@ -280,38 +280,42 @@ export function PricingPage() {
             {/* The quickstart still leads, which is this page's own decision
                 and survives: the engine is MIT licensed, it installs with one
                 command, and it needs no account at all. What changes is the
-                label beside it. "Request hosted access" was true while the
-                hosted plane admitted an allowlist of two; anybody can create an
-                account now, so asking for access describes nothing. */}
+                label beside it. It went through "Request hosted access" and
+                "Create an account"; self-serve is off now, so the hosted plane
+                is reached by a booked demo and the button says so. */}
             <Button href="/docs/getting-started/quickstart">Start the quickstart</Button>
-            <Button href="/signup" theme="outlined">
-              Create an account
+            <Button href="/request-demo" theme="outlined">
+              Request a demo
             </Button>
           </>
         }
       />
       <PageSection className="pt-0">
-        {/* This paragraph said the hosted control plane was invitation only and
-            that the access button led to a waitlist. Both stopped being true
-            when sign-up became a GitHub exchange anybody can complete, and a
-            pricing page that turns a reader away is the most expensive place on
-            a site to be out of date.
+        {/* This paragraph once said the hosted plane was invitation only, then
+            that anybody could sign up with a GitHub exchange. Self-serve is off
+            now, so the second reading turns a reader toward a door that does
+            not open, and a pricing page that turns a reader away is the most
+            expensive place on a site to be out of date. The way onto the hosted
+            plane is a booked demo, and this says so.
 
             It deliberately does not describe the free plan's numbers. Those are
             enforced by PLAN_QUOTAS and PLAN_COST_CAPS in the control plane, and
             publishing them belongs in a band that is held to that code rather
-            than in a paragraph somebody retyped. */}
+            than in a paragraph somebody retyped. The free plan still applies to
+            an organization with no live subscription, whether that control
+            plane is the hosted one or one you run yourself. */}
         <p className="mb-14 max-w-[720px] border-l border-black/15 pl-6 text-[16px] leading-7 tracking-extra-tight text-gray-new-40 max-md:mb-10 max-md:pl-4">
           Community needs nothing from us. The engine is MIT licensed, it installs with one
           command, and the quickstart runs on your own compute without an account. The hosted
-          control plane is open: signing up is a GitHub exchange with no card and no invitation,
-          and it lands you in your own organization on the free plan, whose limits are the ones
-          below and are enforced from the first environment. Team is bought from the console
-          with a card at the price on its card, and cancelled from the same page. Enterprise is
-          arranged with a person, so its band is illustrative and its button books a call.
-          Residency on that plan is about where your environments run, which a policy holds to
-          the regions you name. The hosted control plane itself runs in one Azure region,
-          Central US, and it can also be run on your own infrastructure in a region you choose.
+          control plane is a managed service, and a booked demo is the way onto it: an
+          organization with no live subscription is held to the free plan, whose limits are the
+          ones below and are enforced from the first environment. Team is that hosted plane at
+          the price on its card, a flat platform fee per organization plus run usage, arranged
+          from the same demo. Enterprise is arranged with a person too, so its band is
+          illustrative and its button books a call. Residency on that plan is about where your
+          environments run, which a policy holds to the regions you name. The hosted control
+          plane itself runs in one Azure region, Central US, and it can also be run on your own
+          infrastructure in a region you choose.
         </p>
         <ul className="grid grid-cols-3 items-stretch gap-x-12 max-xl:grid-cols-1 max-xl:gap-y-12">
           {PLANS.map((plan) => (

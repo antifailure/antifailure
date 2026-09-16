@@ -228,24 +228,20 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                   app router cannot navigate into it, so the one link that
                   remains is already the safe one. */}
             </div>
-            {/* The filled action was "Request access" once, which is an
-                invitation wall, and then "Install the engine", which was the
-                right answer while the only other door was a waitlist: the
-                engine is MIT licensed and installs with one command, so it was
-                the action a visitor could actually take.
-
-                Creating an account is now an action a visitor can actually
-                take too. It is a GitHub sign-in, it needs no card and no
-                invitation, and it ends in an organization on the free plan. So
-                it leads, and installing the engine is one click away in the
-                hero, in the nav, and on the sign-up page itself, which says in
-                as many words that the engine needs none of this. */}
+            {/* The filled action was "Request access" once, then "Install the
+                engine", then "Start free" while the hosted plane opened itself
+                to a stranger. Self-serve is off now, so a stranger cannot
+                create an organization on their own, and the way into the
+                hosted plane is a booked demo. So the filled action leads there.
+                Signing in stays beside it for the operators who already have an
+                organization, and installing the open-source engine is one click
+                away in the hero and in the nav, needing no account at all. */}
             <div className="flex gap-x-3.5">
               <Button href="/signin" theme="outlined" size="xxs">
                 Sign in
               </Button>
-              <Button href="/signup" theme="filled" size="xxs">
-                Start free
+              <Button href="/request-demo" theme="filled" size="xxs">
+                Request a demo
               </Button>
             </div>
           </div>
@@ -486,8 +482,8 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
               <Button href="/signin" theme="outlined" className="flex-1">
                 Sign in
               </Button>
-              <Button href="/signup" theme="filled" className="flex-1">
-                Start free
+              <Button href="/request-demo" theme="filled" className="flex-1">
+                Request a demo
               </Button>
             </div>
           </div>

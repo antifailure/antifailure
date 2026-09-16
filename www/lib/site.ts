@@ -148,8 +148,8 @@ export const CONTACT_POINTS = [
   },
   {
     id: "signup",
-    label: "Create an account",
-    url: "/signup",
+    label: "Request a demo",
+    url: "/request-demo",
     contactType: "sales",
   },
 ] as const;

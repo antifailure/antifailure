@@ -24,12 +24,11 @@ export function Hero() {
             a locked door. The engine is MIT licensed and the quickstart needs
             no account, so that is the action, and the install line under it is
             the first command of it rather than a third call to action.
-            The button beside it said "Request hosted access" for the same
-            reason, and outlived it: the hosted plane admitted an allowlist of
-            two when that was written and anybody can create an account now, so
-            asking for access described nothing while the link already went to
-            /signup. It says what the link does, the way the pricing page's
-            pair already did. */}
+            The button beside it went through "Request hosted access" and then
+            "Create an account", and the second outlived its truth: self-serve
+            is off, so a stranger cannot create an organization on their own,
+            and the way into the hosted plane is a booked demo. So it says
+            "Request a demo" and leads to the page that books one. */}
         {/* THREE CONTROLS ON ONE LINE. The install command sat on its own row
             below the two buttons, square where they are round, which read as a
             leftover rather than as the third thing you can do here. It is the
@@ -39,22 +38,20 @@ export function Hero() {
           <Button href="/docs/getting-started/quickstart" theme="filled">
             Start the quickstart
           </Button>
-          <Button href="/signup" theme="outlined">
-            Create an account
+          <Button href="/request-demo" theme="outlined">
+            Request a demo
           </Button>
           {/* No fill and no border of its own: the variant now carries Button's
               outlined theme, so this only has to stop being 34.2% of the row. */}
           <CopyCodeButton variant="white" className="w-auto max-w-full max-xl:w-auto max-md:w-full" />
         </div>
-        {/* The state of the product, on the page that sends the most people to
-            /signup. This button said "Get started" and led to an invitation
-            wall, and the only page that admitted it was /pricing, which most
-            visitors never open. Worded to match that page rather than beside
-            it: two descriptions of one product state is how the first of them
-            goes stale.
+        {/* The state of the product, worded to match the pricing page rather
+            than beside it: two descriptions of one product state is how the
+            first of them goes stale.
 
-            The two sentences are now in the order a visitor needs them: what
-            they can have, then what they cannot have yet. */}
+            The two sentences are in the order a visitor needs them: what they
+            can have today with no account, then how the hosted plane is
+            reached now that self-serve is off. */}
         <p className="mt-5 max-w-[760px] text-[15px] leading-6 tracking-extra-tight text-gray-new-40 max-lg:mt-4 max-lg:max-w-[520px] max-md:text-[14px]">
           The engine is open source and runs in your own continuous integration
           today, with no account.
@@ -62,7 +59,7 @@ export function Hero() {
               left to text-balance, which put the first sentence's "The" alone
               at the end of a line. */}
           <br className="max-lg:hidden" />{" "}
-          The hosted control plane is open: sign in with GitHub and connect a repository.
+          The hosted control plane is a managed service: book a demo and we set your team up on it.
         </p>
         {/* mt-36 was 144 pixels of nothing between two short sentences and the
             five things this product is. The gap is the section rhythm now, and

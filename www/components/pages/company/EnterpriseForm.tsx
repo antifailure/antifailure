@@ -43,9 +43,12 @@ type State =
   | { kind: "sent"; notified: boolean }
   | { kind: "failed"; message: string };
 
-const FIELD =
+// Exported so the demo-request form on /request-demo dresses its fields in the
+// exact same vocabulary rather than a second copy that drifts. One source of
+// truth for what an input on this site looks like.
+export const FIELD =
   "mt-1.5 h-11 w-full rounded-[8px] border border-black/15 bg-white px-3 text-[15px] text-black outline-none placeholder:text-gray-new-50 focus-visible:border-black/45 focus-visible:ring-2 focus-visible:ring-black/10 disabled:opacity-60";
-const LABEL = "block text-[13px] tracking-extra-tight text-gray-new-40";
+export const LABEL = "block text-[13px] tracking-extra-tight text-gray-new-40";
 
 export function EnterpriseForm() {
   const [state, setState] = useState<State>({ kind: "idle" });

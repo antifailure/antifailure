@@ -52,8 +52,8 @@ export function Cta() {
               <Button href="/docs/getting-started/quickstart" theme="white">
                 Start the quickstart
               </Button>
-              <Button href="/signup" theme="outlined-inverse">
-                Create an account
+              <Button href="/request-demo" theme="outlined-inverse">
+                Request a demo
               </Button>
             </div>
             <CopyCodeButton variant="terminal" className="max-lg:w-full" />

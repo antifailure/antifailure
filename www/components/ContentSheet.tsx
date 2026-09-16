@@ -22,7 +22,7 @@ const SHEETS: Record<
     points: [
       "Give us one deployment your team is nervous about. We create an isolated production-shaped test and show what staging missed.",
       "The pilot centers on an actual upcoming migration, not a generic demo.",
-      "Open core: the local engine is MIT licensed and runs on your infrastructure, and the hosted control plane has a free plan anybody can sign up to.",
+      "Open core: the local engine is MIT licensed and runs on your infrastructure, and the hosted control plane is a managed service a demo puts you on.",
       "Unlimited free hosted compute is not the model. Production data stays in your boundary.",
     ],
     cta: "signup",
@@ -33,7 +33,7 @@ const SHEETS: Record<
     points: [
       "Planned open-source surface: customer agent, local CLI, Postgres adapter, sanitization, egress gateway, simulators, cleanup controller.",
       "The installer is one command and the engine runs entirely on your machine.",
-      "The hosted control plane is open: sign up with GitHub and land in your own organization on the free plan.",
+      "The hosted control plane is a managed service you reach by requesting a demo; existing operators sign in with GitHub.",
     ],
     cta: "cli",
   },
@@ -137,10 +137,10 @@ export function ContentSheet({
         ) : null}
         {sheet.cta === "signup" ? (
           <a
-            href="/signup"
+            href="/request-demo"
             className="mt-6 inline-flex h-11 w-full items-center justify-center rounded-full bg-black text-[13px] font-medium text-white"
           >
-            Create an account
+            Request a demo
           </a>
         ) : null}
         {sheet.cta === "migration" ? (

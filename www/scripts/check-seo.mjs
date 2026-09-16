@@ -168,13 +168,15 @@ if (has("sitemap.xml")) {
   // sitemap, so it tracks the real page count rather than holding a page
   // hostage to a threshold.
   assert(urls >= 20, `sitemap lists ${urls} URLs`, urls < 20 ? "expected at least 20" : "");
-  // /signin stays out and /signup is now IN, and both halves are asserted so
-  // that flipping either one by accident is loud. A sitemap that submits the
-  // sign-in button for indexing is spending crawl budget on a page with nothing
-  // to say; one that omits the sign-up page is hiding the page a person
-  // searching for the product by name wants.
+  // /signin and /signup both stay out, and /request-demo is IN, and every half
+  // is asserted so that flipping one by accident is loud. A sitemap that
+  // submits the sign-in button for indexing is spending crawl budget on a page
+  // with nothing to say; /signup is a 301 to /request-demo now, so submitting
+  // it would ask engines to index a redirect; and omitting /request-demo hides
+  // the page a person searching for the product by name wants.
   assert(!sitemap.includes("/signin"), "sitemap excludes /signin, which is noindex");
-  assert(sitemap.includes("/signup"), "sitemap includes /signup, which is indexable");
+  assert(!sitemap.includes("/signup"), "sitemap excludes /signup, which 301s to /request-demo");
+  assert(sitemap.includes("/request-demo"), "sitemap includes /request-demo, which is indexable");
   // The count above is a canary against a truncated sitemap and says nothing
   // about what the URLs in it are. A sitemap listing 32 URLs on a host the
   // pages do not canonicalise to passes it and is worse than no sitemap,
@@ -399,8 +401,9 @@ for (const file of pages) {
 // and lib/seo.ts advertised one anyway. Two <link rel="alternate"> tags pointed
 // at https://antifailure.dev/signin.md and /signup.md, the host answered 404 for
 // both, and the only thing that noticed was the external link checker, after
-// the build was green and merged. /signup is indexable now and does have a twin;
-// /signin is still the case this guards.
+// the build was green and merged. /signin and /signup are both noindex now
+// (/signup 301s to /request-demo), so neither advertises a twin, and this is
+// the case that guards against one of them starting to.
 //
 // So this walks every built page, indexable or not, reads the address it
 // claims its markdown lives at, and asserts the build actually wrote that
@@ -630,7 +633,7 @@ const trustPages = [
       "https://github.com/antifailure/antifailure/security/advisories/new",
       "https://github.com/antifailure/antifailure/issues/new/choose",
       "https://github.com/antifailure/antifailure/discussions",
-      "/signup",
+      "/request-demo",
     ],
   },
 ];
@@ -667,7 +670,7 @@ if (has("contact.html")) {
     "https://github.com/antifailure/antifailure/security/advisories/new",
     "https://github.com/antifailure/antifailure/issues/new/choose",
     "https://github.com/antifailure/antifailure/discussions",
-    "https://antifailure.dev/signup",
+    "https://antifailure.dev/request-demo",
   ]) {
     assert(contacts.has(url), `Organization JSON-LD publishes ${url}`);
   }

@@ -22,8 +22,8 @@ export type { SheetId };
 //
 // Deleted rather than wired up, which is the unusual direction for dead code
 // and is right here. The thing it duplicated is finished and reachable: the
-// full screen at /signin and /signup is linked from the header, the hero, the
-// pricing page and the footer. The modal was the older, smaller half of it,
+// full screen at /signin and the demo booking at /request-demo are linked from
+// the header, the hero, the pricing page and the footer. The modal was the older, smaller half of it,
 // offering the waitlist and no GitHub button at all, so giving it a trigger
 // would have meant intercepting a working page with a version of itself that
 // cannot let an invited person in. A second implementation of one thing is

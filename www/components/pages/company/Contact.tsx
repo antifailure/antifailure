@@ -33,10 +33,10 @@ const CONTACT_DETAILS = {
     action: "Start a discussion",
   },
   signup: {
-    body: "Anybody can create an account and start on the free plan with a GitHub sign-in. No card, no invitation, and no waiting: you land in your own organization and the free plan's limits are enforced against it from the first environment.",
+    body: "The hosted control plane is a managed service, and a booked demo is the way onto it. Bring a deployment your team is nervous about and we show what a production twin catches before it ships. The engine itself is open source and needs no account at all.",
     href: "/pricing",
     link: "What the free plan holds",
-    action: "Create an account",
+    action: "Request a demo",
   },
 } as const;
 
@@ -148,9 +148,10 @@ export function ContactPage() {
               GitHub organization, single sign-on, an agreement to sign, or an
               answer about where data is processed. It writes a row in the
               product database that a person reads, oldest first, rather than an
-              address on a list. You do not need it to start: creating an{" "}
-              <a href="/signup">account</a> is a GitHub sign-in and the free
-              plan needs no card.
+              address on a list. You do not need it to start: the engine is open
+              source and the <a href="/docs/getting-started/quickstart">quickstart</a>{" "}
+              needs no account, and the hosted plane is a{" "}
+              <a href="/request-demo">booked demo</a>.
             </p>
           </Prose>
           <div className="mt-10 max-w-[720px]">

@@ -148,11 +148,14 @@ export const SITE_ROUTES = [
   'blog',
   'blog_post',
   'legal',
-  // The page the only form on the site is on, and therefore the one page the
-  // acquisition funnel ends on. It classified as `other` until the form moved
-  // there, which made "views of the page that converts" a question the
-  // dashboard could not answer about the page it most needed to.
+  // The pages a form on the site is on, and therefore the pages the
+  // acquisition funnel ends on. Each classified as `other` until its form
+  // arrived, which made "views of the page that converts" a question the
+  // dashboard could not answer about the pages it most needed to. /contact
+  // holds the enterprise form; /request-demo holds the demo-request form that
+  // replaced self-serve sign-up, so it is the funnel's main landing now.
   'contact',
+  'request_demo',
   'signin',
   'signup',
   'other',

@@ -1,32 +1,25 @@
-import { pageMetadata } from "@/lib/seo";
-import { PageJsonLd } from "@/lib/jsonld";
-import { AuthScreen } from "@/components/AuthScreen";
-import { ChromeProvider } from "@/components/Chrome";
+import { MovedPage, movedMetadata } from "@/components/layout/MovedPage";
+import { pageTitle } from "@/lib/site";
 
-export const metadata = pageMetadata("/signup");
+/**
+ * /signup moved to /request-demo.
+ *
+ * Self-serve organization creation is off (`AF_SELF_SERVE_SIGNUP` defaults
+ * off), so a page headed "Create an account" was describing a door that does
+ * not open for a stranger. The hosted plane is entered by a booked demo now,
+ * and existing operators still sign in with GitHub at /signin.
+ *
+ * The production host serves the 301 in public/staticwebapp.config.json, so
+ * almost nobody reaches the markup below. It exists for the same reason the
+ * product moved-pages do: the build is `output: "export"`, which refuses
+ * next.config redirects because there is no server to evaluate them, and a
+ * preview or a local `next start` serves the static files without the host
+ * config, where a missing page is a 404 on a URL that is in bookmarks and was
+ * indexed. The MovedPage carries a canonical to /request-demo and noindex, so
+ * the one indexable result is the demo page rather than two spellings of it.
+ */
+export const metadata = movedMetadata("/request-demo", pageTitle("Request a demo"));
 
-export default function SignUpPage() {
-  return (
-    <ChromeProvider>
-      {/* The structured data every other indexable page gets from PageShell.
-          This route renders an AuthScreen full bleed instead, so it has no
-          shell to inherit it from, and it was excluded from the index for as
-          long as it was a waitlist with nothing to rank for. It describes
-          creating an account now, on a product anybody can create one on, so it
-          is indexed and it needs the same WebPage node and breadcrumb trail as
-          everything else.
-
-          The trail is not markup with nothing behind it: AuthScreen renders a
-          Home link at the top left, which is the one visible step this
-          describes. */}
-      <PageJsonLd path="/signup" />
-      {/* These two render an AuthScreen directly rather than through
-          SiteLayout, so they had no <main> at all: no landmark for a screen
-          reader, and the skip link in the root layout pointed at an anchor
-          that does not exist on them. */}
-      <main id="main" tabIndex={-1}>
-        <AuthScreen mode="signup" />
-      </main>
-    </ChromeProvider>
-  );
+export default function Page() {
+  return <MovedPage to="/request-demo" label="request a demo" />;
 }

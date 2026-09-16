@@ -191,15 +191,15 @@ function HeroCopy({
           </p>
         ))}
       </div>
-      {/* The same pair as every other hero on the site, in the same order.
-          This one offered only the invitation wall, so a solutions page pitched
-          the product and then gave a visitor nothing they could do today. */}
+      {/* The same pair as every other hero on the site, in the same order:
+          the open-source quickstart a visitor can run today, and a booked demo
+          for the hosted plane. */}
       <div className="mt-8 flex flex-wrap gap-3 xl:mt-auto xl:pt-10 max-sm:flex-col max-sm:[&_a]:w-full">
         <Button href="/docs/getting-started/quickstart" theme="filled">
           Start the quickstart
         </Button>
-        <Button href="/signup" theme="outlined">
-          Create an account
+        <Button href="/request-demo" theme="outlined">
+          Request a demo
         </Button>
       </div>
     </div>

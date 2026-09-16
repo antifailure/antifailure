@@ -7,12 +7,12 @@ export const metadata = pageMetadata("/signin");
 export default function SignInPage() {
   return (
     <ChromeProvider>
-      {/* These two render an AuthScreen directly rather than through
-          SiteLayout, so they had no <main> at all: no landmark for a screen
-          reader, and the skip link in the root layout pointed at an anchor
-          that does not exist on them. */}
+      {/* This renders an AuthScreen directly rather than through SiteLayout,
+          so it had no <main> at all: no landmark for a screen reader, and the
+          skip link in the root layout pointed at an anchor that does not exist
+          on it. */}
       <main id="main" tabIndex={-1}>
-        <AuthScreen mode="signin" />
+        <AuthScreen />
       </main>
     </ChromeProvider>
   );

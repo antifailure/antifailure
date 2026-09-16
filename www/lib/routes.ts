@@ -300,34 +300,32 @@ export const ROUTES: readonly Route[] = [
     parent: "/",
   },
 
-  // Sign-up and sign-in.
+  // Request a demo, and sign-in.
   //
-  // These two entries said "Join the waitlist" and "There is no hosted control
-  // plane yet" for as long as there was one. The pages themselves had already
-  // been corrected, so an invited customer following the header got a tab, a
-  // bookmark and a shared link all telling them they were being turned away,
-  // while the page under them offered a working GitHub button. The title is the
-  // one piece of copy a person reads before the page renders and the only piece
-  // that survives being sent to somebody else, so it is the last place a stale
-  // claim should be allowed to sit.
+  // /request-demo replaced /signup as the site's front door to the hosted
+  // plane. Self-serve organization creation is off (`AF_SELF_SERVE_SIGNUP`),
+  // so "Create an account" described a door that does not open for a stranger;
+  // the way in is a booked demo, and every self-serve call to action across
+  // the site now leads here. /signup is kept only as a 301 to this route, in
+  // public/staticwebapp.config.json and as a MovedPage, so a bookmark or an
+  // inbound link still lands somewhere true.
   //
-  // /signup IS INDEXABLE NOW, and that is a change rather than an oversight. It
-  // was excluded on the reasoning that "a sign-in form and a waitlist have
-  // nothing to rank for", which was true of both things that used to be here. A
-  // page describing what creating an account does, on a product anybody can
-  // create one on, is a page with something to rank for and the one a person
-  // searching for the product by name is looking for. Being indexable is also
-  // what gives it a markdown twin, which is what an assistant reads.
+  // /request-demo IS INDEXABLE, and it is the page a person searching for the
+  // product by name is looking for: it says what the demo is and puts a real
+  // calendar in front of them. Being indexable is also what gives it a
+  // markdown twin, which is what an assistant reads. The title is the one
+  // piece of copy a person reads before the page renders and the only piece
+  // that survives being sent to somebody else, so it names the action plainly.
   //
   // /signin stays out. It is a button for people who already have an account,
   // it says nothing a stranger wants, and indexing it spends crawl budget that
   // belongs to the product pages.
   {
-    path: "/signup",
-    title: pageTitle("Create an account"),
+    path: "/request-demo",
+    title: pageTitle("Request a demo"),
     description:
-      "Sign up with GitHub and land in your own organization on the free plan. No card, no invitation, and no password. The engine is open source and runs on your own machine without an account at all.",
-    summary: "Create an account on the hosted control plane, on the free plan.",
+      "Book thirty minutes with the person building Antifailure. Bring a deployment your team is nervous about and see what a disposable production twin catches before it ships. The engine is open source and runs on your own machine without an account at all.",
+    summary: "Book a demo of the hosted control plane with the person building it.",
     section: "utility",
     indexable: true,
     priority: 0.8,
