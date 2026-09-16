@@ -12,6 +12,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/change"
 	"github.com/antifailure/antifailure/engine/internal/report"
 	"github.com/antifailure/antifailure/engine/internal/security"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 )
 
 // Doer issues one HTTP request. *http.Client satisfies it, and so does a test's
@@ -21,17 +22,25 @@ type Doer interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-// defaultDoer is the transport New uses. It does NOT follow redirects, because a
-// 302 to a login page is a refusal this family must read as a refusal rather
-// than chase into a 200 login screen and misread as a leak. Its timeout bounds a
-// hung endpoint so one unreachable target cannot stall the fleet.
+// defaultDoer is the transport New uses. It goes through the egress guard, never
+// a raw client: an air gapped installation must not be able to reach the network
+// through a security probe, and the guard is the one seam in the product that
+// enforces that. SiteOracle is the engine driving the sanitized twin, which is
+// exactly and only what this probe does: it reaches the configured twin BaseURL,
+// the same deployments the oracle compares, and never an external host, so it
+// carries no new outbound destination an air gapped buyer was not already told
+// about.
+//
+// It does NOT follow redirects, because a 302 to a login page is a refusal this
+// family must read as a refusal rather than chase into a 200 login screen and
+// misread as a leak. The timeout bounds a hung endpoint so one unreachable
+// target cannot stall the fleet.
 func defaultDoer() Doer {
-	return &http.Client{
-		Timeout: 15 * time.Second,
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
+	c := airgap.Client(airgap.SiteOracle, 15*time.Second)
+	c.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
 	}
+	return c
 }
 
 // maxBodyBytes bounds how much of a response the family reads to decide content
