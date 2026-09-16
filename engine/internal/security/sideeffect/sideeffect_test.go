@@ -115,21 +115,18 @@ func TestDetect_IgnoreLevelDropsTheFinding(t *testing.T) {
 }
 
 func TestProbe_ReadsInputAndReturnsFindings(t *testing.T) {
-	f := &family{
-		readEffects: func(security.Input) ([]local.Decision, []local.Message, bool) {
-			return []local.Decision{
+	in := security.Input{Policy: policy(report.LevelFail, report.LevelFail)}.
+		WithRunArtifacts(security.RunArtifacts{
+			Decisions: []local.Decision{
 				{Host: "api.stripe.com", Method: "POST", Path: "/v1/payment_intents"},
 				{Host: "api.stripe.com", Method: "POST", Path: "/v1/payment_intents"},
 				{Host: "api.stripe.com", Method: "POST", Path: "/v1/payment_intents"},
-			}, nil, true
-		},
-		readBaseline: func(security.Input) ([]local.Decision, []local.Message, bool) {
-			return []local.Decision{
+			},
+			Baseline: &security.Baseline{Decisions: []local.Decision{
 				{Host: "api.stripe.com", Method: "POST", Path: "/v1/payment_intents"},
-			}, nil, true
-		},
-	}
-	findings, err := f.Probe(context.Background(), security.Input{Policy: policy(report.LevelFail, report.LevelFail)})
+			}},
+		})
+	findings, err := New().Probe(context.Background(), in)
 	require.NoError(t, err)
 	require.Len(t, findings, 1)
 	require.Equal(t, string(RuleExternalCall), findings[0].Rule)
@@ -137,26 +134,22 @@ func TestProbe_ReadsInputAndReturnsFindings(t *testing.T) {
 }
 
 func TestProbe_UnreadEffectsAreBlockedNeverAPass(t *testing.T) {
-	f := &family{
-		readEffects:  func(security.Input) ([]local.Decision, []local.Message, bool) { return nil, nil, false },
-		readBaseline: func(security.Input) ([]local.Decision, []local.Message, bool) { return nil, nil, false },
-	}
-	findings, err := f.Probe(context.Background(), security.Input{Policy: policy(report.LevelFail, report.LevelFail)})
+	// An Input with neither a decision nor a message log attached is a run whose
+	// effects were not captured: a blocked probe, never an empty pass.
+	findings, err := New().Probe(context.Background(), security.Input{Policy: policy(report.LevelFail, report.LevelFail)})
 	require.Error(t, err, "an unread effect log is a blocked probe, not an empty pass")
 	require.Nil(t, findings)
 }
 
 func TestProbe_MissingBaselineStillFiresDestructiveButNotIncrease(t *testing.T) {
-	f := &family{
-		readEffects: func(security.Input) ([]local.Decision, []local.Message, bool) {
-			return []local.Decision{
-				{Host: "ec2.us-east-1.amazonaws.com", Method: "DELETE", Path: "/instances/i-1"},
-				{Host: "api.stripe.com", Method: "POST", Path: "/v1/payment_intents"},
-			}, nil, true
-		},
-		readBaseline: func(security.Input) ([]local.Decision, []local.Message, bool) { return nil, nil, false },
-	}
-	findings, err := f.Probe(context.Background(), security.Input{Policy: policy(report.LevelFail, report.LevelFail)})
+	// Candidate decisions are attached (so the probe is not blocked) but no base
+	// twin was built (Baseline nil, ok=false).
+	in := security.Input{Policy: policy(report.LevelFail, report.LevelFail)}.
+		WithRunArtifacts(security.RunArtifacts{Decisions: []local.Decision{
+			{Host: "ec2.us-east-1.amazonaws.com", Method: "DELETE", Path: "/instances/i-1"},
+			{Host: "api.stripe.com", Method: "POST", Path: "/v1/payment_intents"},
+		}})
+	findings, err := New().Probe(context.Background(), in)
 	require.NoError(t, err)
 	require.Len(t, findings, 1, "no baseline means no increase finding, but destructive still fires")
 	require.Equal(t, string(RuleDestructive), findings[0].Rule)

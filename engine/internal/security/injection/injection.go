@@ -50,16 +50,6 @@ const (
 	RuleDynamicQuery  = report.PolicyKey("security.injection.dynamic_query")
 )
 
-// Route is one endpoint to fuzz: a method, a path under the twin's base URL, and
-// the parameter names to inject into. The router fills it from the ingress
-// routes the workflows actually hit; the type is mirrored in the security
-// package so the router does not import this one.
-type Route struct {
-	Method string
-	Path   string
-	Params []string
-}
-
 // Response is what one request returned, reduced to the three facts the oracles
 // read: the status, a bounded body, and how long it took. The body is bounded
 // on read so a large response never sits in memory and never reaches a finding.
@@ -353,25 +343,18 @@ var _ security.Family = (*family)(nil)
 
 // family is the injection prober as a registered security family.
 type family struct {
-	// readRoutes returns the routes to fuzz for this run, and whether a route
-	// source resolved at all. It is a seam because the merged security.Input
-	// does not yet carry the observed routes: the router lane adds Input.Routes
-	// and this collapses to reading it. ok=false is UNAVAILABLE, a blocked probe,
-	// never a pass; an empty slice means the change touched no fuzzable endpoint.
-	readRoutes func(security.Input) (routes []Route, ok bool)
-	client     *http.Client
-	sleep      time.Duration
-	maxBody    int64
+	client  *http.Client
+	sleep   time.Duration
+	maxBody int64
 }
 
 // New builds the injection family. The router registers it with a bare New and
-// supplies the per run routes through security.Input.
+// supplies the per run routes through security.Input.Routes.
 func New() security.Family {
 	return &family{
-		readRoutes: routesFromInput,
-		client:     &http.Client{Timeout: 30 * time.Second},
-		sleep:      3 * time.Second,
-		maxBody:    64 << 10,
+		client:  &http.Client{Timeout: 30 * time.Second},
+		sleep:   3 * time.Second,
+		maxBody: 64 << 10,
 	}
 }
 
@@ -381,16 +364,16 @@ func (f *family) Checks() []change.Check     { return familyChecks }
 func (f *family) Keys() []security.KeySpec   { return keys() }
 func (f *family) Licensed() string           { return "" }
 
-// Probe fuzzes each routed endpoint and returns the proven findings. A run with
-// no resolvable route source is a blocked probe, because a family that could not
-// reach an endpoint has proven nothing and must not read as a pass. A route
-// source that resolves to nothing means the change touched no fuzzable endpoint,
-// which is quiet rather than blocked.
+// Probe fuzzes each routed endpoint and returns the proven findings. A nil route
+// slice is UNAVAILABLE, a blocked probe: no observed-route source was wired, and
+// a family that could not reach an endpoint has proven nothing and must not read
+// as a pass. An empty non-nil slice means the change touched no fuzzable
+// endpoint, which is quiet rather than blocked.
 func (f *family) Probe(ctx context.Context, in security.Input) ([]report.Finding, error) {
-	routes, ok := f.readRoutes(in)
-	if !ok {
+	routes := in.Routes()
+	if routes == nil {
 		return nil, fmt.Errorf(
-			"the injection prober found no route source for this run, so it fuzzed nothing")
+			"the injection prober found no observed route source for this run, so it fuzzed nothing")
 	}
 	base := strings.TrimRight(in.Env.BaseURL, "/")
 	if base == "" {
@@ -464,7 +447,7 @@ func (f *family) Probe(ctx context.Context, in security.Input) ([]report.Finding
 // send issues one request with the parameter set to a value and returns the
 // bounded response. The body is read up to maxBody so a large response never
 // sits in memory, and neither the value nor the body ever reaches a finding.
-func (f *family) send(ctx context.Context, route Route, base, param, value string) (Response, error) {
+func (f *family) send(ctx context.Context, route security.Route, base, param, value string) (Response, error) {
 	method := route.Method
 	if method == "" {
 		method = http.MethodGet
@@ -523,13 +506,4 @@ func fixFor(class report.PolicyKey) string {
 		return "Resolve the path against the application root and reject any result outside it; never join a request value onto a filesystem path."
 	}
 	return "Treat the request value as data and validate it against the shape the endpoint expects."
-}
-
-// routesFromInput is the production seam the router lane replaces with the real
-// security.Input accessor. Until Input carries the run's observed routes it
-// reports that none resolved, which keeps this branch buildable on its own and
-// the probe honestly blocked. The merge that lands Input.Routes turns it into a
-// one line read.
-func routesFromInput(security.Input) ([]Route, bool) {
-	return nil, false
 }

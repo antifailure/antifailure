@@ -326,27 +326,12 @@ var (
 var _ security.Family = (*family)(nil)
 
 // family is the side effect counter as a registered security family.
-type family struct {
-	// readEffects returns the head run's egress decisions and captured messages.
-	// It is a seam because the merged security.Input does not yet carry them:
-	// the router lane, which owns the security package, adds Input.Decisions and
-	// Input.Messages and this collapses to reading them. Until then it reports
-	// ok=false, which makes the probe a blocked one, never a pass.
-	readEffects func(security.Input) (decisions []local.Decision, messages []local.Message, ok bool)
-	// readBaseline returns the base twin's egress decisions and captured
-	// messages, and whether a base twin was built at all. ok=false is not a base
-	// of zero: the increase comparison is skipped rather than made against
-	// nothing.
-	readBaseline func(security.Input) (decisions []local.Decision, messages []local.Message, ok bool)
-}
+type family struct{}
 
 // New builds the side effect family. The router registers it with a bare New
 // and populates the per run effect and baseline data through security.Input.
 func New() security.Family {
-	return &family{
-		readEffects:  effectsFromInput,
-		readBaseline: baselineFromInput,
-	}
+	return &family{}
 }
 
 func (f *family) Name() string               { return "side_effect" }
@@ -356,35 +341,23 @@ func (f *family) Keys() []security.KeySpec   { return keys() }
 func (f *family) Licensed() string           { return "" }
 
 // Probe classifies the run's effects, compares them against the base twin, and
-// returns the findings. An input that carries no captured effects is a blocked
-// probe (an error), because a run whose effects we could not read has told us
-// nothing about the change, which must never read as a pass.
+// returns the findings. A run whose candidate logs were not captured at all
+// (both the decision and message logs nil) is a blocked probe, because a run
+// whose effects we could not read has told us nothing and must never read as a
+// pass. A base twin that was not built leaves the increase comparison unmade
+// rather than diffing against a base of zero.
 func (f *family) Probe(_ context.Context, in security.Input) ([]report.Finding, error) {
-	decisions, messages, ok := f.readEffects(in)
-	if !ok {
+	decisions, messages := in.Decisions(), in.Messages()
+	if decisions == nil && messages == nil {
 		return nil, fmt.Errorf(
 			"the side effect counter could not read this run's captured effects, so it counted nothing")
 	}
 	head := Classify(decisions, messages)
 
-	baseDecisions, baseMessages, baseOK := f.readBaseline(in)
 	var base Counts
+	baseline, baseOK := in.Baseline()
 	if baseOK {
-		base = Classify(baseDecisions, baseMessages)
+		base = Classify(baseline.Decisions, baseline.Messages)
 	}
 	return Detect(head, base, baseOK, in.Policy), nil
-}
-
-// effectsFromInput and baselineFromInput are the production seams the router
-// lane replaces with the real security.Input accessors. Until Input carries the
-// per run decision and capture logs, they report that nothing could be read,
-// which keeps this branch buildable on its own and makes the probe honestly
-// blocked rather than silently empty. The merge that lands Input.Decisions,
-// Input.Messages and Input.Baseline turns each into a one line read.
-func effectsFromInput(security.Input) ([]local.Decision, []local.Message, bool) {
-	return nil, nil, false
-}
-
-func baselineFromInput(security.Input) ([]local.Decision, []local.Message, bool) {
-	return nil, nil, false
 }

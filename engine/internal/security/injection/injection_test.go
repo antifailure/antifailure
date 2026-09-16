@@ -127,23 +127,27 @@ func safeServer() *httptest.Server {
 	}))
 }
 
-func newTestFamily(routes []Route) *family {
+func newTestFamily() *family {
 	return &family{
-		readRoutes: func(security.Input) ([]Route, bool) { return routes, true },
-		client:     &http.Client{Timeout: 5 * time.Second},
-		sleep:      50 * time.Millisecond,
-		maxBody:    64 << 10,
+		client:  &http.Client{Timeout: 5 * time.Second},
+		sleep:   50 * time.Millisecond,
+		maxBody: 64 << 10,
 	}
+}
+
+// inputWithRoutes builds an Input carrying the base URL and the observed routes
+// the way the router's securityFindings does, through WithRunArtifacts.
+func inputWithRoutes(base string, routes []security.Route, pol report.Policy) security.Input {
+	return security.Input{Env: security.Environment{BaseURL: base}, Policy: pol}.
+		WithRunArtifacts(security.RunArtifacts{Routes: routes})
 }
 
 func TestProbe_ProvesInjectionAgainstAVulnerableServer(t *testing.T) {
 	srv := vulnerableServer()
 	defer srv.Close()
-	f := newTestFamily([]Route{{Method: http.MethodGet, Path: "/", Params: []string{"q"}}})
-	findings, err := f.Probe(context.Background(), security.Input{
-		Env:    security.Environment{BaseURL: srv.URL},
-		Policy: allFail(),
-	})
+	f := newTestFamily()
+	in := inputWithRoutes(srv.URL, []security.Route{{Method: http.MethodGet, Path: "/", Params: []string{"q"}}}, allFail())
+	findings, err := f.Probe(context.Background(), in)
 	require.NoError(t, err)
 	rules := map[string]int{}
 	for _, fd := range findings {
@@ -161,18 +165,17 @@ func TestProbe_SafeServerYieldsNoFindings(t *testing.T) {
 	// finding, or the check cannot say no.
 	srv := safeServer()
 	defer srv.Close()
-	f := newTestFamily([]Route{{Method: http.MethodGet, Path: "/", Params: []string{"q"}}})
-	findings, err := f.Probe(context.Background(), security.Input{
-		Env:    security.Environment{BaseURL: srv.URL},
-		Policy: allFail(),
-	})
+	f := newTestFamily()
+	in := inputWithRoutes(srv.URL, []security.Route{{Method: http.MethodGet, Path: "/", Params: []string{"q"}}}, allFail())
+	findings, err := f.Probe(context.Background(), in)
 	require.NoError(t, err)
 	require.Empty(t, findings, "a reflecting but safe server proves nothing")
 }
 
 func TestProbe_NoRouteSourceIsBlockedNeverAPass(t *testing.T) {
 	f := New().(*family)
-	// New wires routesFromInput, which reports no source until the router lands.
+	// An Input with no observed routes attached returns nil from Routes, which
+	// is UNAVAILABLE and a blocked probe, never a pass.
 	findings, err := f.Probe(context.Background(), security.Input{
 		Env:    security.Environment{BaseURL: "http://example.invalid"},
 		Policy: allFail(),
@@ -182,11 +185,9 @@ func TestProbe_NoRouteSourceIsBlockedNeverAPass(t *testing.T) {
 }
 
 func TestProbe_EmptyRoutesAreQuiet(t *testing.T) {
-	f := newTestFamily(nil)
-	findings, err := f.Probe(context.Background(), security.Input{
-		Env:    security.Environment{BaseURL: "http://example.invalid"},
-		Policy: allFail(),
-	})
+	f := newTestFamily()
+	in := inputWithRoutes("http://example.invalid", []security.Route{}, allFail())
+	findings, err := f.Probe(context.Background(), in)
 	require.NoError(t, err, "a change that touched no fuzzable endpoint is quiet, not blocked")
 	require.Empty(t, findings)
 }

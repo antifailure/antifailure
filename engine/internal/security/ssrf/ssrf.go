@@ -280,18 +280,12 @@ var (
 var _ security.Family = (*family)(nil)
 
 // family is the SSRF reader as a registered security family.
-type family struct {
-	// readEgress returns the run's egress decision log. It is a seam because the
-	// merged security.Input does not yet carry the decisions: the router lane
-	// adds Input.Decisions and this collapses to reading it. Until then it
-	// reports ok=false, which makes the probe blocked rather than a pass.
-	readEgress func(security.Input) (decisions []local.Decision, ok bool)
-}
+type family struct{}
 
 // New builds the SSRF family. The router registers it with a bare New and
 // supplies the per run egress decisions through security.Input.
 func New() security.Family {
-	return &family{readEgress: egressFromInput}
+	return &family{}
 }
 
 func (f *family) Name() string               { return "ssrf" }
@@ -301,23 +295,14 @@ func (f *family) Keys() []security.KeySpec   { return keys() }
 func (f *family) Licensed() string           { return "" }
 
 // Probe reads the run's egress decisions and returns the internal reach
-// findings. A run whose decisions we could not read is a blocked probe, never a
-// pass: an empty decision log and an unread one are different facts, and only
-// the first means the application reached nothing internal.
+// findings. A nil decision log is a blocked probe, never a pass: the router
+// distinguishes an unread log (nil, not measured) from a run that made no
+// outbound call (an empty, non-nil log), and only the second is a clean look.
 func (f *family) Probe(_ context.Context, in security.Input) ([]report.Finding, error) {
-	decisions, ok := f.readEgress(in)
-	if !ok {
+	decisions := in.Decisions()
+	if decisions == nil {
 		return nil, fmt.Errorf(
 			"the SSRF reader could not read this run's egress decisions, so it observed no outbound request")
 	}
 	return Detect(decisions, in.Targets, in.Policy), nil
-}
-
-// egressFromInput is the production seam the router lane replaces with the real
-// security.Input accessor. Until Input carries the per run decision log it
-// reports that nothing could be read, which keeps this branch buildable on its
-// own and the probe honestly blocked. The merge that lands Input.Decisions
-// turns it into a one line read.
-func egressFromInput(security.Input) ([]local.Decision, bool) {
-	return nil, false
 }

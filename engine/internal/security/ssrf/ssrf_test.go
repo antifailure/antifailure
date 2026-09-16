@@ -101,18 +101,20 @@ func TestDetect_NamesTheChangedEndpointAndNeverTheRawAddress(t *testing.T) {
 }
 
 func TestProbe_ReadsInputAndReturnsFindings(t *testing.T) {
-	f := &family{readEgress: func(security.Input) ([]local.Decision, bool) {
-		return []local.Decision{{Host: "169.254.169.254", Method: "GET", Path: "/", Allowed: false}}, true
-	}}
-	findings, err := f.Probe(context.Background(), security.Input{Policy: policy(report.LevelFail, report.LevelFail)})
+	in := security.Input{Policy: policy(report.LevelFail, report.LevelFail)}.
+		WithRunArtifacts(security.RunArtifacts{Decisions: []local.Decision{
+			{Host: "169.254.169.254", Method: "GET", Path: "/", Allowed: false},
+		}})
+	findings, err := New().Probe(context.Background(), in)
 	require.NoError(t, err)
 	require.Len(t, findings, 1)
 	require.Equal(t, string(RuleInternalHost), findings[0].Rule)
 }
 
 func TestProbe_UnreadDecisionsAreBlockedNeverAPass(t *testing.T) {
-	f := &family{readEgress: func(security.Input) ([]local.Decision, bool) { return nil, false }}
-	findings, err := f.Probe(context.Background(), security.Input{Policy: policy(report.LevelFail, report.LevelFail)})
+	// An Input with no decision log attached returns nil from Decisions, which a
+	// reader treats as not measured and fails closed on.
+	findings, err := New().Probe(context.Background(), security.Input{Policy: policy(report.LevelFail, report.LevelFail)})
 	require.Error(t, err, "an unread decision log is a blocked probe, not an empty pass")
 	require.Nil(t, findings)
 }
