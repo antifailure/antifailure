@@ -100,21 +100,23 @@ func securityFindings(
 	// the egress summary and are passed in rather than fetched twice; the
 	// browser evidence is folded out of what exploration already captured.
 	//
-	// Three artifacts stay in their honest absent state until the lane that
+	// Two artifacts stay in their honest absent state until the lane that
 	// produces them lands: a base twin is not built by ci today, so Baseline is
 	// nil (a reader reads that as "not measured" and skips its baseline
-	// comparison rather than diffing against a base of zero); the runner does
-	// not yet emit structured per-persona observations, so Observations is nil
-	// (authz fails closed on it); and no ingress-route source is wired, so
-	// Routes is nil (injection reports blocked). Nil here is absent, never a
-	// misleading empty.
+	// comparison rather than diffing against a base of zero); and the runner
+	// does not yet emit structured per-persona observations, so Observations is
+	// nil (authz fails closed on it). Routes is sourced from the exploration the
+	// run observed: observedRoutes returns the routes the browser reached and
+	// nil when there was no exploration to read, which the injection family
+	// reads as UNAVAILABLE rather than as a clean pass. Nil here is absent,
+	// never a misleading empty.
 	messages, _ := o.Messages(ctx, securityLogLimit)
 	artifacts := security.RunArtifacts{
 		Decisions:    decisions,
 		Messages:     messages,
 		Observations: nil,
 		Evidence:     explorationEvidence(run.Exploration),
-		Routes:       nil,
+		Routes:       observedRoutes(run),
 		Baseline:     nil,
 		// The dependency diff, read only when the change touched the dependency
 		// surface, so a code-only change does not pay for a second read of the

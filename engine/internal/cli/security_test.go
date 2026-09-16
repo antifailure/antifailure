@@ -263,13 +263,44 @@ func TestSecurityFindings_EnrichesInputWithTheRunArtifacts(t *testing.T) {
 		"the DOM exploration captured reaches the leak family")
 	require.Equal(t, []string{`{"ok":true}`}, seen.Evidence().Responses,
 		"the response bodies exploration captured reach the leak family")
-	// ci builds no base twin, emits no structured observations and wires no
-	// ingress source yet, so these stay in their honest absent states rather
-	// than a misleading empty one.
+	// ci builds no base twin and emits no structured observations yet, so those
+	// stay in their honest absent states rather than a misleading empty one.
 	require.Nil(t, seen.Observations(), "the runner emits no observations yet, so authz fails closed")
 	_, ok := seen.Baseline()
 	require.False(t, ok, "no base twin was built, so Baseline is ok=false, never a base of zero")
-	require.Nil(t, seen.Routes(), "no ingress source is wired, so Routes is UNAVAILABLE (nil)")
+	// The ingress source IS wired now: observedRoutes read this exploration. It
+	// reached pages but none carried a fuzzable query parameter, so Routes is
+	// EMPTY and non-nil, which the injection family reads as a quiet pass, not
+	// nil, which would be UNAVAILABLE. The distinction is the whole contract.
+	require.NotNil(t, seen.Routes(),
+		"the exploration was read, so Routes is EMPTY (a quiet pass), never nil (UNAVAILABLE)")
+	require.Empty(t, seen.Routes(), "no page this run reached carried a fuzzable query parameter")
+}
+
+// TestSecurityFindings_HandsObservedRoutesToTheFamily proves the wiring the
+// collector adds: a route the exploration REACHED with a fuzzable query
+// parameter is sourced by observedRoutes and reaches the family through
+// Input.Routes, so the injection family fuzzes what the run observed. Without
+// the `Routes: observedRoutes(run)` line the family would read nil and report
+// blocked, so this is the test that the wiring is live rather than dormant.
+func TestSecurityFindings_HandsObservedRoutesToTheFamily(t *testing.T) {
+	fam := &spyFamily{name: "injection", surfaces: []change.Surface{change.SurfaceCode}}
+	reg := security.NewRegistry()
+	reg.Register(fam)
+
+	var reached explore.Exploration
+	reached.Visited = []string{"http://twin.local/api/search?q=chair"}
+	run := report.Run{URL: "http://twin.local", Exploration: &report.Exploration{
+		Results: []explore.Exploration{reached},
+	}}
+
+	securityFindings(context.Background(), testEnv(),
+		&fakeReader{profile: codeProfile()}, reg, report.Configure(nil), &run, nil, "")
+
+	require.Equal(t, []security.Route{{
+		Method: "GET", Path: "/api/search", Params: []string{"q"},
+	}}, fam.gotInput.Routes(),
+		"the observed route the run reached is handed to the family, templated and value-free")
 }
 
 func TestSecurityFindings_AChangeThatCannotBeReadIsANoteNotAFailure(t *testing.T) {
