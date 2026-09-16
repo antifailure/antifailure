@@ -340,6 +340,14 @@ func (f *family) Checks() []change.Check     { return familyChecks }
 func (f *family) Keys() []security.KeySpec   { return keys() }
 func (f *family) Licensed() string           { return "" }
 
+// ReadsBaseline marks side_effect as a base-twin consumer, so af ci builds the
+// base environment its increase rule diffs against. Without it the collector
+// would leave Input.Baseline ok=false on every run and the increase comparison
+// would never fire, which was the dormant state this family shipped in: fully
+// built, correctly consuming a baseline it was never handed. It satisfies
+// security.BaselineReader.
+func (f *family) ReadsBaseline() {}
+
 // Probe classifies the run's effects, compares them against the base twin, and
 // returns the findings. A run whose candidate logs were not captured at all
 // (both the decision and message logs nil) is a blocked probe, because a run

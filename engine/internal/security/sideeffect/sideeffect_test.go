@@ -114,6 +114,17 @@ func TestDetect_IgnoreLevelDropsTheFinding(t *testing.T) {
 		"a key resolved to ignore emits nothing")
 }
 
+// TestFamily_ReadsBaselineMarksItABaselineConsumer proves the marker that makes
+// af ci build this family's base twin. Without it the collector would never ask
+// for a baseline, Input.Baseline would stay ok=false on every run, and the whole
+// increase comparison would sit dormant, which is the exact state this family
+// shipped in before the base twin was wired.
+func TestFamily_ReadsBaselineMarksItABaselineConsumer(t *testing.T) {
+	_, ok := New().(security.BaselineReader)
+	require.True(t, ok,
+		"side_effect must implement security.BaselineReader so the collector builds its base twin")
+}
+
 func TestProbe_ReadsInputAndReturnsFindings(t *testing.T) {
 	in := security.Input{Policy: policy(report.LevelFail, report.LevelFail)}.
 		WithRunArtifacts(security.RunArtifacts{

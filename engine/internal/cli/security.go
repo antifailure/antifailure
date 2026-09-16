@@ -2,7 +2,9 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/antifailure/antifailure/engine/internal/change"
 	"github.com/antifailure/antifailure/engine/internal/env"
@@ -29,6 +31,13 @@ type changeReader interface {
 	// off, so a family that reasons about what a dependency change adds needs
 	// this beside it.
 	DependencyFiles(ctx context.Context, opts env.ChangeOptions) ([]change.File, error)
+	// BaselineTwin brings a second environment up from the base revision and
+	// drives it, so the side_effect family can diff what this change made against
+	// what the base branch made. It is on the interface, not called through the
+	// concrete orchestrator, so the collector's before/after wiring can be tested
+	// with a fake base twin rather than only through Docker, the same reason
+	// Change and Messages are here.
+	BaselineTwin(ctx context.Context, opts env.BaselineTwinOptions) (*env.BaselineTwin, error)
 }
 
 // securityFindings runs the registered security families against the change and
@@ -70,6 +79,8 @@ func securityFindings(
 	run *report.Run,
 	decisions []local.Decision,
 	branch string,
+	runner string,
+	baseTTL time.Duration,
 ) []report.Finding {
 	// No family, no work: the spine ships an empty registry, and until a family
 	// lands this returns immediately without reading the diff or the twin, so
@@ -100,16 +111,17 @@ func securityFindings(
 	// the egress summary and are passed in rather than fetched twice; the
 	// browser evidence is folded out of what exploration already captured.
 	//
-	// Two artifacts stay in their honest absent state until the lane that
-	// produces them lands: a base twin is not built by ci today, so Baseline is
-	// nil (a reader reads that as "not measured" and skips its baseline
-	// comparison rather than diffing against a base of zero); and the runner
-	// does not yet emit structured per-persona observations, so Observations is
-	// nil (authz fails closed on it). Routes is sourced from the exploration the
-	// run observed: observedRoutes returns the routes the browser reached and
-	// nil when there was no exploration to read, which the injection family
-	// reads as UNAVAILABLE rather than as a clean pass. Nil here is absent,
-	// never a misleading empty.
+	// Two of these three are sourced now, and one stays honestly absent. Routes
+	// is sourced from the exploration the run observed: observedRoutes returns
+	// the routes the browser reached and nil when there was no exploration to
+	// read, which the injection family reads as UNAVAILABLE rather than as a
+	// clean pass. The base twin is built here, but only when a selected family
+	// reads it and only when there is a change to compare: baselineArtifact
+	// returns nil for a change that routes no baseline reader, which a reader
+	// reads as "not measured" and skips its baseline comparison rather than
+	// diffing against a base of zero. Observations stays nil until the runner
+	// emits structured per-persona observations, which authz fails closed on.
+	// Nil here is absent, never a misleading empty.
 	messages, _ := o.Messages(ctx, securityLogLimit)
 	artifacts := security.RunArtifacts{
 		Decisions:    decisions,
@@ -117,7 +129,7 @@ func securityFindings(
 		Observations: nil,
 		Evidence:     explorationEvidence(run.Exploration),
 		Routes:       observedRoutes(run),
-		Baseline:     nil,
+		Baseline:     baselineArtifact(ctx, o, selections, run, runner, baseTTL),
 		// The dependency diff, read only when the change touched the dependency
 		// surface, so a code-only change does not pay for a second read of the
 		// diff. Nil otherwise, which the supply family reads as "not measured".
@@ -160,6 +172,57 @@ func securityFindings(
 		out = append(out, findings...)
 	}
 	return out
+}
+
+// baselineArtifact builds the base twin the side_effect family diffs against,
+// but only when it is worth the second environment: a change that routes no
+// baseline-reading family gets nil at once, so a docs change, a config change,
+// or a code change that touched no baseline-reading surface never pays for a
+// base twin. When one is worth building and the base is faithfully measured, the
+// bundle is returned; when the base is the same commit, cannot be built, or
+// cannot be measured, that is a fact about our tooling and the change, said in a
+// note, and the artifact stays nil, which the family reads as "not measured" and
+// skips its comparison rather than diffing against a base of zero.
+//
+// The golden is the candidate's own, read off the run, so both sides branch one
+// golden and a difference is the code's rather than two databases'. The ttl and
+// the runner are af ci's, so the base env is reaped on the same terms as the
+// candidate and driven through the same runner.
+func baselineArtifact(
+	ctx context.Context, o changeReader, selections []security.Selection,
+	run *report.Run, runner string, baseTTL time.Duration,
+) *security.Baseline {
+	if !security.SelectionsWantBaseline(selections) {
+		// No family reads a base twin, so a second environment would be built and
+		// torn down for nothing. Silent rather than noted: nothing was expected,
+		// so its absence owes the reader no sentence.
+		return nil
+	}
+
+	twin, err := o.BaselineTwin(ctx, env.BaselineTwinOptions{
+		Golden:     run.Golden,
+		RunnerPath: runner,
+		TTL:        baseTTL,
+		Limit:      securityLogLimit,
+	})
+	if err != nil {
+		if errors.Is(err, env.ErrBaselineSameCommit) {
+			run.Notes = append(run.Notes,
+				"the base and this change are the same commit, so the side-effect comparison had nothing to compare")
+		} else {
+			run.Notes = append(run.Notes,
+				"the baseline could not be measured, so the side-effect comparison did not run: "+err.Error())
+		}
+		return nil
+	}
+	if twin != nil && !twin.TornDown {
+		// The base env came up and was not removed, which is the leak this
+		// product exists to prevent. Named with the exact command, because the
+		// base env carries a branch suffix a reader would not otherwise guess.
+		run.Notes = append(run.Notes,
+			"the side-effect base environment is still up; run 'af down --branch \""+twin.Branch+"\"' where this ran")
+	}
+	return &security.Baseline{Decisions: twin.Decisions, Messages: twin.Messages}
 }
 
 // dependencyArtifacts reads the changed dependency files, with their added

@@ -16,6 +16,10 @@ import (
 // getting it wrong puts a row in the dashboard named after a word that is not
 // a service. That is worth a test, and the function has no reason to be part
 // of the package's real surface.
+func BaselineMeasuredForTest(testErr, dReadErr, mReadErr error) error {
+	return baselineMeasured(testErr, dReadErr, mReadErr)
+}
+
 func ServiceFieldForTest(line string, names map[string]bool) []events.Field {
 	return serviceField(line, names)
 }

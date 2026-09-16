@@ -49,6 +49,13 @@ import (
 // address the baseline by hand when a teardown was interrupted.
 const baselineSuffix = " (oracle baseline)"
 
+// securityBaselineSuffix distinguishes the side_effect family's base twin from
+// the oracle's, so the two never share an EnvID and `af down --branch` can
+// address either by hand after an interrupted teardown. af ci never runs the
+// oracle, so within one run only one of these is ever in flight, but a distinct
+// name keeps the environment honest about which mechanism created it.
+const securityBaselineSuffix = " (side-effect baseline)"
+
 // OracleOptions are the choices a caller makes.
 type OracleOptions struct {
 	// BaseRef overrides the manifest's oracle.base_ref.
@@ -118,7 +125,7 @@ func (o *Orchestrator) Oracle(ctx context.Context, opts OracleOptions) (*OracleR
 	}
 	defer cleanTree()
 
-	baseline, err := o.baselineOrchestrator(tree, candidate.Golden)
+	baseline, err := o.baselineOrchestrator(tree, candidate.Golden, baselineSuffix)
 	if err != nil {
 		return nil, err
 	}
@@ -241,9 +248,9 @@ func (o *Orchestrator) snapshotBranch(
 // the baseline checkout would let a manifest change move the harness and the
 // application at once, and then no difference in the report could be attributed
 // to either.
-func (o *Orchestrator) baselineOrchestrator(tree, golden string) (*Orchestrator, error) {
+func (o *Orchestrator) baselineOrchestrator(tree, golden, suffix string) (*Orchestrator, error) {
 	opts := o.opts
-	opts.Branch = o.opts.Branch + baselineSuffix
+	opts.Branch = o.opts.Branch + suffix
 	opts.BuildRoot = tree
 	opts.PinGolden = golden
 	opts.Progress = func(line string) {

@@ -129,6 +129,38 @@ func surfacesForKind(kind change.TargetKind) []change.Surface {
 	}
 }
 
+// BaselineReader is implemented by a family whose Probe diffs its candidate run
+// against a base twin: side_effect counts the outbound effects each side made
+// and reports the ones this change added. Building a base twin is the run's most
+// expensive artifact, a second environment brought up from the base revision, so
+// the collector builds one ONLY when a selected family reads it. A family that
+// ignores the baseline does not implement this, its Input.Baseline stays
+// ok=false, and Detect leaves the comparison unmade rather than diffing against a
+// base of zero, which every family already handles.
+//
+// A marker rather than a method that returns a value: its presence is the whole
+// signal, so there is nothing for a family to get wrong by returning the wrong
+// bool. side_effect implements it; authz's increment will when the runner emits
+// the per-persona base observations it needs.
+type BaselineReader interface {
+	// ReadsBaseline marks a family as a base-twin consumer. It takes and returns
+	// nothing; the collector checks for it with a type assertion.
+	ReadsBaseline()
+}
+
+// SelectionsWantBaseline reports whether any selected family reads a base twin,
+// so the collector knows whether a second environment is worth building for this
+// change. A change that routes no baseline reader, a docs edit, a config change,
+// a code change that touched no baseline-reading surface, never pays for one.
+func SelectionsWantBaseline(sels []Selection) bool {
+	for _, s := range sels {
+		if _, ok := s.Family.(BaselineReader); ok {
+			return true
+		}
+	}
+	return false
+}
+
 // intersects reports whether a surface slice shares a member with a surface
 // set. It is how a family's surfaces are tested against the diff's touched set.
 func intersects(a []change.Surface, b map[change.Surface]bool) bool {
