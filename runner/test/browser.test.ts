@@ -1178,3 +1178,144 @@ test('ordering 5, run for real: a real failure, then the time budget running out
     server.close();
   }
 });
+
+// A live Stripe secret key shape: the credential detector's prefix and enough
+// entropy to read as a credential. Split so this test file carries no string a
+// secret scanner would match on sight, the same care canaryleak_test takes.
+const capturedSecret = 'sk' + '_live_' + '0123456789abcdefghijABCDEF';
+
+/** listen starts a server on a free loopback port and resolves its base URL. */
+function listen(server: Server): Promise<string> {
+  return new Promise<string>((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address();
+      resolve(`http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`);
+    });
+  });
+}
+
+/** poll waits until a predicate holds or a deadline passes, so a test reads the
+ *  best-effort capture once it has settled rather than on a fixed sleep. */
+async function poll(ok: () => boolean, budgetMs = 5_000): Promise<void> {
+  const deadline = Date.now() + budgetMs;
+  while (!ok() && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
+// The capture claim, end to end through a real browser: a page that fetches its
+// own JSON API by POST, pulls a third party by fetch, and loads an image, has
+// its same-origin text bodies and its reached requests recorded, and nothing
+// else. This is the producer the engine's canary_leak and injection families
+// were already wired to consume.
+test('the session captures same-origin bodies, the DOM, and every reached request', { timeout: 120_000 }, async () => {
+  // A third party the page pulls in, on its own origin, answering with CORS so
+  // the fetch completes and the drop is proved to be the origin check and not a
+  // network failure. Its body carries the same secret shape, so a test that
+  // captured it would light up canary_leak on somebody else's response.
+  const third = createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' });
+    res.end(`{"thirdPartyKey":"${capturedSecret}"}`);
+  });
+  const thirdURL = await listen(third);
+
+  const app = createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    if (req.method === 'POST' && url.pathname === '/api/orders') {
+      // The response body a leak family scans by shape.
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(`{"apiKey":"${capturedSecret}","status":"open"}`);
+      return;
+    }
+    if (url.pathname === '/logo.png') {
+      // A binary whose bytes would match the shape, to prove the content type is
+      // what excludes it and not luck.
+      res.writeHead(200, { 'content-type': 'image/png' });
+      res.end(`PNG${capturedSecret}`);
+      return;
+    }
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end(`<html><body><h1>Orders</h1><p>Your orders are ready.</p>
+      <script>
+        fetch('/api/orders?status=open', { method: 'POST' });
+        fetch('/api/orders?status=open', { method: 'POST' });
+        fetch('/logo.png');
+        fetch('${thirdURL}/leak');
+      </script></body></html>`);
+  });
+  const baseURL = await listen(app);
+
+  const session = await Session.open({ artifacts: mkdtempSync(join(tmpdir(), 'af-capture-')) });
+  try {
+    await session.page().goto(`${baseURL}/`);
+    await session.snapshot();
+    await poll(() => session.reached().some((r) => r.method === 'POST' && r.path.startsWith('/api/orders')));
+    const reached = session.reached();
+
+    // Every reached request, by method and location, deduped: the two identical
+    // POSTs are one entry, and the third party never enters.
+    const posts = reached.filter((r) => r.method === 'POST' && r.path === '/api/orders?status=open');
+    assert.equal(posts.length, 1, `the POST is recorded once, not ${posts.length}: ${JSON.stringify(reached)}`);
+    assert.ok(reached.some((r) => r.method === 'GET' && r.path === '/'), 'the navigation is recorded');
+    assert.ok(!reached.some((r) => r.path.includes('/leak')), 'the third party request is not a reached route');
+
+    const evidence = await session.close('capture');
+    // The same-origin API body is captured for a leak family to scan; the third
+    // party body and the binary are not.
+    assert.ok(evidence.responses.some((b) => b.includes('"apiKey"')), 'the same-origin JSON body is captured');
+    assert.ok(!evidence.responses.some((b) => b.includes('thirdPartyKey')), 'a third party body is never captured');
+    assert.ok(!evidence.responses.some((b) => b.startsWith('PNG')), 'a binary response is never captured');
+    // The rendered DOM is captured, so a leak family can scan what the page showed.
+    assert.ok(evidence.dom.some((d) => d.includes('Your orders are ready.')), 'the rendered DOM is captured');
+  } finally {
+    await session.close('capture').catch(() => undefined);
+    app.close();
+    third.close();
+  }
+});
+
+// The byte caps hold: a body whose declared length is over the per-body cap is
+// skipped before it is read, and a chunked body with no declared length is read
+// and truncated. Both matter, because an unbounded capture on a chatty or large
+// application is the memory failure this cap exists to prevent.
+test('the session bounds captured bodies by declared length and by truncation', { timeout: 120_000 }, async () => {
+  const app = createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    if (url.pathname === '/toobig') {
+      // A declared length over the 64KB per-body cap: skipped before it is read.
+      const body = `SKIP_MARKER${'y'.repeat(70 * 1024)}`;
+      res.writeHead(200, { 'content-type': 'text/plain', 'content-length': String(Buffer.byteLength(body)) });
+      res.end(body);
+      return;
+    }
+    if (url.pathname === '/chunked') {
+      // No declared length (two writes make it chunked): read and truncated to
+      // the cap, so the head survives and the tail past 64KB is dropped.
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      res.write(`HEAD_MARKER${'x'.repeat(70 * 1024)}`);
+      res.write('TAIL_MARKER');
+      res.end();
+      return;
+    }
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end(`<html><body><h1>Big</h1>
+      <script>fetch('/toobig'); fetch('/chunked');</script></body></html>`);
+  });
+  const baseURL = await listen(app);
+
+  const session = await Session.open({ artifacts: mkdtempSync(join(tmpdir(), 'af-caps-')) });
+  try {
+    await session.page().goto(`${baseURL}/`);
+    await poll(() => session.reached().some((r) => r.path === '/chunked'));
+    const evidence = await session.close('caps');
+    assert.ok(!evidence.responses.some((b) => b.includes('SKIP_MARKER')),
+      'a body whose declared length is over the cap is skipped');
+    const chunked = evidence.responses.find((b) => b.startsWith('HEAD_MARKER'));
+    assert.ok(chunked, 'the chunked body is captured');
+    assert.equal(chunked!.length, 64 * 1024, 'the captured body is truncated to the per-body cap');
+    assert.ok(!chunked!.includes('TAIL_MARKER'), 'the part past the cap is dropped');
+  } finally {
+    await session.close('caps').catch(() => undefined);
+    app.close();
+  }
+});

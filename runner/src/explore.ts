@@ -183,6 +183,16 @@ export interface Exploration {
     readonly screenshot?: string;
     readonly console: readonly string[];
     readonly failed: readonly string[];
+    /** dom is the rendered text of each page this exploration stood on, and
+     *  responses is the bounded body of each same-origin text response it
+     *  received. The engine's canary_leak family folds them into the streams it
+     *  scans for a secret by shape, so a Stripe key or a private key that
+     *  reached a response is caught from a real run. They stay inside the
+     *  engine as evidence; a finding reports a location and a kind, never a
+     *  captured byte. Empty when nothing was captured, which a family reads as
+     *  "not handed evidence" rather than "found none". */
+    readonly dom: readonly string[];
+    readonly responses: readonly string[];
   };
   /** observations are the structured per-persona authorization readings this
    *  exploration made against the twin: which persona reached which object
@@ -197,7 +207,26 @@ export interface Exploration {
    *  mirror the engine's explore.Observation exactly; the boundary test holds
    *  the two in lockstep. */
   readonly observations?: readonly Observation[];
+  /** requests are the ingress requests this exploration's browser actually
+   *  reached, every method and location, deduped. The engine's observedRoutes
+   *  folds them into the routes the injection family fuzzes, so a POST or fetch
+   *  API route is exercised and not only a GET page navigation, which is where
+   *  most real injection lives. A location, never a value: the runner strips
+   *  anything it typed, and the engine reduces the query to parameter names
+   *  before a route can leave it. Empty when the exploration reached nothing. */
+  readonly requests: readonly Request[];
   readonly durationMs: number;
+}
+
+/** Request is one reached ingress request, the wire form the engine's injection
+ *  family's observed-route source consumes. It is a method and a location, never
+ *  a captured body: path carries the query for the engine to reduce to parameter
+ *  names, and method is what lets a POST or fetch route be fuzzed and not only a
+ *  GET navigation. The field names and shape mirror the engine's explore.Request
+ *  exactly, so the shape cannot drift across the boundary. */
+export interface Request {
+  readonly method: string;
+  readonly path: string;
 }
 
 /** Observation is one per-persona authorization reading the runner made against
@@ -808,7 +837,7 @@ async function exploreOne(job: ExploreJob, goal: Goal): Promise<Exploration> {
   const desc = agentForGoal(job, goal);
   const signIns: string[] = [];
   let pursuit: Pursuit | undefined;
-  let evidence: Exploration['evidence'] = { console: [], failed: [] };
+  let evidence: Exploration['evidence'] = { console: [], failed: [], dom: [], responses: [] };
   let attempt: Attempt;
   let session: Session | undefined;
   let signedInAs = '';
@@ -920,6 +949,16 @@ async function exploreOne(job: ExploreJob, goal: Goal): Promise<Exploration> {
       ? pursuit.explorer.missing
       : [`Nothing was explored: ${attempt.detail}`],
     evidence,
+    // The reached requests, redacted through the explorer that knows exactly
+    // what it typed, so a value the run put in a path never crosses the
+    // boundary. Empty when nothing was explored, which observedRoutes reads as
+    // simply no request source to add, never as a block. redact is available
+    // only when an explorer ran, so a failed exploration emits an empty list.
+    requests: pursuit
+      ? (session?.reached() ?? []).map(
+        (r) => ({ method: r.method, path: pursuit.explorer.redact(r.path) }),
+      )
+      : [],
     durationMs: clock.monotonicMs() - started,
   };
 }
