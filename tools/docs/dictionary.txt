@@ -58,6 +58,7 @@ postgres
 posthog
 Procfile
 reprovision
+reweighted
 Scaleway
 schedulable
 SCIM

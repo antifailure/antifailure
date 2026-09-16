@@ -79,7 +79,14 @@ people learn to ignore the results. Only a real failure exits non zero.`),
 			e.Out.Println("")
 			for _, r := range report.Results {
 				symbol, style := verdictStyle(e, r.Outcome.Verdict)
-				e.Out.Status(symbol, r.Workflow,
+				// The personality that drove this run, when several agents
+				// with different behavioral lenses drove one workflow, so a
+				// verdict reads against the personality that produced it.
+				label := r.Workflow
+				if r.Personality != "" {
+					label = fmt.Sprintf("%s [%s]", r.Workflow, r.Personality)
+				}
+				e.Out.Status(symbol, label,
 					fmt.Sprintf("%s in %s", style, (time.Duration(r.DurationMs)*time.Millisecond).Round(time.Millisecond)))
 				if r.Outcome.Verdict != "pass" {
 					e.Out.Printf("      %s\n", e.Out.Wrap(r.Outcome.Detail, 6))

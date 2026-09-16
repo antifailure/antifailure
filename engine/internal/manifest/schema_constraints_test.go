@@ -697,6 +697,8 @@ const defaultTuning = `{
         "oracle.ignore.fields[]": "$.field",
         "oracle.probes[].method": "POST",
         "personas[].email": "person@example.com",
+        "diversity.personalities[].id": "skeptic",
+        "workflows[].personality": "skeptic",
         "services[].build.strategy": "image",
         "services[].depends_on": [
           "dep"
@@ -749,6 +751,8 @@ const defaultTuning = `{
         "oracle.ignore.fields[]": "$.field",
         "oracle.probes[].method": "POST",
         "personas[].email": "person@example.com",
+        "diversity.personalities[].id": "skeptic",
+        "workflows[].personality": "skeptic",
         "services[].kind": "cron",
         "services[].schedule": "0 3 * * *",
         "datastores[].stance": "derived",
@@ -793,6 +797,8 @@ const defaultTuning = `{
         "oracle.ignore.fields[]": "$.field",
         "oracle.probes[].method": "POST",
         "personas[].email": "person@example.com",
+        "diversity.personalities[].id": "skeptic",
+        "workflows[].personality": "skeptic",
         "services[].build.strategy": "image",
         "services[].depends_on": [
           "dep"
@@ -845,6 +851,8 @@ const defaultTuning = `{
         "oracle.ignore.fields[]": "$.field",
         "oracle.probes[].method": "POST",
         "personas[].email": "person@example.com",
+        "diversity.personalities[].id": "skeptic",
+        "workflows[].personality": "skeptic",
         "services[].build.strategy": "image",
         "services[].depends_on": [
           "dep"
@@ -1306,7 +1314,18 @@ func TestSchemaConstraintReport(t *testing.T) {
 // three by name, the same way every other policy key is checked. The generated
 // base carries security: {sample_key: ignore}, which validates, so no base is
 // refused and the enum is measured in every base.
-const wantConstraints = 635
+//
+// Then 661. The personality engine added the top level diversity block, its
+// personality items, and a personality pin on a workflow. Twenty six
+// constraints across them, every one ENFORCED and measured in every base: the
+// bounds pass keeps the enums (mix, variance), the ranges (agents_per_workflow
+// 1..10, weight 0..100), the lengths, the array cap, the id pattern and the
+// required id from the schema, and the validator refuses a personality id or a
+// workflow pin that names no built in. The tuning above gained two overrides
+// per base, diversity.personalities[].id and workflows[].personality set to a
+// real built in, without which the generator fills them with the app name and
+// the validator refuses the base itself, which is the #315 failure exactly.
+const wantConstraints = 661
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and

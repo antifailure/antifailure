@@ -20,6 +20,7 @@ import { callModel, fromEnvironment, type ModelConfig } from './model.ts';
 import { cassetteFromEnvironment } from './cassette.ts';
 import type { Persona } from './login.ts';
 import type { Workflow } from './workflow.ts';
+import type { ResolvedDiversity } from './personality.ts';
 
 const exec = promisify(execFile);
 
@@ -39,6 +40,10 @@ interface JobDocument {
    *  field must not take a whole run with it. */
   readonly workflows?: readonly Workflow[] | null;
   readonly personas?: readonly Persona[] | null;
+  /** diversity is the resolved per-agent personality plan. Absent means one
+   *  neutral agent per workflow, which is what every run did before the engine
+   *  learned to send this. */
+  readonly diversity?: ResolvedDiversity;
   /** goals are exploratory runs. Present for 'af explore', absent for
    *  'af test'. One entry point rather than two binaries, because the browser,
    *  the sign in and the evidence capture are the same in both and a second
@@ -126,6 +131,7 @@ async function main(): Promise<number> {
     // logged.
     ...(model ? { model } : {}),
     ...(complete ? { complete } : {}),
+    ...(doc.diversity ? { diversity: doc.diversity } : {}),
     ...(doc.headless === undefined ? {} : { headless: doc.headless }),
     ...(doc.af
       ? {

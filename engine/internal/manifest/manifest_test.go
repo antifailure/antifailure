@@ -849,6 +849,14 @@ load:
   source: access_log
   source_config:
     path: traffic/access.log
+diversity:
+  enabled: true
+  agents_per_workflow: 3
+  mix: aggressive_diversity
+  variance: high
+  personalities:
+    - id: skeptic
+    - id: explorer
 `)
 	// Compared with the line breaks collapsed, because what is being asserted
 	// is what the page SAYS, not where the renderer happened to wrap it. A
@@ -873,6 +881,11 @@ load:
 		"api.stripe.com", "sandbox", "Billing runs against the Stripe sandbox.",
 		"owner@example.test", "subscribe", "no-orphan-subscriptions",
 		"Insights", "Runtime", "GitHub", "antifailure:allow", "Load",
+		// The diversity block, when enabled, is part of what the environment
+		// will be, so the page that explains the effective configuration says
+		// how many personality varied agents run and which personalities.
+		"Diversity", "3 per workflow", "aggressive_diversity mix", "high variance",
+		"skeptic, explorer",
 	} {
 		require.Contains(t, out, want, "Explain must mention %q", want)
 	}
