@@ -291,13 +291,6 @@ export function PricingPage() {
         }
       />
       <PageSection className="pt-0">
-        <ul className="grid grid-cols-3 items-stretch gap-x-12 max-xl:grid-cols-1 max-xl:gap-y-12">
-          {PLANS.map((plan) => (
-            <li key={plan.name} className="min-w-0">
-              <PlanCard plan={plan} />
-            </li>
-          ))}
-        </ul>
         {/* This paragraph said the hosted control plane was invitation only and
             that the access button led to a waitlist. Both stopped being true
             when sign-up became a GitHub exchange anybody can complete, and a
@@ -308,7 +301,7 @@ export function PricingPage() {
             enforced by PLAN_QUOTAS and PLAN_COST_CAPS in the control plane, and
             publishing them belongs in a band that is held to that code rather
             than in a paragraph somebody retyped. */}
-        <p className="mx-auto mt-14 w-full max-w-[1120px] text-center text-[17px] leading-8 tracking-extra-tight text-gray-new-40 max-md:mt-10 max-md:text-left max-md:text-[16px] max-md:leading-7">
+        <p className="mb-14 max-w-[720px] border-l border-black/15 pl-6 text-[16px] leading-7 tracking-extra-tight text-gray-new-40 max-md:mb-10 max-md:pl-4">
           Community needs nothing from us. The engine is MIT licensed, it installs with one
           command, and the quickstart runs on your own compute without an account. The hosted
           control plane is open: signing up is a GitHub exchange with no card and no invitation,
@@ -320,6 +313,13 @@ export function PricingPage() {
           the regions you name. The hosted control plane itself runs in one Azure region,
           Central US, and it can also be run on your own infrastructure in a region you choose.
         </p>
+        <ul className="grid grid-cols-3 items-stretch gap-x-12 max-xl:grid-cols-1 max-xl:gap-y-12">
+          {PLANS.map((plan) => (
+            <li key={plan.name} className="min-w-0">
+              <PlanCard plan={plan} />
+            </li>
+          ))}
+        </ul>
       </PageSection>
       <PageSection tone="ruled">
         <PageHeading
