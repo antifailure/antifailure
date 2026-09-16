@@ -303,6 +303,34 @@ func scratchRepo(t *testing.T) string {
 	return dir
 }
 
+// TestFileAtRef_ReadsTheHeadSideAndReportsAnAbsentPath proves the whole file
+// context the static reviewer feeds the model actually comes back from git: the
+// head side content of a changed file at a ref, and a clean ok=false, not an
+// error, for a path that ref does not carry. It is the real capability behind
+// the reviewer's FileReader, so it is proven against a real repository rather
+// than assumed.
+func TestFileAtRef_ReadsTheHeadSideAndReportsAnAbsentPath(t *testing.T) {
+	dir := scratchRepo(t)
+
+	content, ok, err := change.FileAtRef(context.Background(), dir, "feature", "src/app.go")
+	require.NoError(t, err)
+	require.True(t, ok, "a file present at the ref is read")
+	assert.Equal(t, "package main\n\nfunc handler() {}\n", content,
+		"the head side content is the file as of that ref, the side the added lines came from")
+
+	// unrelated.md exists on main but not on feature, so at the feature ref it is
+	// an absence, which is ok=false with no error rather than a failure.
+	_, ok, err = change.FileAtRef(context.Background(), dir, "feature", "unrelated.md")
+	require.NoError(t, err, "a path absent at the ref is not an error")
+	assert.False(t, ok, "an absent path reports ok=false so the reviewer falls back to the added lines")
+
+	// An empty ref defaults to HEAD, which the checkout leaves on feature.
+	content, ok, err = change.FileAtRef(context.Background(), dir, "", "src/app.go")
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, "package main\n\nfunc handler() {}\n", content, "an empty ref reads HEAD")
+}
+
 func run(t *testing.T, dir, name string, args ...string) {
 	t.Helper()
 	cmd := exec.Command(name, args...)

@@ -3,6 +3,8 @@ package review
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -39,6 +41,25 @@ func codeFile(path string, lines ...change.AddedLine) change.File {
 	return change.File{Path: path, Status: change.StatusModified, Added: len(lines), AddedLines: lines}
 }
 
+// fakeFileReader stands in for git show: it returns canned head side content per
+// path, so the reviewer's whole file context is exercised without a checkout. A
+// path with no content returns ok=false, the absence a deleted file produces,
+// and a path listed in fail returns failErr so the read error fallback is
+// testable too.
+type fakeFileReader struct {
+	content map[string]string
+	failErr error
+	fail    map[string]bool
+}
+
+func (r fakeFileReader) FullFile(_ context.Context, path string) (string, bool, error) {
+	if r.fail[path] {
+		return "", false, r.failErr
+	}
+	c, ok := r.content[path]
+	return c, ok, nil
+}
+
 func TestReview_MapsAModelReviewIntoFindings(t *testing.T) {
 	t.Parallel()
 	client := &fakeClient{reply: `[
@@ -50,8 +71,10 @@ func TestReview_MapsAModelReviewIntoFindings(t *testing.T) {
 		 "suggested_fix":"return the error"}
 	]`}
 
-	res, err := Review(context.Background(), client,
-		[]change.File{codeFile("app/pay.go", change.AddedLine{N: 42, Text: "for i < len(xs)"})},
+	res, err := Review(context.Background(), client, nil,
+		[]change.File{codeFile("app/pay.go",
+			change.AddedLine{N: 10, Text: "v, _ := parse()"},
+			change.AddedLine{N: 42, Text: "for i < len(xs)"})},
 		report.LevelWarn, DefaultCaps)
 
 	require.NoError(t, err)
@@ -74,7 +97,7 @@ func TestReview_TheLevelIsWhateverTheCallerPassed(t *testing.T) {
 	t.Parallel()
 	client := &fakeClient{reply: `[{"category":"correctness","file":"a.go","line":1,"title":"x"}]`}
 
-	res, err := Review(context.Background(), client,
+	res, err := Review(context.Background(), client, nil,
 		[]change.File{codeFile("a.go", change.AddedLine{N: 1, Text: "x"})},
 		report.LevelFail, DefaultCaps)
 	require.NoError(t, err)
@@ -86,7 +109,7 @@ func TestReview_TheLevelIsWhateverTheCallerPassed(t *testing.T) {
 func TestReview_EmptyReviewIsNoFindingAndNoError(t *testing.T) {
 	t.Parallel()
 	client := &fakeClient{reply: `[]`}
-	res, err := Review(context.Background(), client,
+	res, err := Review(context.Background(), client, nil,
 		[]change.File{codeFile("a.go", change.AddedLine{N: 1, Text: "ok"})},
 		report.LevelWarn, DefaultCaps)
 	require.NoError(t, err)
@@ -98,7 +121,7 @@ func TestReview_AChangeWithNoAddedLinesMakesNoModelCall(t *testing.T) {
 	t.Parallel()
 	client := &fakeClient{reply: `[{"category":"correctness","file":"a.go","line":1,"title":"x"}]`}
 	// A binary file and a file with no added lines: nothing for a line reviewer.
-	res, err := Review(context.Background(), client,
+	res, err := Review(context.Background(), client, nil,
 		[]change.File{{Path: "logo.png", Binary: true}, {Path: "a.go"}},
 		report.LevelWarn, DefaultCaps)
 	require.NoError(t, err)
@@ -109,7 +132,7 @@ func TestReview_AChangeWithNoAddedLinesMakesNoModelCall(t *testing.T) {
 func TestReview_AModelErrorIsReturnedNotSwallowed(t *testing.T) {
 	t.Parallel()
 	client := &fakeClient{err: context.DeadlineExceeded}
-	res, err := Review(context.Background(), client,
+	res, err := Review(context.Background(), client, nil,
 		[]change.File{codeFile("a.go", change.AddedLine{N: 1, Text: "x"})},
 		report.LevelWarn, DefaultCaps)
 	require.Error(t, err, "a call that failed is an error the collector turns into a note, never a clean pass")
@@ -119,7 +142,7 @@ func TestReview_AModelErrorIsReturnedNotSwallowed(t *testing.T) {
 func TestReview_AnUnreadableResponseIsANoteNotAFinding(t *testing.T) {
 	t.Parallel()
 	client := &fakeClient{reply: "I could not review this change, sorry."}
-	res, err := Review(context.Background(), client,
+	res, err := Review(context.Background(), client, nil,
 		[]change.File{codeFile("a.go", change.AddedLine{N: 1, Text: "x"})},
 		report.LevelWarn, DefaultCaps)
 	require.NoError(t, err, "an unreadable answer is not an error; it is a note")
@@ -137,7 +160,7 @@ func TestReview_OneMalformedEntryDoesNotBlankTheRest(t *testing.T) {
 		{"category":"correctness","line":2,"title":"has no file"},
 		{"category":"correctness","file":"a.go","line":3,"title":"a real defect"}
 	]`}
-	res, err := Review(context.Background(), client,
+	res, err := Review(context.Background(), client, nil,
 		[]change.File{codeFile("a.go", change.AddedLine{N: 3, Text: "x"})},
 		report.LevelWarn, DefaultCaps)
 	require.NoError(t, err)
@@ -148,7 +171,7 @@ func TestReview_OneMalformedEntryDoesNotBlankTheRest(t *testing.T) {
 func TestReview_AnUnknownCategoryBecomesCorrectness(t *testing.T) {
 	t.Parallel()
 	client := &fakeClient{reply: `[{"category":"vibes","file":"a.go","line":1,"title":"weird"}]`}
-	res, err := Review(context.Background(), client,
+	res, err := Review(context.Background(), client, nil,
 		[]change.File{codeFile("a.go", change.AddedLine{N: 1, Text: "x"})},
 		report.LevelWarn, DefaultCaps)
 	require.NoError(t, err)
@@ -163,7 +186,7 @@ func TestReview_DuplicateFindingsAreCollapsed(t *testing.T) {
 		{"category":"correctness","file":"a.go","line":1,"title":"same"},
 		{"category":"correctness","file":"a.go","line":1,"title":"Same"}
 	]`}
-	res, err := Review(context.Background(), client,
+	res, err := Review(context.Background(), client, nil,
 		[]change.File{codeFile("a.go", change.AddedLine{N: 1, Text: "x"})},
 		report.LevelWarn, DefaultCaps)
 	require.NoError(t, err)
@@ -173,7 +196,7 @@ func TestReview_DuplicateFindingsAreCollapsed(t *testing.T) {
 func TestReview_ALinelessFindingKeepsTheFileInWhere(t *testing.T) {
 	t.Parallel()
 	client := &fakeClient{reply: `[{"category":"dead_code","file":"a.go","title":"unused func"}]`}
-	res, err := Review(context.Background(), client,
+	res, err := Review(context.Background(), client, nil,
 		[]change.File{codeFile("a.go", change.AddedLine{N: 1, Text: "x"})},
 		report.LevelWarn, DefaultCaps)
 	require.NoError(t, err)
@@ -280,7 +303,7 @@ func TestProviderClient_ReviewsThroughTheRealClient(t *testing.T) {
 	cfg := model.Config{Provider: p, Key: secrets.New("sk-ant-secret"), Model: "claude", BaseURL: srv.URL}
 	client := NewProviderClient(cfg)
 
-	res, err := Review(context.Background(), client,
+	res, err := Review(context.Background(), client, nil,
 		[]change.File{codeFile("a.go", change.AddedLine{N: 5, Text: "buggy"})},
 		report.LevelWarn, DefaultCaps)
 	require.NoError(t, err)
@@ -306,7 +329,7 @@ func TestProviderClient_ReadsTheOpenAIShape(t *testing.T) {
 
 	p, _ := model.Lookup("openai")
 	cfg := model.Config{Provider: p, Key: secrets.New("sk-openai"), Model: "gpt", BaseURL: srv.URL}
-	res, err := Review(context.Background(), NewProviderClient(cfg),
+	res, err := Review(context.Background(), NewProviderClient(cfg), nil,
 		[]change.File{codeFile("b.go", change.AddedLine{N: 2, Text: "x"})},
 		report.LevelWarn, DefaultCaps)
 	require.NoError(t, err)
@@ -348,4 +371,168 @@ func TestProviderClient_A200ThatIsNotACompletionIsUnreadable(t *testing.T) {
 	_, err := NewProviderClient(cfg).Complete(context.Background(), "sys", "user")
 	require.Error(t, err, "a 200 that is not the completion shape is unreadable, not a working call")
 	require.Contains(t, strings.ToLower(err.Error()), "completion shape")
+}
+
+// TestReview_SendsWholeFileContextWithAddedLinesMarked is the core proof of the
+// context feature: the model now receives the whole new file with the added
+// lines marked, not the added lines alone, so it can catch a defect on an added
+// line whose cause is on an unchanged line above. The planted bug is a nil
+// dereference: line 5 (added) calls a method on x, and the only evidence x is
+// nil is line 4 (unchanged context). The test asserts the unchanged line reached
+// the model and the finding mapped back to the added line.
+func TestReview_SendsWholeFileContextWithAddedLinesMarked(t *testing.T) {
+	t.Parallel()
+	content := "package p\n\nfunc f() {\n\tvar x *T\n\tx.Do()\n}\n"
+	reader := fakeFileReader{content: map[string]string{"p.go": content}}
+	client := &fakeClient{reply: `[{"category":"error_handling","file":"p.go","line":5,` +
+		`"title":"nil dereference","explanation":"x is nil from the line above","suggested_fix":"assign x"}]`}
+
+	res, err := Review(context.Background(), client, reader,
+		[]change.File{codeFile("p.go", change.AddedLine{N: 5, Text: "\tx.Do()"})},
+		report.LevelWarn, DefaultCaps)
+	require.NoError(t, err)
+
+	require.Contains(t, client.gotUser, "var x *T",
+		"the unchanged line that makes the bug detectable reached the model as context")
+	require.Contains(t, client.gotUser, "+ 5:", "the added line is marked as added")
+	require.Contains(t, client.gotUser, "  4:", "the unchanged line is shown as context, not marked added")
+
+	require.Len(t, res.Findings, 1)
+	require.Equal(t, "p.go:5", res.Findings[0].Where, "the finding maps to the added line")
+	require.Equal(t, "review.error_handling", res.Findings[0].Rule)
+}
+
+// TestReview_TooLargeFileFallsBackToWindowedContextAtTheBoundary proves the per
+// file byte cap: a file within the cap is shown whole, and the same file one
+// byte over the cap falls back to its added lines with a window of surrounding
+// context and a note. The two runs bracket the exact boundary.
+func TestReview_TooLargeFileFallsBackToWindowedContextAtTheBoundary(t *testing.T) {
+	t.Parallel()
+	var sb strings.Builder
+	for i := 1; i <= 100; i++ {
+		fmt.Fprintf(&sb, "line %d\n", i)
+	}
+	content := sb.String()
+	reader := fakeFileReader{content: map[string]string{"big.go": content}}
+	file := []change.File{codeFile("big.go", change.AddedLine{N: 50, Text: "line 50"})}
+
+	// At the cap the file fits and is shown whole: a far away line is present and
+	// no windowing note fires.
+	whole := &fakeClient{reply: "[]"}
+	_, err := Review(context.Background(), whole, reader, file, report.LevelWarn,
+		Caps{MaxFiles: 40, MaxLines: 1500, MaxFileBytes: len(content), ContextWindow: 2})
+	require.NoError(t, err)
+	require.Contains(t, whole.gotUser, "  1: line 1", "at the cap the whole file is shown")
+
+	// One byte under the content size the file is over the cap and falls back to a
+	// window around the added line: the far line is gone, a gap marker appears,
+	// and the note names the fallback.
+	windowed := &fakeClient{reply: "[]"}
+	res, err := Review(context.Background(), windowed, reader, file, report.LevelWarn,
+		Caps{MaxFiles: 40, MaxLines: 1500, MaxFileBytes: len(content) - 1, ContextWindow: 2})
+	require.NoError(t, err)
+	require.Contains(t, windowed.gotUser, "+ 50: line 50", "the added line is shown, marked")
+	require.Contains(t, windowed.gotUser, "  48: line 48", "a line inside the window is shown as context")
+	require.NotContains(t, windowed.gotUser, "line 1\n", "a line outside the window is not shown")
+	require.Contains(t, windowed.gotUser, "...", "a gap marker stands where lines were left out")
+	require.Len(t, res.Notes, 1)
+	require.Contains(t, res.Notes[0], "too large to show the reviewer in full")
+}
+
+// TestReview_TheTotalBudgetReviewsHighestSignalAndNotesTheRest proves the total
+// context budget: two files whose combined context exceeds the budget, the
+// highest signal one (more added lines) is sent and the other is not, with a
+// note. A finding the model returns on the unsent file is dropped, because a file
+// the model never saw cannot be the source of a trustworthy finding.
+func TestReview_TheTotalBudgetReviewsHighestSignalAndNotesTheRest(t *testing.T) {
+	t.Parallel()
+	big := codeFile("big.go",
+		change.AddedLine{N: 1, Text: "a"}, change.AddedLine{N: 2, Text: "b"})
+	small := codeFile("small.go", change.AddedLine{N: 1, Text: "c"})
+	reader := fakeFileReader{content: map[string]string{
+		"big.go":   "a\nb\n",
+		"small.go": "c\n",
+	}}
+	// The rendered big.go fits, adding small.go would exceed the budget.
+	// The unsent file's finding is lineless on purpose: only the not-sent guard
+	// can drop it, so this test isolates that guard from the context-line rule.
+	client := &fakeClient{reply: `[
+		{"category":"correctness","file":"big.go","line":1,"title":"real defect on the sent file"},
+		{"category":"correctness","file":"small.go","title":"defect on the unsent file"}
+	]`}
+
+	res, err := Review(context.Background(), client, reader,
+		[]change.File{small, big}, report.LevelWarn,
+		Caps{MaxFiles: 40, MaxLines: 1500, MaxFileBytes: 24000, MaxContextBytes: 30})
+	require.NoError(t, err)
+
+	require.Contains(t, client.gotUser, "big.go", "the highest-signal file is sent")
+	require.NotContains(t, client.gotUser, "small.go", "the file over budget is not sent")
+	require.Len(t, res.Findings, 1, "the finding on the unsent file is dropped")
+	require.Equal(t, "big.go:1", res.Findings[0].Where)
+	require.NotEmpty(t, res.Notes)
+	require.Contains(t, res.Notes[0], "highest-signal files and did not send the remaining")
+}
+
+// TestReview_AFindingOnAContextLineIsDropped is the guarantee that widening the
+// model's view never widens what it may report: with the whole file visible, a
+// finding the model anchors to an unchanged context line is dropped, while a
+// finding on an added line in the same answer survives.
+func TestReview_AFindingOnAContextLineIsDropped(t *testing.T) {
+	t.Parallel()
+	content := "one\ntwo\nthree\nfour\nfive\n"
+	reader := fakeFileReader{content: map[string]string{"a.go": content}}
+	client := &fakeClient{reply: `[
+		{"category":"correctness","file":"a.go","line":2,"title":"a pre-existing bug on a context line"},
+		{"category":"correctness","file":"a.go","line":5,"title":"a real defect on an added line"}
+	]`}
+
+	res, err := Review(context.Background(), client, reader,
+		[]change.File{codeFile("a.go", change.AddedLine{N: 5, Text: "five"})},
+		report.LevelWarn, DefaultCaps)
+	require.NoError(t, err)
+	require.Len(t, res.Findings, 1, "the context-line finding is dropped, the added-line one stands")
+	require.Equal(t, "a.go:5", res.Findings[0].Where)
+	require.Equal(t, "a real defect on an added line", res.Findings[0].Title)
+}
+
+// TestReview_ContentThatCannotBeReadFallsBackToAddedLinesWithANote proves a file
+// whose context the reader cannot produce is reviewed on its added lines rather
+// than dropped, and the narrower review is noted, never silent.
+func TestReview_ContentThatCannotBeReadFallsBackToAddedLinesWithANote(t *testing.T) {
+	t.Parallel()
+	reader := fakeFileReader{content: map[string]string{}} // no content for any path
+	client := &fakeClient{reply: `[{"category":"correctness","file":"a.go","line":3,"title":"still found"}]`}
+
+	res, err := Review(context.Background(), client, reader,
+		[]change.File{codeFile("a.go", change.AddedLine{N: 3, Text: "buggy"})},
+		report.LevelWarn, DefaultCaps)
+	require.NoError(t, err)
+	require.Contains(t, client.gotUser, "+ 3: buggy", "with no context the added line is still shown, marked")
+	require.Len(t, res.Findings, 1, "the review still runs on the added lines")
+	require.Equal(t, "a.go:3", res.Findings[0].Where)
+	require.Len(t, res.Notes, 1)
+	require.Contains(t, res.Notes[0], "could not read the full contents of a.go")
+}
+
+// TestReview_AReadErrorFallsBackToAddedLinesWithANamedNote proves the read error
+// path: when the reader errors on a file's content, the reviewer reviews its
+// added lines and names the error in the note, so a broken reader narrows the
+// review rather than blanking it.
+func TestReview_AReadErrorFallsBackToAddedLinesWithANamedNote(t *testing.T) {
+	t.Parallel()
+	reader := fakeFileReader{
+		fail:    map[string]bool{"a.go": true},
+		failErr: errors.New("git object missing"),
+	}
+	client := &fakeClient{reply: `[{"category":"correctness","file":"a.go","line":2,"title":"found"}]`}
+
+	res, err := Review(context.Background(), client, reader,
+		[]change.File{codeFile("a.go", change.AddedLine{N: 2, Text: "boom"})},
+		report.LevelWarn, DefaultCaps)
+	require.NoError(t, err)
+	require.Contains(t, client.gotUser, "+ 2: boom", "the added line is reviewed despite the read error")
+	require.Len(t, res.Findings, 1)
+	require.Len(t, res.Notes, 1)
+	require.Contains(t, res.Notes[0], "git object missing", "the read error is named in the note")
 }

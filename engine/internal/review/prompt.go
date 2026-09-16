@@ -19,7 +19,7 @@ import (
 // correctness bug a diff introduces that no workflow happened to run.
 const systemPrompt = `You are a rigorous senior software engineer reviewing a code change for correctness.
 
-You are given the lines a diff ADDS to each file, each with the line number it has in the new file. Review ONLY those added lines. Do not report problems in code the diff did not add, and do not report anything you would need the rest of the file to be sure about.
+You are given each changed file with its line numbers. A line that begins with "+ " was ADDED by this change; a line that begins with two spaces is unchanged context, shown so you can see the whole file around the change. Use that context freely to decide whether an added line is wrong: a nil the added line dereferences may be set on a line above, the shape a value is used as may be defined elsewhere in the file, the caller a new function needs may be absent. But report defects ONLY on the added ("+ ") lines. Do not report a problem that lives on a context line or in code the change did not touch, even when you can now see it. Every finding's "line" must be the number of an added ("+ ") line.
 
 Report ONLY high-confidence, concrete, actionable defects that these added lines introduce. Prefer silence to noise: if the change is clean, or you are not sure, return an empty list. A single wrong or speculative finding is worse than a missed one, because it teaches the author to ignore you.
 

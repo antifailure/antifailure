@@ -255,6 +255,34 @@ func FromGit(ctx context.Context, opts GitOptions) ([]File, bool, error) {
 	return ParseUnifiedDiff(strings.NewReader(string(out)))
 }
 
+// FileAtRef returns the contents of path as of ref, which is the whole new side
+// of a changed file. The static code reviewer shows it to the model as context
+// around the lines a diff added, so a finding on an added line can be decided
+// against the unchanged code above and below it rather than the added line in
+// isolation.
+//
+// A path that does not exist at that ref is not an error and does not fail the
+// review: a file the change deletes, or a ref with no such path, returns
+// ok=false, and the caller falls back to showing the added lines alone. ref
+// defaults to HEAD, and the returned content is the head side of the same three
+// dot comparison FromGit reads, so a line number the diff carried indexes the
+// same line here.
+func FileAtRef(ctx context.Context, dir, ref, path string) (string, bool, error) {
+	if ref == "" {
+		ref = "HEAD"
+	}
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "show", ref+":"+path)
+	out, err := cmd.Output()
+	if err != nil {
+		// git exits non zero when the path is absent at that ref, which is an
+		// ordinary absence for a deleted or renamed file, not a failure of the
+		// review. The reviewer treats a missing context the same as a diff that
+		// had none: it reads the added lines on their own.
+		return "", false, nil
+	}
+	return string(out), true, nil
+}
+
 // ResolveBase picks the ref a change is measured against.
 //
 // The order is the order the answer is most likely to be right in, and every

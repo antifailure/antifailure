@@ -52,6 +52,23 @@ type Client interface {
 	Complete(ctx context.Context, system, user string) (string, error)
 }
 
+// FileReader returns the whole new side of a changed file, so the reviewer can
+// show the model the file around the lines a diff added rather than the added
+// lines alone. It is an interface for the same reason Client is: the collector
+// backs it with git, and a test hands the package a fake, so nothing here shells
+// out or needs a checkout.
+//
+// A file the reader cannot produce, a deletion, a path absent at head, a diff
+// read from a file with no checkout behind it, returns ok=false with no error,
+// and the reviewer falls back to that file's added lines alone. An error is a
+// real failure to read, which the reviewer records as a note and still falls
+// back from, so a reader that cannot answer never blanks a review. A nil reader
+// is the honest no context mode: every file is shown as its added lines, exactly
+// as the reviewer behaved before whole file context existed.
+type FileReader interface {
+	FullFile(ctx context.Context, path string) (content string, ok bool, err error)
+}
+
 // Caps bound how much of a change is sent to the model.
 //
 // A model call is paid per token and a huge mechanical change (a generated file,
@@ -70,12 +87,38 @@ type Caps struct {
 	// MaxBytes is the ceiling on the total added-line bytes, a second bound so a
 	// file of very long lines cannot blow the budget under a small line count.
 	MaxBytes int
+	// MaxFileBytes bounds the full new file content shown as context for one
+	// changed file. A file whose head content exceeds it is not shown whole: its
+	// added lines are shown with a window of surrounding context instead, and a
+	// note records that the file was too large for full context. Zero disables
+	// the per file bound, which sends every selected file whole.
+	MaxFileBytes int
+	// MaxContextBytes bounds the total rendered context across all reviewed
+	// files. The files are taken highest signal first, most added lines first,
+	// and once the budget is spent the rest are not sent to the model and a note
+	// says so. The highest signal file is always sent even when it alone exceeds
+	// the budget, because dropping the file a review is worth most on would be
+	// the worse failure. Zero disables the total bound.
+	MaxContextBytes int
+	// ContextWindow is how many unchanged lines are shown on each side of an
+	// added hunk in the per file fallback, when a file is too large to show
+	// whole. Zero leaves only the added lines with no surrounding context.
+	ContextWindow int
 }
 
 // DefaultCaps are generous enough that an ordinary change is reviewed whole and
 // tight enough that a mechanical one does not spend a fortune. They are the
 // collector's default; a caller may pass its own.
-var DefaultCaps = Caps{MaxFiles: 40, MaxLines: 1500, MaxBytes: 60000}
+//
+// The context bounds are the ones that make whole file review affordable: a file
+// up to MaxFileBytes is shown entire, a larger one falls back to its added lines
+// with ContextWindow lines of context on each side, and the whole change is held
+// under MaxContextBytes of context so a sprawling pull request cannot run the
+// bill up on files with little signal.
+var DefaultCaps = Caps{
+	MaxFiles: 40, MaxLines: 1500, MaxBytes: 60000,
+	MaxFileBytes: 24000, MaxContextBytes: 120000, ContextWindow: 40,
+}
 
 // Result is what one review produced.
 type Result struct {
@@ -123,7 +166,8 @@ var knownCategories = map[string]bool{
 // collector can tell "the reviewer ran and found nothing" from "the reviewer
 // could not run", which are the two outcomes that must never look alike.
 func Review(
-	ctx context.Context, client Client, files []change.File, level report.Level, caps Caps,
+	ctx context.Context, client Client, reader FileReader,
+	files []change.File, level report.Level, caps Caps,
 ) (Result, error) {
 	selected, notes := boundDiff(files, caps)
 	if len(selected) == 0 {
@@ -134,7 +178,8 @@ func Review(
 	}
 
 	system := systemPrompt
-	user := renderDiff(selected)
+	user, renderNotes, addedByFile := renderContext(ctx, reader, selected, caps)
+	notes = append(notes, renderNotes...)
 
 	raw, err := client.Complete(ctx, system, user)
 	if err != nil {
@@ -152,7 +197,7 @@ func Review(
 		return Result{Notes: notes}, nil
 	}
 
-	findings := mapEntries(entries, level)
+	findings := mapEntries(entries, level, addedByFile)
 	return Result{Findings: findings, Notes: notes}, nil
 }
 
@@ -222,27 +267,217 @@ func boundDiff(files []change.File, caps Caps) ([]change.File, []string) {
 	return selected, notes
 }
 
-// renderDiff turns the selected files into the added-lines view the model reads.
-// Every line carries the number it has in the new file, so a finding can name a
-// line the author can open. Kept plain on purpose: a fenced or annotated format
-// invites the model to answer in the same shape instead of the JSON asked for.
-func renderDiff(files []change.File) string {
+// renderContext turns the selected files into the view the model reads: each
+// file with line numbers, the lines the change added marked, and the unchanged
+// lines around them shown as context so a finding on an added line can be judged
+// against the whole file rather than the added line alone.
+//
+// It returns the rendered text, any notes the rendering produced (a file too
+// large for full context, a file whose context could not be read, a total budget
+// that cut the change short), and the set of added line numbers per rendered
+// file. That set is the drop rule's authority: only a finding on a line the
+// change added survives, so widening the model's view to the whole file can
+// never turn a pre existing bug into a reported one. A file that was not sent,
+// because the total budget was spent before it, is absent from the set, so a
+// finding the model somehow returns for it is dropped too.
+func renderContext(
+	ctx context.Context, reader FileReader, files []change.File, caps Caps,
+) (string, []string, map[string]map[int]bool) {
 	var b strings.Builder
-	for _, f := range files {
-		status := string(f.Status)
-		if status == "" {
-			status = "modified"
+	b.WriteString(contextLegend)
+	var notes []string
+	addedByFile := make(map[string]map[int]bool, len(files))
+	total := 0
+	sent := 0
+	for i, f := range files {
+		added := addedSet(f)
+		text, note := renderFile(ctx, reader, f, added, caps)
+
+		// The total context budget. The highest signal file is always sent, even
+		// alone over budget, so a review is never cut to nothing; each further
+		// file is sent only while the budget holds, and the rest are noted rather
+		// than dropped in silence.
+		if caps.MaxContextBytes > 0 && sent > 0 && total+len(text) > caps.MaxContextBytes {
+			remaining := len(files) - i
+			notes = append(notes, fmt.Sprintf(
+				"the change's context did not fit the reviewer's budget, so it reviewed the %d "+
+					"highest-signal files and did not send the remaining %d; a finding's absence on "+
+					"an unsent file is not a clean bill", sent, remaining))
+			break
 		}
-		fmt.Fprintf(&b, "FILE: %s (%s)\n", f.Path, status)
-		if f.LinesTruncated {
-			b.WriteString("  (the added lines below are a prefix; this file's diff was truncated)\n")
-		}
-		for _, al := range f.AddedLines {
-			fmt.Fprintf(&b, "%d: %s\n", al.N, al.Text)
-		}
+
+		b.WriteString(text)
 		b.WriteByte('\n')
+		total += len(text)
+		sent++
+		addedByFile[f.Path] = added
+		if note != "" {
+			notes = append(notes, note)
+		}
+	}
+	return b.String(), notes, addedByFile
+}
+
+// contextLegend heads the model's input so it reads the markers the way the
+// renderer writes them, and repeats the one rule the whole context feature turns
+// on: report only on the added lines.
+const contextLegend = "Each file below is shown with its line numbers. A line that begins with \"+ \" was ADDED by this change. A line that begins with two spaces is unchanged context, shown only so you can understand the added lines. Report defects ONLY on the added (\"+ \") lines; use the surrounding context to decide whether an added line is wrong.\n\n"
+
+// renderFile renders one file for the model and returns any note the rendering
+// produced. It shows the whole file when it fits the per file byte cap, falls
+// back to the added lines with a window of context when the file is too large,
+// and falls back again to the added lines alone when the file's content cannot
+// be read at all. Each fallback is noted so "reviewed with less context" is
+// never silent.
+func renderFile(
+	ctx context.Context, reader FileReader, f change.File, added map[int]bool, caps Caps,
+) (string, string) {
+	content, ok, note := fetchContent(ctx, reader, f)
+	if !ok {
+		return renderAddedOnly(f), note
+	}
+	if caps.MaxFileBytes > 0 && len(content) > caps.MaxFileBytes {
+		return renderWindowed(f, content, added, caps.ContextWindow), fmt.Sprintf(
+			"%s was too large to show the reviewer in full, so its added lines were shown with %d "+
+				"lines of surrounding context on each side rather than the whole file", f.Path, caps.ContextWindow)
+	}
+	return renderWhole(f, content, added), ""
+}
+
+// fetchContent asks the reader for a file's head side content. A nil reader is
+// the no context mode and produces no note. A reader that returns not ok, or an
+// error, is a file whose context could not be read, which is noted so the
+// narrower review is visible.
+func fetchContent(ctx context.Context, reader FileReader, f change.File) (string, bool, string) {
+	if reader == nil {
+		return "", false, ""
+	}
+	content, ok, err := reader.FullFile(ctx, f.Path)
+	if err != nil {
+		return "", false, fmt.Sprintf(
+			"the code reviewer could not read the full contents of %s, so it reviewed that file's "+
+				"added lines without surrounding context: %s", f.Path, err.Error())
+	}
+	if !ok {
+		return "", false, fmt.Sprintf(
+			"the code reviewer could not read the full contents of %s, so it reviewed that file's "+
+				"added lines without surrounding context", f.Path)
+	}
+	return content, true, ""
+}
+
+// renderWhole shows every line of the file, the added ones marked. The line
+// number is the file's own, so a finding names a line the author can open, and
+// the marker is what tells the model which lines it may report on.
+func renderWhole(f change.File, content string, added map[int]bool) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "FILE: %s (%s)\n", f.Path, statusOf(f))
+	if f.LinesTruncated {
+		b.WriteString("  (this file added more lines than the reviewer marks; some added lines below are shown as context)\n")
+	}
+	for i, ln := range splitLines(content) {
+		writeLine(&b, i+1, ln, added[i+1])
 	}
 	return b.String()
+}
+
+// renderWindowed shows the added lines of a file too large to show whole, each
+// with window unchanged lines on either side, and a gap marker where lines were
+// left out. The added markers still come from the diff, so the model sees which
+// lines it may report on even in the trimmed view.
+func renderWindowed(f change.File, content string, added map[int]bool, window int) string {
+	lines := splitLines(content)
+	n := len(lines)
+	show := make([]bool, n+1)
+	for a := range added {
+		if a < 1 || a > n {
+			continue
+		}
+		lo, hi := a-window, a+window
+		if lo < 1 {
+			lo = 1
+		}
+		if hi > n {
+			hi = n
+		}
+		for k := lo; k <= hi; k++ {
+			show[k] = true
+		}
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "FILE: %s (%s)\n", f.Path, statusOf(f))
+	prev := false
+	for i := 1; i <= n; i++ {
+		if !show[i] {
+			if prev {
+				b.WriteString("  ...\n")
+			}
+			prev = false
+			continue
+		}
+		writeLine(&b, i, lines[i-1], added[i])
+		prev = true
+	}
+	return b.String()
+}
+
+// renderAddedOnly shows a file's added lines alone, the view the reviewer had
+// before whole file context, used when a file's content cannot be read. The
+// added lines carry the same marker so the model's rule does not change with the
+// available context.
+func renderAddedOnly(f change.File) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "FILE: %s (%s)\n", f.Path, statusOf(f))
+	if f.LinesTruncated {
+		b.WriteString("  (the added lines below are a prefix; this file's diff was truncated)\n")
+	}
+	for _, al := range f.AddedLines {
+		writeLine(&b, al.N, al.Text, true)
+	}
+	return b.String()
+}
+
+// writeLine writes one numbered line with the marker that says whether the
+// change added it: "+ " for an added line, two spaces for context.
+func writeLine(b *strings.Builder, n int, text string, isAdded bool) {
+	marker := "  "
+	if isAdded {
+		marker = "+ "
+	}
+	fmt.Fprintf(b, "%s%d: %s\n", marker, n, text)
+}
+
+// addedSet is the set of new file line numbers a change added to a file, which
+// marks the rendered lines and is the drop rule's authority for which lines a
+// finding may sit on.
+func addedSet(f change.File) map[int]bool {
+	set := make(map[int]bool, len(f.AddedLines))
+	for _, al := range f.AddedLines {
+		set[al.N] = true
+	}
+	return set
+}
+
+// statusOf is the file's status, defaulting to modified when the diff carried
+// none, so the model always sees what happened to the path.
+func statusOf(f change.File) string {
+	if f.Status == "" {
+		return "modified"
+	}
+	return string(f.Status)
+}
+
+// splitLines splits file content into its lines, dropping the empty trailing
+// element a final newline produces so the last real line keeps its own number.
+func splitLines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
 }
 
 // mapEntries turns the model's parsed entries into findings at the caller's
@@ -253,7 +488,16 @@ func renderDiff(files []change.File) string {
 // drops the line from Where rather than the whole entry). One bad element must
 // never blank the feature: a single unreadable entry is skipped and the rest
 // stand, the same discipline the read boundary uses everywhere.
-func mapEntries(entries []rawFinding, level report.Level) []report.Finding {
+//
+// addedByFile is the drop rule that keeps whole file context honest. The model
+// now sees unchanged code around the added lines, so it could report a pre
+// existing defect the change did not introduce. Only a line the change added is
+// eligible for a finding: an entry on a file that was not sent is dropped, and
+// an entry on a line the change did not add, a context line, is dropped, so
+// widening the model's view can never widen what it may flag. An entry with no
+// line stays a file level finding, because it names no context line to have been
+// read off.
+func mapEntries(entries []rawFinding, level report.Level, addedByFile map[string]map[int]bool) []report.Finding {
 	seen := map[string]bool{}
 	var out []report.Finding
 	for _, e := range entries {
@@ -261,6 +505,20 @@ func mapEntries(entries []rawFinding, level report.Level) []report.Finding {
 		file := strings.TrimSpace(e.File)
 		if title == "" || file == "" {
 			// Nothing to point a reader at. Dropped, not guessed.
+			continue
+		}
+		added, sent := addedByFile[file]
+		if !sent {
+			// A file the reviewer did not send the model. A finding on it cannot
+			// be trusted, so it is dropped rather than reported on code the model
+			// was never shown.
+			continue
+		}
+		line := int(e.Line)
+		if line > 0 && !added[line] {
+			// The finding sits on a context line the change did not add. Dropped:
+			// the reviewer reports only what the change introduced, and the extra
+			// context is there to judge the added lines, not to be flagged itself.
 			continue
 		}
 		category := strings.ToLower(strings.TrimSpace(e.Category))

@@ -34,8 +34,10 @@ type fakeReviewReader struct {
 	changeErr  error
 	codeFiles  []change.File
 	codeErr    error
+	content    map[string]string
 	changed    bool
 	codeCalled bool
+	gotHead    string
 }
 
 func (f *fakeReviewReader) Change(context.Context, env.ChangeOptions) (*change.Profile, error) {
@@ -46,6 +48,16 @@ func (f *fakeReviewReader) Change(context.Context, env.ChangeOptions) (*change.P
 func (f *fakeReviewReader) CodeFiles(context.Context, env.ChangeOptions) ([]change.File, error) {
 	f.codeCalled = true
 	return f.codeFiles, f.codeErr
+}
+
+// FileContent stands in for git show, returning canned head side content per
+// path so the reviewer's whole file context can be exercised without a
+// checkout. A path with no canned content returns ok=false, the same absence a
+// deleted file produces, so the added lines fallback is testable too.
+func (f *fakeReviewReader) FileContent(_ context.Context, head, path string) (string, bool, error) {
+	f.gotHead = head
+	c, ok := f.content[path]
+	return c, ok, nil
 }
 
 // fakeReviewClient is a model the collector can drive without a network.
@@ -76,11 +88,18 @@ func reviewCodeFiles() []change.File {
 	}}
 }
 
+// reviewContent is the head side content the fake reader hands back for the code
+// file reviewCodeFiles names, so the collector's whole file context path runs
+// the way git show would feed it, without a fallback note for a missing file.
+func reviewContent() map[string]string {
+	return map[string]string{"app/pay.go": "package app\n\nfunc pay(items []int) {\n\tfor i < len(items)\n}\n"}
+}
+
 const oneReviewFinding = `[{"category":"correctness","file":"app/pay.go","line":42,` +
 	`"title":"off by one","explanation":"stops one short","suggested_fix":"use <="}]`
 
 func TestReviewFindings_EmitsFindingsForACodeChange(t *testing.T) {
-	reader := &fakeReviewReader{profile: codeProfile(), codeFiles: reviewCodeFiles()}
+	reader := &fakeReviewReader{profile: codeProfile(), codeFiles: reviewCodeFiles(), content: reviewContent()}
 	client := &fakeReviewClient{reply: oneReviewFinding}
 	run := report.Run{}
 
@@ -97,7 +116,7 @@ func TestReviewFindings_EmitsFindingsForACodeChange(t *testing.T) {
 }
 
 func TestReviewFindings_TheLevelComesFromPolicyNotThisCollector(t *testing.T) {
-	reader := &fakeReviewReader{profile: codeProfile(), codeFiles: reviewCodeFiles()}
+	reader := &fakeReviewReader{profile: codeProfile(), codeFiles: reviewCodeFiles(), content: reviewContent()}
 	client := &fakeReviewClient{reply: oneReviewFinding}
 	run := report.Run{}
 	// A project that raised the reviewer to fail gets fail, which proves the
@@ -168,7 +187,7 @@ func TestReviewFindings_ACodeDiffThatCannotBeReadIsANote(t *testing.T) {
 }
 
 func TestReviewFindings_AModelErrorIsANoteNotAFinding(t *testing.T) {
-	reader := &fakeReviewReader{profile: codeProfile(), codeFiles: reviewCodeFiles()}
+	reader := &fakeReviewReader{profile: codeProfile(), codeFiles: reviewCodeFiles(), content: reviewContent()}
 	client := &fakeReviewClient{err: errors.New("the provider timed out")}
 	run := report.Run{}
 
@@ -235,7 +254,9 @@ func TestReviewFindings_FiresEndToEndThroughTheRealClient(t *testing.T) {
 	reader := &fakeReviewReader{profile: codeProfile(), codeFiles: []change.File{{
 		Path: "app/orders.go", Status: change.StatusModified, Added: 1,
 		AddedLines: []change.AddedLine{{N: 7, Text: "return items[len(items)]"}},
-	}}}
+	}}, content: map[string]string{
+		"app/orders.go": "package app\n\nfunc last(items []int) int {\n\tif len(items) == 0 {\n\t\treturn 0\n\t}\n\treturn items[len(items)]\n}\n",
+	}}
 	run := report.Run{}
 
 	got := reviewFindings(context.Background(), e, reader, client, report.Configure(nil), &run, "")
