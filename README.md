@@ -1,4 +1,14 @@
 <p align="center">
+  <a href="https://antifailure.dev/home/antifailure-demo.mp4">
+    <img src=".github/antifailure-demo-poster.jpg" width="860" alt="Watch a run. Antifailure catches a migration that rewrites six million rows and holds an AccessExclusiveLock on the orders table for 9.5 seconds, on the twin, before it ships." />
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://antifailure.dev/home/antifailure-demo.mp4"><strong>Watch a 75 second run</strong></a>
+</p>
+
+<p align="center">
   <img src=".github/banner.svg" alt="Antifailure. Know what happens before you deploy, on a disposable production twin." />
 </p>
 
