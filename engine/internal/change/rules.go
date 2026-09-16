@@ -300,6 +300,17 @@ var pathRules = []pathRule{
 // The manifest is consulted first, for two paths it names exactly and for the
 // rules a project adds. A project's own rule beats the built in table, because
 // the project knows its layout and this file is guessing at conventions.
+// SurfaceOf reports the base surface a path classifies to, the same one the
+// full classification starts from, so a caller that has read a diff can pick
+// out the files of one surface without re-implementing the path rules. It is
+// the base classification only: the content rules that add egress and service
+// facts do not change which surface a file's PATH belongs to, and a caller
+// selecting dependency files wants exactly that base answer.
+func SurfaceOf(p string, m *schema.Manifest) Surface {
+	s, _, _ := baseSurface(p, m)
+	return s
+}
+
 func baseSurface(p string, m *schema.Manifest) (Surface, string, string) {
 	p = path.Clean(strings.ReplaceAll(p, "\\", "/"))
 	base := strings.ToLower(path.Base(p))

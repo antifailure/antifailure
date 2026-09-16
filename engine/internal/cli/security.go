@@ -23,6 +23,12 @@ import (
 type changeReader interface {
 	Change(ctx context.Context, opts env.ChangeOptions) (*change.Profile, error)
 	Messages(ctx context.Context, limit int) ([]local.Message, error)
+	// DependencyFiles is the changed dependency manifests and lockfiles with
+	// their added lines, which the supply_chain family reads. It reads the same
+	// diff Change classifies; the profile Change returns keeps the added lines
+	// off, so a family that reasons about what a dependency change adds needs
+	// this beside it.
+	DependencyFiles(ctx context.Context, opts env.ChangeOptions) ([]change.File, error)
 }
 
 // securityFindings runs the registered security families against the change and
@@ -110,6 +116,10 @@ func securityFindings(
 		Evidence:     explorationEvidence(run.Exploration),
 		Routes:       nil,
 		Baseline:     nil,
+		// The dependency diff, read only when the change touched the dependency
+		// surface, so a code-only change does not pay for a second read of the
+		// diff. Nil otherwise, which the supply family reads as "not measured".
+		DependencyFiles: dependencyArtifacts(ctx, o, e, profile, branch, run),
 	}
 
 	base := security.Input{
@@ -148,6 +158,54 @@ func securityFindings(
 		out = append(out, findings...)
 	}
 	return out
+}
+
+// dependencyArtifacts reads the changed dependency files, with their added
+// lines, for the supply_chain family, but only when the change touched the
+// dependency surface: a code-only change routes no supply family and must not
+// pay for a second read of the diff. A read that fails is a fact about our
+// tooling, so it is a note and leaves the artifact absent, which the family
+// reads as "not measured" rather than as a clean dependency change.
+func dependencyArtifacts(
+	ctx context.Context, o changeReader, e *Env, profile *change.Profile, branch string, run *report.Run,
+) []security.DependencyFile {
+	if !profileTouchesDependency(profile) {
+		return nil
+	}
+	files, err := o.DependencyFiles(ctx, env.ChangeOptions{Head: branch, Getenv: e.Getenv})
+	if err != nil {
+		run.Notes = append(run.Notes,
+			"the supply-chain family could not read the dependency diff, so it did not run: "+err.Error())
+		return nil
+	}
+	// A non-nil slice, even an empty one, is the honest "measured" state the
+	// family's DependencyDiff reads as ok=true.
+	out := make([]security.DependencyFile, 0, len(files))
+	for _, f := range files {
+		added := make([]string, 0, len(f.AddedLines))
+		for _, al := range f.AddedLines {
+			added = append(added, al.Text)
+		}
+		out = append(out, security.DependencyFile{
+			Path: f.Path, Status: string(f.Status), Added: added,
+		})
+	}
+	return out
+}
+
+// profileTouchesDependency reports whether the classified change touched a
+// dependency manifest or lockfile, so the diff is read a second time only when
+// a supply family will read it.
+func profileTouchesDependency(profile *change.Profile) bool {
+	if profile == nil {
+		return false
+	}
+	for _, f := range profile.Facts {
+		if f.Surface == change.SurfaceDependency {
+			return true
+		}
+	}
+	return false
 }
 
 // securityLogLimit is how many captured messages a family reads. It matches the
