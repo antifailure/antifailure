@@ -27,6 +27,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/change"
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	"github.com/antifailure/antifailure/engine/internal/report"
+	"github.com/antifailure/antifailure/engine/internal/runtime/local"
 )
 
 // Family is one dynamic security check family. authz, injection, canary_leak,
@@ -119,6 +120,26 @@ type Input struct {
 	// Clock is the time source, so a family that measures a duration or stamps
 	// an observation stays testable and deterministic.
 	Clock clock.Clock
+
+	// The per-run reader artifacts a reader family consults, populated by the
+	// security router after the run captured them and before Probe. They are
+	// unexported and reached through the accessors in input.go so that an
+	// absent artifact and an empty one are told apart: Baseline reports
+	// ok=false when no base twin was measured, and Routes returns nil when no
+	// observed route was sourced, neither of which a reader may read as "zero".
+	// An Input built by an older constructor, as every existing one is, leaves
+	// these zero and the accessors report absent, which is why the enrichment
+	// is additive and the merged contract keeps compiling.
+	//
+	// These are the CANDIDATE run's artifacts, flat. The base twin's artifacts,
+	// when one was built, arrive together in baseline, so a reader diffs a
+	// candidate against a base through Baseline() and never confuses the two.
+	decisions    []local.Decision
+	messages     []local.Message
+	observations []RawObservation
+	routes       []Route
+	evidence     Evidence
+	baseline     *Baseline
 }
 
 // Environment is the sanitized twin a family drives.

@@ -20,6 +20,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/load"
 	"github.com/antifailure/antifailure/engine/internal/report"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
+	"github.com/antifailure/antifailure/engine/internal/security"
 	"github.com/antifailure/antifailure/engine/internal/verify"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
@@ -133,6 +134,12 @@ change.`),
 			started := e.Clock.Now()
 			run.Exploration = declaredExploration(m)
 			var migration []report.Finding
+			// The security families' findings, run against the twin while it is
+			// up and appended in finish in one line, exactly as migration is.
+			// Empty until a family registers in security.Default, so the spine
+			// adds nothing here until one lands.
+			var securityResults []report.Finding
+			reg := security.Default()
 
 			// Teardown runs at most once and it runs BEFORE the report is
 			// written, which is the change that makes a failed cleanup mean
@@ -185,6 +192,12 @@ change.`),
 						run.Findings = append(run.Findings, *f)
 					}
 				}
+				// The security families' findings, computed above while the
+				// environment was up. One append line, the whole of the spine's
+				// wiring into the verdict: from here they ride Verdict, the exit
+				// code, the pull request comment and read_security_findings like
+				// every other finding.
+				run.Findings = append(run.Findings, securityResults...)
 				run.Duration = e.Clock.Since(started).Round(time.Second).String()
 				writeReport(e, run, output, jsonOutput)
 			}
@@ -231,8 +244,15 @@ change.`),
 				run.Invariants = append(run.Invariants, reportInvariants(test.Invariants)...)
 			}
 
-			if decisions, dErr := o.Decisions(ctx, 500); dErr == nil && len(decisions) > 0 {
-				run.Egress = summariseEgress(decisions)
+			// Captured in an outer variable so the security router reads the same
+			// egress log the report summarises, rather than asking the sidecar a
+			// second time for what it already answered.
+			var decisions []local.Decision
+			if ds, dErr := o.Decisions(ctx, 500); dErr == nil {
+				decisions = ds
+				if len(ds) > 0 {
+					run.Egress = summariseEgress(ds)
+				}
 			}
 
 			// After the workflows, because the query regression and the plan
@@ -261,6 +281,12 @@ change.`),
 					run.Load = loadReport(res, refused, p95, errorRate, &run)
 				}
 			}
+
+			// Security families run here, last of the run and while the twin is
+			// still up: the active families drive it and the readers read what
+			// the run captured above. Their findings are folded into the verdict
+			// by the one append line in finish. Empty registry, empty result.
+			securityResults = securityFindings(ctx, e, o, reg, gate, &run, decisions, branch)
 
 			finish()
 			return ciExit(run)
