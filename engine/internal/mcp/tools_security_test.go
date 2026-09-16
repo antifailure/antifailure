@@ -130,3 +130,46 @@ func TestReadSecurityFindings_RequiresTheProjectAssertion(t *testing.T) {
 		map[string]any{})
 	require.NotNil(t, fault, "project_id is required on every tool")
 }
+
+// TestReadSecurityFindings_SurfacesCollectorOutputEndToEnd proves the whole
+// pipe from the cli collector's output type to the read tool: a slice of
+// report.Finding shaped exactly as engine/internal/cli securityFindings emits,
+// run through the same boundFindings the rehearsal submit path uses, stored,
+// and then read back through read_security_findings. It is the seam the other
+// tests skip by building stored Items directly, and it is the one that would
+// break if boundFindings ever dropped a finding's rule or level.
+func TestReadSecurityFindings_SurfacesCollectorOutputEndToEnd(t *testing.T) {
+	store, _ := newStore(t)
+	ctx := context.Background()
+	run, _, fault := store.Submit(ctx, "cli", "repo", "rehearse", "", map[string]any{"n": "1"})
+	require.Nil(t, fault)
+
+	// The findings a family returns and the collector appends to run.Findings.
+	collectorOutput := []report.Finding{
+		{Rule: "security.authz.idor", Level: report.LevelFail,
+			Title: "reached across a tenant boundary", Where: "GET /api/orders/{id}", Count: 1},
+		{Rule: "security.headers.absent", Level: report.LevelWarn,
+			Title: "no HSTS header", Where: "GET /"},
+		{Rule: "migration_lint", Level: report.LevelWarn, Title: "a non-security finding"},
+		{Rule: "security.canary_leak.pii_in_response", Level: report.LevelIgnore,
+			Title: "silenced by policy"},
+	}
+	result := storedResult{
+		Tool:     "rehearse",
+		Summary:  "the change was rehearsed",
+		Findings: boundFindings(collectorOutput), // the REAL submit shaping
+	}
+	require.NoError(t, store.Finish(ctx, run.ID, report.VerdictFail, result))
+
+	doc := callReadSecurity(t, store, map[string]any{"project_id": "repo", "run_id": run.ID})
+	findings := doc["findings"].([]securityFinding)
+
+	// Two security findings surface; the non-security one and the ignored one do
+	// not, and the fail comes before the warn.
+	require.Len(t, findings, 2)
+	require.Equal(t, "security.authz.idor", findings[0].Rule, "worst first: the fail leads")
+	require.Equal(t, "authz", findings[0].Family)
+	require.Equal(t, "security.headers.absent", findings[1].Rule)
+	// The location survived; the data boundary is honored by construction.
+	require.Equal(t, "GET /api/orders/{id}", findings[0].Where)
+}
