@@ -328,7 +328,8 @@ change.`),
 			// still up: the active families drive it and the readers read what
 			// the run captured above. Their findings are folded into the verdict
 			// by the one append line in finish. Empty registry, empty result.
-			securityResults = securityFindings(ctx, e, o, reg, gate, &run, decisions, branch)
+			securityResults = securityFindings(ctx, e, o, reg, gate, &run, decisions, branch,
+				runner, ciRunTTL(timeout, m))
 
 			finish()
 			return ciExit(run)

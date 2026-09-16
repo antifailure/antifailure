@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/report"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
 	"github.com/antifailure/antifailure/engine/internal/security"
+	"github.com/antifailure/antifailure/engine/internal/security/sideeffect"
 	"github.com/antifailure/antifailure/engine/internal/security/ssrf"
 	"github.com/antifailure/antifailure/engine/internal/supply"
 	"github.com/antifailure/antifailure/engine/pkg/edition"
@@ -32,6 +34,21 @@ type fakeReader struct {
 	changed        bool
 	messagesCalled bool
 	depCalled      bool
+
+	// The base twin the collector asks for, and how the fake answers: a bundle,
+	// an error (env.ErrBaselineSameCommit or any other), and a record of whether
+	// it was asked at all and with what golden. This is what lets the before/after
+	// wiring be exercised without bringing a second environment up.
+	baselineTwin   *env.BaselineTwin
+	baselineErr    error
+	baselineCalled bool
+	baselineOpts   env.BaselineTwinOptions
+}
+
+func (f *fakeReader) BaselineTwin(_ context.Context, opts env.BaselineTwinOptions) (*env.BaselineTwin, error) {
+	f.baselineCalled = true
+	f.baselineOpts = opts
+	return f.baselineTwin, f.baselineErr
 }
 
 func (f *fakeReader) Change(context.Context, env.ChangeOptions) (*change.Profile, error) {
@@ -120,7 +137,7 @@ func TestSecurityFindings_ProbesASelectedFamilyAndCollectsItsFinding(t *testing.
 	run := report.Run{URL: "http://twin.local"}
 
 	got := securityFindings(context.Background(), testEnv(), &fakeReader{profile: codeProfile()},
-		reg, report.Configure(nil), &run, nil, "")
+		reg, report.Configure(nil), &run, nil, "", "", 0)
 
 	require.True(t, fam.probed, "a family whose surface the change touched must be probed")
 	require.Len(t, got, 1)
@@ -153,7 +170,7 @@ func TestSecurityFindings_ARealFamilyFlowsAProvenFindingThrough(t *testing.T) {
 	}
 
 	got := securityFindings(context.Background(), testEnv(), &fakeReader{profile: codeProfile()},
-		reg, report.Configure(nil), &run, decisions, "")
+		reg, report.Configure(nil), &run, decisions, "", "", 0)
 
 	require.Len(t, got, 1, "the real ssrf family's proven internal reach flows through the collector")
 	require.Equal(t, "security.ssrf.internal_host", got[0].Rule)
@@ -176,7 +193,7 @@ func TestSecurityFindings_DoesNotProbeAFamilyTheChangeDidNotTouch(t *testing.T) 
 	run := report.Run{URL: "http://twin.local"}
 
 	got := securityFindings(context.Background(), testEnv(), &fakeReader{profile: codeProfile()},
-		reg, report.Configure(nil), &run, nil, "")
+		reg, report.Configure(nil), &run, nil, "", "", 0)
 
 	require.True(t, authz.probed, "authz's surface was touched, so it runs")
 	require.False(t, db.probed, "schema was not touched, so db_security must never be probed")
@@ -198,7 +215,7 @@ func TestSecurityFindings_SkipsAnUnlicensedFamilyAndRecordsWhy(t *testing.T) {
 
 	// No status on the context: Permits says no, the family is skipped.
 	got := securityFindings(context.Background(), testEnv(), &fakeReader{profile: codeProfile()},
-		reg, report.Configure(nil), &run, nil, "")
+		reg, report.Configure(nil), &run, nil, "", "", 0)
 	require.False(t, refused.probed, "a family the edition does not license must not be probed")
 	require.Empty(t, got, "a skipped family produces no finding")
 	require.Len(t, run.Notes, 1, "the skip is recorded, so refused is not a silent absence")
@@ -213,7 +230,7 @@ func TestSecurityFindings_SkipsAnUnlicensedFamilyAndRecordsWhy(t *testing.T) {
 	run2 := report.Run{URL: "http://twin.local"}
 	ctx := edition.With(context.Background(), edition.Status{Features: []string{feature}})
 	got2 := securityFindings(ctx, testEnv(), &fakeReader{profile: codeProfile()},
-		reg2, report.Configure(nil), &run2, nil, "")
+		reg2, report.Configure(nil), &run2, nil, "", "", 0)
 	require.True(t, granted.probed, "with the feature licensed the family runs")
 	require.Len(t, got2, 1)
 }
@@ -223,7 +240,7 @@ func TestSecurityFindings_EmptyRegistryProducesNothingAndReadsNoDiff(t *testing.
 	run := report.Run{URL: "http://twin.local"}
 
 	got := securityFindings(context.Background(), testEnv(), reader,
-		security.Default(), report.Configure(nil), &run, nil, "")
+		security.Default(), report.Configure(nil), &run, nil, "", "", 0)
 
 	require.Nil(t, got, "the spine's empty registry produces no security finding")
 	require.False(t, reader.changed, "with no family the collector reads no diff, so a docs change pays nothing")
@@ -254,7 +271,7 @@ func TestSecurityFindings_EnrichesInputWithTheRunArtifacts(t *testing.T) {
 
 	securityFindings(context.Background(), testEnv(),
 		&fakeReader{profile: codeProfile(), messages: messages},
-		reg, report.Configure(nil), &run, decisions, "")
+		reg, report.Configure(nil), &run, decisions, "", "", 0)
 	seen = fam.gotInput
 
 	require.Equal(t, decisions, seen.Decisions(), "the egress log the run captured reaches the family")
@@ -295,7 +312,7 @@ func TestSecurityFindings_HandsObservedRoutesToTheFamily(t *testing.T) {
 	}}
 
 	securityFindings(context.Background(), testEnv(),
-		&fakeReader{profile: codeProfile()}, reg, report.Configure(nil), &run, nil, "")
+		&fakeReader{profile: codeProfile()}, reg, report.Configure(nil), &run, nil, "", "", 0)
 
 	require.Equal(t, []security.Route{{
 		Method: "GET", Path: "/api/search", Params: []string{"q"},
@@ -311,7 +328,7 @@ func TestSecurityFindings_AChangeThatCannotBeReadIsANoteNotAFailure(t *testing.T
 	reader := &fakeReader{changeErr: errors.New("no base ref")}
 
 	got := securityFindings(context.Background(), testEnv(), reader,
-		reg, report.Configure(nil), &run, nil, "")
+		reg, report.Configure(nil), &run, nil, "", "", 0)
 
 	require.Nil(t, got, "a diff we could not read is not evidence about the change")
 	require.Len(t, run.Notes, 1)
@@ -329,7 +346,7 @@ func TestSecurityFindings_ABlockedProbeIsANoteNotAFinding(t *testing.T) {
 	run := report.Run{URL: "http://twin.local"}
 
 	got := securityFindings(context.Background(), testEnv(), &fakeReader{profile: codeProfile()},
-		reg, report.Configure(nil), &run, nil, "")
+		reg, report.Configure(nil), &run, nil, "", "", 0)
 
 	require.Empty(t, got, "a probe that could not complete reaches no verdict")
 	require.Len(t, run.Notes, 1)
@@ -378,6 +395,138 @@ func TestSecurityFindings_AFailFindingDrivesTheVerdictAndExitCode(t *testing.T) 
 		"a proven security finding drives exit 7 through the ordinary gate")
 }
 
+// TestSecurityFindings_BuildsABaseTwinAndSideEffectFiresTheIncrease is the whole
+// point of this lane, proven without a second environment: a code change routes
+// the real side_effect family, the collector recognises it reads a baseline,
+// asks the reader for a base twin pinned to the candidate's golden, and hands the
+// base twin's captured effects to the family, which reports the ones this change
+// added. The candidate made three emails; the base branch made one; the finding
+// says exactly that.
+func TestSecurityFindings_BuildsABaseTwinAndSideEffectFiresTheIncrease(t *testing.T) {
+	reg := security.NewRegistry()
+	reg.Register(sideeffect.New())
+	run := report.Run{URL: "http://twin.local", Golden: "golden-abc"}
+	candidate := []local.Message{{Kind: "email"}, {Kind: "email"}, {Kind: "email"}}
+	reader := &fakeReader{
+		profile:  codeProfile(),
+		messages: candidate,
+		baselineTwin: &env.BaselineTwin{
+			Messages: []local.Message{{Kind: "email"}},
+			TornDown: true, Branch: "feature (side-effect baseline)",
+		},
+	}
+
+	got := securityFindings(context.Background(), testEnv(), reader,
+		reg, report.Configure(nil), &run, nil, "", "runner.js", time.Hour)
+
+	require.True(t, reader.baselineCalled, "a selected baseline reader must make the collector build a base twin")
+	require.Equal(t, "golden-abc", reader.baselineOpts.Golden,
+		"the base twin is pinned to the candidate's golden, so both sides branch one database")
+	require.Equal(t, "runner.js", reader.baselineOpts.RunnerPath,
+		"the base twin is driven through the same runner as the candidate")
+	require.Equal(t, time.Hour, reader.baselineOpts.TTL,
+		"the base env is reaped on the same terms as the candidate")
+	require.Len(t, got, 1, "the extra emails this change made over the base branch produce one increase finding")
+	require.Equal(t, "security.side_effect.external_call", got[0].Rule)
+	require.Contains(t, got[0].Detail, "base branch made 1")
+	require.Contains(t, got[0].Detail, "made 3")
+	require.Empty(t, run.Notes, "a base twin that was built and torn down owes the reader no note")
+}
+
+// A change that routes no baseline-reading family must NOT build a base twin: a
+// second environment is the run's most expensive artifact, and the negative that
+// keeps it off the common path is as load-bearing as the positive above.
+func TestSecurityFindings_NoBaselineReaderBuildsNoTwin(t *testing.T) {
+	// authz is selected by codeProfile but does not read a baseline, so nothing
+	// selected wants one.
+	reg := security.NewRegistry()
+	reg.Register(authzSpy())
+	run := report.Run{URL: "http://twin.local", Golden: "golden-abc"}
+	reader := &fakeReader{profile: codeProfile()}
+
+	securityFindings(context.Background(), testEnv(), reader,
+		reg, report.Configure(nil), &run, nil, "", "runner.js", time.Hour)
+
+	require.False(t, reader.baselineCalled,
+		"no selected family reads a baseline, so no second environment is built")
+	require.Empty(t, run.Notes, "nothing was expected, so its absence owes no sentence")
+}
+
+// A base that is the same commit as the change is a legitimate state, not a
+// failure: it is said in a note and the comparison is simply not made. The
+// side_effect family gets no baseline, so with three candidate emails and no base
+// it reports no increase rather than reading the absent base as a base of zero.
+func TestSecurityFindings_SameCommitBaselineIsANoteNotAComparison(t *testing.T) {
+	reg := security.NewRegistry()
+	reg.Register(sideeffect.New())
+	run := report.Run{URL: "http://twin.local", Golden: "golden-abc"}
+	reader := &fakeReader{
+		profile:     codeProfile(),
+		messages:    []local.Message{{Kind: "email"}, {Kind: "email"}, {Kind: "email"}},
+		baselineErr: env.ErrBaselineSameCommit,
+	}
+
+	got := securityFindings(context.Background(), testEnv(), reader,
+		reg, report.Configure(nil), &run, nil, "", "runner.js", time.Hour)
+
+	require.True(t, reader.baselineCalled)
+	require.Empty(t, got, "with no measured base the increase comparison is not made, never against a base of zero")
+	require.Len(t, run.Notes, 1)
+	// Keyed on text unique to the same-commit branch, not on "same commit" alone:
+	// the sentinel's own message carries "same commit" too, so matching that would
+	// pass whether or not the collector told the two cases apart.
+	require.Contains(t, run.Notes[0], "nothing to compare")
+	require.NotContains(t, run.Notes[0], "could not be measured",
+		"a same-commit base is a legitimate state, not the tooling-failure note")
+}
+
+// A base twin that could not be measured, it would not come up, its workflows
+// did not run, its logs could not be read, is a fact about our tooling: a note,
+// and the comparison fails closed to no baseline. It must never redden the change
+// and must never invent a base of zero.
+func TestSecurityFindings_UnmeasurableBaselineFailsClosedToANote(t *testing.T) {
+	reg := security.NewRegistry()
+	reg.Register(sideeffect.New())
+	run := report.Run{URL: "http://twin.local", Golden: "golden-abc"}
+	reader := &fakeReader{
+		profile:     codeProfile(),
+		messages:    []local.Message{{Kind: "email"}, {Kind: "email"}, {Kind: "email"}},
+		baselineErr: errors.New("the base twin did not come up: the daemon refused"),
+	}
+
+	got := securityFindings(context.Background(), testEnv(), reader,
+		reg, report.Configure(nil), &run, nil, "", "runner.js", time.Hour)
+
+	require.Empty(t, got, "an unmeasurable base leaves the comparison unmade rather than diffing against zero")
+	require.Len(t, run.Notes, 1)
+	require.Contains(t, run.Notes[0], "baseline could not be measured")
+	require.Contains(t, run.Notes[0], "the daemon refused", "the note carries the underlying reason")
+}
+
+// A base env that came up and was not torn down is the leak this product exists
+// to prevent, so it is named with the exact command to finish the teardown by
+// hand, including the branch suffix a reader could not otherwise guess.
+func TestSecurityFindings_ABaseTwinLeftUpIsNamedForHandTeardown(t *testing.T) {
+	reg := security.NewRegistry()
+	reg.Register(sideeffect.New())
+	run := report.Run{URL: "http://twin.local", Golden: "golden-abc"}
+	reader := &fakeReader{
+		profile:  codeProfile(),
+		messages: []local.Message{{Kind: "email"}}, // candidate made one, so the probe completes
+		baselineTwin: &env.BaselineTwin{
+			Messages: []local.Message{{Kind: "email"}}, // base made one too, so no increase, only the leak note
+			TornDown: false, Branch: "feature (side-effect baseline)",
+		},
+	}
+
+	securityFindings(context.Background(), testEnv(), reader,
+		reg, report.Configure(nil), &run, nil, "", "runner.js", time.Hour)
+
+	require.Len(t, run.Notes, 1)
+	require.Contains(t, run.Notes[0], "af down --branch")
+	require.Contains(t, run.Notes[0], "feature (side-effect baseline)")
+}
+
 func dependencyProfile() *change.Profile {
 	return &change.Profile{
 		Files: 1,
@@ -408,7 +557,7 @@ func TestSecurityFindings_SupplyChainReadsTheDependencyDiff(t *testing.T) {
 	}
 
 	got := securityFindings(context.Background(), testEnv(), reader,
-		reg, report.Configure(nil), &run, nil, "")
+		reg, report.Configure(nil), &run, nil, "", "", 0)
 
 	require.True(t, reader.depCalled, "the collector must read the dependency diff for a dependency change")
 	require.NotEmpty(t, got, "the added install hook and download must produce findings")
@@ -431,7 +580,7 @@ func TestSecurityFindings_CodeOnlyChangeDoesNotReadTheDependencyDiff(t *testing.
 	reader := &fakeReader{profile: codeProfile()}
 
 	securityFindings(context.Background(), testEnv(), reader,
-		reg, report.Configure(nil), &run, nil, "")
+		reg, report.Configure(nil), &run, nil, "", "", 0)
 
 	require.False(t, reader.depCalled, "a code-only change must not trigger a dependency-diff read")
 }
