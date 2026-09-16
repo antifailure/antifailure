@@ -34,6 +34,7 @@ type Manifest struct {
 	Policy     *Policy     `json:"policy,omitempty" yaml:"policy,omitempty"`
 	Runtime    *Runtime    `json:"runtime,omitempty" yaml:"runtime,omitempty"`
 	GitHub     *GitHub     `json:"github,omitempty" yaml:"github,omitempty"`
+	Security   *Security   `json:"security,omitempty" yaml:"security,omitempty"`
 }
 
 // ServiceKind is what a service is.
@@ -533,9 +534,17 @@ const (
 
 // Persona is an account an agent logs in as.
 type Persona struct {
-	Name       string            `json:"name" yaml:"name"`
-	Email      string            `json:"email,omitempty" yaml:"email,omitempty"`
-	Role       string            `json:"role,omitempty" yaml:"role,omitempty"`
+	Name  string `json:"name" yaml:"name"`
+	Email string `json:"email,omitempty" yaml:"email,omitempty"`
+	Role  string `json:"role,omitempty" yaml:"role,omitempty"`
+	// Tenant is the account boundary this persona belongs to, an identity label
+	// and nothing more: it is never a credential and it does not change how the
+	// persona is provisioned or signs in. It exists so the security suite's
+	// access-probe pass can decide a cross-tenant reach, where an actor in one
+	// tenant reaches an object owned by another. Absent when the application has
+	// no tenant boundary, which is most of them, and then only the same-tenant
+	// idor and privilege-escalation classes can fire.
+	Tenant     string            `json:"tenant,omitempty" yaml:"tenant,omitempty"`
 	Login      LoginStrategy     `json:"login,omitempty" yaml:"login,omitempty"`
 	Phone      string            `json:"phone,omitempty" yaml:"phone,omitempty"`
 	MFA        bool              `json:"mfa,omitempty" yaml:"mfa,omitempty"`
@@ -792,6 +801,102 @@ type Goal struct {
 	// SlowMs is how long one step may take before it is reported as friction.
 	SlowMs int     `json:"slow_ms,omitempty" yaml:"slow_ms,omitempty"`
 	Budget *Budget `json:"budget,omitempty" yaml:"budget,omitempty"`
+}
+
+// Security configures the dynamic security suite's fixtures: the facts the
+// engine cannot infer from a diff and only the application's author knows.
+//
+// Off by default in the strongest sense: absent, or present with no access
+// block, means the suite runs exactly as it did before, and no access probing
+// happens and nothing is paid for it. The suite's families still run against a
+// diff's targets on their own; this block only feeds the authenticated
+// authorization differential the ownership facts it cannot guess, so it stays
+// silent rather than probe a boundary it was never told about.
+type Security struct {
+	// Access declares the ownership-scoped objects the authz access-probe pass
+	// reaches: a concrete object at a route, who owns it, and the canary the
+	// application's own seed planted into it. Absent means no access probing.
+	Access *SecurityAccess `json:"access,omitempty" yaml:"access,omitempty"`
+}
+
+// SecurityAccess is the list of ownership-scoped objects the access-probe pass
+// reaches as each persona.
+type SecurityAccess struct {
+	// Objects are the declared reachable objects. Empty means no access probing,
+	// the same as an absent access block.
+	Objects []AccessObject `json:"objects,omitempty" yaml:"objects,omitempty"`
+}
+
+// AccessObject is one ownership-scoped object the access-probe pass reaches. The
+// engine populates the golden's canary view from it and drives the runner to
+// reach it as every persona, so a persona that reached another owner's object
+// and got the object's canary back is a proven authorization break.
+//
+// The application's own seed is what plants the canary into the object; this
+// block only DECLARES the ownership and the planted value, which keeps the
+// engine app-agnostic. The canary value lives here and in the golden, against
+// the twin; a finding that recognises it reports the location and the class,
+// never the value.
+type AccessObject struct {
+	// Route is the object's location template, for example /api/orders/{id}. The
+	// id below is substituted into its dynamic segment to form the concrete
+	// reach, and the template, never the concrete url, is what a finding
+	// reports.
+	Route string `json:"route" yaml:"route"`
+	// ID is the concrete object id substituted into the route's dynamic segment.
+	// It names one real seeded object, so a refusal proves a boundary dropped a
+	// real row rather than that the id was invented.
+	ID string `json:"id" yaml:"id"`
+	// Owner is the identity that owns the object. A cross-owner reach that
+	// returns the canary is the break; a reach by the owner itself is the
+	// self-access liveness arm and never a violation.
+	Owner AccessOwner `json:"owner" yaml:"owner"`
+	// ObjectClass is a category label for the object, for example "another
+	// customer's order". It is what a finding says was reached, so it is a label
+	// and NEVER an id or a value.
+	ObjectClass string `json:"object_class" yaml:"object_class"`
+	// Canary is the token the application's seed planted into this object so it
+	// appears in the object's response body. Its presence in a response a
+	// persona should not have been able to read is what proves the leak. The
+	// value stays inside the engine; a finding reports only the location.
+	Canary string `json:"canary" yaml:"canary"`
+	// CanaryKind routes a leaked canary to the canary_leak family's secret or
+	// pii key when the same value surfaces in a response it must not. Defaults
+	// to "pii", because another owner's object content is another person's data;
+	// set it to "secret" for a planted credential.
+	CanaryKind CanaryKind `json:"canary_kind,omitempty" yaml:"canary_kind,omitempty"`
+}
+
+// CanaryKind is what a planted canary is, which decides the finding key when it
+// leaks.
+type CanaryKind string
+
+const (
+	// CanaryPII is another party's data, the default for an access object's
+	// canary.
+	CanaryPII CanaryKind = "pii"
+	// CanarySecret is a planted credential.
+	CanarySecret CanaryKind = "secret"
+)
+
+// AccessOwner is who owns an access object, given either as a declared persona
+// by name or as an explicit identity. Naming a persona is the ordinary form:
+// the object is owned by an account the manifest already declares, so the owner
+// identity is resolved from that persona and stays one source of truth. An
+// explicit identity is for an owner that is not a driven persona, a background
+// account that seeds data but never signs in.
+type AccessOwner struct {
+	// Persona names a declared persona whose identity owns the object. When set,
+	// User and Role are resolved from that persona; Tenant is resolved from the
+	// persona too, and Tenant here may still supply one the persona does not
+	// carry so a cross-tenant reach can be expressed without a tenant on every
+	// persona.
+	Persona string `json:"persona,omitempty" yaml:"persona,omitempty"`
+	// Tenant, User and Role are the explicit owning identity, for an owner that
+	// is not a declared persona. At least one must be set when Persona is empty.
+	Tenant string `json:"tenant,omitempty" yaml:"tenant,omitempty"`
+	User   string `json:"user,omitempty" yaml:"user,omitempty"`
+	Role   string `json:"role,omitempty" yaml:"role,omitempty"`
 }
 
 // Diversity configures the behavioral variance of the agents that drive the

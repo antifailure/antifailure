@@ -30,9 +30,34 @@ This page is generated from `schemas/manifest.v1.json`. Edit the schema, then ru
 | `personas` | list of [Persona](#persona) | no | The accounts agents log in as. Each is created or reconciled in the golden by the authentication adapter, so a persona is a real user of the application rather than a bypass. Max items 50. |
 | `policy` | [Policy](#policy) | no | What each class of finding does to the pull request check. |
 | `runtime` | [Runtime](#runtime) | no | Where and how long the environment runs. |
+| `security` | [Security](#security) | no | Fixtures the dynamic security suite needs and the engine cannot infer from a diff. |
 | `services` | list of [Service](#service) | no | Every process the environment runs: web servers, API servers, background workers, and scheduled jobs. Min items 1, max items 50. |
 | `version` | `1` | no | The manifest schema version. Increment only for a breaking change; the engine refuses a version it does not understand rather than guessing. |
 | `workflows` | list of [Workflow](#workflow) | no | What the agents do, written as sentences. A workflow is a goal, not a script: the runner decides the actions and verifies the outcome. Max items 200. |
+
+## AccessObject
+
+One ownership-scoped object the access-probe pass reaches. The application's own seed plants the canary into the object; this only declares the ownership and the planted value, so the engine stays application-agnostic. The canary value stays inside the engine; a finding reports the location and the class, never the value.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `canary` | string | **yes** | The token the application's seed planted into this object so it appears in the object's response body. Its presence in a response a persona should not have been able to read is what proves the leak. The value stays inside the engine. Max length 256. |
+| `canary_kind` | `pii`, `secret` | no | What the planted canary is, which decides the canary_leak finding key when the same value surfaces in a response it must not. Defaults to pii, because another owner's object content is another person's data; set secret for a planted credential. Defaults to `pii`. |
+| `id` | string | **yes** | The concrete object id substituted into the route's dynamic segment. It names one real seeded object, so a refusal proves a boundary dropped a real row rather than that the id was invented. Max length 256. |
+| `object_class` | string | **yes** | A category label for the object, for example "another customer's order". It is what a finding says was reached, so it is a label and never an id or a value. Max length 128. |
+| `owner` | [AccessOwner](#accessowner) | **yes** | Who owns an access object, given either as a declared persona by name or as an explicit identity. |
+| `route` | string | **yes** | The object's location template, for example /api/orders/{id}. The id is substituted into its dynamic segment to form the concrete reach, and the template, never the concrete url, is what a finding reports. Max length 512, matches `^/`. |
+
+## AccessOwner
+
+Who owns an access object, given either as a declared persona by name or as an explicit identity. Naming a persona keeps one source of truth for the identity; an explicit identity is for an owner that seeds data but never signs in.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `persona` | string | no | A declared persona whose identity owns the object. When set, user and role are resolved from that persona, and tenant is resolved from it unless tenant here supplies one the persona does not carry. Max length 40. |
+| `role` | string | no | The explicit owning role, for an owner that is not a declared persona. Max length 64. |
+| `tenant` | string | no | The explicit owning tenant, or a tenant supplied for a persona owner that carries none, so a cross-tenant reach can be expressed. At least one of persona, tenant or user must be set. Max length 128. |
+| `user` | string | no | The explicit owning user identifier, for an owner that is not a declared persona. Max length 128. |
 
 ## auth
 
@@ -385,6 +410,7 @@ One account an agent logs in as. Personas are created or reconciled in the golde
 | `phone` | string | no | Number an SMS code is sent to. Defaults to a number in the +1 555 0100 block, which is reserved for fictional use and can never reach a real handset. Only sms_code uses it. Max length 32. |
 | `role` | string | no | Application role to provision, for example admin or member. Interpreted by the authentication adapter. Max length 64. |
 | `sign_in_path` | string | no | Where this persona's sign-in form lives, when it is not where the workflow starts. The runner looks for a form at the workflow's start path first and then at the usual paths, which finds the wrong form for a persona whose sign-in surface is elsewhere on the same origin, such as an operator portal beside a customer console. Max length 512. |
+| `tenant` | string | no | The account boundary this persona belongs to, an identity label only. It is never a credential and does not change how the persona is provisioned or signs in; the security suite's access-probe pass reads it to decide a cross-tenant reach. Absent when the application has no tenant boundary. Max length 128. |
 
 ## Personality
 
@@ -473,6 +499,14 @@ One place an environment may be placed. A runtime plus the facts about where it 
 | `namespace_prefix` | string | no | Prefix for Kubernetes namespaces on this target. Omitted inherits runtime.namespace_prefix. Max length 40. |
 | `provider` | `local`, `kubernetes` | no | The runtime this target uses. Omitted inherits runtime.provider, which is what lets a fleet of clusters be one provider line and a list of contexts. |
 | `tags` | object | no | What this target offers, matched against runtime.requires. The region tag is also what fills the organization policy hook's residency check. Max properties 16. |
+
+## Security
+
+Fixtures the dynamic security suite needs and the engine cannot infer from a diff. Off by default: absent, or present with no access block, runs the suite exactly as before and pays nothing for access probing.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `access` | object | no | The ownership-scoped objects the authenticated authorization differential reaches as each persona. Absent means no access probing. |
 
 ## Service
 

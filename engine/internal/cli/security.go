@@ -12,6 +12,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
 	"github.com/antifailure/antifailure/engine/internal/security"
 	"github.com/antifailure/antifailure/engine/pkg/edition"
+	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
 // changeReader is the part of the orchestrator the security collector needs: a
@@ -77,6 +78,7 @@ func securityFindings(
 	reg *security.Registry,
 	gate report.Policy,
 	run *report.Run,
+	m *schema.Manifest,
 	decisions []local.Decision,
 	branch string,
 	runner string,
@@ -128,12 +130,13 @@ func securityFindings(
 	// never a misleading empty.
 	messages, _ := o.Messages(ctx, securityLogLimit)
 	artifacts := security.RunArtifacts{
-		Decisions:    decisions,
-		Messages:     messages,
-		Observations: observationsFrom(run.Exploration),
-		Evidence:     explorationEvidence(run.Exploration),
-		Routes:       observedRoutes(run),
-		Baseline:     baselineArtifact(ctx, o, selections, run, runner, baseTTL),
+		Decisions: decisions,
+		Messages:  messages,
+		Observations: mergeObservations(
+			observationsFrom(run.Exploration), observationsFrom(run.AccessProbe)),
+		Evidence: explorationEvidence(run.Exploration),
+		Routes:   observedRoutes(run),
+		Baseline: baselineArtifact(ctx, o, selections, run, runner, baseTTL),
 		// The dependency diff, read only when the change touched the dependency
 		// surface, so a code-only change does not pay for a second read of the
 		// diff. Nil otherwise, which the supply family reads as "not measured".
@@ -142,7 +145,7 @@ func securityFindings(
 
 	base := security.Input{
 		Env:    security.Environment{BaseURL: run.URL},
-		Golden: security.GoldenView{},
+		Golden: goldenFromManifest(m),
 		Policy: resolveSecurityPolicy(gate, reg),
 		Clock:  e.Clock,
 	}
@@ -323,6 +326,81 @@ func explorationEvidence(x *report.Exploration) security.Evidence {
 		ev.Responses = append(ev.Responses, r.Evidence.Responses...)
 	}
 	return ev
+}
+
+// goldenFromManifest builds the golden's canary view from the manifest's access
+// fixtures. Each declared object planted a canary into itself through the
+// application's own seed; this reads the declared value and the owning tenant
+// into a security.Canary, so the golden the authz and canary_leak families
+// match against is populated from the same fixtures that drive the probes.
+//
+// This is the caller the golden had been missing: NewGoldenView existed with no
+// production call site, so the golden was always empty, markersOf was always
+// nil, the content detector could never be proven, and every authenticated
+// authorization reading and every planted-canary leak went inconclusive rather
+// than reaching a verdict. An empty or absent access block yields an empty view,
+// which is the honest state for a manifest that declares no fixtures: the
+// families stay silent rather than match against a token nobody planted.
+//
+// The kind carries through so a leaked canary lands on the canary_leak family's
+// secret or pii key; the value stays inside the engine, against the twin, and
+// only a location and a kind ever reach a finding.
+func goldenFromManifest(m *schema.Manifest) security.GoldenView {
+	if !env.HasAccessProbes(m) {
+		return security.GoldenView{}
+	}
+	byName := map[string]schema.Persona{}
+	for _, p := range m.Personas {
+		byName[p.Name] = p
+	}
+	var canaries []security.Canary
+	for _, obj := range m.Security.Access.Objects {
+		if obj.Canary == "" {
+			continue
+		}
+		kind := string(obj.CanaryKind)
+		if kind == "" {
+			kind = string(schema.CanaryPII)
+		}
+		canaries = append(canaries, security.Canary{
+			Tenant: ownerTenant(obj.Owner, byName),
+			Kind:   kind,
+			Value:  obj.Canary,
+		})
+	}
+	return security.NewGoldenView(canaries)
+}
+
+// ownerTenant resolves the tenant a canary belongs to from an object's owner,
+// the same resolution the access-probe docs use: a persona owner's tenant is
+// the fixture's when given and the persona's otherwise, and an explicit owner's
+// tenant is its own.
+func ownerTenant(owner schema.AccessOwner, byName map[string]schema.Persona) string {
+	if owner.Persona != "" {
+		if owner.Tenant != "" {
+			return owner.Tenant
+		}
+		return byName[owner.Persona].Tenant
+	}
+	return owner.Tenant
+}
+
+// mergeObservations joins the observations from the exploration and the
+// access-probe passes while preserving the nil-means-not-measured discipline the
+// authz family turns on. If NEITHER pass made a reading the result is nil, which
+// the family reads as "the runner emitted nothing" and fails closed on; if
+// EITHER made one the result is the non-nil concatenation, even when the other
+// is absent. Returning an empty non-nil slice for the both-absent case would
+// read as "measured, nothing crossed", which is the banned defect this suite
+// keeps finding in its own instruments, so both-absent stays nil.
+func mergeObservations(a, b []security.RawObservation) []security.RawObservation {
+	if a == nil && b == nil {
+		return nil
+	}
+	out := make([]security.RawObservation, 0, len(a)+len(b))
+	out = append(out, a...)
+	out = append(out, b...)
+	return out
 }
 
 // observationsFrom folds the structured per-persona observations every

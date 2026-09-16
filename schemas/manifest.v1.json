@@ -98,6 +98,9 @@
     },
     "github": {
       "$ref": "#/$defs/github"
+    },
+    "security": {
+      "$ref": "#/$defs/security"
     }
   },
   "$defs": {
@@ -831,6 +834,11 @@
           "type": "string",
           "maxLength": 64,
           "description": "Application role to provision, for example admin or member. Interpreted by the authentication adapter."
+        },
+        "tenant": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "The account boundary this persona belongs to, an identity label only. It is never a credential and does not change how the persona is provisioned or signs in; the security suite's access-probe pass reads it to decide a cross-tenant reach. Absent when the application has no tenant boundary."
         },
         "login": {
           "type": "string",
@@ -1886,6 +1894,106 @@
             ]
           },
           "description": "Accepted and read by nothing. Teardown is unconditional: af ci tears down whatever the outcome, and the control plane asks for teardown on close, merge, supersession and timeout without reading your manifest. The lifetime ceiling is runtime.max_ttl."
+        }
+      }
+    },
+    "security": {
+      "title": "Security",
+      "description": "Fixtures the dynamic security suite needs and the engine cannot infer from a diff. Off by default: absent, or present with no access block, runs the suite exactly as before and pays nothing for access probing.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "access": {
+          "title": "SecurityAccess",
+          "description": "The ownership-scoped objects the authenticated authorization differential reaches as each persona. Absent means no access probing.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "objects": {
+              "type": "array",
+              "maxItems": 50,
+              "items": {
+                "$ref": "#/$defs/access_object"
+              },
+              "description": "The declared reachable objects, each owned by a known identity and carrying a canary the application's seed planted into it. A persona that reached another owner's object and got the canary back is a proven authorization break."
+            }
+          }
+        }
+      }
+    },
+    "access_object": {
+      "title": "AccessObject",
+      "description": "One ownership-scoped object the access-probe pass reaches. The application's own seed plants the canary into the object; this only declares the ownership and the planted value, so the engine stays application-agnostic. The canary value stays inside the engine; a finding reports the location and the class, never the value.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "route",
+        "id",
+        "owner",
+        "object_class",
+        "canary"
+      ],
+      "properties": {
+        "route": {
+          "type": "string",
+          "maxLength": 512,
+          "pattern": "^/",
+          "description": "The object's location template, for example /api/orders/{id}. The id is substituted into its dynamic segment to form the concrete reach, and the template, never the concrete url, is what a finding reports."
+        },
+        "id": {
+          "type": "string",
+          "maxLength": 256,
+          "description": "The concrete object id substituted into the route's dynamic segment. It names one real seeded object, so a refusal proves a boundary dropped a real row rather than that the id was invented."
+        },
+        "owner": {
+          "$ref": "#/$defs/access_owner"
+        },
+        "object_class": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "A category label for the object, for example \"another customer's order\". It is what a finding says was reached, so it is a label and never an id or a value."
+        },
+        "canary": {
+          "type": "string",
+          "maxLength": 256,
+          "description": "The token the application's seed planted into this object so it appears in the object's response body. Its presence in a response a persona should not have been able to read is what proves the leak. The value stays inside the engine."
+        },
+        "canary_kind": {
+          "type": "string",
+          "enum": [
+            "pii",
+            "secret"
+          ],
+          "default": "pii",
+          "description": "What the planted canary is, which decides the canary_leak finding key when the same value surfaces in a response it must not. Defaults to pii, because another owner's object content is another person's data; set secret for a planted credential."
+        }
+      }
+    },
+    "access_owner": {
+      "title": "AccessOwner",
+      "description": "Who owns an access object, given either as a declared persona by name or as an explicit identity. Naming a persona keeps one source of truth for the identity; an explicit identity is for an owner that seeds data but never signs in.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "persona": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "A declared persona whose identity owns the object. When set, user and role are resolved from that persona, and tenant is resolved from it unless tenant here supplies one the persona does not carry."
+        },
+        "tenant": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "The explicit owning tenant, or a tenant supplied for a persona owner that carries none, so a cross-tenant reach can be expressed. At least one of persona, tenant or user must be set."
+        },
+        "user": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "The explicit owning user identifier, for an owner that is not a declared persona."
+        },
+        "role": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "The explicit owning role, for an owner that is not a declared persona."
         }
       }
     },
