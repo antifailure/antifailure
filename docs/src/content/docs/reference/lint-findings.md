@@ -47,3 +47,8 @@ on the insights page, beside the rest of what a rehearsal measures.
 | `LINT-015` | `cluster` | CLUSTER, which rewrites the table offline. |
 | `LINT-016` | `drop_table` | Table dropped. |
 | `LINT-017` | `truncate` | Table truncated. |
+| `LINT-018` | `rls_disabled` | Row level security disabled on a table. |
+| `LINT-019` | `rls_policy_permissive` | Policy admits every row through a tautological clause. |
+| `LINT-020` | `broad_grant` | Table privilege granted to PUBLIC, anon or authenticated. |
+| `LINT-021` | `tenant_column_removed` | Tenant scoping column dropped. |
+| `LINT-022` | `db_role_privilege_broadened` | Role given SUPERUSER, BYPASSRLS or CREATEROLE. |

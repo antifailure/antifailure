@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/antifailure/antifailure/engine/internal/dbsecurity"
 	"github.com/antifailure/antifailure/engine/internal/insights"
 	"github.com/antifailure/antifailure/engine/internal/report"
 )
@@ -108,12 +109,34 @@ func MigrationFindings(full insights.Full, p report.Policy) ([]report.Finding, *
 		}
 
 		for _, l := range r.Lint {
+			// The finding carries the lint rule's own name, not migration_lint,
+			// because "migration_lint" in a comment tells nobody what to change.
+			// Availability rules route to the migration_lint policy key, which
+			// governs the DDL-safety lint rules together. A database-security
+			// rule is a different thing: it carries the security namespace in
+			// its rule and routes to the security.db_security key, so a project
+			// can gate a broadened grant apart from a non concurrent index and
+			// the release gate gives it a security exit code.
+			rule := string(l.Rule)
+			level := p.MigrationLint
+			if l.Rule.Class() == insights.ClassSecurity {
+				// The level is the manifest's override for the key when there is
+				// one, and otherwise the default the db_security family declares,
+				// read back from the same KeySpec so the default lives in one
+				// place rather than being copied here. The map distinguishes a
+				// key the manifest left unset from one it set to ignore, so an
+				// explicit ignore is honoured rather than replaced by the
+				// default.
+				key := dbsecurity.KeyFor(l.Rule)
+				rule = string(key)
+				if lvl, ok := p.Security[key]; ok {
+					level = lvl
+				} else if spec, ok := dbsecurity.KeySpecFor(key); ok {
+					level = spec.Default
+				}
+			}
 			out = append(out, report.Finding{
-				// The lint rule's own name, not migration_lint. The policy key
-				// governs all seventeen together and the finding says which
-				// one it was, because "migration_lint" in a comment tells
-				// nobody what to change.
-				Rule: string(l.Rule), Level: p.MigrationLint, Where: l.Table,
+				Rule: rule, Level: level, Where: l.Table,
 				Title:  sentence(l.Rule.Title()),
 				Detail: lintDetail(l),
 				Fix:    l.Fix,

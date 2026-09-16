@@ -32,6 +32,11 @@ var findingIDs = map[Rule]FindingID{
 	"cluster":                        "LINT-015",
 	"drop_table":                     "LINT-016",
 	"truncate":                       "LINT-017",
+	"rls_disabled":                   "LINT-018",
+	"rls_policy_permissive":          "LINT-019",
+	"broad_grant":                    "LINT-020",
+	"tenant_column_removed":          "LINT-021",
+	"db_role_privilege_broadened":    "LINT-022",
 }
 
 // findingTitles is the one line summary of each rule, used as a heading in the
@@ -55,6 +60,11 @@ var findingTitles = map[Rule]string{
 	"cluster":                        "CLUSTER, which rewrites the table offline",
 	"drop_table":                     "table dropped",
 	"truncate":                       "table truncated",
+	"rls_disabled":                   "row level security disabled on a table",
+	"rls_policy_permissive":          "policy admits every row through a tautological clause",
+	"broad_grant":                    "table privilege granted to PUBLIC, anon or authenticated",
+	"tenant_column_removed":          "tenant scoping column dropped",
+	"db_role_privilege_broadened":    "role given SUPERUSER, BYPASSRLS or CREATEROLE",
 }
 
 // assignedFindingIDs is every identifier ever handed out, retired ones
@@ -77,6 +87,11 @@ var assignedFindingIDs = []FindingID{
 	"LINT-015",
 	"LINT-016",
 	"LINT-017",
+	"LINT-018",
+	"LINT-019",
+	"LINT-020",
+	"LINT-021",
+	"LINT-022",
 }
 
 // ID is the finding's stable identifier, or the empty string for a rule the
