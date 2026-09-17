@@ -18,6 +18,7 @@ import { CommandInbox } from './inbox.ts';
 import { exitCodeFor } from './verdict.ts';
 import { callModel, fromEnvironment, type ModelConfig } from './model.ts';
 import { cassetteFromEnvironment } from './cassette.ts';
+import { emit } from './emit.ts';
 import { nullSink, socketSink, type LiveSink } from './live.ts';
 import { assertAvailable, type Surface } from './drivers/driver.ts';
 import { runTerminal, type TerminalWorkflow } from './drivers/terminal.ts';
@@ -233,7 +234,10 @@ async function main(): Promise<number> {
   await live.close();
 
   const out: ResultDocument = { results, explorations, ...counted };
-  process.stdout.write(JSON.stringify(out, replaceRegExp, 2) + '\n');
+  // Awaited, not fired and forgotten: the document must reach the operating
+  // system before this function returns, because its caller exits the process
+  // the moment it does, and process.exit truncates a document still draining.
+  await emit(out);
   return exitCodeFor([
     ...results.map((r) => r.outcome),
     ...explorations.map((e) => e.outcome),
@@ -256,15 +260,6 @@ function replayOnlyConfig(env: Record<string, string | undefined>): ModelConfig 
     apiKey: '',
     model: env.AF_MODEL ?? (provider === 'anthropic' ? 'claude-sonnet-5' : 'gpt-4.1'),
   };
-}
-
-/** replaceRegExp makes the patterns readable in the output document.
- *
- * A RegExp serialises to {} by default, so a step that says which control it
- * pressed would come out empty, which is exactly the field somebody reads.
- */
-function replaceRegExp(_key: string, value: unknown): unknown {
-  return value instanceof RegExp ? value.source : value;
 }
 
 main().then(
