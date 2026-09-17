@@ -319,6 +319,13 @@ export const ADMIN_NAV: AdminNavGroup[] = [
         summary: "Private applications for founding roles, oldest first. Review or remove applicant details.",
       },
       {
+        label: "Leads",
+        href: "/admin/administration/leads",
+        Icon: IconEmail,
+        permission: "admin.leads.read",
+        summary: "Enterprise and demo requests, oldest first. Mark one handled so nobody is answered twice or never.",
+      },
+      {
         label: "Analytics & Usage",
         href: "/admin/administration/analytics",
         Icon: IconPlan,
