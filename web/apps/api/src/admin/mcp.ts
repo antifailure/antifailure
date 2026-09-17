@@ -361,6 +361,21 @@ export const MCP_TOOLS: readonly McpToolFact[] = [
     servedBy: 'engine/internal/mcp/tools_security.go:newReadSecurityFindingsTool',
   },
   {
+    name: 'review_change',
+    does:
+      'Read the current change and return the correctness defects a model found in the lines it ' +
+      'added, with each changed file shown whole as context, so a bug whose cause sits on a line ' +
+      'the change did not touch is still caught. It reads the diff and not the twin, so it needs no ' +
+      'environment, and it reports edge cases, error handling, data shape and dead code beside plain ' +
+      'correctness.',
+    refuses:
+      'It reports only on lines the change added, never on the surrounding file it read for context. ' +
+      'With no model key configured it returns no finding and says it did not run, rather than a ' +
+      'clean review it never performed, and a change that touched no code is answered as nothing to ' +
+      'review rather than as passing.',
+    servedBy: 'engine/internal/mcp/tools_review.go:newReviewChangeTool',
+  },
+  {
     name: 'read_documentation_page',
     does:
       'Read one page of this build\'s documentation, or one section of it named by an anchor from ' +
