@@ -3,7 +3,10 @@ package cli
 import (
 	"context"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -69,6 +72,11 @@ operated and authenticated Streamable HTTP bridge.`),
 				// rather than a pass.
 				Diagnose:    func(ctx context.Context) (mcp.Diagnosis, error) { return diagnose(ctx, env) },
 				RunnerReady: func(ctx context.Context) (mcp.RunnerReadiness, error) { return runnerReady(ctx, env) },
+				// The same in-place update af update performs, so a tool call
+				// and the command cannot install different things. Handed in
+				// because the swap lives here and this package imports that
+				// one. Left nil, the tool reports a refusal, never a pass.
+				Upgrade: upgradeInPlace,
 			})
 		},
 	}
@@ -88,6 +96,38 @@ func diagnose(ctx context.Context, env *Env) (mcp.Diagnosis, error) {
 		})
 	}
 	return out, nil
+}
+
+// upgradeInPlace applies, or with check only reports, the latest release for
+// the MCP upgrade tool.
+//
+// It is the same performUpdate af update runs, wired to the same release
+// metadata and download endpoints with the same two minute budget, so a tool
+// call and the command cannot install different things. The current version is
+// this build's Version; the latest and the applied flag come back from the
+// swap. On check it looks and changes nothing; otherwise it installs the
+// release when it is newer than the installed one.
+func upgradeInPlace(ctx context.Context, check bool) (mcp.UpgradeOutcome, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return mcp.UpgradeOutcome{}, err
+	}
+	executable, err = filepath.EvalSymlinks(executable)
+	if err != nil {
+		return mcp.UpgradeOutcome{}, err
+	}
+	result, err := performUpdate(ctx, executable, "", Version, runtime.GOOS, runtime.GOARCH,
+		latestReleaseURL, "https://github.com/antifailure/antifailure/releases/download",
+		releaseHTTPClient(2*time.Minute), check)
+	if err != nil {
+		return mcp.UpgradeOutcome{}, err
+	}
+	return mcp.UpgradeOutcome{
+		Current: Version,
+		Latest:  result.Version,
+		Applied: result.Applied,
+		Path:    result.InstalledPath,
+	}, nil
 }
 
 // runnerReady inspects the browser agent runner for the MCP server.
