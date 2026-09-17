@@ -26,6 +26,14 @@ type Run struct {
 	Golden      string
 	Workflows   []Workflow
 	Exploration *Exploration
+	// AccessProbe holds the observations the security access-probe pass made:
+	// each persona's reach of each declared object, and whether the object's
+	// canary came back. It is a separate channel from Exploration because it is
+	// not a declared goal and must not be judged by the exploration's
+	// completeness rules; the security collector reads its observations for the
+	// authz differential and nothing renders it as an exploration section. Nil
+	// when the manifest declares no access fixtures, which is every run today.
+	AccessProbe *Exploration
 	// Declared is how many workflows the manifest asked for, which is not the
 	// same number as len(Workflows) and was being read as though it were.
 	//

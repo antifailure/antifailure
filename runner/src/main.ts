@@ -14,6 +14,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { run, type Job, type WorkflowResult } from './execute.ts';
 import { explore, type Exploration, type Goal } from './explore.ts';
+import { accessProbe, type AccessObjectDoc } from './access.ts';
 import { CommandInbox } from './inbox.ts';
 import { exitCodeFor } from './verdict.ts';
 import { callModel, fromEnvironment, type ModelConfig } from './model.ts';
@@ -53,6 +54,12 @@ interface JobDocument {
    *  the sign in and the evidence capture are the same in both and a second
    *  main is a second place for them to drift. */
   readonly goals?: readonly Goal[];
+  /** accessProbes are the declared ownership-scoped objects the access-probe
+   *  pass reaches as each persona for the authenticated authorization
+   *  differential. Optional and tolerant like the lists above: a nil Go slice
+   *  arrives as null or is absent, and either means no access probing, which is
+   *  every run that has not declared access fixtures. */
+  readonly accessProbes?: readonly AccessObjectDoc[] | null;
   /** af is the path to the engine binary, used to read the inbox. Absent
    *  means no inbox, and a workflow needing one is blocked rather than
    *  failed. */
@@ -206,6 +213,24 @@ async function main(): Promise<number> {
           ...(doc.headless === undefined ? {} : { headless: doc.headless }),
         })
       : [];
+    // The access-probe pass runs when the engine declared access fixtures,
+    // independent of goals: it reaches each declared object as every persona so
+    // the authenticated authorization differential has observations to assess.
+    // Its result rides the same explorations channel, carrying observations
+    // rather than a goal's findings.
+    if (doc.accessProbes?.length) {
+      explorations = [
+        ...explorations,
+        await accessProbe({
+          baseURL: doc.base_url,
+          artifacts: doc.artifacts,
+          objects: doc.accessProbes,
+          personas,
+          ...(job.inbox ? { inbox: job.inbox } : {}),
+          ...(doc.headless === undefined ? {} : { headless: doc.headless }),
+        }),
+      ];
+    }
   }
 
 

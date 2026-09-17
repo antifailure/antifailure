@@ -122,6 +122,24 @@ func normalize(m *schema.Manifest, root string) {
 	normalizePolicy(m)
 	normalizeRuntime(m)
 	normalizeGitHub(m)
+	normalizeSecurity(m)
+}
+
+// normalizeSecurity defaults each access object's canary kind, so a fixture
+// that plants a canary without saying what it is is treated as another party's
+// data, which is what an ownership-scoped object's content is. The default
+// matches the schema's, so a fixture read here and one validated against the
+// published schema agree.
+func normalizeSecurity(m *schema.Manifest) {
+	if m.Security == nil || m.Security.Access == nil {
+		return
+	}
+	for i := range m.Security.Access.Objects {
+		o := &m.Security.Access.Objects[i]
+		if o.CanaryKind == "" {
+			o.CanaryKind = schema.CanaryPII
+		}
+	}
 }
 
 func normalizeService(s *schema.Service) {

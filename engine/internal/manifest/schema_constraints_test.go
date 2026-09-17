@@ -699,6 +699,7 @@ const defaultTuning = `{
         "personas[].email": "person@example.com",
         "diversity.personalities[].id": "skeptic",
         "workflows[].personality": "skeptic",
+        "security.access.objects[].route": "/api/orders/{id}",
         "services[].build.strategy": "image",
         "services[].depends_on": [
           "dep"
@@ -753,6 +754,7 @@ const defaultTuning = `{
         "personas[].email": "person@example.com",
         "diversity.personalities[].id": "skeptic",
         "workflows[].personality": "skeptic",
+        "security.access.objects[].route": "/api/orders/{id}",
         "services[].kind": "cron",
         "services[].schedule": "0 3 * * *",
         "datastores[].stance": "derived",
@@ -799,6 +801,7 @@ const defaultTuning = `{
         "personas[].email": "person@example.com",
         "diversity.personalities[].id": "skeptic",
         "workflows[].personality": "skeptic",
+        "security.access.objects[].route": "/api/orders/{id}",
         "services[].build.strategy": "image",
         "services[].depends_on": [
           "dep"
@@ -853,6 +856,7 @@ const defaultTuning = `{
         "personas[].email": "person@example.com",
         "diversity.personalities[].id": "skeptic",
         "workflows[].personality": "skeptic",
+        "security.access.objects[].route": "/api/orders/{id}",
         "services[].build.strategy": "image",
         "services[].depends_on": [
           "dep"
@@ -1331,7 +1335,19 @@ func TestSchemaConstraintReport(t *testing.T) {
 // refuses a non-string and the validator refuses a level that is not one of the
 // three by name, exactly as it does for masking and cleanup. The generated base
 // fills it with a valid level, so no base is refused.
-const wantConstraints = 663
+//
+// Then 699. The security access-probe block landed: a security object with an
+// access object with an owner. The 36 new constraints are the type and
+// additionalProperties on each of the three new objects, the type and length
+// (and the route's ^/ pattern) on route, id, object_class, canary and the
+// owner's persona, tenant, user and role, the canary_kind enum, and the five
+// required fields on an access object. The generator fills the route with a
+// candidate that has no leading slash, so the tuning above overrides it to
+// /api/orders/{id} in every base, without which the base is refused for a route
+// that names no path, which is the #315 failure exactly. Every other new field
+// the generator fills with a value the validator accepts, and the generated
+// owner persona is the generated persona's own name, so the owner resolves.
+const wantConstraints = 699
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and
