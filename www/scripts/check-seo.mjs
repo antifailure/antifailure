@@ -284,6 +284,7 @@ const missing = {
   h1: [],
   oneMain: [],
   markdownTwin: [],
+  twinAdvertised: [],
   twinHeading: [],
 };
 
@@ -352,6 +353,25 @@ for (const file of pages) {
   const mains = (html.match(/<main\b/gi) ?? []).length;
   if (mains !== 1) missing.oneMain.push(`${rel} (${mains})`);
   if (!/<h1[\s>]/i.test(html)) missing.h1.push(rel);
+  // The head has to ADVERTISE the twin, not merely have a file for it. The
+  // loop below this one only ever checked the twin a page names, so a page
+  // that named none was invisible to it: the home page shipped /index.md on
+  // disk and no <link> pointing at it, and an agent reading metadata to
+  // discover machine-readable versions never learned the home twin existed.
+  // Driven from the route rather than the tag, so a missing tag is a failure
+  // here rather than a page this check skips. index.html's twin is /index.md,
+  // every other page's is its own address plus .md, which is exactly what
+  // lib/seo.ts emits.
+  const wantTwin = rel === "index.html" ? `${ORIGIN}/index.md` : `${want}.md`;
+  const twinLink = (html.match(/<link\b[^>]*>/gi) ?? []).find(
+    (t) => /rel="alternate"/i.test(t) && /type="text\/markdown"/i.test(t),
+  );
+  const twinHref = twinLink?.match(/href="([^"]*)"/i)?.[1] ?? "";
+  if (twinHref !== wantTwin) {
+    missing.twinAdvertised.push(
+      `${rel} (want ${JSON.stringify(wantTwin)}, got ${JSON.stringify(twinHref || null)})`,
+    );
+  }
   const twin = file.replace(/\.html$/, ".md");
   if (!existsSync(twin)) missing.markdownTwin.push(rel);
   else {
@@ -532,6 +552,7 @@ const LABELS = {
   h1: "every indexable page has an h1",
   oneMain: "every indexable page has exactly one <main>",
   markdownTwin: "every indexable page has its markdown twin",
+  twinAdvertised: "every indexable page advertises its markdown twin in the head",
   twinHeading: "every twin opens with the page's own h1",
 };
 
