@@ -14,6 +14,46 @@ and the per change entries are what make it a wall. `just relnotes` refuses an
 unbalanced marker, a second region in one section, an empty region, and a
 section that omits all of itself.
 
+## v1.5.2
+
+An agent driving a project through the MCP server could do everything but get
+onto a newer Antifailure from inside the session, so it left the session for the
+one thing the session could not do. It serves an upgrade tool now, the same
+in-place update the command runs, checksum verified and reported honestly about
+the restart it needs. And the home page, alone among the site's indexable pages,
+advertised no machine-readable Markdown twin in its head, so an agent reading its
+metadata never found the source the build had already written; it points at the
+twin now, and a latent bug that would have advertised a dead address is fixed
+with it.
+
+<!-- relnotes:omit -->
+### Added
+
+The MCP server serves an upgrade tool that installs the latest verified community
+release of the CLI and its bundled runner in place, verifying the published
+SHA256 checksum and swapping the binary and runner atomically, with a check
+option that only reports the latest release beside the installed version. It is
+the same update af update performs, handed to the server rather than
+reimplemented, so a tool call and the command cannot install different things,
+and it reports the restart the running server needs rather than pretending the
+tools changed under the caller. A binary the installer does not own, an
+enterprise build, an unsupported platform, a checksum mismatch or a failed
+download is reported as a refusal that changed nothing (#494).
+
+### Fixed
+
+The home page exported no page metadata, so it inherited only the site-wide
+canonical and, alone among the indexable pages, advertised no text/markdown twin,
+though the build wrote /index.md and the host answered 200 for it. It routes
+through the same metadata registry every other page uses now. A second fault sat
+behind it: the twin address for the root was the origin with .md appended,
+https://antifailure.dev.md, a host that does not resolve, and it is
+https://antifailure.dev/index.md now. The SEO check walked only the twins a page
+already advertised, so a page advertising none was invisible to it, and it now
+asserts every indexable page advertises its own twin at the address the build
+wrote (#495).
+<!-- relnotes:end -->
+
 ## v1.5.1
 
 v1.5.0 shipped the dynamic security suite, and part of it could not yet fire. A
