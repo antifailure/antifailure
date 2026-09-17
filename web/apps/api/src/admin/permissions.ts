@@ -29,6 +29,13 @@ export const ADMIN_PERMISSIONS = [
   'admin.recruitment.read',
   'admin.recruitment.write',
 
+  // Enterprise and demo requests: somebody who asked to buy, and whether an
+  // operator has answered them. Kept beside recruitment because the two are the
+  // same shape, a private queue of people who are not customers, reachable by
+  // owner alone.
+  'admin.leads.read',
+  'admin.leads.write',
+
   // The operator directory: who can reach this portal, and with what role.
   'admin.operators.read',
   'admin.operators.write',
@@ -242,6 +249,8 @@ export type AdminRole = (typeof ADMIN_ROLES)[number]
 export const ADMIN_PERMISSION_DESCRIPTIONS: Record<AdminPermission, string> = {
   'admin.recruitment.read': 'Read private applications for founding roles.',
   'admin.recruitment.write': 'Mark applications reviewed or delete applicant personal data.',
+  'admin.leads.read': 'Read enterprise and demo requests, the private queue of people who asked to buy.',
+  'admin.leads.write': 'Mark an enterprise or demo request handled, so nobody is answered twice or never.',
   'admin.portal.access': 'Sign in to the operator portal and see its navigation.',
   'admin.operators.read': 'See who holds an operator account and what role they have.',
   'admin.operators.write': 'Create operators, change their role, and suspend them.',

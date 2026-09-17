@@ -1278,15 +1278,15 @@ jobs:
         # avoid. A stray server-only import stops one page exporting, its route
         # starts answering with the 404 page, and the rail keeps the entry: the
         # reader clicks a section that is supposed to exist and gets nothing,
-        # which teaches them to distrust the other twenty three as well.
+        # which teaches them to distrust the other twenty four as well.
         run: |
           routes=$(grep -oE 'href: "/admin[^"]*"' console/lib/admin-nav.ts | cut -d'"' -f2)
           count=$(printf '%s\n' "$routes" | grep -c .)
           # A grep that stops matching returns nothing, and a loop over nothing
           # passes every time. The count is what keeps this from going quietly
           # green if the navigation is ever reformatted out from under it.
-          if [ "$count" -ne 24 ]; then
-            echo "::error::read $count routes out of console/lib/admin-nav.ts, expected 24"
+          if [ "$count" -ne 25 ]; then
+            echo "::error::read $count routes out of console/lib/admin-nav.ts, expected 25"
             exit 1
           fi
           missing=0
@@ -1320,7 +1320,7 @@ jobs:
         #
         # A floor rather than the exact number the step above uses, and the
         # difference is the subject rather than laziness: that one reads a
-        # hand curated navigation of twenty four entries, where an exact count
+        # hand curated navigation of twenty five entries, where an exact count
         # is a decision somebody makes on purpose. This reads an error catalog
         # that grows whenever a new code is added, so an exact count would be a
         # number every unrelated change had to edit, and a number people edit

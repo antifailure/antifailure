@@ -43,6 +43,7 @@ import { adminProcedure, type AdminContext } from './trpc.ts'
 import { capsFor, round } from '../costs.ts'
 import { CONTROL_NAMES, controlStates } from './controls.ts'
 import { recruitmentRouter } from './recruitment.ts'
+import { leadsRouter } from './leads.ts'
 
 /**
  * How far back the operator activity summary reads, in entries.
@@ -85,6 +86,7 @@ function num(value: string | number | null | undefined): number {
 
 export const administrationRouter = router({
   applications: recruitmentRouter,
+  leads: leadsRouter,
   /**
    * What the installation is doing, for the page an operator lands on.
    *
