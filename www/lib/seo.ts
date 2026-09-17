@@ -54,7 +54,12 @@ export function pageMetadata(path: string, overrides: Metadata = {}): Metadata {
       ...(route.indexable
         ? {
             types: {
-              "text/markdown": `${url === SITE_URL ? SITE_URL : url}.md`,
+              // The root is the one page whose twin is not `${url}.md`. Its url
+              // is the origin with no path (absoluteUrl("/") returns SITE_URL),
+              // so `${url}.md` produced https://antifailure.dev.md, a host that
+              // does not resolve, rather than the /index.md the build actually
+              // writes. Every other page's twin sits at its own path plus .md.
+              "text/markdown": url === SITE_URL ? `${SITE_URL}/index.md` : `${url}.md`,
             },
           }
         : {}),
