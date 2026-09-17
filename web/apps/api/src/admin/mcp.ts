@@ -376,6 +376,21 @@ export const MCP_TOOLS: readonly McpToolFact[] = [
     servedBy: 'engine/internal/mcp/tools_review.go:newReviewChangeTool',
   },
   {
+    name: 'upgrade',
+    does:
+      'Install the latest verified community release of the CLI and its bundled runner in place, ' +
+      'with the published SHA256 checksum verified and the binary and runner swapped atomically, so ' +
+      'a project keeps rehearsing against the newest engine without leaving the session. The check ' +
+      'option reports the latest release beside the installed version and changes nothing.',
+    refuses:
+      'It cannot install anything but the latest published stable community release, so it will not ' +
+      'downgrade, cross to an enterprise or package-managed binary, or reach a version that is not ' +
+      'published. A binary the installer does not own, an unsupported platform, a checksum mismatch ' +
+      'or a failed download is reported as a refusal that changed nothing, never as an upgrade. The ' +
+      'running server keeps its old code until it is restarted.',
+    servedBy: 'engine/internal/mcp/tools_upgrade.go:newUpgradeTool',
+  },
+  {
     name: 'read_documentation_page',
     does:
       'Read one page of this build\'s documentation, or one section of it named by an anchor from ' +

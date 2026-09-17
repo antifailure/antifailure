@@ -53,6 +53,17 @@ type Config struct {
 	// that succeeded.
 	Diagnose    func(context.Context) (Diagnosis, error)
 	RunnerReady func(context.Context) (RunnerReadiness, error)
+	// Upgrade installs the latest verified release in place, or with check
+	// true reports the latest without changing a file. It is handed in for the
+	// same reason as the two above: the download, checksum verification and
+	// atomic swap live in the package that builds the command, this package
+	// cannot import that one back, and one instrument for applying an upgrade
+	// is better than two that can disagree.
+	//
+	// A nil value is reported by the tool as a refusal that changed nothing,
+	// never as "already up to date". A build with no upgrade path did not find
+	// the installation current; it could not look.
+	Upgrade func(ctx context.Context, check bool) (UpgradeOutcome, error)
 }
 
 // Serve binds a project, restores its runs and serves until the input ends.
@@ -160,6 +171,7 @@ func Serve(ctx context.Context, cfg Config) error {
 	server.Register(newDescribeModelKeyTool(project, orch.modelKey))
 	server.Register(newVerifyModelKeyTool(project, orch.probeModel))
 	server.Register(newReviewChangeTool(project, orch.reviewChange))
+	server.Register(newUpgradeTool(project, cfg.Upgrade))
 
 	_, _ = fmt.Fprintf(cfg.Log, "af mcp: serving project %q from %s\n", project.ID, project.Root)
 
