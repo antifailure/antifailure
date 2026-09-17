@@ -14,6 +14,59 @@ and the per change entries are what make it a wall. `just relnotes` refuses an
 unbalanced marker, a second region in one section, an empty region, and a
 section that omits all of itself.
 
+## v1.5.1
+
+v1.5.0 shipped the dynamic security suite, and part of it could not yet fire. A
+reader was in place for the authorization differential and for the leaked
+secret, and nothing produced what they read: the runner recorded no response
+body and no rendered DOM, and no run emitted an authorization reading, so two
+families were live code a real run could never trigger. This release is the
+producer half. The runner now captures the bodies, the DOM and the write-path
+routes those families need, a manifest declares the ownership fixtures the
+access-control differential cannot infer from a diff, and both fire on a real
+run rather than reading empty evidence. The static reviewer that reads a change
+for the correctness bug no workflow exercised is now a tool an agent can call
+mid-edit without standing up an environment. A bug that truncated a large run's
+own result is fixed, so the evidence a run captures survives the way back to the
+engine. And the demo and enterprise requests the site records now have somewhere
+an operator can read them.
+
+<!-- relnotes:omit -->
+### Added
+
+The runner captures, per response, the request that reached the server and its
+method, the bounded body of each same-origin document, and the rendered text of
+each page, so canary_leak has a stream to scan and the injection family sources
+the POST and fetch routes where most real injection lives. Both families were
+wired and starved before (#487). A manifest access block declares the
+ownership-scoped objects the authz differential cannot infer from a diff, and an
+access-probe pass signs in as each persona, reaches each object, and emits the
+observation the differential reads, so an IDOR or a cross-tenant read is proven
+rather than left unmeasured. The reader shipped in v1.5.0 with nothing to produce
+for it (#491). The review_change MCP tool exposes the static code reviewer on its
+own, reading the diff rather than the twin, so an agent gets the defects on the
+lines it just wrote without a rehearsal or a pull request comment (#489). An
+Enterprise Leads page under Administration reads the leads the request-demo and
+contact forms record, oldest first, and marks one handled; the serving role
+stays INSERT-only, so the leak boundary the table was built with is untouched
+(#490).
+
+### Changed
+
+The static code reviewer now sends the model each changed file whole with the
+added lines marked, and decides on the whole file while still reporting only on
+the added lines, so it catches the bug whose cause sits on a line the change did
+not touch rather than being blind to it (#486).
+
+### Fixed
+
+The runner handed its one result document to standard output and then exited
+before the write drained, so a document past the pipe buffer reached the engine
+truncated and a healthy run read as blocked. It now waits for the document to
+reach the operating system before it exits, so a result of any size arrives
+whole (#488).
+<!-- relnotes:end -->
+
 ## v1.5.0
 
 Where the releases before it made the product rehearse a change against a copy
