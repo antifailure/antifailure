@@ -555,13 +555,32 @@ jobs:
           # jq rather than a hand built string. A report carries quotes,
           # newlines and backslashes, and a body pasted together in the shell
           # is malformed on the first interesting run.
+          #
+          # The exploration evidence is dropped before the report is sent, and
+          # that is what keeps this step from failing. The control plane reads
+          # only counts and a little metadata off this report: workflow
+          # verdicts, invariant results, findings, load, and, from each
+          # exploration result, its name, verdict, visited pages and whether a
+          # trace exists. It never reads the evidence bodies. Those bodies are
+          # the whole size of the report: the captured responses and DOM
+          # snapshots of a thorough exploration run to several megabytes, and a
+          # body that large is refused by the control plane's own body limit
+          # with a 413, so the check would go red having verified nothing. Each
+          # result keeps its trace, which readiness does look at, and loses the
+          # rest of its evidence. The full report, evidence and all, is still
+          # uploaded as an artifact below, so a reader loses nothing. The server
+          # side of this contract is guarded by exploration-report.test.ts.
           if [ -f "$GITHUB_WORKSPACE/dogfood-report.json" ]; then
             markdown="$GITHUB_WORKSPACE/dogfood-report.md"
             [ -f "$markdown" ] || printf '' > "$markdown"
             jq -n --arg sha "$HEAD_SHA" \
                   --rawfile markdown "$markdown" \
                   --slurpfile report "$GITHUB_WORKSPACE/dogfood-report.json" \
-                  '{head_sha: $sha, markdown: $markdown, report: $report[0]}' > payload.json
+                  '{head_sha: $sha, markdown: $markdown,
+                    report: ($report[0]
+                             | if (.Exploration.Results | type) == "array"
+                               then .Exploration.Results |= map(.evidence |= {trace})
+                               else . end)}' > payload.json
           else
             # No report at all. Sent rather than skipped, and sent as a report
             # with no workflows in it, which the control plane reads as
