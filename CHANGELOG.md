@@ -14,6 +14,31 @@ and the per change entries are what make it a wall. `just relnotes` refuses an
 unbalanced marker, a second region in one section, an empty region, and a
 section that omits all of itself.
 
+## v1.5.3
+
+The control plane could start an agents run or a load run against an environment
+but could not shape either from the one place a customer drives them. It could
+set no seed, so two runs could not be made to decide the same way and compared,
+and no concurrency ceiling, so a load run could not be held inside a limit. The
+inputs already existed in the workflow every customer runs and the engine
+already read them; only the console and the dispatch in between withheld them.
+The Start a run card carries them now, a seed on an agents run and seconds, a
+scale, a concurrency ceiling and a seed on a load run, and an unset field is
+left out of the dispatch so an older workflow file keeps working and each
+command falls back to its own default.
+
+<!-- relnotes:omit -->
+### Added
+
+The Start a run card in the control plane grew the controls a run is shaped by.
+An agents run takes a seed, so two runs decide the same way and a before can be
+compared against an after. A load run takes seconds, a scale, a concurrency
+ceiling and a seed. The dispatch verbs forward each one, and a field left blank
+is omitted from the request rather than sent as a zero, so it reaches the
+command's own default and a workflow file that predates an input is never handed
+one it cannot declare (#498).
+<!-- relnotes:end -->
+
 ## v1.5.2
 
 An agent driving a project through the MCP server could do everything but get
