@@ -1048,6 +1048,47 @@ describe('the control plane acts', { skip: hasDatabase ? false : 'no Postgres at
       assert.equal(load.inputs.workflows, '')
     })
 
+    it('the seed and concurrency inputs ride along only when set', async () => {
+      const seen = h.github.dispatches.length
+
+      // Unset, an agents run sends exactly the four inputs the console has
+      // always sent. This is the backward compatibility that lets a repository
+      // whose workflow file predates seed and concurrency keep working: an
+      // input the file does not declare is a 422 that fails the whole run.
+      data(await callProcedure(h, member, 'agents.run', 'mutation', { envId: org.envId }), 'agents.run')
+      const plain = h.github.dispatches[seen]!
+      assert.deepEqual(
+        Object.keys(plain.inputs).sort(),
+        ['command', 'duration', 'scale', 'workflows'],
+        'an agents run with no seed sends no more than the four base inputs',
+      )
+
+      // A seed rides along as the string a workflow_dispatch input has to be.
+      data(await callProcedure(h, member, 'agents.run', 'mutation', { envId: org.envId, seed: 7 }), 'agents.run')
+      assert.equal(h.github.dispatches[seen + 1]!.inputs.seed, '7')
+
+      // Load carries concurrency and seed when they are set.
+      data(
+        await callProcedure(h, member, 'load.run', 'mutation', {
+          envId: org.envId,
+          seconds: 30,
+          concurrency: 40,
+          seed: 9,
+        }),
+        'load.run',
+      )
+      const load = h.github.dispatches[seen + 2]!
+      assert.equal(load.inputs.concurrency, '40')
+      assert.equal(load.inputs.seed, '9')
+      assert.equal(load.inputs.duration, '30s')
+
+      // And neither when they are not, so an unset control adds nothing.
+      data(await callProcedure(h, member, 'load.run', 'mutation', { envId: org.envId, seconds: 30 }), 'load.run')
+      const bare = h.github.dispatches[seen + 3]!
+      assert.equal('concurrency' in bare.inputs, false, 'an unset concurrency is not sent')
+      assert.equal('seed' in bare.inputs, false, 'an unset seed is not sent')
+    })
+
     it('a torn down environment is refused before GitHub is asked', async () => {
       const gone = await seedOrg(h.admin, 'torndown')
       const session = await signInAs(h, gone, 'admin')

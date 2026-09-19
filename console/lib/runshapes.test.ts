@@ -30,6 +30,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { toneFor } from "./tone.ts";
 import {
+  agentsRunArgs,
+  loadRunArgs,
   noVerdictsReason,
   nothingWasVerified,
   nothingWasVerifiedNotice,
@@ -244,6 +246,8 @@ test("the runs page actually calls each of these", () => {
   // would replace it.
   const page = readFileSync(new URL("../app/(app)/runs/page.tsx", import.meta.url), "utf8");
   for (const wired of [
+    "agentsRunArgs",
+    "loadRunArgs",
     "nothingWasVerifiedNotice",
     "noVerdictsReason",
     "reproductionText",
@@ -334,4 +338,64 @@ test("the list calls five blocked nothing verified", () => {
 
 test("the list says nothing about a run with no verdicts, so the cell is a dash", () => {
   assert.equal(recentRunSummary({ total: 0, passing: 0, failing: 0, proved: 0 }), null);
+});
+
+/* -------------------------------------------------------------------------
+ * The launcher inputs: a blank knob is left out, never sent as a zero.
+ * ---------------------------------------------------------------------- */
+
+test("an agents run with everything blank sends only the environment", () => {
+  // The backward compatibility that matters: nothing but envId, so the dispatch
+  // carries the four inputs it always has and a repository whose workflow file
+  // predates seed keeps working.
+  assert.deepEqual(agentsRunArgs("web-42", "", ""), { envId: "web-42" });
+});
+
+test("agents workflows are split, trimmed and emptied out", () => {
+  assert.deepEqual(agentsRunArgs("web-42", " sign-up , checkout ,, ", ""), {
+    envId: "web-42",
+    workflows: ["sign-up", "checkout"],
+  });
+});
+
+test("an agents seed is carried only when it is a non-negative integer", () => {
+  assert.deepEqual(agentsRunArgs("web-42", "", "7"), { envId: "web-42", seed: 7 });
+  assert.deepEqual(agentsRunArgs("web-42", "", "0"), { envId: "web-42", seed: 0 });
+  // Blank, fractional and negative are all "no seed", so the engine picks one.
+  assert.deepEqual(agentsRunArgs("web-42", "", "  "), { envId: "web-42" });
+  assert.deepEqual(agentsRunArgs("web-42", "", "1.5"), { envId: "web-42" });
+  assert.deepEqual(agentsRunArgs("web-42", "", "-3"), { envId: "web-42" });
+  assert.deepEqual(agentsRunArgs("web-42", "", "abc"), { envId: "web-42" });
+});
+
+test("a load run with everything blank sends only the environment", () => {
+  assert.deepEqual(loadRunArgs("web-42", "", "", "", ""), { envId: "web-42" });
+});
+
+test("load carries each knob only when it is valid", () => {
+  assert.deepEqual(loadRunArgs("web-42", "90", "2", "40", "9"), {
+    envId: "web-42",
+    seconds: 90,
+    scale: 2,
+    concurrency: 40,
+    seed: 9,
+  });
+});
+
+test("load seconds is a positive number, rounded to whole seconds", () => {
+  assert.deepEqual(loadRunArgs("web-42", "60.5", "", "", ""), { envId: "web-42", seconds: 61 });
+  // Zero and negative seconds are no duration at all, so the default stands.
+  assert.deepEqual(loadRunArgs("web-42", "0", "", "", ""), { envId: "web-42" });
+  assert.deepEqual(loadRunArgs("web-42", "-5", "", "", ""), { envId: "web-42" });
+});
+
+test("load scale may be fractional but must be positive", () => {
+  assert.deepEqual(loadRunArgs("web-42", "", "0.5", "", ""), { envId: "web-42", scale: 0.5 });
+  assert.deepEqual(loadRunArgs("web-42", "", "0", "", ""), { envId: "web-42" });
+});
+
+test("load concurrency must be a whole count of at least one", () => {
+  assert.deepEqual(loadRunArgs("web-42", "", "", "1", ""), { envId: "web-42", concurrency: 1 });
+  assert.deepEqual(loadRunArgs("web-42", "", "", "0", ""), { envId: "web-42" });
+  assert.deepEqual(loadRunArgs("web-42", "", "", "2.5", ""), { envId: "web-42" });
 });

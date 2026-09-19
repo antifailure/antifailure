@@ -130,8 +130,9 @@ export function blockerFor(cause: DispatchCause, s: Subject, said = ''): Dispatc
       `alone changes nothing.`,
     'inputs-refused':
       `${s.workflow} in ${s.repository} does not declare the inputs this console sends. Its ` +
-      `workflow_dispatch block needs inputs named command, workflows, duration and scale, ` +
-      `which examples/github-workflow.yml already carries.`,
+      `workflow_dispatch block needs inputs named command, workflows, duration and scale, plus ` +
+      `seed and concurrency once you use the reproducible-run and load-ceiling controls, all of ` +
+      `which examples/github-workflow.yml already carries. Copy its workflow_dispatch block over.`,
     'github-refused':
       `GitHub would not start ${s.workflow} in ${s.repository}` +
       (said ? `, and gave the reason as: ${said}` : '') +
