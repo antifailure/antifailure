@@ -63,6 +63,32 @@ export const workflowFile = z
 /** A git ref a dispatch may name. Not a commit: GitHub refuses a SHA here. */
 const gitRef = z.string().min(1).max(255)
 
+/** A run seed: a non-negative integer, sent as the string a workflow_dispatch
+ *  input has to be. It makes two runs make the same decisions, which is what
+ *  turns a pair of runs into a comparison rather than two samples. */
+const seedValue = z.number().int().min(0).max(2_147_483_647)
+
+/**
+ * Turns the advanced numeric inputs into dispatch strings, keeping only the
+ * ones the caller actually set.
+ *
+ * A field that is present but undefined is left out entirely, so an unset
+ * control adds nothing to the four inputs (command, workflows, duration, scale)
+ * the console has always sent. That backward compatibility is the point: a
+ * workflow file that predates the seed and concurrency inputs declares neither,
+ * and GitHub answers a dispatch carrying an input the file does not declare
+ * with a 422 that fails the whole run. Sending these only when a customer uses
+ * them keeps every existing repository working while the new controls reach the
+ * ones whose workflow carries the inputs.
+ */
+function optionalInputs(fields: Record<string, number | undefined>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(fields)) {
+    if (value !== undefined) out[key] = String(value)
+  }
+  return out
+}
+
 export interface Installation extends Record<string, unknown> {
   installation_id: string
   account_login: string
@@ -459,6 +485,9 @@ export const agentsRouter = router({
         /** Which workflows from the manifest to exercise. Empty means all of
          *  them, which is what `af ci` does. */
         workflows: z.array(z.string().min(1).max(200)).max(50).optional(),
+        /** A fixed seed, sent to `--seed`, so two runs make the same decisions
+         *  and can be compared. Absent leaves the engine to pick one. */
+        seed: seedValue.optional(),
         workflow: workflowFile,
       }),
     )
@@ -477,6 +506,12 @@ export const agentsRouter = router({
         workflows: (input.workflows ?? []).join(','),
         duration: '',
         scale: '',
+        // seed rides along only when the caller set one. An empty seed and no
+        // seed are the same instruction to the engine, and sending the key
+        // regardless would break a customer whose workflow file predates the
+        // seed input, whereas leaving it out keeps the exact four inputs the
+        // console has always sent.
+        ...optionalInputs({ seed: input.seed }),
       })
 
       await c.pool.withTenant(c.tenant, async (db) => {
@@ -484,7 +519,7 @@ export const agentsRouter = router({
           action: 'agents.run_requested',
           targetType: 'environment',
           targetId: target.envId,
-          detail: { repository: target.repository, workflows: input.workflows ?? null },
+          detail: { repository: target.repository, workflows: input.workflows ?? null, seed: input.seed ?? null },
         })
         await adopted(db, c, 'agent_run')
       })
@@ -503,6 +538,12 @@ export const loadRouter = router({
         seconds: z.number().int().min(1).max(3600).optional(),
         /** Multiplier on production's rate, sent to `--scale`. */
         scale: z.number().min(0.01).max(100).optional(),
+        /** Ceiling on requests in flight, sent to `--concurrency`. Absent
+         *  leaves the command to derive one from the scale. */
+        concurrency: z.number().int().min(1).max(10000).optional(),
+        /** A fixed seed, sent to `--seed`, so two load runs send the same
+         *  sequence and their deltas are comparable. */
+        seed: seedValue.optional(),
         workflow: workflowFile,
       }),
     )
@@ -521,6 +562,12 @@ export const loadRouter = router({
         // have the engine refuse it after the job has started.
         duration: input.seconds === undefined ? '' : `${input.seconds}s`,
         scale: input.scale === undefined ? '' : String(input.scale),
+        // concurrency and seed ride along only when set, for the same reason
+        // agents.run holds back an unset seed: an older workflow file declares
+        // neither, and sending an input it does not declare is a 422 that fails
+        // the whole dispatch. Unset, the console sends the same four it always
+        // has.
+        ...optionalInputs({ concurrency: input.concurrency, seed: input.seed }),
       })
 
       await c.pool.withTenant(c.tenant, async (db) => {
@@ -528,7 +575,13 @@ export const loadRouter = router({
           action: 'load.run_requested',
           targetType: 'environment',
           targetId: target.envId,
-          detail: { repository: target.repository, seconds: input.seconds ?? null, scale: input.scale ?? null },
+          detail: {
+            repository: target.repository,
+            seconds: input.seconds ?? null,
+            scale: input.scale ?? null,
+            concurrency: input.concurrency ?? null,
+            seed: input.seed ?? null,
+          },
         })
         await adopted(db, c, 'load_run')
       })

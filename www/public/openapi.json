@@ -1619,6 +1619,11 @@
                       "maxLength": 200
                     }
                   },
+                  "seed": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 2147483647
+                  },
                   "workflow": {
                     "default": "antifailure.yml",
                     "type": "string",
@@ -3931,6 +3936,16 @@
                     "type": "number",
                     "minimum": 0.01,
                     "maximum": 100
+                  },
+                  "concurrency": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10000
+                  },
+                  "seed": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 2147483647
                   },
                   "workflow": {
                     "default": "antifailure.yml",

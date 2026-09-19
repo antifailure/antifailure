@@ -31,6 +31,8 @@ import {
 } from "@/components/ui";
 import { POLL_MS, useInterval } from "@/components/load/polling";
 import {
+  agentsRunArgs,
+  loadRunArgs,
   nothingWasVerifiedNotice,
   noVerdictsReason,
   recentRunSummary,
@@ -316,6 +318,9 @@ function Start({ onStarted }: { onStarted: () => void }) {
   const [kind, setKind] = useState<"agents" | "load">("agents");
   const [workflows, setWorkflows] = useState("");
   const [seconds, setSeconds] = useState("");
+  const [scale, setScale] = useState("");
+  const [concurrency, setConcurrency] = useState("");
+  const [seed, setSeed] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [asked, setAsked] = useState<string | null>(null);
@@ -347,24 +352,15 @@ function Start({ onStarted }: { onStarted: () => void }) {
                 setError(null);
                 setAsked(null);
                 try {
+                  // The field-to-argument rule lives in runshapes so it can be
+                  // tested: a blank knob is left out of the call rather than
+                  // sent as a zero, so it reaches the command's own default.
                   if (kind === "agents") {
-                    const only = workflows
-                      .split(",")
-                      .map((w) => w.trim())
-                      .filter(Boolean);
-                    await mutate(
-                      "agents.run",
-                      { envId: chosen, ...(only.length ? { workflows: only } : {}) },
-                      csrf,
-                    );
+                    await mutate("agents.run", agentsRunArgs(chosen, workflows, seed), csrf);
                   } else {
-                    const n = Number(seconds);
                     await mutate(
                       "load.run",
-                      {
-                        envId: chosen,
-                        ...(Number.isFinite(n) && n > 0 ? { seconds: Math.round(n) } : {}),
-                      },
+                      loadRunArgs(chosen, seconds, scale, concurrency, seed),
                       csrf,
                     );
                   }
@@ -377,7 +373,7 @@ function Start({ onStarted }: { onStarted: () => void }) {
                 }
               }}
             >
-              <div className="grid gap-3 sm:grid-cols-[2fr_1fr_2fr_auto] sm:items-end">
+              <div className="grid gap-3 sm:grid-cols-[2fr_1fr_auto] sm:items-end">
                 <Field label="Environment">
                   <select
                     className={inputClass}
@@ -401,16 +397,37 @@ function Start({ onStarted }: { onStarted: () => void }) {
                     <option value="load">load</option>
                   </select>
                 </Field>
-                {kind === "agents" ? (
-                  <Field label="Workflows">
+                <Button type="submit" variant="primary" busy={busy}>
+                  {busy ? "Asking" : "Start"}
+                </Button>
+              </div>
+              {/* The knobs for the chosen run. Every one is optional: left
+                  blank it is not sent, so the command falls back to its own
+                  default rather than to a zero. */}
+              {kind === "agents" ? (
+                <div className="mt-3 grid gap-3 sm:grid-cols-4">
+                  <div className="sm:col-span-3">
+                    <Field label="Workflows">
+                      <input
+                        className={inputClass}
+                        value={workflows}
+                        onChange={(e) => setWorkflows(e.target.value)}
+                        placeholder="sign-up, checkout"
+                      />
+                    </Field>
+                  </div>
+                  <Field label="Seed">
                     <input
                       className={inputClass}
-                      value={workflows}
-                      onChange={(e) => setWorkflows(e.target.value)}
-                      placeholder="sign-up, checkout"
+                      inputMode="numeric"
+                      value={seed}
+                      onChange={(e) => setSeed(e.target.value)}
+                      placeholder="any number"
                     />
                   </Field>
-                ) : (
+                </div>
+              ) : (
+                <div className="mt-3 grid gap-3 sm:grid-cols-4">
                   <Field label="Seconds">
                     <input
                       className={inputClass}
@@ -420,11 +437,35 @@ function Start({ onStarted }: { onStarted: () => void }) {
                       placeholder="60"
                     />
                   </Field>
-                )}
-                <Button type="submit" variant="primary" busy={busy}>
-                  {busy ? "Asking" : "Start"}
-                </Button>
-              </div>
+                  <Field label="Scale">
+                    <input
+                      className={inputClass}
+                      inputMode="decimal"
+                      value={scale}
+                      onChange={(e) => setScale(e.target.value)}
+                      placeholder="1"
+                    />
+                  </Field>
+                  <Field label="Concurrency">
+                    <input
+                      className={inputClass}
+                      inputMode="numeric"
+                      value={concurrency}
+                      onChange={(e) => setConcurrency(e.target.value)}
+                      placeholder="auto"
+                    />
+                  </Field>
+                  <Field label="Seed">
+                    <input
+                      className={inputClass}
+                      inputMode="numeric"
+                      value={seed}
+                      onChange={(e) => setSeed(e.target.value)}
+                      placeholder="any number"
+                    />
+                  </Field>
+                </div>
+              )}
               {/* Under the row rather than in a Field: a hint inside one grid
                   cell makes it taller, and items-end then lifts that input
                   clear of the ones beside it. */}
@@ -436,8 +477,8 @@ function Start({ onStarted }: { onStarted: () => void }) {
                 <p role={asked ? "status" : undefined} className="mt-2.5 text-[12px] leading-5 text-dim">
                   {asked ??
                     (kind === "agents"
-                      ? "Workflows are comma separated. Empty runs all of them."
-                      : "Empty leaves the command's own default, which is a minute.")}
+                      ? "Workflows are comma separated; empty runs all of them. A seed makes two runs decide the same way, so they can be compared."
+                      : "Every field is optional. Empty seconds leaves the default minute; scale multiplies production's rate, concurrency caps requests in flight, and a seed makes two runs send the same sequence.")}
                 </p>
               )}
             </form>

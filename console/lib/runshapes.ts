@@ -274,3 +274,92 @@ export function recentRunSummary(t: RecentTally): { tone: Tone; text: string } |
   if (t.passing < t.total) return { tone: "warn", text: `${t.passing} of ${t.total} passed` };
   return { tone: "pass", text: `${t.total} passing` };
 }
+
+// ---------------------------------------------------------------------------
+// The launcher inputs
+// ---------------------------------------------------------------------------
+//
+// The Start card takes text fields and turns them into the argument for an
+// agents.run or a load.run. The rule for every optional knob is the same: a
+// blank field is LEFT OUT of the call, never sent as a zero, so it reaches the
+// command's own default rather than a value the caller did not choose. That
+// rule matters twice over. A sent zero would be a real instruction the engine
+// takes literally, and a sent seed or concurrency the customer never set would
+// reach a workflow file that may not declare those inputs, which GitHub answers
+// with a 422 that fails the whole run. So these functions build the smallest
+// object that says what the caller actually asked for, and the page renders the
+// result rather than computing it.
+
+/** The agents.run argument for a set of raw form fields. */
+export interface AgentsRunArgs {
+  envId: string;
+  workflows?: string[];
+  seed?: number;
+}
+
+/** The load.run argument for a set of raw form fields. */
+export interface LoadRunArgs {
+  envId: string;
+  seconds?: number;
+  scale?: number;
+  concurrency?: number;
+  seed?: number;
+}
+
+/** A non-negative integer read from a field, or undefined when the field is
+ *  blank or is not one. undefined is the instruction to leave the input out. */
+function optionalNonNegativeInt(raw: string): number | undefined {
+  if (raw.trim() === "") return undefined;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 ? n : undefined;
+}
+
+/** A positive integer read from a field, for a count that a zero would make
+ *  meaningless. */
+function optionalPositiveInt(raw: string): number | undefined {
+  const n = optionalNonNegativeInt(raw);
+  return n !== undefined && n >= 1 ? n : undefined;
+}
+
+/** A positive number, for a multiplier that need not be whole. */
+function optionalPositiveNumber(raw: string): number | undefined {
+  if (raw.trim() === "") return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+export function agentsRunArgs(envId: string, workflowsRaw: string, seedRaw: string): AgentsRunArgs {
+  const workflows = workflowsRaw
+    .split(",")
+    .map((w) => w.trim())
+    .filter(Boolean);
+  const seed = optionalNonNegativeInt(seedRaw);
+  return {
+    envId,
+    ...(workflows.length ? { workflows } : {}),
+    ...(seed !== undefined ? { seed } : {}),
+  };
+}
+
+export function loadRunArgs(
+  envId: string,
+  secondsRaw: string,
+  scaleRaw: string,
+  concurrencyRaw: string,
+  seedRaw: string,
+): LoadRunArgs {
+  // A positive number, rounded, because a duration is whole seconds and a
+  // caller who typed 60.5 meant a minute rather than nothing.
+  const secondsNumber = optionalPositiveNumber(secondsRaw);
+  const seconds = secondsNumber === undefined ? undefined : Math.round(secondsNumber);
+  const scale = optionalPositiveNumber(scaleRaw);
+  const concurrency = optionalPositiveInt(concurrencyRaw);
+  const seed = optionalNonNegativeInt(seedRaw);
+  return {
+    envId,
+    ...(seconds !== undefined ? { seconds } : {}),
+    ...(scale !== undefined ? { scale } : {}),
+    ...(concurrency !== undefined ? { concurrency } : {}),
+    ...(seed !== undefined ? { seed } : {}),
+  };
+}
