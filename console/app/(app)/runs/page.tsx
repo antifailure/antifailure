@@ -11,6 +11,7 @@ import {
   Badge,
   Button,
   Card,
+  CardSkeleton,
   CellLink,
   Empty,
   Field,
@@ -30,6 +31,7 @@ import {
   type Tone,
 } from "@/components/ui";
 import { POLL_MS, useInterval } from "@/components/load/polling";
+import { ReportMarkdown } from "@/lib/reportmarkdown";
 import {
   agentsRunArgs,
   loadRunArgs,
@@ -294,6 +296,107 @@ function Detail({ runId, onClose }: { runId: string; onClose: () => void }) {
   );
 }
 
+type ReportCounts = {
+  passed: number;
+  failed: number;
+  flaky: number;
+  blocked: number;
+  unverified: number;
+};
+type PrReport = {
+  headSha: string;
+  state: string;
+  finishedAt: string | null;
+  envId: string | null;
+  counts: ReportCounts | null;
+  environment: string | null;
+  url: string | null;
+  duration: string | null;
+  markdown: string | null;
+};
+
+/**
+ * The whole report a pull request check reported, rendered.
+ *
+ * A GitHub check links here as /runs?pr=<n>&commit=<sha>. Everything the run
+ * gathered past the counts, the findings and their fixes, the migration
+ * statements and locks, the invariants, the access probe, reaches this control
+ * plane through the pull request callback rather than the events stream, so it
+ * is not in a run row. It lands whole in the generation, and runs.report is the
+ * only reader of it. This shows a scannable strip of the counts and then the
+ * engine's own report in full, so nothing it measured is dropped on the way to
+ * the person who has to act on it. It needs no run row to exist, which is the
+ * whole point: the demo repositories report here without ever writing one.
+ */
+function PullRequestReport({ pr, commit }: { pr: number; commit: string | null }) {
+  const report = useApi<PrReport | null>(
+    () => query("runs.report", { pr, ...(commit ? { commit } : {}) }),
+    [pr, commit],
+  );
+  const pending = report.data?.state === "queued" || report.data?.state === "running";
+  useInterval(pending, POLL_MS, report.reload);
+
+  return (
+    <Loaded state={report} skeleton={<CardSkeleton count={2} />}>
+      {(r) =>
+        r === null ? (
+          <Card title="Report">
+            <Empty title="No report yet">
+              No check on this control plane is waiting on pull request #{pr}. It appears here the
+              moment a run reports one.
+            </Empty>
+          </Card>
+        ) : (
+          <div className="space-y-6">
+            <Card title="Report" note={`Commit ${r.headSha.slice(0, 7)}`}>
+              <div className="space-y-4 px-4 py-4">
+                {r.counts ? (
+                  <div className="flex flex-wrap gap-2">
+                    <Badge tone="pass">{r.counts.passed} passed</Badge>
+                    <Badge tone={r.counts.failed > 0 ? "fail" : "neutral"}>
+                      {r.counts.failed} failed
+                    </Badge>
+                    <Badge tone={r.counts.flaky > 0 ? "warn" : "neutral"}>
+                      {r.counts.flaky} flaky
+                    </Badge>
+                    <Badge tone="neutral">{r.counts.blocked} blocked</Badge>
+                    <Badge tone="neutral">{r.counts.unverified} unverified</Badge>
+                  </div>
+                ) : null}
+                <dl className="grid gap-x-8 gap-y-3 sm:grid-cols-3">
+                  {[
+                    ["Environment", r.environment ?? r.envId ?? "--"],
+                    ["Duration", r.duration ?? "--"],
+                    ["Finished", r.finishedAt ? when(r.finishedAt) : pending ? "running" : "--"],
+                  ].map(([k, v]) => (
+                    <div key={k}>
+                      <dt className="text-[11px] uppercase tracking-[0.08em] text-dim">{k}</dt>
+                      <dd className="mt-1 text-[13px] text-ink">{v}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+            </Card>
+            {r.markdown ? (
+              <Card title="Everything the run gathered" note="The engine's report in full, as it wrote it.">
+                <ReportMarkdown source={r.markdown} />
+              </Card>
+            ) : (
+              <Card title="Everything the run gathered">
+                <Empty title="Nothing to show yet">
+                  {pending
+                    ? "The run is still going. The report fills in the moment it reports."
+                    : "This run reported counts but no report body."}
+                </Empty>
+              </Card>
+            )}
+          </div>
+        )
+      }
+    </Loaded>
+  );
+}
+
 
 /**
  * Starting a run against an environment that is already up.
@@ -501,6 +604,7 @@ function Runs() {
   // every click from GitHub landed on the list below.
   const prParam = params.get("pr");
   const prNumber = prParam !== null && /^\d+$/.test(prParam) ? Number(prParam) : null;
+  const commit = params.get("commit");
   // `runs.recent` names its cursor `before` and returns `nextCursor`, which is
   // not the pair `environments.list` uses, so the adapter is here rather than
   // in the hook.
@@ -524,7 +628,7 @@ function Runs() {
   // left open. Hooks run before the two early returns below because they have
   // to, so the condition carries the "is this list even on screen" part.
   useInterval(
-    selected === null && forPullRequest === null && rows.some((r) => runIsInFlight(r.state)),
+    selected === null && prNumber === null && rows.some((r) => runIsInFlight(r.state)),
     POLL_MS,
     state.reload,
   );
@@ -537,13 +641,15 @@ function Runs() {
     );
   }
 
-  if (forPullRequest) {
+  if (prNumber !== null) {
     return (
-      <Page
-        title="Run"
-        lede={`The newest run for pull request #${prNumber}, as the runner reported it.`}
-      >
-        <Detail runId={forPullRequest.id} onClose={() => router.push("/runs")} />
+      <Page title="Run" lede={`Pull request #${prNumber}, as the control plane received it.`}>
+        <div className="space-y-6">
+          <PullRequestReport pr={prNumber} commit={commit} />
+          {forPullRequest ? (
+            <Detail runId={forPullRequest.id} onClose={() => router.push("/runs")} />
+          ) : null}
+        </div>
       </Page>
     );
   }
@@ -551,11 +657,7 @@ function Runs() {
   return (
     <Page
       title="Runs"
-      lede={
-        prNumber !== null && state.status === "ready"
-          ? `No run has reported for pull request #${prNumber} yet. The check on GitHub updates when one does; every other run is below, newest first.`
-          : "Every run across every environment, newest first. A run with failing verdicts is one that found something."
-      }
+      lede="Every run across every environment, newest first. A run with failing verdicts is one that found something."
     >
       {may(session.data?.role, "agents.run") ? (
         <div className="mb-6">
