@@ -569,6 +569,58 @@ const runsRouter = router({
         return rows.map((row) => ({ ...row, size_bytes: asNumber(row.size_bytes) }))
       })
     }),
+
+  /**
+   * The whole report a pull request generation carried.
+   *
+   * Everything the engine gathers past the counts, the findings and their fixes,
+   * the migration statements and locks, the egress substitutions, the access
+   * probe readings, the load percentiles, the invariant rows, reaches this
+   * control plane through the pull request callback rather than the events
+   * stream, so it is never projected into the runs, verdicts and artifacts
+   * tables the rest of this router reads. It lands whole in
+   * pr_generations.verdict, as the counts plus the report the engine already
+   * rendered for a human, and this is the only reader of that rendered report.
+   *
+   * Keyed by pull request number, and by a commit when the caller names one, so
+   * a link from the check on a superseded commit shows that commit's report
+   * rather than the newest. RLS on pr_generations scopes this to the tenant.
+   */
+  report: orgProcedure('environments.view')
+    .input(z.object({ pr: z.number().int().positive(), commit: z.string().optional() }))
+    .query(async ({ ctx, input }) => {
+      const c = ctx as OrgContext
+      return c.pool.withTenant(c.tenant, async (db) => {
+        const rows = await db.execute<{
+          head_sha: string
+          state: string
+          finished_at: string | Date | null
+          env_id: string | null
+          verdict: unknown
+        }>(sql`
+          SELECT g.head_sha, g.state::text AS state, g.finished_at, g.env_id, g.verdict
+          FROM pr_generations g
+          JOIN pull_requests p ON p.id = g.pull_request_id
+          WHERE p.number = ${input.pr}
+            AND (${input.commit ?? null}::text IS NULL OR g.head_sha = ${input.commit ?? null})
+          ORDER BY g.queued_at DESC
+          LIMIT 1`)
+        const g = rows[0]
+        if (!g) return null
+        const verdict = (g.verdict ?? {}) as Record<string, unknown>
+        return {
+          headSha: g.head_sha,
+          state: g.state,
+          finishedAt: g.finished_at ?? null,
+          envId: g.env_id,
+          counts: (verdict.counts ?? null) as unknown,
+          environment: typeof verdict.environment === 'string' ? verdict.environment : null,
+          url: typeof verdict.url === 'string' ? verdict.url : null,
+          duration: typeof verdict.duration === 'string' ? verdict.duration : null,
+          markdown: typeof verdict.markdown === 'string' ? verdict.markdown : null,
+        }
+      })
+    }),
 })
 
 // ---------------------------------------------------------------------------

@@ -534,6 +534,43 @@ describe(
       assert.equal((await generation(head))?.state, 'passed')
     })
 
+    // The report the console shows a person is this one, read back whole. The
+    // callback stores it and nothing else does, so a run detail that only read
+    // the runs and verdicts tables would show a pull request that reported
+    // everything as a pull request that reported nothing.
+    it('runs.report reads the whole stored report back for a pull request', async () => {
+      const head = sha('report-readback')
+      await deliver('pull_request', pullRequestPayload('opened', 78, head))
+      await deliver('workflow_run', workflowRunPayload('in_progress', head, 5078))
+      const token = (await callbackFor(head, 5078))!
+      const md =
+        '<!-- antifailure:report -->\n### Antifailure: a check failed\n\n' +
+        '| Workflow | Result |\n| --- | --- |\n| `read-own-orders` | FAILED |\n'
+      assert.equal((await report(token, head, ['pass', 'fail'], md)).status, 200)
+
+      const member = await signInAs(h, org, 'member')
+      const unwrap = <T,>(res: { body: unknown }): T =>
+        (res.body as { result: { data: T } }).result.data
+      const body = unwrap<{
+        headSha: string
+        markdown: string
+        counts: { passed: number; failed: number }
+        environment: string | null
+      }>(await callProcedure(h, member, 'runs.report', 'query', { pr: 78 }))
+      assert.equal(body.headSha, head)
+      assert.equal(body.markdown, md, 'the stored report did not come back whole')
+      assert.equal(body.counts.passed, 1)
+      assert.equal(body.counts.failed, 1)
+      assert.equal(body.environment, `env-${head.slice(0, 6)}`)
+
+      // A pull request nobody reported reads back as null rather than as the
+      // newest other pull request's report.
+      const none = unwrap<unknown>(
+        await callProcedure(h, member, 'runs.report', 'query', { pr: 99999 }),
+      )
+      assert.equal(none, null)
+    })
+
     for (const [name, extra, conclusion] of [
       ['load policy failure', { Findings: [{ Level: 'fail', Rule: 'load_regression' }] }, 'failure'],
       ['incomplete load', { Load: { Sent: 0, Unavailable: 'all routes refused' } }, 'action_required'],
