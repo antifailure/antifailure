@@ -21,6 +21,12 @@ real pseudo terminal of that size, sent the bytes a keyboard sends for
 `<down>`, `<ctrl-c>` and the rest, and judged against every screen the program
 drew. Those screens are the steps in the report.
 
+A failed terminal workflow carries steps a person can follow at their own
+terminal: the invocation, the size it was given, and one line per key that was
+pressed. The report skips its "how to see this yourself" block when that list
+is empty, so a red check used to name a terminal workflow and offer no way at
+all to reach it.
+
 Arrow keys are sent in the encoding the program asked for rather than a guess,
 because a program that has taken the screen ignores the other one in silence,
 and a key that silently did nothing is the worst shape a test failure can take.

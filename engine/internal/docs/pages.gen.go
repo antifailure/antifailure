@@ -12565,9 +12565,15 @@ is only spent when the clock runs out with keys still to send.
 
 ## What the report shows
 
-Each rendered screen is a step, so the report carries the screens the program
-drew in the order it drew them, and ` + "`" + `af watch` + "`" + ` prints them as they happen. A
-screen identical to the one before it is recorded once.
+Each rendered screen is a step, so the run's own report carries the screens the
+program drew in the order it drew them, and ` + "`" + `af watch` + "`" + ` prints them as they
+happen. A screen identical to the one before it is recorded once.
+
+The pull request comment shows something narrower for a workflow that failed:
+the invocation, the size of the terminal it was given, and one line per key
+that was pressed, so that a reader can run the same thing at their own
+terminal. The screens are not in it, because that comment is markdown and
+markdown collapses the runs of spaces that hold a screen's columns together.
 
 ## Running one
 
