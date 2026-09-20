@@ -298,3 +298,41 @@ func TestTest_TheEnvironmentAddressReachesTheProgram(t *testing.T) {
 	require.Len(t, rep.Results, 1)
 	require.Equal(t, "pass", rep.Results[0].Outcome.Verdict, rep.Results[0].Outcome.Detail)
 }
+
+// The surface the manifest named reaches the document builder, and does NOT
+// reach the wire. The runner takes one surface for the whole job, so a per
+// workflow copy would be a second answer to a question already answered, and
+// two answers can disagree about the same run.
+func TestWorkflowDocs_TheSurfaceIsCarriedAndNotSent(t *testing.T) {
+	m := &schema.Manifest{Name: "app", Workflows: []schema.Workflow{{
+		Name: "preferences", Description: "Open preferences.", Surface: schema.SurfaceDesktop,
+	}}}
+	docs := orchestratorFor(t, t.TempDir(), m).workflowDocs(nil)
+	require.Len(t, docs, 1)
+	require.Equal(t, "desktop", docs[0].surface,
+		"the manifest's surface did not reach the document, so nothing can select a driver from it")
+
+	body, err := json.Marshal(docs[0])
+	require.NoError(t, err)
+	require.NotContains(t, string(body), "desktop",
+		"the per workflow surface reached the wire, where it is a second answer to a question the job document already answers")
+}
+
+// Which driver the runner dispatches, read from what the manifest said. Until
+// this read the manifest, a surface could be built, registered and available
+// in the runner and still reachable from nothing.
+func TestSurfaceFor_TheManifestSelectsTheDriver(t *testing.T) {
+	desktop := &schema.Manifest{Name: "app", Workflows: []schema.Workflow{{
+		Name: "preferences", Description: "Open preferences.", Surface: schema.SurfaceDesktop,
+	}}}
+	docs := orchestratorFor(t, t.TempDir(), desktop).workflowDocs(nil)
+	require.Equal(t, "desktop", surfaceFor(docs, nil),
+		"a manifest whose workflows drive the desktop did not select the desktop driver")
+
+	web := &schema.Manifest{Name: "app", Workflows: []schema.Workflow{{
+		Name: "checkout", Description: "Buy one item.", Surface: schema.SurfaceWeb,
+	}}}
+	// Empty rather than "web", because the runner already defaults to web and
+	// a second spelling of the default is a second thing that can disagree.
+	require.Equal(t, "", surfaceFor(orchestratorFor(t, t.TempDir(), web).workflowDocs(nil), nil))
+}
