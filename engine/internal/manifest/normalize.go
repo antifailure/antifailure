@@ -444,6 +444,13 @@ func normalizeWorkflows(m *schema.Manifest) {
 		} else if w.Persona == "" {
 			w.Persona = firstPersona
 		}
+		// Filled in rather than left empty, so that every reader downstream
+		// gets a value and none of them has to decide what an absence means.
+		// The validator refuses a surface this build cannot drive, so what
+		// reaches the runner is always one it can.
+		if w.Surface == "" {
+			w.Surface = schema.SurfaceWeb
+		}
 		if w.StartPath == "" {
 			w.StartPath = DefaultStartPath
 		}

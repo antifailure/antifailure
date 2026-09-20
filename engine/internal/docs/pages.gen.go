@@ -12887,9 +12887,11 @@ Antifailure drives the program you name. It does not give it a shell, so
 ` + "`" + `args` + "`" + ` are passed as written and nothing in them is expanded, and a pipeline or
 a redirection belongs in a script you name as the ` + "`" + `command` + "`" + `.
 
-Desktop and iOS are declared in the surface abstraction and are not built. A
-run that asks for one is refused with a reason rather than returning a green
-verdict that tested nothing.
+Desktop, iOS and Android are declared in the surface abstraction and are not
+built. A manifest may still name one, in a ` + "`" + `workflows` + "`" + ` entry's
+[` + "`" + `surface` + "`" + `](/docs/guides/workflows): it is refused by name, against the
+surfaces this build does carry, rather than returning a green verdict that
+tested nothing.
 `,
 	"guides/webhooks.md": `---
 title: Webhooks
@@ -13207,7 +13209,43 @@ Where to begin. Defaults to ` + "`" + `/` + "`" + `. Worth setting for a workflo
 in the application, so the agent does not spend its budget navigating to the
 starting line.
 
-Related: [agents](/docs/concepts/agents), [personas](/docs/guides/personas).
+## ` + "`" + `surface` + "`" + `
+
+What the workflow drives. Defaults to ` + "`" + `web` + "`" + `, which is a browser.
+
+` + "`" + "`" + "`" + `yaml
+workflows:
+  - name: subscribe
+    surface: web
+    persona: owner
+    description: ...
+` + "`" + "`" + "`" + `
+
+The product knows five surfaces: ` + "`" + `web` + "`" + `, ` + "`" + `terminal` + "`" + `, ` + "`" + `desktop` + "`" + `, ` + "`" + `ios` + "`" + ` and
+` + "`" + `android` + "`" + `. All five may be written here, including the ones a build has no
+driver for, and that is deliberate. A build registers the drivers it carries,
+so a manifest naming a surface this build cannot drive is refused by name,
+against the surfaces that build actually has, which tells you far more than a
+schema saying the value is unknown. It is the same decision ` + "`" + `runtime.provider` + "`" + `
+documents for runtimes.
+
+The refusal happens twice, and neither half is redundant. The engine says it
+when it reads the manifest, so the answer arrives before an environment is
+built. The runner says it again before it drives anything, so a surface nothing
+drove can never come back green. A workflow refused that way is blocked, which
+counts against nobody, and the workflows beside it still run.
+
+Write a terminal workflow in
+[` + "`" + `terminal_workflows` + "`" + `](/docs/guides/terminal) rather than here. It needs a
+program to run where a browser workflow needs a persona to sign in as, so the
+two do not share an entry; ` + "`" + `surface: terminal` + "`" + ` written here is refused with
+that sentence rather than treated as a typo.
+
+This is not ` + "`" + `change.rules[].surface` + "`" + `, which says what a changed FILE is. This
+says what a workflow DRIVES.
+
+Related: [agents](/docs/concepts/agents), [personas](/docs/guides/personas),
+[terminal workflows](/docs/guides/terminal).
 `,
 	"index.md": `---
 title: Antifailure documentation
@@ -22635,6 +22673,11 @@ workflow needs a program and, when the program draws a screen, the size of it.
 names, what a screen changes, and why an expectation the workflow types itself
 is refused.
 
+A ` + "`" + `workflows` + "`" + ` entry names what it drives with
+[` + "`" + `surface` + "`" + `](/docs/guides/workflows), one of ` + "`" + `web` + "`" + `, ` + "`" + `terminal` + "`" + `, ` + "`" + `desktop` + "`" + `, ` + "`" + `ios` + "`" + `
+or ` + "`" + `android` + "`" + `, defaulting to ` + "`" + `web` + "`" + `. All five may be written; a build refuses the
+ones it carries no driver for, by name.
+
 ## ` + "`" + `database` + "`" + `
 
 | Key | Notes |
@@ -24834,6 +24877,7 @@ One thing the agents do, written as a goal rather than a script. The runner deci
 | ` + "`" + `personality` + "`" + ` | string | no | Pin one personality to this workflow rather than drawing from the diversity mix. One of the built in ids: explorer, fast_actor, cautious_analyst, goal_oriented, distracted, skeptic, text_oriented, visual_follower, keyboard_user, edge_case. This is the HOW the agent behaves and is independent of persona, the WHO it signs in as. Absent means the personality is assigned from the mix by the seed, which is the usual case. Read only when diversity is enabled. Max length 40, matches ` + "`" + `^[a-z0-9]([a-z0-9_-]{0,38}[a-z0-9])?$` + "`" + `. |
 | ` + "`" + `personas` + "`" + ` | list of string | no | The personas this workflow signs in as, in order, in one browser, for a person who holds more than one session at once: an operator who is also a customer, an account with a second sign-in surface. Each is signed in through its own strategy and the sessions accumulate; the last one named is the identity the workflow acts as. Mutually exclusive with persona. Min items 1, max items 5. |
 | ` + "`" + `start_path` + "`" + ` | string | no | Where to begin. Defaults to the application root. Defaults to ` + "`" + `/` + "`" + `. Max length 512. |
+| ` + "`" + `surface` + "`" + ` | ` + "`" + `web` + "`" + `, ` + "`" + `terminal` + "`" + `, ` + "`" + `desktop` + "`" + `, ` + "`" + `ios` + "`" + `, ` + "`" + `android` + "`" + ` | no | What this workflow drives. Defaults to ` + "`" + `web` + "`" + `, which is a browser.  Every surface the product knows is named here, including the ones a given build cannot drive yet, and that is the same decision ` + "`" + `runtime.provider` + "`" + ` documents. A build registers the drivers it carries, so a manifest naming a surface this build has no driver for is refused BY NAME, against the surfaces that build actually has, which tells a person far more than a schema saying the value is unknown. The refusal happens twice on purpose: the engine says it at validation, so the answer is immediate, and the runner says it again before it drives anything, so a surface nothing drove can never come back green.  Write ` + "`" + `terminal` + "`" + ` in ` + "`" + `terminal_workflows` + "`" + ` rather than here. A terminal workflow needs a program to run where this one needs a persona to sign in as, so the two do not share an entry; naming it here is refused with that sentence rather than treated as a typo.  This is not ` + "`" + `change.rules[].surface` + "`" + `, which says what a changed FILE is. This says what a workflow DRIVES. Defaults to ` + "`" + `web` + "`" + `. |
 | ` + "`" + `tags` + "`" + ` | list of string | no | Labels for the person reading the manifest, and nothing else. The engine does not read them: no command selects workflows by tag and no report prints one, so grouping workflows here groups them for a reader and not for a run. Name the workflows with --only to run a subset. This key had no description at all until somebody counted the fields nothing reads, which is how a label and a broken promise came to look alike. Max items 20. |
 
 `,

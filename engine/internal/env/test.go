@@ -189,6 +189,13 @@ type jobDocument struct {
 }
 
 type workflowDoc struct {
+	// surface is unexported and never marshalled. The runner dispatches ONE
+	// driver per run from the job document's own `surface`, so a per workflow
+	// copy on the wire would be a second answer to a question already
+	// answered, and the two could disagree. It is carried here only so
+	// surfaceFor can read what the manifest said without being handed the
+	// manifest again.
+	surface     string
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Persona     string `json:"persona,omitempty"`
@@ -708,6 +715,7 @@ func (o *Orchestrator) workflowDocs(only []string) []workflowDoc {
 		doc := workflowDoc{
 			Name: w.Name, Description: w.Description, Persona: w.Persona,
 			Personas: w.Personas, Expect: w.Expect, StartPath: w.StartPath,
+			surface: string(w.Surface),
 		}
 		if w.Budget != nil {
 			doc.MaxSteps = w.Budget.Steps
@@ -764,15 +772,37 @@ func (o *Orchestrator) terminalDocs(only []string) []terminalDoc {
 	return out
 }
 
-// surfaceFor is which surface the runner is told this run drives.
+// surfaceFor is which surface the runner is told this run drives, which is
+// which DRIVER it dispatches.
+//
+// It is read from what the workflows say they drive, so a manifest is what
+// selects a driver. Until this read the manifest, a surface could be built,
+// registered and available in the runner and still reachable from nothing,
+// which is the defect this whole seam exists to close: the terminal driver
+// lived that way for its whole life and the desktop driver was one merge away
+// from the same.
 //
 // "terminal" only when there is nothing for a browser to do. A run with both
-// kinds of workflow is a web run that also has terminal workflows in it, and
-// saying otherwise would stop the browser half from running at all. A run with
+// kinds is a web run that also has terminal workflows in it, and saying
+// otherwise would stop the browser half from running at all. A run with
 // neither cannot reach here: Test refuses it above.
+//
+// The workflows have one surface between them, because the runner dispatches
+// ONE driver per run and hands it the whole list. A manifest that mixes them
+// is refused at validation rather than here, so the message arrives before an
+// environment is built.
 func surfaceFor(workflows []workflowDoc, terminals []terminalDoc) string {
-	if len(workflows) == 0 && len(terminals) > 0 {
-		return "terminal"
+	if len(workflows) == 0 {
+		if len(terminals) > 0 {
+			return "terminal"
+		}
+		return ""
+	}
+	// Normalisation fills every workflow's surface in, and validation refuses
+	// a manifest whose browser-shaped workflows do not agree, so the first one
+	// speaks for all of them. Empty means web, which the runner defaults to.
+	if s := workflows[0].surface; s != string(schema.SurfaceWeb) {
+		return s
 	}
 	return ""
 }

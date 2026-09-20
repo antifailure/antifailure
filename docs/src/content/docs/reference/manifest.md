@@ -272,6 +272,11 @@ workflow needs a program and, when the program draws a screen, the size of it.
 names, what a screen changes, and why an expectation the workflow types itself
 is refused.
 
+A `workflows` entry names what it drives with
+[`surface`](/docs/guides/workflows), one of `web`, `terminal`, `desktop`, `ios`
+or `android`, defaulting to `web`. All five may be written; a build refuses the
+ones it carries no driver for, by name.
+
 ## `database`
 
 | Key | Notes |

@@ -10,14 +10,22 @@
 // workflow that reads as a sentence, "press Continue", "expect Welcome", ports
 // from surface to surface, and only the driver underneath changes.
 //
-// Today web and terminal are implemented, and the terminal one drives a full
-// screen program through a real pseudo terminal, which is where that design
-// stops being a claim: a curses program's rendered grid of cells IS the tree,
-// and matching against the bytes it wrote would be matching against the HTML.
-// Desktop and iOS are defined here and scaffolded: their drivers conform to
-// this interface and FAIL LOUDLY rather than silently passing, so a job that
-// targets them is refused with a clear reason instead of returning a green
-// verdict that tested nothing.
+// THE REGISTRY BELOW IS THE SOURCE OF TRUTH FOR WHAT THIS BUILD CAN DRIVE, and
+// the engine reads it rather than keeping a second opinion. A surface is
+// reachable from a manifest the moment it appears here, and the engine refuses
+// one whose `available` is false by name; schema.DriveableSurfaces on the Go
+// side must list exactly the available ones, and a test compares the two so a
+// driver that is finished in one place and not the other fails the build
+// instead of shipping a surface a manifest can ask for and nothing drives.
+//
+// Today web, terminal and desktop are implemented. The terminal one drives a
+// full screen program through a real pseudo terminal, which is where that
+// design stops being a claim: a curses program's rendered grid of cells IS the
+// tree, and matching against the bytes it wrote would be matching against the
+// HTML. iOS and Android are defined here and scaffolded: their drivers conform
+// to this interface and FAIL LOUDLY rather than silently passing, so a job
+// that targets them is refused with a clear reason instead of returning a
+// green verdict that tested nothing.
 
 import type { Surface } from '../live.ts';
 
@@ -81,6 +89,11 @@ const drivers: Record<Surface, SurfaceDriver> = {
     available: false,
     summary: 'Will drive an app through XCUITest against the simulator, then a device farm. Needs the Xcode toolchain and simulator provisioning.',
   },
+  android: {
+    surface: 'android',
+    available: false,
+    summary: 'Will drive an app through UiAutomator against an emulator, then a device farm. Needs the Android SDK and an emulator image.',
+  },
 };
 
 /** driverFor returns the driver description for a surface. */
@@ -91,7 +104,7 @@ export function driverFor(surface: Surface): SurfaceDriver {
 /** surfaces lists every surface the abstraction knows, available or not, so a
  *  command can print the roadmap and a test can walk all of them. */
 export function surfaces(): readonly Surface[] {
-  return ['web', 'terminal', 'desktop', 'ios'];
+  return ['web', 'terminal', 'desktop', 'ios', 'android'];
 }
 
 /** assertAvailable throws NotImplementedError for a scaffolded surface. This is

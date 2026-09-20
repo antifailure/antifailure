@@ -1397,7 +1397,20 @@ func TestSchemaConstraintReport(t *testing.T) {
 // max_statements and thresholds.mean_increase instead. Without that split the
 // base manifest is refused by this feature's own three cross field rules,
 // which is the #315 failure exactly.
-const wantConstraints = 770
+//
+// Then 772, which is neither branch's number: the SQL workload above and the
+// surface below landed in parallel and each measured 743 plus its own, so the
+// figure was recounted from the schema rather than added. A workflow gained
+// `surface`, naming all five the product knows
+// rather than only the two this build drives, so that a manifest asking for a
+// surface with no driver is refused BY NAME instead of read as a typo. Two
+// constraints, its type and its enum, both ENFORCED: the decoder refuses a
+// non-string and the validator refuses a value that is not a surface, a
+// surface this build cannot drive, and `terminal` written in the wrong list,
+// each with its own sentence. The generator fills the field with the first
+// enum value, which is `web`, so no base is refused and no tuning override is
+// needed.
+const wantConstraints = 772
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and

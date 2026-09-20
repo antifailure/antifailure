@@ -169,6 +169,8 @@ Antifailure drives the program you name. It does not give it a shell, so
 `args` are passed as written and nothing in them is expanded, and a pipeline or
 a redirection belongs in a script you name as the `command`.
 
-Desktop and iOS are declared in the surface abstraction and are not built. A
-run that asks for one is refused with a reason rather than returning a green
-verdict that tested nothing.
+Desktop, iOS and Android are declared in the surface abstraction and are not
+built. A manifest may still name one, in a `workflows` entry's
+[`surface`](/docs/guides/workflows): it is refused by name, against the
+surfaces this build does carry, rather than returning a green verdict that
+tested nothing.

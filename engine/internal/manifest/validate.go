@@ -1407,6 +1407,10 @@ func (v *validator) workflows(m *schema.Manifest) {
 		personas[p.Name] = true
 	}
 	names := map[string]bool{}
+	// The surface the first workflow named, and which workflow that was, so a
+	// disagreement can name both sides rather than only the second one.
+	var first schema.Surface
+	var firstName string
 	for i := range m.Workflows {
 		w := &m.Workflows[i]
 		base := fmt.Sprintf("workflows[%d]", i)
@@ -1414,6 +1418,49 @@ func (v *validator) workflows(m *schema.Manifest) {
 			v.add(base+".name", fmt.Sprintf("Two workflows are both named %q.", w.Name), "")
 		}
 		names[w.Name] = true
+
+		// The surface this workflow drives, refused here rather than only in
+		// the runner. Two gates at two layers, and neither is redundant: this
+		// one gives a person an answer at validation time and names what this
+		// build can actually drive, and the runner's assertAvailable is the
+		// backstop that makes a green run impossible for a surface nothing
+		// drove. A run has to get past both.
+		switch {
+		case w.Surface == schema.SurfaceTerminal:
+			// Named rather than lumped in with an unknown value, because
+			// somebody writing this has understood the product correctly and
+			// only written it in the wrong list.
+			v.add(base+".surface",
+				fmt.Sprintf("Workflow %q sets surface to terminal.", w.Name),
+				"Write a terminal workflow in terminal_workflows instead. It needs a program to run where this one needs a persona to sign in as, so the two do not share an entry.")
+		case !schema.IsSurface(w.Surface):
+			v.add(base+".surface",
+				fmt.Sprintf("Workflow %q drives %q, which is not a surface.", w.Name, w.Surface),
+				"The surfaces are: "+strings.Join(schema.SurfaceNames(schema.Surfaces), ", ")+".")
+		case !schema.CanDrive(w.Surface):
+			// The surface is real and this build has no driver for it. That is
+			// a different fact from a typo and it gets a different sentence,
+			// because the manifest is allowed to name a surface the product
+			// knows before a build can drive it.
+			v.add(base+".surface",
+				fmt.Sprintf("Workflow %q drives %q, and this build has no driver for it.", w.Name, w.Surface),
+				"This build drives: "+strings.Join(schema.SurfaceNames(schema.DriveableSurfaces), ", ")+".")
+		}
+
+		// The runner dispatches ONE driver per run and hands it the whole
+		// workflow list, so a manifest whose workflows drive different
+		// surfaces has no single answer to give it. Refused here rather than
+		// left to the runner, because the runner would silently drive them all
+		// as whichever surface won, and a workflow driven on the wrong surface
+		// fails for a reason nothing in the report could name.
+		if first != "" && w.Surface != "" && w.Surface != first {
+			v.add(base+".surface",
+				fmt.Sprintf("Workflow %q drives %q and %q drives %q.", w.Name, w.Surface, firstName, first),
+				"One run drives one surface, because the runner starts one driver for the whole list. Put them in separate manifests, or run them as separate checks.")
+		}
+		if first == "" && w.Surface != "" {
+			first, firstName = w.Surface, w.Name
+		}
 
 		if w.Persona == "" {
 			v.add(base+".persona",

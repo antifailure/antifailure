@@ -26,9 +26,11 @@
 
 import { connect, type Socket } from 'node:net';
 
-/** The surfaces a run can drive. web and terminal are live; desktop and ios
- *  are declared here so the wire shape is stable before their drivers exist. */
-export type Surface = 'web' | 'terminal' | 'desktop' | 'ios';
+/** The surfaces a run can drive. web, terminal and desktop are live; ios and
+ *  android are declared here so the wire shape is stable before their drivers
+ *  exist, and so a manifest naming one is refused by name rather than read as
+ *  a typo. */
+export type Surface = 'web' | 'terminal' | 'desktop' | 'ios' | 'android';
 
 /** Which agent is which, from a watcher's point of view. One workflow running
  *  as one persona is one agent; one exploration goal is one agent. The id is

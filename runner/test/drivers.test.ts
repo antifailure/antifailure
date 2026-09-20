@@ -19,11 +19,20 @@ import { socketSink, decode, type LiveEvent } from '../src/live.ts';
 import type { WorkflowResult } from '../src/execute.ts';
 
 test('the registry knows every surface and which are available', () => {
-  assert.deepEqual([...surfaces()].sort(), ['desktop', 'ios', 'terminal', 'web']);
+  assert.deepEqual([...surfaces()].sort(), ['android', 'desktop', 'ios', 'terminal', 'web']);
   assert.equal(driverFor('web').available, true);
   assert.equal(driverFor('terminal').available, true);
   assert.equal(driverFor('desktop').available, true);
   assert.equal(driverFor('ios').available, false);
+  assert.equal(driverFor('android').available, false);
+  // Every surface the type allows has a row. A surface in the union and not in
+  // the registry is one driverFor answers undefined for, and assertAvailable
+  // would refuse it with "unknown surface" rather than with the sentence
+  // saying what building it takes.
+  for (const surface of surfaces()) {
+    assert.ok(driverFor(surface), `no registry row for ${surface}`);
+    assert.ok(driverFor(surface).summary.length > 0, `no summary for ${surface}`);
+  }
 });
 
 test('assertAvailable passes a built surface and refuses a scaffolded one loudly', () => {
@@ -33,7 +42,7 @@ test('assertAvailable passes a built surface and refuses a scaffolded one loudly
   assertAvailable('desktop');
   // Scaffolded surfaces throw, so a run that targets them fails rather than
   // returning a green verdict that tested nothing.
-  for (const surface of ['ios'] as Surface[]) {
+  for (const surface of ['ios', 'android'] as Surface[]) {
     assert.throws(() => assertAvailable(surface), (err: unknown) => {
       assert.ok(err instanceof NotImplementedError);
       assert.equal((err as NotImplementedError).surface, surface);
