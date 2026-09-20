@@ -522,6 +522,10 @@ var knownKeys = []string{
 	"email", "phone", "role", "login", "mfa", "attributes", "sign_in_path",
 	"description", "persona", "start_path", "independent", "budget", "expect", "tags",
 	"steps", "usd", "duration", "sql",
+	// The terminal surface: its own list of workflows, what is typed at the
+	// program, where it runs, and the screen it is given when it draws one.
+	// command and args are already above, under the service build block.
+	"terminal_workflows", "input", "cwd", "screen", "rows", "cols",
 	"goals", "goal", "slow_ms",
 	// The diversity block: how many personality varied agents drive each
 	// workflow, which personalities may be drawn, and a workflow's personality

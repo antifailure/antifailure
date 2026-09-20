@@ -12416,6 +12416,175 @@ a model for every unmatched request would be a surprising bill.
 
 Related: [egress](/docs/concepts/egress), [mocking](/docs/guides/mocking).
 `,
+	"guides/terminal.md": `---
+title: Terminal workflows
+description: Driving a command line program, including a full screen one, from the same manifest and the same run as the browser workflows.
+sidebar:
+  order: 26
+---
+
+A terminal workflow is one thing a person does at a command line, written the
+same way a [browser workflow](/docs/guides/workflows) is: a goal, what they
+type, and what the terminal must show afterwards.
+
+` + "`" + "`" + "`" + `yaml
+terminal_workflows:
+  - name: deploy-plan
+    description: >
+      Run the deploy command in plan mode. It prints the changes it would make
+      and asks before applying them. Answer yes and confirm it reports what it
+      applied rather than an error.
+    command: ./bin/deploy
+    args: ["--plan"]
+    input: ["y", "<enter>"]
+    expect:
+      - '"Applied 3 changes"'
+` + "`" + "`" + "`" + `
+
+They run inside ` + "`" + `af test` + "`" + `, against the same environment the browser workflows
+run against, and their results are counted in the same verdict. A terminal
+workflow that fails is a failed check, exactly as a browser one is.
+
+## The screen is what decides how the program is driven
+
+Two kinds of program live at a command line and they need opposite things.
+
+A program that reads a line and prints lines is driven through a pipe. What it
+printed is the evidence, all of it, from the first line to the last. Leave
+` + "`" + `screen` + "`" + ` out and that is what you get.
+
+A program that takes over the screen is different in every way that matters. It
+will not start without a terminal. It reads raw keystrokes rather than lines.
+And what it "printed" is a stream of cursor moves, erases and scroll regions
+whose only meaning is the grid of cells they leave behind: a menu row that was
+drawn, erased, and redrawn one line up appears three times in that stream and
+once on the screen, and the row a person would name is in neither. Declare a
+` + "`" + `screen` + "`" + ` and the program is given a real pseudo terminal of that size, and the
+expectations are judged against what it drew.
+
+` + "`" + "`" + "`" + `yaml
+terminal_workflows:
+  - name: inbox
+    description: >
+      Open the inbox. Move down to the published posts with the arrow keys and
+      press Enter. The detail for that row should appear at the bottom.
+    command: ./bin/inbox
+    screen:
+      rows: 24
+      cols: 80
+    input: ["<down>", "<down>", "<enter>", "q"]
+    expect:
+      - '"Eleven posts are live."'
+` + "`" + "`" + "`" + `
+
+That is the whole choice, and it is not a preference. A pseudo terminal echoes
+what is typed into it, so a program that has not turned echo off shows the
+driver's own keystrokes on its screen. An expectation naming something the
+workflow types would then be satisfied by the workflow rather than by the
+program, which is why the manifest is refused with AF-MAN-002 rather than
+merely warned about: a check that its own input can pass is worse than no
+check, because it looks like one. ` + "`" + `af doctor` + "`" + ` revalidates.
+
+## Keys
+
+Without a screen, each ` + "`" + `input` + "`" + ` entry is a line written to standard input.
+
+With a screen, each entry is keystrokes. Text is typed as written, and a name
+in angle brackets becomes the bytes a keyboard sends for that key:
+
+` + "`" + `<enter>` + "`" + ` ` + "`" + `<tab>` + "`" + ` ` + "`" + `<esc>` + "`" + ` ` + "`" + `<space>` + "`" + ` ` + "`" + `<backspace>` + "`" + ` ` + "`" + `<delete>` + "`" + ` ` + "`" + `<insert>` + "`" + ` ` + "`" + `<up>` + "`" + `
+` + "`" + `<down>` + "`" + ` ` + "`" + `<left>` + "`" + ` ` + "`" + `<right>` + "`" + ` ` + "`" + `<home>` + "`" + ` ` + "`" + `<end>` + "`" + ` ` + "`" + `<pageup>` + "`" + ` ` + "`" + `<pagedown>` + "`" + `
+` + "`" + `<backtab>` + "`" + `, ` + "`" + `<f1>` + "`" + ` through ` + "`" + `<f12>` + "`" + `, and ` + "`" + `<ctrl-a>` + "`" + ` through ` + "`" + `<ctrl-z>` + "`" + `.
+
+Anything else between angle brackets is typed literally, so a workflow that
+types ` + "`" + `<html>` + "`" + ` into a field gets ` + "`" + `<html>` + "`" + ` and there is no escape syntax to
+learn.
+
+Text and keys mix inside one entry, so ` + "`" + `"<esc>:wq<enter>"` + "`" + ` is one step.
+
+Arrow keys have two encodings, and which one is correct is decided by the
+program rather than by you: a program that has asked for application cursor
+keys, which most full screen programs do while they own the screen, ignores the
+other encoding in complete silence. Antifailure reads the mode the program set
+and sends the encoding it asked for, so an arrow in a workflow is the arrow the
+program is waiting for.
+
+After every entry, Antifailure waits for the program to redraw and then reads
+the screen. Expectations are judged against every screen the program showed,
+not only the last one, so a workflow can name something that was on screen in
+the middle of it.
+
+## Expectations
+
+The rules are the browser ones, with one piece of advice that matters more
+here. A quoted sentence is required on the screen character for character:
+
+` + "`" + "`" + "`" + `yaml
+expect:
+  - '"Eleven posts are live."'
+` + "`" + "`" + "`" + `
+
+Prefer that form for a terminal. An unquoted expectation is judged by how many
+of its meaningful words appear, and a screen is eighty columns of dense text
+whose words repeat, so the sense of a sentence is matched far more easily there
+than on a page.
+
+At least one expectation is required, which is stricter than a browser
+workflow. A terminal workflow with nothing to expect can only ever report that
+nothing confirmed or contradicted it, and that is blocked, so a workflow
+without one could never pass.
+
+## Where the program runs, and what it can reach
+
+` + "`" + `cwd` + "`" + ` is where the program runs, relative to the directory holding the
+manifest, and it defaults to that directory.
+
+Every terminal workflow is started with ` + "`" + `AF_BASE_URL` + "`" + ` set to the address of the
+environment this run is rehearsing. A command line tool under test reads it and
+talks to the rehearsal environment rather than to whatever the shell it
+inherited happens to point at.
+
+## Budget
+
+` + "`" + "`" + "`" + `yaml
+budget:
+  duration: 45s
+` + "`" + "`" + "`" + `
+
+Thirty seconds by default. Past it the program is stopped and the workflow is
+reported as blocked with the budget named, never judged on a half drawn screen.
+
+There is no step budget and no cost ceiling, because neither exists here: the
+keys are written down rather than decided by an agent, and no model is asked
+anything.
+
+A full screen program is not expected to exit, and not exiting is not a spent
+budget. The workflow is over once its keys have been sent and the screen has
+settled; Antifailure judges what it sees and then stops the program. The budget
+is only spent when the clock runs out with keys still to send.
+
+## What the report shows
+
+Each rendered screen is a step, so the report carries the screens the program
+drew in the order it drew them, and ` + "`" + `af watch` + "`" + ` prints them as they happen. A
+screen identical to the one before it is recorded once.
+
+## Running one
+
+` + "`" + `af test --only deploy-plan` + "`" + ` selects by name, and names are shared between
+` + "`" + `workflows` + "`" + ` and ` + "`" + `terminal_workflows` + "`" + ` for exactly that reason. Two workflows
+answering to one name is refused.
+
+## What this does not do
+
+Antifailure drives the program you name. It does not give it a shell, so
+` + "`" + `args` + "`" + ` are passed as written and nothing in them is expanded, and a pipeline or
+a redirection belongs in a script you name as the ` + "`" + `command` + "`" + `.
+
+Desktop and iOS are declared in the surface abstraction and are not built. A
+run that asks for one is refused with a reason rather than returning a green
+verdict that tested nothing.
+`,
 	"guides/webhooks.md": `---
 title: Webhooks
 description: Inbound callbacks reach an environment that has no public address.
@@ -18292,6 +18461,11 @@ Run the manifest's workflows against the environment.
 Agents drive the application the way a person does, through the accessibility
 tree, and return a verdict with a video, a trace, and steps to reproduce it.
 
+The manifest's terminal workflows run in the same pass and are counted in the
+same verdict. A terminal's rendered cells are its accessibility tree, so a
+program that draws a full screen is driven on a real pseudo terminal and judged
+on what it drew rather than on the bytes it wrote.
+
 Five verdicts, not two. The one that matters is blocked: a browser that
 crashed, a page that never loaded, or a persona with no password is not
 evidence about the application, and charging it to the application is how
@@ -18311,7 +18485,7 @@ af test --only checkout --headed
 | ` + "`" + `--attempts` + "`" + ` | ` + "`" + `2` + "`" + ` | How many times to try a workflow before deciding. |
 | ` + "`" + `--branch` + "`" + ` | - | Branch to run against, defaulting to the checked out one. |
 | ` + "`" + `--headed` + "`" + ` | ` + "`" + `false` + "`" + ` | Show the browser rather than running it hidden. |
-| ` + "`" + `--only` + "`" + ` | - | Run just these workflows, by name. |
+| ` + "`" + `--only` + "`" + ` | - | Run just these workflows, by name, from either list. |
 | ` + "`" + `--runner` + "`" + ` | - | Path to the runner's entry point. |
 
 ### ` + "`" + `af token` + "`" + `
@@ -21792,6 +21966,7 @@ what it deliberately does not cover.
 | ` + "`" + `egress` + "`" + ` | block | What the environment may reach. |
 | ` + "`" + `personas` + "`" + ` | list | Users the agents sign in as. |
 | ` + "`" + `workflows` + "`" + ` | list | What the agents do. |
+| ` + "`" + `terminal_workflows` + "`" + ` | list | What the agents do at a command line. |
 | ` + "`" + `invariants` + "`" + ` | list | Statements about the data that must stay true. |
 | ` + "`" + `insights` + "`" + ` | block | The Postgres native checks. |
 | ` + "`" + `change` + "`" + ` | block | Path rules for [change analysis](/docs/concepts/change-analysis), for a layout the built in rules do not predict. |
@@ -22008,6 +22183,30 @@ rather than resolved to whichever was seen first.
 A service receives what it declares and nothing else. The engine's own
 environment is not passed through, or a preview would inherit whatever is
 exported on the laptop that started it.
+
+## ` + "`" + `terminal_workflows` + "`" + `
+
+What the agents do at a command line, run inside the same ` + "`" + `af test` + "`" + ` and counted
+in the same verdict as ` + "`" + `workflows` + "`" + `. Its own list rather than a ` + "`" + `surface` + "`" + ` key on
+` + "`" + `workflows` + "`" + `, because the two share the sentence and nothing else: a browser
+workflow needs a persona to sign in as and a path to start at, and a terminal
+workflow needs a program and, when the program draws a screen, the size of it.
+
+| Key | Type | Notes |
+| --- | --- | --- |
+| ` + "`" + `name` + "`" + ` | string | Required. What the report calls it and what ` + "`" + `--only` + "`" + ` selects. Unique across this list and ` + "`" + `workflows` + "`" + ` together. |
+| ` + "`" + `description` + "`" + ` | string | Required. What a person would do and what proves it happened. |
+| ` + "`" + `command` + "`" + ` | string | Required. The program to run. Never through a shell. |
+| ` + "`" + `args` + "`" + ` | list | Its arguments, one per entry, passed as written. |
+| ` + "`" + `input` + "`" + ` | list | What a person types. Lines without ` + "`" + `screen` + "`" + `, keystrokes with it. |
+| ` + "`" + `expect` + "`" + ` | list | Required, at least one. What the terminal must show. |
+| ` + "`" + `screen` + "`" + ` | block | ` + "`" + `rows` + "`" + ` and ` + "`" + `cols` + "`" + `. Its presence says the program draws a screen and gives it a pseudo terminal. |
+| ` + "`" + `cwd` + "`" + ` | string | Where to run it, relative to the manifest. |
+| ` + "`" + `budget` + "`" + ` | block | ` + "`" + `duration` + "`" + ` only. Thirty seconds by default. |
+
+[Terminal workflows](/docs/guides/terminal) is the guide, including the key
+names, what a screen changes, and why an expectation the workflow types itself
+is refused.
 
 ## ` + "`" + `database` + "`" + `
 
@@ -22939,10 +23138,11 @@ that ran nothing and reported green is a check everybody believes is running.
 
 ### ` + "`" + `run_browser_workflows` + "`" + `
 
-Drives the manifest's declared workflows through a real browser, then asks the
-manifest's invariants of the rows they left behind, so an order that reached a
-success page and now has no user is a failure the screen was never going to
-show.
+Drives the manifest's declared workflows, the browser ones through a real
+browser and the [terminal ones](/docs/guides/terminal) on a real pseudo
+terminal, then asks the manifest's invariants of the rows they left behind, so
+an order that reached a success page and now has no user is a failure the
+screen was never going to show.
 
 Blocked and unverified are statements about the environment rather than
 verdicts about the application and are not counted against the change. A run in
@@ -23613,6 +23813,7 @@ This page is generated from ` + "`" + `schemas/manifest.v1.json` + "`" + `. Edit
 | ` + "`" + `runtime` + "`" + ` | [Runtime](#runtime) | no | Where and how long the environment runs. |
 | ` + "`" + `security` + "`" + ` | [Security](#security) | no | Fixtures the dynamic security suite needs and the engine cannot infer from a diff. |
 | ` + "`" + `services` + "`" + ` | list of [Service](#service) | no | Every process the environment runs: web servers, API servers, background workers, and scheduled jobs. Min items 1, max items 50. |
+| ` + "`" + `terminal_workflows` + "`" + ` | list of [Terminal workflow](#terminal-workflow) | no | What the agents do at a command line. Written the same way a browser workflow is, as a goal and what proves it happened, and run in the same ` + "`" + `af test` + "`" + ` against the same environment, so a terminal result is counted and reported exactly like a browser one. Max items 200. |
 | ` + "`" + `version` + "`" + ` | ` + "`" + `1` + "`" + ` | no | The manifest schema version. Increment only for a breaking change; the engine refuses a version it does not understand rather than guessing. |
 | ` + "`" + `workflows` + "`" + ` | list of [Workflow](#workflow) | no | What the agents do, written as sentences. A workflow is a goal, not a script: the runner decides the actions and verifies the outcome. Max items 200. |
 
@@ -24122,6 +24323,39 @@ Take a production shaped slice rather than the whole database. The closure is co
 | ` + "`" + `seed_table` + "`" + ` | string | no | Table the selection starts from, for example the tenant or account table. Max length 128. |
 | ` + "`" + `seed_where` + "`" + ` | string | no | A SQL predicate selecting the seed rows, for example created_at > now() - interval '90 days'. Max length 2048. |
 | ` + "`" + `virtual_relationships` + "`" + ` | list of object | no | Relationships the schema does not declare as foreign keys but the application relies on. Without these, a subset can look complete and still break the application. Max items 200. |
+
+## Terminal screen
+
+The size of the screen the program draws, and its presence is what says the program draws one.
+
+A program that takes over the screen is driven through a pseudo terminal: it is given a real terminal, it is sent raw keystrokes rather than lines, and it is judged on the grid of cells its cursor moves and erases leave behind rather than on the bytes it wrote. A program that only prints is driven through a pipe and judged on everything it printed. Leaving this out is the second one.
+
+The distinction is not a preference. A pseudo terminal echoes what is typed into it, so a program that has not turned echo off shows the driver's own keystrokes on its screen, and an expectation naming them would be satisfied by the workflow rather than by the program. Say a program draws a screen when it does, and not otherwise.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| ` + "`" + `cols` + "`" + ` | integer | no | How many columns the terminal has. Text past it wraps or is truncated by the program, which is the behaviour a narrow terminal is worth testing for. Defaults to ` + "`" + `80` + "`" + `. Minimum 20, maximum 500. |
+| ` + "`" + `rows` + "`" + ` | integer | no | How many rows the terminal has. A program lays its screen out from this, so a narrow one and a tall one are different tests of the same program. Defaults to ` + "`" + `24` + "`" + `. Minimum 4, maximum 200. |
+
+## Terminal workflow
+
+One thing the agents do at a command line: a program to run, what a person types at it, and what the terminal must show.
+
+WHY THIS IS ITS OWN LIST rather than a ` + "`" + `surface` + "`" + ` key on ` + "`" + `workflows` + "`" + `. The two surfaces share the sentence and nothing else. A browser workflow needs a persona to sign in as, a path to start at and a step budget; a terminal workflow needs a program, its arguments, and the size of the screen it draws. Putting both in one entry would mean half of every entry's keys are refused by the other half's surface, which is a conditional this schema has nowhere else and which a reader would have to hold in their head on every field. The list a workflow is written in says which surface it drives, and that is a fact a person can see.
+
+Names are unique across both lists, because a name is what ` + "`" + `--only` + "`" + ` selects and what the report prints, and two workflows answering to one name is a run nobody can read.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| ` + "`" + `args` + "`" + ` | list of string | no | The arguments, one per entry. Passed to the program as written and never through a shell, so a space in a value is part of that value and nothing is expanded behind your back. Max items 64. |
+| ` + "`" + `budget` + "`" + ` | object | no | What this workflow may spend. Only a duration, because the two other things a browser workflow spends do not exist here: there are no steps to count, the keys are written down rather than decided, and no model is asked anything, so there is no cost to cap. |
+| ` + "`" + `command` + "`" + ` | string | **yes** | The program to run. Resolved against the working directory and the PATH the engine runs with, so ` + "`" + `./bin/deploy` + "`" + ` and ` + "`" + `psql` + "`" + ` both work. Min length 1, max length 512. |
+| ` + "`" + `cwd` + "`" + ` | string | no | Where to run it. Relative paths are resolved against the directory holding the manifest. Defaults to that directory. Max length 512. |
+| ` + "`" + `description` + "`" + ` | string | **yes** | What a person would do and what proves it happened, in sentences. It is what a reader of the report is told this workflow was for. Min length 10, max length 4000. |
+| ` + "`" + `expect` + "`" + ` | list of string | **yes** | What the terminal must show, written as sentences about what a person would read. Judged against every screen the program drew and the scrollback it left behind, not against the bytes it wrote.  At least one is required here, unlike a browser workflow. A terminal workflow with nothing to expect can only ever report that nothing confirmed or contradicted it, which is blocked, so a manifest that declares one has written a workflow that cannot pass.  A sentence in double quotes is required on the screen character for character. Prefer that form here: a screen is small and its words repeat, so the sense of a sentence is matched far more easily on eighty columns than on a page. Min items 1, max items 50. |
+| ` + "`" + `input` + "`" + ` | list of string | no | What a person types, in order.  Without ` + "`" + `screen` + "`" + ` each entry is a line written to standard input, followed by a newline.  With ` + "`" + `screen` + "`" + ` each entry is keystrokes sent to the program as a keyboard would send them. Text is typed as written, and a name in angle brackets becomes that key: ` + "`" + `<enter>` + "`" + `, ` + "`" + `<tab>` + "`" + `, ` + "`" + `<esc>` + "`" + `, ` + "`" + `<space>` + "`" + `, ` + "`" + `<backspace>` + "`" + `, ` + "`" + `<delete>` + "`" + `, ` + "`" + `<insert>` + "`" + `, ` + "`" + `<up>` + "`" + `, ` + "`" + `<down>` + "`" + `, ` + "`" + `<left>` + "`" + `, ` + "`" + `<right>` + "`" + `, ` + "`" + `<home>` + "`" + `, ` + "`" + `<end>` + "`" + `, ` + "`" + `<pageup>` + "`" + `, ` + "`" + `<pagedown>` + "`" + `, ` + "`" + `<f1>` + "`" + ` through ` + "`" + `<f12>` + "`" + `, ` + "`" + `<backtab>` + "`" + `, and ` + "`" + `<ctrl-a>` + "`" + ` through ` + "`" + `<ctrl-z>` + "`" + `. Anything else between angle brackets is typed literally, so a workflow that types ` + "`" + `<html>` + "`" + ` into a field gets ` + "`" + `<html>` + "`" + ` and there is no escape syntax to learn. After every entry the driver waits for the program to redraw and reads the screen, so an expectation may name something that was only on screen in the middle of the workflow. Max items 200. |
+| ` + "`" + `name` + "`" + ` | string | **yes** | What the report calls it and what the ` + "`" + `--only` + "`" + ` flag selects. Unique across this list and ` + "`" + `workflows` + "`" + ` together. Max length 64, matches ` + "`" + `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$` + "`" + `. |
+| ` + "`" + `screen` + "`" + ` | [Terminal screen](#terminal-screen) | no | The size of the screen the program draws, and its presence is what says the program draws one.  A program that takes over the screen is driven through a pseudo terminal: it is given a real terminal, it is sent raw keystrokes rather than lines, and it is judged on the grid of cells its cursor moves and erases leave behind rather than on the bytes it wrote. |
 
 ## Traffic
 

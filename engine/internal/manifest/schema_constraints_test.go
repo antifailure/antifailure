@@ -699,6 +699,9 @@ const defaultTuning = `{
         "personas[].email": "person@example.com",
         "diversity.personalities[].id": "skeptic",
         "workflows[].personality": "skeptic",
+        "terminal_workflows[].name": "deploy-plan",
+        "terminal_workflows[].expect[]": "\"Applied 3 changes\"",
+        "terminal_workflows[].input[]": "y",
         "security.access.objects[].route": "/api/orders/{id}",
         "services[].build.strategy": "image",
         "services[].depends_on": [
@@ -754,6 +757,9 @@ const defaultTuning = `{
         "personas[].email": "person@example.com",
         "diversity.personalities[].id": "skeptic",
         "workflows[].personality": "skeptic",
+        "terminal_workflows[].name": "deploy-plan",
+        "terminal_workflows[].expect[]": "\"Applied 3 changes\"",
+        "terminal_workflows[].input[]": "y",
         "security.access.objects[].route": "/api/orders/{id}",
         "services[].kind": "cron",
         "services[].schedule": "0 3 * * *",
@@ -801,6 +807,9 @@ const defaultTuning = `{
         "personas[].email": "person@example.com",
         "diversity.personalities[].id": "skeptic",
         "workflows[].personality": "skeptic",
+        "terminal_workflows[].name": "deploy-plan",
+        "terminal_workflows[].expect[]": "\"Applied 3 changes\"",
+        "terminal_workflows[].input[]": "y",
         "security.access.objects[].route": "/api/orders/{id}",
         "services[].build.strategy": "image",
         "services[].depends_on": [
@@ -856,6 +865,9 @@ const defaultTuning = `{
         "personas[].email": "person@example.com",
         "diversity.personalities[].id": "skeptic",
         "workflows[].personality": "skeptic",
+        "terminal_workflows[].name": "deploy-plan",
+        "terminal_workflows[].expect[]": "\"Applied 3 changes\"",
+        "terminal_workflows[].input[]": "y",
         "security.access.objects[].route": "/api/orders/{id}",
         "services[].build.strategy": "image",
         "services[].depends_on": [
@@ -1347,7 +1359,21 @@ func TestSchemaConstraintReport(t *testing.T) {
 // that names no path, which is the #315 failure exactly. Every other new field
 // the generator fills with a value the validator accepts, and the generated
 // owner persona is the generated persona's own name, so the owner resolves.
-const wantConstraints = 699
+//
+// Then 743. The terminal surface landed: terminal_workflows, a list of its own
+// with a screen and a budget under each entry. The 44 new constraints are the
+// list's own type and maxItems, and then on a terminal workflow the type, the
+// additionalProperties and the four required fields, the type, pattern and
+// maxLength on name, the type and both lengths on description, the type and
+// both lengths on command, the type, maxItems and item type and maxLength on
+// args, input and expect, expect's minItems, the type and maxLength on cwd,
+// and under screen and budget the type, additionalProperties, and the ranges
+// and pattern on rows, cols and duration. The generator fills name, expect and
+// input with the app name, which collides with the browser workflow's name and
+// makes the expectation the same string the workflow types, so the tuning
+// above overrides all three in every base; without them the base is refused by
+// this feature's own two cross field rules, which is the #315 failure exactly.
+const wantConstraints = 743
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and

@@ -5,13 +5,19 @@
   "description": "Drives an application the way a person does, and returns a verdict with evidence.",
   "license": "MIT",
   "type": "module",
-  "engines": { "node": ">=22.6" },
-  "bin": { "af-runner": "./src/main.ts" },
+  "engines": {
+    "node": ">=22.6"
+  },
+  "bin": {
+    "af-runner": "./src/main.ts"
+  },
   "scripts": {
     "test": "ls test/*.test.ts > /dev/null && node --experimental-strip-types --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@lydell/node-pty": "1.2.0-beta.15",
+    "@xterm/headless": "6.0.0",
     "playwright": "^1.63.0"
   },
   "devDependencies": {

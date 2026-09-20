@@ -30,6 +30,7 @@ what it deliberately does not cover.
 | `egress` | block | What the environment may reach. |
 | `personas` | list | Users the agents sign in as. |
 | `workflows` | list | What the agents do. |
+| `terminal_workflows` | list | What the agents do at a command line. |
 | `invariants` | list | Statements about the data that must stay true. |
 | `insights` | block | The Postgres native checks. |
 | `change` | block | Path rules for [change analysis](/docs/concepts/change-analysis), for a layout the built in rules do not predict. |
@@ -246,6 +247,30 @@ rather than resolved to whichever was seen first.
 A service receives what it declares and nothing else. The engine's own
 environment is not passed through, or a preview would inherit whatever is
 exported on the laptop that started it.
+
+## `terminal_workflows`
+
+What the agents do at a command line, run inside the same `af test` and counted
+in the same verdict as `workflows`. Its own list rather than a `surface` key on
+`workflows`, because the two share the sentence and nothing else: a browser
+workflow needs a persona to sign in as and a path to start at, and a terminal
+workflow needs a program and, when the program draws a screen, the size of it.
+
+| Key | Type | Notes |
+| --- | --- | --- |
+| `name` | string | Required. What the report calls it and what `--only` selects. Unique across this list and `workflows` together. |
+| `description` | string | Required. What a person would do and what proves it happened. |
+| `command` | string | Required. The program to run. Never through a shell. |
+| `args` | list | Its arguments, one per entry, passed as written. |
+| `input` | list | What a person types. Lines without `screen`, keystrokes with it. |
+| `expect` | list | Required, at least one. What the terminal must show. |
+| `screen` | block | `rows` and `cols`. Its presence says the program draws a screen and gives it a pseudo terminal. |
+| `cwd` | string | Where to run it, relative to the manifest. |
+| `budget` | block | `duration` only. Thirty seconds by default. |
+
+[Terminal workflows](/docs/guides/terminal) is the guide, including the key
+names, what a screen changes, and why an expectation the workflow types itself
+is refused.
 
 ## `database`
 

@@ -21,6 +21,33 @@ parameter properties, enums, and namespaces, which cost a few written out
 constructors, and it removes an entire toolchain between the source somebody
 reads and the code that runs.
 
+## Surfaces
+
+The same workflow model drives more than a browser, because the design is to
+drive the ACCESSIBILITY REPRESENTATION rather than selectors. A browser exposes
+a tree of roles and names. A terminal's rendered cells are its tree, so a
+workflow that reads as a sentence ports from one to the other and only the
+driver underneath changes.
+
+Web and terminal are built. A terminal workflow that declares a `screen` is
+given a real pseudo terminal of that size, sent the bytes a keyboard sends for
+`<down>`, `<ctrl-c>` and the rest, and judged against the grid of cells the
+program drew rather than the byte stream it wrote, which is the only way a
+curses program can be judged at all. One without a screen is driven through a
+pipe and judged on everything it printed, and that distinction is not a
+preference: a pseudo terminal echoes what is typed into it, so a line oriented
+program driven through one could have its expectations met by its own input.
+
+Desktop and iOS are declared in `src/drivers/driver.ts` and are not built.
+Their drivers throw rather than return an empty result, so a job that asks for
+one fails loudly instead of passing having tested nothing.
+
+The pseudo terminal is `@lydell/node-pty`, whose per platform binaries are
+ordinary npm packages rather than a compile step, and the terminal emulator is
+`@xterm/headless`, which is pure JavaScript. Both are loaded only when a
+workflow actually asks for a screen, so a run with no terminal workflow in it
+touches neither.
+
 ## What it decides, and what it refuses to decide
 
 Five verdicts, and the distinction that matters is between `fail` and

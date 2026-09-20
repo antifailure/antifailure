@@ -32,6 +32,7 @@ This page is generated from `schemas/manifest.v1.json`. Edit the schema, then ru
 | `runtime` | [Runtime](#runtime) | no | Where and how long the environment runs. |
 | `security` | [Security](#security) | no | Fixtures the dynamic security suite needs and the engine cannot infer from a diff. |
 | `services` | list of [Service](#service) | no | Every process the environment runs: web servers, API servers, background workers, and scheduled jobs. Min items 1, max items 50. |
+| `terminal_workflows` | list of [Terminal workflow](#terminal-workflow) | no | What the agents do at a command line. Written the same way a browser workflow is, as a goal and what proves it happened, and run in the same `af test` against the same environment, so a terminal result is counted and reported exactly like a browser one. Max items 200. |
 | `version` | `1` | no | The manifest schema version. Increment only for a breaking change; the engine refuses a version it does not understand rather than guessing. |
 | `workflows` | list of [Workflow](#workflow) | no | What the agents do, written as sentences. A workflow is a goal, not a script: the runner decides the actions and verifies the outcome. Max items 200. |
 
@@ -541,6 +542,39 @@ Take a production shaped slice rather than the whole database. The closure is co
 | `seed_table` | string | no | Table the selection starts from, for example the tenant or account table. Max length 128. |
 | `seed_where` | string | no | A SQL predicate selecting the seed rows, for example created_at > now() - interval '90 days'. Max length 2048. |
 | `virtual_relationships` | list of object | no | Relationships the schema does not declare as foreign keys but the application relies on. Without these, a subset can look complete and still break the application. Max items 200. |
+
+## Terminal screen
+
+The size of the screen the program draws, and its presence is what says the program draws one.
+
+A program that takes over the screen is driven through a pseudo terminal: it is given a real terminal, it is sent raw keystrokes rather than lines, and it is judged on the grid of cells its cursor moves and erases leave behind rather than on the bytes it wrote. A program that only prints is driven through a pipe and judged on everything it printed. Leaving this out is the second one.
+
+The distinction is not a preference. A pseudo terminal echoes what is typed into it, so a program that has not turned echo off shows the driver's own keystrokes on its screen, and an expectation naming them would be satisfied by the workflow rather than by the program. Say a program draws a screen when it does, and not otherwise.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `cols` | integer | no | How many columns the terminal has. Text past it wraps or is truncated by the program, which is the behaviour a narrow terminal is worth testing for. Defaults to `80`. Minimum 20, maximum 500. |
+| `rows` | integer | no | How many rows the terminal has. A program lays its screen out from this, so a narrow one and a tall one are different tests of the same program. Defaults to `24`. Minimum 4, maximum 200. |
+
+## Terminal workflow
+
+One thing the agents do at a command line: a program to run, what a person types at it, and what the terminal must show.
+
+WHY THIS IS ITS OWN LIST rather than a `surface` key on `workflows`. The two surfaces share the sentence and nothing else. A browser workflow needs a persona to sign in as, a path to start at and a step budget; a terminal workflow needs a program, its arguments, and the size of the screen it draws. Putting both in one entry would mean half of every entry's keys are refused by the other half's surface, which is a conditional this schema has nowhere else and which a reader would have to hold in their head on every field. The list a workflow is written in says which surface it drives, and that is a fact a person can see.
+
+Names are unique across both lists, because a name is what `--only` selects and what the report prints, and two workflows answering to one name is a run nobody can read.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `args` | list of string | no | The arguments, one per entry. Passed to the program as written and never through a shell, so a space in a value is part of that value and nothing is expanded behind your back. Max items 64. |
+| `budget` | object | no | What this workflow may spend. Only a duration, because the two other things a browser workflow spends do not exist here: there are no steps to count, the keys are written down rather than decided, and no model is asked anything, so there is no cost to cap. |
+| `command` | string | **yes** | The program to run. Resolved against the working directory and the PATH the engine runs with, so `./bin/deploy` and `psql` both work. Min length 1, max length 512. |
+| `cwd` | string | no | Where to run it. Relative paths are resolved against the directory holding the manifest. Defaults to that directory. Max length 512. |
+| `description` | string | **yes** | What a person would do and what proves it happened, in sentences. It is what a reader of the report is told this workflow was for. Min length 10, max length 4000. |
+| `expect` | list of string | **yes** | What the terminal must show, written as sentences about what a person would read. Judged against every screen the program drew and the scrollback it left behind, not against the bytes it wrote.  At least one is required here, unlike a browser workflow. A terminal workflow with nothing to expect can only ever report that nothing confirmed or contradicted it, which is blocked, so a manifest that declares one has written a workflow that cannot pass.  A sentence in double quotes is required on the screen character for character. Prefer that form here: a screen is small and its words repeat, so the sense of a sentence is matched far more easily on eighty columns than on a page. Min items 1, max items 50. |
+| `input` | list of string | no | What a person types, in order.  Without `screen` each entry is a line written to standard input, followed by a newline.  With `screen` each entry is keystrokes sent to the program as a keyboard would send them. Text is typed as written, and a name in angle brackets becomes that key: `<enter>`, `<tab>`, `<esc>`, `<space>`, `<backspace>`, `<delete>`, `<insert>`, `<up>`, `<down>`, `<left>`, `<right>`, `<home>`, `<end>`, `<pageup>`, `<pagedown>`, `<f1>` through `<f12>`, `<backtab>`, and `<ctrl-a>` through `<ctrl-z>`. Anything else between angle brackets is typed literally, so a workflow that types `<html>` into a field gets `<html>` and there is no escape syntax to learn. After every entry the driver waits for the program to redraw and reads the screen, so an expectation may name something that was only on screen in the middle of the workflow. Max items 200. |
+| `name` | string | **yes** | What the report calls it and what the `--only` flag selects. Unique across this list and `workflows` together. Max length 64, matches `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`. |
+| `screen` | [Terminal screen](#terminal-screen) | no | The size of the screen the program draws, and its presence is what says the program draws one.  A program that takes over the screen is driven through a pseudo terminal: it is given a real terminal, it is sent raw keystrokes rather than lines, and it is judged on the grid of cells its cursor moves and erases leave behind rather than on the bytes it wrote. |
 
 ## Traffic
 

@@ -23,18 +23,24 @@ type Manifest struct {
 	Personas   []Persona   `json:"personas,omitempty" yaml:"personas,omitempty"`
 	Auth       *Auth       `json:"auth,omitempty" yaml:"auth,omitempty"`
 	Workflows  []Workflow  `json:"workflows,omitempty" yaml:"workflows,omitempty"`
-	Invariants []Invariant `json:"invariants,omitempty" yaml:"invariants,omitempty"`
-	Insights   *Insights   `json:"insights,omitempty" yaml:"insights,omitempty"`
-	Change     *Change     `json:"change,omitempty" yaml:"change,omitempty"`
-	Oracle     *Oracle     `json:"oracle,omitempty" yaml:"oracle,omitempty"`
-	Explore    *Explore    `json:"explore,omitempty" yaml:"explore,omitempty"`
-	Diversity  *Diversity  `json:"diversity,omitempty" yaml:"diversity,omitempty"`
-	Fidelity   *Fidelity   `json:"fidelity,omitempty" yaml:"fidelity,omitempty"`
-	Load       *Load       `json:"load,omitempty" yaml:"load,omitempty"`
-	Policy     *Policy     `json:"policy,omitempty" yaml:"policy,omitempty"`
-	Runtime    *Runtime    `json:"runtime,omitempty" yaml:"runtime,omitempty"`
-	GitHub     *GitHub     `json:"github,omitempty" yaml:"github,omitempty"`
-	Security   *Security   `json:"security,omitempty" yaml:"security,omitempty"`
+	// TerminalWorkflows are the workflows driven at a command line rather
+	// than in a browser. Their own list rather than a surface key on
+	// Workflow: the two share the sentence and nothing else, and see the
+	// schema's terminal_workflow description for why that is a list and not
+	// a conditional.
+	TerminalWorkflows []TerminalWorkflow `json:"terminal_workflows,omitempty" yaml:"terminal_workflows,omitempty"`
+	Invariants        []Invariant        `json:"invariants,omitempty" yaml:"invariants,omitempty"`
+	Insights          *Insights          `json:"insights,omitempty" yaml:"insights,omitempty"`
+	Change            *Change            `json:"change,omitempty" yaml:"change,omitempty"`
+	Oracle            *Oracle            `json:"oracle,omitempty" yaml:"oracle,omitempty"`
+	Explore           *Explore           `json:"explore,omitempty" yaml:"explore,omitempty"`
+	Diversity         *Diversity         `json:"diversity,omitempty" yaml:"diversity,omitempty"`
+	Fidelity          *Fidelity          `json:"fidelity,omitempty" yaml:"fidelity,omitempty"`
+	Load              *Load              `json:"load,omitempty" yaml:"load,omitempty"`
+	Policy            *Policy            `json:"policy,omitempty" yaml:"policy,omitempty"`
+	Runtime           *Runtime           `json:"runtime,omitempty" yaml:"runtime,omitempty"`
+	GitHub            *GitHub            `json:"github,omitempty" yaml:"github,omitempty"`
+	Security          *Security          `json:"security,omitempty" yaml:"security,omitempty"`
 }
 
 // ServiceKind is what a service is.
@@ -664,6 +670,64 @@ type Workflow struct {
 	Expect      []string `json:"expect,omitempty" yaml:"expect,omitempty"`
 	Tags        []string `json:"tags,omitempty" yaml:"tags,omitempty"`
 }
+
+// TerminalWorkflow is one thing the agents do at a command line.
+//
+// It carries the half of Workflow that is about the goal, the name, the
+// description and the expectations, and replaces the half that is about a
+// browser with the half that is about a program: what to run, what to type at
+// it, and whether it draws a screen.
+type TerminalWorkflow struct {
+	Name        string   `json:"name" yaml:"name"`
+	Description string   `json:"description" yaml:"description"`
+	Command     string   `json:"command" yaml:"command"`
+	Args        []string `json:"args,omitempty" yaml:"args,omitempty"`
+	// Input is what a person types, in order. Lines on standard input when the
+	// workflow declares no screen, and keystrokes when it does; the angle
+	// bracket key names are listed in the schema and decoded by the runner.
+	Input  []string `json:"input,omitempty" yaml:"input,omitempty"`
+	Expect []string `json:"expect,omitempty" yaml:"expect,omitempty"`
+	// Screen is the size of the screen the program draws, and its presence is
+	// what says the program draws one. A pointer rather than a value because
+	// absence is the decision: it selects the pipe rather than the pseudo
+	// terminal, and a zero sized screen and no screen at all are different
+	// things.
+	Screen *TerminalScreen `json:"screen,omitempty" yaml:"screen,omitempty"`
+	// Cwd is where to run it, relative to the directory holding the manifest
+	// unless it is absolute.
+	Cwd    string          `json:"cwd,omitempty" yaml:"cwd,omitempty"`
+	Budget *TerminalBudget `json:"budget,omitempty" yaml:"budget,omitempty"`
+}
+
+// TerminalScreen is how big the terminal the program is given is.
+type TerminalScreen struct {
+	Rows int `json:"rows,omitempty" yaml:"rows,omitempty"`
+	Cols int `json:"cols,omitempty" yaml:"cols,omitempty"`
+}
+
+// TerminalBudget caps what one terminal workflow may take.
+//
+// Only a duration. A terminal workflow spends no steps, because its keys are
+// written down rather than decided, and no money, because no model is asked
+// anything; a budget with two fields that mean nothing would be three promises
+// where one is kept.
+type TerminalBudget struct {
+	Duration string `json:"duration,omitempty" yaml:"duration,omitempty"`
+}
+
+// DefaultTerminalRows and DefaultTerminalCols are the screen a terminal
+// workflow is given when it declares one without a size. Twenty four by eighty
+// is what a terminal has been since the VT100, and it is what a program laying
+// out a screen is most likely to have been written against.
+const (
+	DefaultTerminalRows = 24
+	DefaultTerminalCols = 80
+)
+
+// DefaultTerminalDuration is how long a terminal workflow may take when it
+// names no budget. It matches the runner's own default, so a workflow with no
+// budget and one that writes this duration down behave identically.
+const DefaultTerminalDuration = "30s"
 
 // Budget caps what one workflow may consume.
 type Budget struct {

@@ -10,10 +10,14 @@
 // workflow that reads as a sentence, "press Continue", "expect Welcome", ports
 // from surface to surface, and only the driver underneath changes.
 //
-// Today web and terminal are implemented. Desktop and iOS are defined here and
-// scaffolded: their drivers conform to this interface and FAIL LOUDLY rather
-// than silently passing, so a job that targets them is refused with a clear
-// reason instead of returning a green verdict that tested nothing.
+// Today web and terminal are implemented, and the terminal one drives a full
+// screen program through a real pseudo terminal, which is where that design
+// stops being a claim: a curses program's rendered grid of cells IS the tree,
+// and matching against the bytes it wrote would be matching against the HTML.
+// Desktop and iOS are defined here and scaffolded: their drivers conform to
+// this interface and FAIL LOUDLY rather than silently passing, so a job that
+// targets them is refused with a clear reason instead of returning a green
+// verdict that tested nothing.
 
 import type { Surface } from '../live.ts';
 
@@ -58,7 +62,7 @@ const drivers: Record<Surface, SurfaceDriver> = {
   terminal: {
     surface: 'terminal',
     available: true,
-    summary: 'Drives a command line program: sends input, reads the rendered output, asserts on it.',
+    summary: 'Drives a command line program, through a pipe or, for one that draws a screen, a real pseudo terminal: sends keystrokes, reads the rendered screen, asserts on it.',
   },
   desktop: {
     surface: 'desktop',

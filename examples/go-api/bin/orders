@@ -1,0 +1,61 @@
+#!/bin/sh
+# The operator's command line tool for this service, and the thing the manifest
+# drives as a terminal workflow.
+#
+# It reads AF_BASE_URL, which Antifailure sets to the address of the
+# environment the run is rehearsing. That is the whole point of a terminal
+# workflow here: the same tool an operator would run against production is run
+# against the rehearsal instead, and the check is what it prints.
+#
+# POSIX sh and curl, so it needs nothing installed that a machine running this
+# example does not already have.
+#
+# THE MESSAGES ARE SEPARATE ON PURPOSE. "could not be reached" and "answered,
+# and not with a healthy status" are different facts, and an earlier version of
+# this script said the second one for both because it piped curl into grep and
+# read grep's exit code. A tool that reports the wrong reason is worse than one
+# that reports none: the reader goes looking in the wrong place.
+set -eu
+
+base="${AF_BASE_URL:-}"
+if [ -z "$base" ]; then
+	echo "orders: AF_BASE_URL is not set, so there is no environment to reach"
+	exit 2
+fi
+
+# fetch prints the body and returns curl's own exit code, so the caller can
+# tell a service that refused from one that was never there.
+fetch() {
+	curl --silent --show-error --fail --max-time 10 "$base$1"
+}
+
+case "${1:-}" in
+health)
+	if ! body=$(fetch /health); then
+		echo "orders: the service at $base could not be reached"
+		exit 1
+	fi
+	case "$body" in
+	*'"status":"ok"'*)
+		echo "orders: the service is healthy"
+		;;
+	*)
+		echo "orders: the service answered, and not with a healthy status"
+		exit 1
+		;;
+	esac
+	;;
+customers)
+	if ! body=$(fetch /customers); then
+		echo "orders: the service at $base could not be reached"
+		exit 1
+	fi
+	count=$(printf '%s' "$body" | tr ',' '\n' | grep -c '"name"' || true)
+	printf '%s\n' "$body"
+	echo "orders: $count customers"
+	;;
+*)
+	echo "orders: say health or customers"
+	exit 2
+	;;
+esac
