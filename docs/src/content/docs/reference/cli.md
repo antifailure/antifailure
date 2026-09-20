@@ -988,10 +988,58 @@ af load smoke
 
 Subcommands:
 
+- [`af load compare`](#af-load-compare) Run the same traffic against the base branch too, and report what moved.
 - [`af load run`](#af-load-run) Run the full load profile.
 - [`af load scenario`](#af-load-scenario) Run the declared journeys against the environment.
 - [`af load smoke`](#af-load-smoke) Send a short burst, to check the environment answers under any load at all.
 - [`af load sql`](#af-load-sql) Run a concurrent SQL workload against the branch's database.
+
+### `af load compare`
+
+Run the same traffic against the base branch too, and report what moved.
+
+Brings a second environment up from the base revision, branches the same golden
+for both so they answer queries over identical rows, sends both the same
+weighted mix in the same order under the same seed, and reports every route and
+every run wide number that moved.
+
+This is the base branch comparison. It is a different question from the one
+'af load run' answers: that measures one build against what production serves,
+using the per route p95 in your traffic source, and it is the right question
+when you want to know whether a route is slower than the fleet. This one
+measures this build against the last one, which is the right question when you
+want to know whether your change made it slower.
+
+What it cannot control is printed with every report rather than left implied.
+The two runs are sequential, because two environments sending traffic at once
+on one host would contend with each other and measure that instead. The seed
+makes the request sequence identical; it does not make the machine, the
+neighbours on the host or the time of day identical. A difference is a
+difference, and a threshold under load.comparison.thresholds is what turns one
+into a verdict.
+
+The base environment is torn down unless --keep says otherwise. The
+environment for this build is left running whether or not this brought it up.
+
+```
+af load compare [flags]
+```
+
+```
+af load compare
+af load compare --baseline origin/main --duration 60s
+af load compare --seed 7 --keep
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--baseline` | - | Revision to compare against, overriding load.comparison.base_ref. |
+| `--branch` | - | Branch to compare, defaulting to the checked out one. |
+| `--duration` | `0s` | How long to send for on each side, overriding the manifest. |
+| `--keep` | `false` | Leave the base environment up, for looking at a difference. |
+| `--report` | - | Write the comparison here as well as to the terminal. |
+| `--scale` | `0` | Fraction of production's arrival rate to send at each side, overriding the manifest. |
+| `--seed` | `0` | Seed for the request sequence. The same seed is used on both sides. |
 
 ### `af load run`
 

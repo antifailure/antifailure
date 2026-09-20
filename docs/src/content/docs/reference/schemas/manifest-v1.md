@@ -24,7 +24,7 @@ This page is generated from `schemas/manifest.v1.json`. Edit the schema, then ru
 | `github` | [GitHub](#github) | no | How Antifailure appears on a pull request: what runs it, whether it comments, what it does with forks, and when it tears the environment down. |
 | `insights` | [Insights](#insights) | no | The Postgres native checks that turn a preview environment into a database review. |
 | `invariants` | list of [Invariant](#invariant) | no | Read only statements that must hold after every workflow. They are the assertions a test cannot make from the outside: no orphaned rows, no negative balances, no subscription without a customer. Max items 100. |
-| `load` | [Load](#load) | no | Traffic shaped like production, compared between the base branch and this one. |
+| `load` | [Load](#load) | no | Traffic shaped like production, sent at an environment. |
 | `name` | string | no | A short name for this application, used in environment hostnames and in the control plane. Defaults to the repository directory name. Max length 40, matches `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`. |
 | `oracle` | [Oracle](#oracle) | no | Deploy a baseline version alongside the candidate, send both the same requests, and report every difference in what came back and in what ended up in the database. |
 | `personas` | list of [Persona](#persona) | no | The accounts agents log in as. Each is created or reconciled in the golden by the authentication adapter, so a persona is a real user of the application rather than a bypass. Max items 50. |
@@ -318,10 +318,11 @@ One read only statement that must hold after every workflow. Invariants are the 
 
 ## Load
 
-Traffic shaped like production, compared between the base branch and this one. Results are always deltas, never absolute capacity claims.
+Traffic shaped like production, sent at an environment. Results are never absolute capacity claims: one machine under a fraction of production's rate cannot tell you what the fleet serves. Two different baselines are available and they are not interchangeable. load.thresholds judges one run against PRODUCTION's own per route p95, carried by the traffic source. load.comparison judges this branch against a second run of the same workload on the base branch, which is the only place in this block a base branch delta is measured.
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
+| `comparison` | object | no | Run this same workload against the base branch too, and difference the two. A second environment is brought up from the base revision and pinned to the candidate's golden, so both sides start from identical rows, and both are sent the same request sequence under the same seed. This is the only part of load that measures a base branch delta. What the seed cannot control is said in the report rather than left implied: two runs against two environments are not a controlled experiment, so a difference is a difference and a threshold is what turns it into a verdict. |
 | `duration` | string | no | How long to run. Capped at fifteen minutes. Defaults to `2m`. Matches `^[0-9]+(s\|m)$`. |
 | `enabled` | boolean | no | Defaults to `false`. |
 | `safe_routes` | list of string | no | Routes that may be called freely because they do not mutate state. Max items 500. |
@@ -330,7 +331,7 @@ Traffic shaped like production, compared between the base branch and this one. R
 | `source` | `none`, `otel`, `access_log` | no | Where the endpoint mix comes from. An OpenTelemetry trace export or a combined format access log, both read from a file named in source_config.path. Defaults to `none`. |
 | `source_config` | object | no | Adapter specific settings. Both sources take a path: the OTLP/JSON trace export, or the access log. Credentials come from the secrets subsystem. Max properties 20. |
 | `sql` | [SQL workload](#sql-workload) | no | A concurrent workload run directly against the branch's database, rather than through the application. |
-| `thresholds` | object | no | Deltas that fail the run. Applied to the difference against the base branch, never to absolute numbers. |
+| `thresholds` | object | no | What fails a SINGLE run. These are measured against production, or against the run's own responses, and never against the base branch: nothing here brings a second environment up, so no key in this object can see another build. The base branch comparison is load.comparison, which has its own thresholds. |
 | `traffic` | [Traffic](#traffic) | no | The committed record of what production actually serves, which is the denominator every route in a load run is measured against. |
 | `unsafe_routes` | list of string | no | Routes that mutate state destructively. They are included only against a fresh branch that is reset afterwards. Max items 500. |
 

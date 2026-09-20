@@ -952,3 +952,51 @@ func count(n int, noun string) string {
 	}
 	return fmt.Sprintf("%d %ss", n, noun)
 }
+
+// ProjectLoadOptions identify one side of a two build comparison.
+type ProjectLoadOptions struct {
+	// EnvID and Branch name the environment the mix was sent at.
+	EnvID  string
+	Branch string
+	// Command is the plain invocation that reproduces this one side, and
+	// ManifestDigest is the manifest it was run under. Compare reads both: two
+	// sides asked for different things, or run under different manifests, get
+	// a note saying so rather than a silent comparison of unlike runs.
+	Command        string
+	ManifestDigest string
+	// P95Increase and ErrorRate are the manifest's SINGLE RUN thresholds, the
+	// ones measured against production. They are carried per side so that a
+	// verdict transition between the two sides is visible in the comparison,
+	// which is a different fact from the base branch deltas Judge evaluates.
+	P95Increase float64
+	ErrorRate   float64
+}
+
+// ProjectLoad builds a result document from one load run.
+//
+// Exported for the two build comparison, which runs the mix itself against two
+// environments and needs both sides in the shape Compare reads. It is the same
+// projection runObservedLoad performs, called directly rather than copied: a
+// second implementation of this that drifted from the first would make a
+// comparison of two documents that no longer describe the same thing.
+func ProjectLoad(out *load.Result, opts ProjectLoadOptions) *Result {
+	res := &Result{
+		Schema:      ResultSchema,
+		Kind:        ObservedLoad,
+		State:       StateSucceeded,
+		Environment: Environment{EnvID: opts.EnvID, Branch: opts.Branch},
+		Reproduce:   Reproduce{Command: opts.Command, ManifestDigest: opts.ManifestDigest},
+	}
+	if out == nil {
+		// A side that measured nothing is unverified, never a pass and never a
+		// zero. Zero requests differenced against a real run would report the
+		// whole of the other side as a regression.
+		res.State = StateFailed
+		res.Verdict = VerdictUnverified
+		return res
+	}
+	projectMix(res, out)
+	res.Thresholds = mixThresholds(out, opts.P95Increase, opts.ErrorRate)
+	res.Verdict = mixVerdict(out, res.Thresholds)
+	return res
+}

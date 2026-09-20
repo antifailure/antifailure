@@ -1290,6 +1290,10 @@ type Load struct {
 	UnsafeRoutes []string          `json:"unsafe_routes,omitempty" yaml:"unsafe_routes,omitempty"`
 	Scenarios    []LoadScenario    `json:"scenarios,omitempty" yaml:"scenarios,omitempty"`
 	Thresholds   *LoadThresholds   `json:"thresholds,omitempty" yaml:"thresholds,omitempty"`
+	// Comparison runs the same workload on the base branch as well and
+	// differences the two. It is the only part of Load that measures a base
+	// branch delta: Thresholds above judges one run against production.
+	Comparison *LoadComparison `json:"comparison,omitempty" yaml:"comparison,omitempty"`
 	// Traffic names the committed profile of what production serves, which is
 	// the denominator every route in a load run is measured against.
 	Traffic *Traffic `json:"traffic,omitempty" yaml:"traffic,omitempty"`
@@ -1353,6 +1357,53 @@ type LoadSQLThresholds struct {
 	MeanIncrease float64 `json:"mean_increase,omitempty" yaml:"mean_increase,omitempty"`
 	// ErrorRate is the share of attempts that may fail.
 	ErrorRate float64 `json:"error_rate,omitempty" yaml:"error_rate,omitempty"`
+}
+
+// LoadComparison configures running the workload twice, once per build.
+//
+// Separate from LoadThresholds rather than three more keys inside it, because
+// the two answer different questions against different baselines and putting
+// them in one object is what let this manifest describe itself wrongly for as
+// long as it did. A key under Thresholds is measured against production or
+// against the run's own responses; a key under Comparison is measured against
+// a second run of the same workload on another commit. A reader who has to
+// know which is which per key has been handed the ambiguity rather than
+// spared it.
+type LoadComparison struct {
+	// Enabled is a pointer so that present-and-false is distinguishable from
+	// absent, which is how a project keeps its thresholds and turns the check
+	// off for a while. The oracle's own Enabled is a pointer for this reason.
+	Enabled  *bool          `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Baseline BaselineSource `json:"baseline,omitempty" yaml:"baseline,omitempty"`
+	BaseRef  string         `json:"base_ref,omitempty" yaml:"base_ref,omitempty"`
+	// Thresholds are the deltas against the base branch that fail the run.
+	Thresholds *LoadComparisonThresholds `json:"thresholds,omitempty" yaml:"thresholds,omitempty"`
+}
+
+// LoadComparisonThresholds are the base branch deltas that fail a run.
+//
+// Every field is a ratio between two measurements of the same workload, one
+// per build. A field is evaluated only when BOTH sides carried the number;
+// otherwise the verdict is unverified, never pass. A threshold that quietly
+// evaluated nothing and reported green is the defect this repository keeps
+// finding in its own instruments, and it is the reason p95_increase is
+// refused under a source that carries no baseline.
+type LoadComparisonThresholds struct {
+	// P95Increase is how much slower than the base branch a route may get, as
+	// a ratio of the base branch's own p95 for that route. Distinct from
+	// LoadThresholds.P95Increase, which compares against production.
+	P95Increase float64 `json:"p95_increase,omitempty" yaml:"p95_increase,omitempty"`
+	// ThroughputDrop is how much of the base branch's achieved request rate
+	// this branch may lose, as a ratio. Read from the rate each run actually
+	// achieved rather than the rate it aimed at, because a run that fell
+	// behind its target reports the target as fine while the queue grows.
+	ThroughputDrop float64 `json:"throughput_drop,omitempty" yaml:"throughput_drop,omitempty"`
+	// ErrorRateIncrease is how much the share of failing requests may rise,
+	// in absolute points expressed as a fraction. Absolute rather than a
+	// ratio because a base branch error rate of zero has no ratio, and a
+	// build introducing errors where there were none is the case this most
+	// needs to catch.
+	ErrorRateIncrease float64 `json:"error_rate_increase,omitempty" yaml:"error_rate_increase,omitempty"`
 }
 
 // Traffic names the committed record of what production actually serves.

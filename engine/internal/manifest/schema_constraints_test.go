@@ -1401,7 +1401,7 @@ func TestSchemaConstraintReport(t *testing.T) {
 // max_statements and thresholds.mean_increase instead. Without that split the
 // base manifest is refused by this feature's own three cross field rules,
 // which is the #315 failure exactly.
-const wantConstraints = 784
+const wantConstraints = 800
 
 // Then 755. The three keys that say what the Postgres a golden is built in
 // actually is: database.image, which declares a type and a maxLength;
@@ -1442,6 +1442,22 @@ const wantConstraints = 784
 // each with its own sentence. The generator fills the field with the first
 // enum value, which is `web`, so no base is refused and no tuning override is
 // needed.
+//
+// Then 786, with load.comparison on top of the SQL workload's keys. The count
+// was RECOUNTED from the tree by this gate rather than added to the previous
+// total, because two branches raised it for different reasons and a number
+// nobody has measured on the tree it describes is worth nothing. the base branch comparison, which is the
+// only part of load that measures a delta against another build. The 16 new
+// constraints are the block's own type and additionalProperties, the type and
+// default on enabled, the type, enum and default on baseline, the type and
+// maxLength on base_ref, the thresholds object's type and additionalProperties,
+// the type and minimum on p95_increase and on error_rate_increase, and the
+// type, minimum and maximum on throughput_drop. None of the three thresholds
+// carries a default, and that is deliberate rather than an omission the
+// generator can fill: identical builds on one machine differ by more than any
+// default worth writing, so the comparison reports until somebody declares a
+// limit. The generator fills every field here with a value the validator
+// accepts, so no tuning override was needed.
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and

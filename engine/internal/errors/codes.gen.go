@@ -304,6 +304,11 @@ const (
 	AFLOD021 Code = "AF-LOD-021"
 	// {count} SQL workload thresholds were breached.
 	AFLOD022 Code = "AF-LOD-022"
+	// The base branch comparison exceeded thresholds the manifest sets:
+	// {detail}
+	AFLOD023 Code = "AF-LOD-023"
+	// The base branch comparison judged nothing: {detail}
+	AFLOD024 Code = "AF-LOD-024"
 
 	// Manifest
 	// No antifailure.yaml was found in {path} or any parent directory.
@@ -1539,6 +1544,24 @@ var catalog = map[Code]Entry{
 		Retryable: false,
 		ExitCode:  ExitTestFailure,
 	},
+	AFLOD023: {
+		Code:      AFLOD023,
+		Area:      "LOD",
+		Message:   "The base branch comparison exceeded thresholds the manifest sets: {detail}",
+		NextStep:  "Read the per route table in the report: it names the base branch p95 and this build's beside each other. Raise the limit under load.comparison.thresholds if the change is deliberate, and remember a difference between two sequential runs on one host is not a controlled experiment.",
+		Docs:      "concepts/load",
+		Retryable: false,
+		ExitCode:  ExitTestFailure,
+	},
+	AFLOD024: {
+		Code:      AFLOD024,
+		Area:      "LOD",
+		Message:   "The base branch comparison judged nothing: {detail}",
+		NextStep:  "Every declared threshold went unmeasured, which is not a clean comparison. Check that both sides sent the same routes: a route served on one side only has no counterpart to be compared against, and a run that sent nothing has none at all.",
+		Docs:      "concepts/load",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
 	AFMAN001: {
 		Code:      AFMAN001,
 		Area:      "MAN",
@@ -1840,7 +1863,7 @@ var catalog = map[Code]Entry{
 		Code:      AFORC003,
 		Area:      "ORC",
 		Message:   "The baseline revision could not be resolved: {detail}",
-		NextStep:  "Set oracle.base_ref to a branch, tag, or commit this checkout can see, and fetch it if it is a remote ref.",
+		NextStep:  "Set the base_ref of whichever block asked for the comparison, oracle.base_ref or load.comparison.base_ref, to a branch, tag, or commit this checkout can see, and fetch it if it is a remote ref. The flag that overrides either is --baseline.",
 		Docs:      "concepts/oracle",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,

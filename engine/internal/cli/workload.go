@@ -718,6 +718,23 @@ func renderComparison(e *Env, c *workload.Comparison) {
 		e.Out.Table([]Column{{Title: "measure"}, {Title: "baseline"},
 			{Title: "candidate"}, {Title: "moved"}}, rows)
 	}
+	// The per route table. It was computed and never printed: routeDifferences
+	// fills Comparison.Routes on every call, the JSON form carried it, and the
+	// text form a person actually reads dropped it. So a route that doubled in
+	// p95, and a route that vanished between the two runs, were both invisible
+	// to anybody who did not pipe the output through a JSON parser, and the
+	// run wide p95 that WAS printed is exactly the average a single slow route
+	// hides inside.
+	routes := [][]string{}
+	for _, r := range c.Routes {
+		routes = append(routes, []string{r.Route, numberOf(r.P95Baseline),
+			numberOf(r.P95Candidate), ratioOf(r.P95Ratio), r.Direction})
+	}
+	if len(routes) > 0 {
+		e.Out.Println("")
+		e.Out.Table([]Column{{Title: "route"}, {Title: "baseline p95"},
+			{Title: "candidate p95"}, {Title: "change"}, {Title: "moved"}}, routes)
+	}
 	if c.Regressed > 0 {
 		e.Out.Printf("\n  %d thresholds that passed on the baseline no longer do.\n", c.Regressed)
 	}

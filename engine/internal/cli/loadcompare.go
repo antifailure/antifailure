@@ -1,0 +1,400 @@
+package cli
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"github.com/antifailure/antifailure/engine/internal/env"
+	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/internal/manifest"
+	"github.com/antifailure/antifailure/engine/internal/workload"
+	"github.com/antifailure/antifailure/engine/pkg/schema"
+)
+
+// af load compare is the only way a person reaches the base branch comparison,
+// and that is the point.
+//
+// A capability nothing invokes is a shippable gap that looks like a feature.
+// The differencing primitive has existed in engine/internal/workload for some
+// time and was reachable only through `af workload compare`, which takes two
+// result documents a person has to have produced by hand and which lives under
+// a command marked Hidden because it is the control plane's plumbing. So the
+// arithmetic was reachable and the measurement was not: nothing anywhere ran
+// one workload against two builds. This command is that missing half, and it
+// lands with the second environment and the thresholds that judge it.
+
+// LoadCompareJSON is the machine readable result of a two build comparison.
+type LoadCompareJSON struct {
+	Comparison *workload.Comparison         `json:"comparison"`
+	Judged     []workload.ComparisonVerdict `json:"thresholds"`
+	Verdict    string                       `json:"verdict"`
+	Baseline   loadCompareSideJSON          `json:"baseline"`
+	Candidate  loadCompareSideJSON          `json:"candidate"`
+	// Golden is the database version BOTH sides branched from, which is what
+	// makes the difference worth anything.
+	Golden string `json:"golden,omitempty"`
+	// BaselineTornDown false is a leak somebody has to finish by hand, so it
+	// is in the document rather than only in the terminal.
+	BaselineTornDown bool     `json:"baseline_torn_down"`
+	BaselineBranch   string   `json:"baseline_branch,omitempty"`
+	Notes            []string `json:"notes"`
+}
+
+type loadCompareSideJSON struct {
+	Rev string `json:"rev,omitempty"`
+	// How says how the base ref was resolved, so a reader can tell
+	// origin/main from a named tag without rerunning anything.
+	How string `json:"how,omitempty"`
+}
+
+func newLoadCompareCommand(e *Env) *cobra.Command {
+	var branch, baseRef, output string
+	var duration time.Duration
+	var scale float64
+	var seed int64
+	var keep bool
+	cmd := &cobra.Command{
+		Use:   "compare",
+		Short: "Run the same traffic against the base branch too, and report what moved",
+		Long: strings.TrimSpace(`
+Brings a second environment up from the base revision, branches the same golden
+for both so they answer queries over identical rows, sends both the same
+weighted mix in the same order under the same seed, and reports every route and
+every run wide number that moved.
+
+This is the base branch comparison. It is a different question from the one
+'af load run' answers: that measures one build against what production serves,
+using the per route p95 in your traffic source, and it is the right question
+when you want to know whether a route is slower than the fleet. This one
+measures this build against the last one, which is the right question when you
+want to know whether your change made it slower.
+
+What it cannot control is printed with every report rather than left implied.
+The two runs are sequential, because two environments sending traffic at once
+on one host would contend with each other and measure that instead. The seed
+makes the request sequence identical; it does not make the machine, the
+neighbours on the host or the time of day identical. A difference is a
+difference, and a threshold under load.comparison.thresholds is what turns one
+into a verdict.
+
+The base environment is torn down unless --keep says otherwise. The
+environment for this build is left running whether or not this brought it up.`),
+		Example: strings.TrimSpace(`
+af load compare
+af load compare --baseline origin/main --duration 60s
+af load compare --seed 7 --keep`),
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Load is sent AT an environment rather than creating one, so the
+			// fork gate is defence in depth here exactly as it is on af load
+			// run: an environment left up from a run on the base branch is
+			// still one a fork's pull request can point traffic at.
+			if fork := forkGate(e); fork.Refused {
+				return refuseFork(fork)
+			}
+			o, m, err := orchestratorWithManifest(e, branch)
+			if err != nil {
+				return err
+			}
+			cfg := loadComparisonConfig(m)
+			if cfg == nil {
+				return aferrors.Coded(aferrors.AFLOD010,
+					"detail", "this manifest declares no load.comparison block, so there is "+
+						"nothing saying which revision to compare against; add one with "+
+						"enabled: true")
+			}
+			if cfg.Enabled != nil && !*cfg.Enabled {
+				e.Out.Status(e.Out.S(StyleDim, SymbolSkip),
+					"the manifest turns the base branch comparison off",
+					"set load.comparison.enabled to true to run it")
+				return nil
+			}
+
+			e.Out.Section("Comparing against the base branch")
+			res, err := o.LoadCompare(cmd.Context(), env.LoadCompareOptions{
+				Baseline: cfg.Baseline,
+				BaseRef:  orDefaultString(baseRef, cfg.BaseRef),
+				Duration: duration, Scale: scale, Seed: seed, Keep: keep,
+				Progress: func(line string) { e.Out.Printf("  %s\n", line) },
+			})
+			if errors.Is(err, env.ErrLoadBaselineSameCommit) {
+				// A branch level with its base is a legitimate state rather
+				// than a failure. Reporting it as one would fail the pipeline
+				// of everybody who reran a check on an unchanged branch.
+				e.Out.Status(e.Out.S(StyleDim, SymbolSkip),
+					"there are not two builds to compare",
+					"this branch is the same commit as its base")
+				return nil
+			}
+			if res != nil && !res.BaselineTornDown && !keep && res.BaselineBranch != "" {
+				defer func() {
+					e.Out.Printf("  the base environment may still be up. Remove it with: "+
+						"af down --branch %q\n", res.BaselineBranch)
+				}()
+			}
+			if err != nil {
+				return err
+			}
+
+			p95Increase, errorRate := o.Thresholds()
+			// The digest of the manifest BOTH sides ran under. One digest
+			// rather than one per side, deliberately: the base environment is
+			// built from the base revision's code and driven by the
+			// candidate's manifest, exactly as the oracle's baseline is, so
+			// that a manifest change in the branch moves the application and
+			// not the harness. Recording two digests here would suggest the
+			// two sides were configured differently when they were not.
+			digest := ""
+			if manifestPath, perr := manifest.Find(e.WorkDir); perr == nil {
+				digest = manifestDigest(manifestPath)
+			}
+			baseline := workload.ProjectLoad(res.Baseline, workload.ProjectLoadOptions{
+				Branch: res.BaselineBranch, Command: "af load run",
+				ManifestDigest: digest, P95Increase: p95Increase, ErrorRate: errorRate,
+			})
+			candidate := workload.ProjectLoad(res.Candidate, workload.ProjectLoadOptions{
+				EnvID: o.EnvID(), Branch: o.Branch(),
+				Command: "af load run", ManifestDigest: digest,
+				P95Increase: p95Increase, ErrorRate: errorRate,
+			})
+			comparison, err := workload.Compare(baseline, candidate)
+			if err != nil {
+				return err
+			}
+			comparison.Notes = append(comparison.Notes, res.Notes...)
+
+			thresholds := comparisonThresholds(cfg)
+			judged := workload.Judge(comparison, thresholds)
+			verdict := workload.ComparisonOutcome(judged)
+
+			if e.Out.Format == FormatJSON {
+				doc := LoadCompareJSON{
+					Comparison: comparison, Judged: judged, Verdict: verdict,
+					Baseline:         loadCompareSideJSON{Rev: res.Rev, How: res.How},
+					Candidate:        loadCompareSideJSON{Rev: res.CandidateRev},
+					Golden:           res.Golden,
+					BaselineTornDown: res.BaselineTornDown,
+					BaselineBranch:   res.BaselineBranch,
+					Notes:            comparison.Notes,
+				}
+				if err := e.Out.JSON(doc); err != nil {
+					return err
+				}
+				return loadCompareExit(thresholds, judged, verdict)
+			}
+
+			renderLoadComparison(e, res, comparison, judged, verdict)
+			if output != "" {
+				doc := LoadCompareJSON{
+					Comparison: comparison, Judged: judged, Verdict: verdict,
+					Baseline:  loadCompareSideJSON{Rev: res.Rev, How: res.How},
+					Candidate: loadCompareSideJSON{Rev: res.CandidateRev},
+					Golden:    res.Golden, BaselineTornDown: res.BaselineTornDown,
+					BaselineBranch: res.BaselineBranch, Notes: comparison.Notes,
+				}
+				body, merr := json.MarshalIndent(doc, "", "  ")
+				if merr != nil {
+					return merr
+				}
+				if werr := os.WriteFile(output, append(body, '\n'), 0o644); werr != nil {
+					e.Out.Printf("  could not write the report to %s: %v\n", output, werr)
+				}
+			}
+			return loadCompareExit(thresholds, judged, verdict)
+		},
+	}
+	cmd.Flags().StringVar(&branch, "branch", "", "Branch to compare, defaulting to the checked out one")
+	cmd.Flags().StringVar(&baseRef, "baseline", "",
+		"Revision to compare against, overriding load.comparison.base_ref")
+	cmd.Flags().DurationVar(&duration, "duration", 0,
+		"How long to send for on each side, overriding the manifest")
+	cmd.Flags().Float64Var(&scale, "scale", 0,
+		"Fraction of production's arrival rate to send at each side, overriding the manifest")
+	cmd.Flags().Int64Var(&seed, "seed", 0,
+		"Seed for the request sequence. The same seed is used on both sides")
+	cmd.Flags().BoolVar(&keep, "keep", false,
+		"Leave the base environment up, for looking at a difference")
+	// --report rather than --output, for the reason af oracle and af ci both
+	// give: --output and -o are the root's own "text or json" flag, a local
+	// flag silently wins, and the result was a command writing its report to a
+	// file literally named json.
+	cmd.Flags().StringVar(&output, "report", "", "Write the comparison here as well as to the terminal")
+	return cmd
+}
+
+// loadComparisonConfig reads the block, treating an absent load block and an
+// absent comparison block as the same answer.
+func loadComparisonConfig(m *schema.Manifest) *schema.LoadComparison {
+	if m == nil || m.Load == nil {
+		return nil
+	}
+	return m.Load.Comparison
+}
+
+// comparisonThresholds carries the manifest's declared base branch limits into
+// the shape the judge evaluates. An absent thresholds block is no declared
+// limit rather than a zero limit.
+func comparisonThresholds(cfg *schema.LoadComparison) workload.ComparisonThresholds {
+	if cfg == nil || cfg.Thresholds == nil {
+		return workload.ComparisonThresholds{}
+	}
+	return workload.ComparisonThresholds{
+		P95Increase:       cfg.Thresholds.P95Increase,
+		ThroughputDrop:    cfg.Thresholds.ThroughputDrop,
+		ErrorRateIncrease: cfg.Thresholds.ErrorRateIncrease,
+	}
+}
+
+// loadCompareExit decides the exit code.
+//
+// Three outcomes rather than two. A failing threshold exits non zero, which is
+// obvious. A threshold that was DECLARED and could not be evaluated also exits
+// non zero, which is not obvious and is the more important of the two: a
+// comparison whose limits all went unverified has measured nothing, and
+// exiting zero on it is exactly how this product once shipped a green nightly
+// corpus that had never reached an agent. A comparison with no declared
+// threshold at all is a report rather than a check and exits zero.
+func loadCompareExit(
+	t workload.ComparisonThresholds, judged []workload.ComparisonVerdict, verdict string,
+) error {
+	if !t.Declared() {
+		return nil
+	}
+	switch verdict {
+	case workload.VerdictFail:
+		breaches := workload.ComparisonBreaches(judged)
+		names := make([]string, 0, len(breaches))
+		for _, b := range breaches {
+			if b.Scope != "" {
+				names = append(names, b.Name+" on "+b.Scope)
+				continue
+			}
+			names = append(names, b.Name)
+		}
+		return silent(aferrors.Coded(aferrors.AFLOD023,
+			"detail", strings.Join(names, ", ")))
+	case workload.VerdictUnverified:
+		return silent(aferrors.Coded(aferrors.AFLOD024,
+			"detail", "every declared base branch threshold went unmeasured, so this "+
+				"comparison judged nothing"))
+	}
+	return nil
+}
+
+func renderLoadComparison(
+	e *Env, res *env.LoadCompareResult, c *workload.Comparison,
+	judged []workload.ComparisonVerdict, verdict string,
+) {
+	e.Out.Println("")
+	e.Out.Printf("  %s against %s\n", shortRev(res.CandidateRev), shortRev(res.Rev))
+	if res.How != "" {
+		e.Out.Printf("  the base was resolved %s\n", res.How)
+	}
+
+	rows := [][]string{}
+	for _, m := range c.Measures {
+		rows = append(rows, []string{m.Measure, numberOf(m.Baseline), numberOf(m.Candidate),
+			ratioOf(m.Ratio), m.Direction})
+	}
+	if len(rows) > 0 {
+		e.Out.Println("")
+		e.Out.Table([]Column{{Title: "measure"}, {Title: "base"}, {Title: "this build"},
+			{Title: "change"}, {Title: "moved"}}, rows)
+	}
+
+	// The per route table, which is the one somebody actually came for. A
+	// comparison that printed only the run wide numbers would hide the single
+	// slow route inside an average, which is the whole reason routes are
+	// measured separately.
+	routes := [][]string{}
+	for _, r := range c.Routes {
+		routes = append(routes, []string{r.Route, numberOf(r.P95Baseline),
+			numberOf(r.P95Candidate), ratioOf(r.P95Ratio), r.Direction})
+	}
+	if len(routes) > 0 {
+		e.Out.Println("")
+		e.Out.Table([]Column{{Title: "route"}, {Title: "base p95"}, {Title: "this build p95"},
+			{Title: "change"}, {Title: "moved"}}, routes)
+	}
+
+	breaches := workload.ComparisonBreaches(judged)
+	if len(breaches) > 0 {
+		e.Out.Println("")
+		e.Out.Println("What crossed a declared threshold:")
+		for _, b := range breaches {
+			e.Out.Printf("  %s\n", e.Out.Wrap(b.Detail, 2))
+		}
+	}
+	// A declared threshold that could not be measured is reported as loudly as
+	// one that failed, because it is the absence of the check the manifest
+	// asked for rather than a clean result.
+	unverified := 0
+	for _, j := range judged {
+		if j.Value == workload.VerdictUnverified {
+			unverified++
+		}
+	}
+	if unverified > 0 {
+		e.Out.Println("")
+		e.Out.Printf("  %d declared %s could not be measured on both sides.\n",
+			unverified, plural2(unverified, "threshold", "thresholds"))
+	}
+
+	e.Out.Println("")
+	e.Out.Println("What this comparison cannot see:")
+	for _, n := range c.Notes {
+		e.Out.Printf("  %s\n", e.Out.Wrap(n, 2))
+	}
+	e.Out.Println("")
+	e.Out.Status(verdictSymbol(verdict), "the base branch comparison is "+verdict, "")
+}
+
+func verdictSymbol(verdict string) string {
+	switch verdict {
+	case workload.VerdictFail:
+		return SymbolFail
+	case workload.VerdictPass:
+		return SymbolOK
+	}
+	return SymbolSkip
+}
+
+// ratioOf renders a ratio as a signed percentage, which is how somebody reads
+// a regression. A nil ratio is "none" rather than "0 percent": no baseline and
+// no change are different answers.
+func ratioOf(v *float64) string {
+	if v == nil {
+		return "none"
+	}
+	return fmt.Sprintf("%+.1f%%", *v*100)
+}
+
+func shortRev(rev string) string {
+	if len(rev) > 12 {
+		return rev[:12]
+	}
+	if rev == "" {
+		return "this build"
+	}
+	return rev
+}
+
+func plural2(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
+func orDefaultString(chosen, fallback string) string {
+	if chosen != "" {
+		return chosen
+	}
+	return fallback
+}
