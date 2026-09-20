@@ -115,6 +115,7 @@ func normalize(m *schema.Manifest, root string) {
 	normalizeAuth(m)
 	normalizeWorkflows(m)
 	normalizeTerminalWorkflows(m)
+	normalizeDesktop(m)
 	normalizeInsights(m)
 	normalizeOracle(m)
 	normalizeExplore(m)
@@ -410,6 +411,34 @@ func normalizeTerminalWorkflows(m *schema.Manifest) {
 		}
 		if w.Budget.Duration == "" {
 			w.Budget.Duration = schema.DefaultTerminalDuration
+		}
+	}
+}
+
+// normalizeDesktop fills in what a desktop block and its workflows leave
+// unsaid, so the engine sends the runner a complete job and `af explain` shows
+// the same numbers the run will use.
+//
+// The process name is derived from the bundle rather than left empty, because
+// the runner has to FIND the application after opening it: opening a bundle
+// returns before the application is ready, so a name is needed either way, and
+// deriving it here means `af explain` shows the name that will actually be
+// looked for rather than a blank that the runner fills in privately.
+func normalizeDesktop(m *schema.Manifest) {
+	if m.Desktop != nil && m.Desktop.Kind == "macos" && m.Desktop.Process == "" {
+		base := filepath.Base(m.Desktop.Application)
+		m.Desktop.Process = strings.TrimSuffix(base, ".app")
+	}
+	for i := range m.DesktopWorkflows {
+		w := &m.DesktopWorkflows[i]
+		if w.Budget == nil {
+			w.Budget = &schema.DesktopBudget{}
+		}
+		if w.Budget.Duration == "" {
+			w.Budget.Duration = schema.DefaultDesktopDuration
+		}
+		if w.Budget.Steps == 0 {
+			w.Budget.Steps = schema.DefaultDesktopSteps
 		}
 	}
 }

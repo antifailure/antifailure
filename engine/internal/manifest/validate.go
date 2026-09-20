@@ -40,6 +40,7 @@ func validate(m *schema.Manifest, doc *yaml.Node, root string) []Problem {
 	v.auth(m)
 	v.workflows(m)
 	v.terminalWorkflows(m)
+	v.desktopWorkflows(m)
 	v.diversity(m)
 	v.invariants(m)
 	v.oracle(m)
@@ -1549,6 +1550,93 @@ func (v *validator) terminalWorkflows(m *schema.Manifest) {
 			}
 		}
 	}
+}
+
+// desktopWorkflows checks the cross field rules a desktop workflow and its
+// application have, and the schema cannot express.
+//
+// The bounds pass already refuses a missing kind, an unknown kind, a missing
+// application path and an empty expectation list, straight from the published
+// schema. What is here needs to look at more than one field at once, or at the
+// other lists.
+func (v *validator) desktopWorkflows(m *schema.Manifest) {
+	// An application with nothing to do, and workflows with nothing to do it
+	// to. Both are refused, and they are different mistakes: the first is a
+	// block that will never be read, and the second is a list of workflows
+	// that cannot run at all. Saying so here is the difference between a
+	// manifest that is corrected in a second and a run that reports every
+	// desktop workflow as blocked for a reason nothing on screen explains.
+	if len(m.DesktopWorkflows) > 0 && m.Desktop == nil {
+		v.add("desktop",
+			"There are desktop workflows and no desktop application to drive.",
+			"Add a `desktop` block naming the application: its kind, electron or macos, and the path to it.")
+	}
+	if m.Desktop != nil && len(m.DesktopWorkflows) == 0 {
+		v.add("desktop_workflows",
+			"A desktop application is declared and no desktop workflow drives it.",
+			"Add a desktop workflow, or remove the `desktop` block: a declared application nothing opens is a promise the report cannot keep.")
+	}
+
+	// `process` belongs to a native application and nothing reads it for an
+	// Electron one, which is launched directly by its binary and never looked
+	// up by name. A field in the manifest that nothing reads is a setting a
+	// person will believe they have made.
+	if m.Desktop != nil && m.Desktop.Kind == "electron" && m.Desktop.Process != "" {
+		v.add("desktop.process",
+			"An Electron application carries a process name.",
+			"Remove it. `process` is how a native application is found after its bundle is opened, and an Electron application is launched directly, so nothing reads this.")
+	}
+
+	// Names are ONE namespace across all three lists, for the reason the
+	// terminal list gives: a name is what --only selects and what the report
+	// prints against a verdict.
+	names := map[string]bool{}
+	for _, w := range m.Workflows {
+		names[w.Name] = true
+	}
+	for _, w := range m.TerminalWorkflows {
+		names[w.Name] = true
+	}
+	seen := map[string]bool{}
+	for i := range m.DesktopWorkflows {
+		w := &m.DesktopWorkflows[i]
+		base := fmt.Sprintf("desktop_workflows[%d]", i)
+		if names[w.Name] || seen[w.Name] {
+			v.add(base+".name",
+				fmt.Sprintf("Two workflows are both named %q.", w.Name),
+				"Names are shared between workflows, terminal_workflows and desktop_workflows, because a name is what --only selects and what the report prints.")
+		}
+		seen[w.Name] = true
+
+		// The same floor the other two lists have, for the same reason: the
+		// description is what a reader of the report is told this workflow was
+		// for, and it is also read by the planner, which will press a control
+		// whose whole visible label appears in it.
+		if len(strings.TrimSpace(w.Description)) < 10 || len(strings.Fields(w.Description)) < 4 {
+			v.add(base+".description",
+				fmt.Sprintf("The description of %q is too short to read in a report.", w.Name),
+				"Say what a person would do in the application and what proves it worked.")
+		}
+	}
+
+	// THERE IS DELIBERATELY NO RULE HERE REFUSING AN EXPECTATION THE WORKFLOW
+	// ALSO TYPES, and the absence is a decision rather than an omission.
+	//
+	// The terminal list has exactly that rule, and it is right there: a pseudo
+	// terminal echoes what is typed into it, so an expectation naming what the
+	// workflow types is satisfied by the workflow rather than by the program.
+	// The same hole existed on this surface and was closed one layer down
+	// instead, in runner/src/drivers/ax.ts: a field's own value is left out of
+	// the text expectations are judged against, so what the agent typed can
+	// never satisfy anything by itself.
+	//
+	// Which means the remaining case is the OPPOSITE of a defect. With the
+	// value excluded, an expectation naming an answer can only be met when the
+	// application RENDERED those words as static text, and a confirmation
+	// screen reading back the address somebody typed is exactly the evidence a
+	// workflow like that is written to find. A rule copied from the terminal
+	// here would refuse a correct workflow, which is why the fix belongs where
+	// the echo is and not where the manifest is read.
 }
 
 // diversity checks the personality population selection. The ranges and enums

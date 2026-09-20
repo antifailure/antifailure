@@ -700,6 +700,10 @@ const defaultTuning = `{
         "diversity.personalities[].id": "skeptic",
         "workflows[].personality": "skeptic",
         "terminal_workflows[].name": "deploy-plan",
+        "desktop.kind": "macos",
+        "desktop_workflows[].name": "sign-in-desktop",
+        "desktop_workflows[].expect[]": "\"Welcome back\"",
+
         "terminal_workflows[].expect[]": "\"Applied 3 changes\"",
         "terminal_workflows[].input[]": "y",
         "security.access.objects[].route": "/api/orders/{id}",
@@ -758,6 +762,10 @@ const defaultTuning = `{
         "diversity.personalities[].id": "skeptic",
         "workflows[].personality": "skeptic",
         "terminal_workflows[].name": "deploy-plan",
+        "desktop.kind": "macos",
+        "desktop_workflows[].name": "sign-in-desktop",
+        "desktop_workflows[].expect[]": "\"Welcome back\"",
+
         "terminal_workflows[].expect[]": "\"Applied 3 changes\"",
         "terminal_workflows[].input[]": "y",
         "security.access.objects[].route": "/api/orders/{id}",
@@ -808,6 +816,10 @@ const defaultTuning = `{
         "diversity.personalities[].id": "skeptic",
         "workflows[].personality": "skeptic",
         "terminal_workflows[].name": "deploy-plan",
+        "desktop.kind": "macos",
+        "desktop_workflows[].name": "sign-in-desktop",
+        "desktop_workflows[].expect[]": "\"Welcome back\"",
+
         "terminal_workflows[].expect[]": "\"Applied 3 changes\"",
         "terminal_workflows[].input[]": "y",
         "security.access.objects[].route": "/api/orders/{id}",
@@ -866,6 +878,10 @@ const defaultTuning = `{
         "diversity.personalities[].id": "skeptic",
         "workflows[].personality": "skeptic",
         "terminal_workflows[].name": "deploy-plan",
+        "desktop.kind": "macos",
+        "desktop_workflows[].name": "sign-in-desktop",
+        "desktop_workflows[].expect[]": "\"Welcome back\"",
+
         "terminal_workflows[].expect[]": "\"Applied 3 changes\"",
         "terminal_workflows[].input[]": "y",
         "security.access.objects[].route": "/api/orders/{id}",
@@ -1373,7 +1389,18 @@ func TestSchemaConstraintReport(t *testing.T) {
 // makes the expectation the same string the workflow types, so the tuning
 // above overrides all three in every base; without them the base is refused by
 // this feature's own two cross field rules, which is the #315 failure exactly.
-const wantConstraints = 743
+//
+// The desktop list arrived the same way and needed the same care, which is the
+// second time in two features, so it is worth stating as a rule rather than as
+// a note. A list whose entries share a namespace with another list will have
+// its generated name collide with that list's, and a block with a required
+// enum will be generated without one. Both refuse the base manifest, and a
+// refused base means every one of these cells measured NOTHING while the gate
+// reported red, which reads exactly like a bug in the feature. The tuning
+// above carries desktop.kind, desktop_workflows[].name and its expectation for
+// that reason. Anything added here that the engine cross checks needs its
+// override in the same commit.
+const wantConstraints = 787
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and

@@ -138,7 +138,7 @@ test('a desktop run that names no application is refused, not reported as a clea
   const { code, stdout, stderr } = await runMain({
     base_url: 'http://127.0.0.1:1',
     surface: 'desktop',
-    workflows: [{ name: 'anything', description: 'Do something.', expect: ['anything'] }],
+    desktopWorkflows: [{ name: 'anything', description: 'Do something.', expect: ['anything'] }],
     personas: [],
   });
   assert.notEqual(code, 0, `a desktop run with no application exited cleanly: ${stdout}`);
@@ -154,7 +154,9 @@ test('a desktop run reaches the desktop driver rather than returning nothing', a
     base_url: 'http://127.0.0.1:1',
     surface: 'desktop',
     desktop: { kind: 'electron', executablePath: '/nonexistent/not/an/electron', timeoutMs: 5000 },
-    workflows: [{ name: 'reaches the driver', description: 'Do something.', expect: ['anything'] }],
+    desktopWorkflows: [
+      { name: 'reaches the driver', description: 'Do something.', expect: ['anything'] },
+    ],
     personas: [],
   });
   const parsed = JSON.parse(stdout) as {

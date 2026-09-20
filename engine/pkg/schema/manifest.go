@@ -29,18 +29,27 @@ type Manifest struct {
 	// schema's terminal_workflow description for why that is a list and not
 	// a conditional.
 	TerminalWorkflows []TerminalWorkflow `json:"terminal_workflows,omitempty" yaml:"terminal_workflows,omitempty"`
-	Invariants        []Invariant        `json:"invariants,omitempty" yaml:"invariants,omitempty"`
-	Insights          *Insights          `json:"insights,omitempty" yaml:"insights,omitempty"`
-	Change            *Change            `json:"change,omitempty" yaml:"change,omitempty"`
-	Oracle            *Oracle            `json:"oracle,omitempty" yaml:"oracle,omitempty"`
-	Explore           *Explore           `json:"explore,omitempty" yaml:"explore,omitempty"`
-	Diversity         *Diversity         `json:"diversity,omitempty" yaml:"diversity,omitempty"`
-	Fidelity          *Fidelity          `json:"fidelity,omitempty" yaml:"fidelity,omitempty"`
-	Load              *Load              `json:"load,omitempty" yaml:"load,omitempty"`
-	Policy            *Policy            `json:"policy,omitempty" yaml:"policy,omitempty"`
-	Runtime           *Runtime           `json:"runtime,omitempty" yaml:"runtime,omitempty"`
-	GitHub            *GitHub            `json:"github,omitempty" yaml:"github,omitempty"`
-	Security          *Security          `json:"security,omitempty" yaml:"security,omitempty"`
+	// Desktop is which application the desktop workflows drive. The desktop
+	// counterpart of BaseURL: one application per manifest, because a
+	// manifest describes one product.
+	Desktop *DesktopApplication `json:"desktop,omitempty" yaml:"desktop,omitempty"`
+	// DesktopWorkflows are the workflows driven in a desktop application,
+	// through its accessibility tree. Their own list for the same reason the
+	// terminal ones are: a browser workflow needs a persona and a start path
+	// and a desktop application has neither.
+	DesktopWorkflows []DesktopWorkflow `json:"desktop_workflows,omitempty" yaml:"desktop_workflows,omitempty"`
+	Invariants       []Invariant       `json:"invariants,omitempty" yaml:"invariants,omitempty"`
+	Insights         *Insights         `json:"insights,omitempty" yaml:"insights,omitempty"`
+	Change           *Change           `json:"change,omitempty" yaml:"change,omitempty"`
+	Oracle           *Oracle           `json:"oracle,omitempty" yaml:"oracle,omitempty"`
+	Explore          *Explore          `json:"explore,omitempty" yaml:"explore,omitempty"`
+	Diversity        *Diversity        `json:"diversity,omitempty" yaml:"diversity,omitempty"`
+	Fidelity         *Fidelity         `json:"fidelity,omitempty" yaml:"fidelity,omitempty"`
+	Load             *Load             `json:"load,omitempty" yaml:"load,omitempty"`
+	Policy           *Policy           `json:"policy,omitempty" yaml:"policy,omitempty"`
+	Runtime          *Runtime          `json:"runtime,omitempty" yaml:"runtime,omitempty"`
+	GitHub           *GitHub           `json:"github,omitempty" yaml:"github,omitempty"`
+	Security         *Security         `json:"security,omitempty" yaml:"security,omitempty"`
 }
 
 // ServiceKind is what a service is.
@@ -699,6 +708,62 @@ type TerminalWorkflow struct {
 	Budget *TerminalBudget `json:"budget,omitempty" yaml:"budget,omitempty"`
 }
 
+// DesktopApplication is which application the desktop workflows drive.
+//
+// Declared once rather than per workflow, because a manifest describes one
+// product, and because the alternative reads worse than it sounds: a list whose
+// entries each name their own application is a list of unrelated runs sharing a
+// report, and nothing in it says which of them the change under review was
+// about.
+type DesktopApplication struct {
+	// Kind is "electron" or "macos", and it is stated rather than inferred
+	// from the path. Inferring it would mean an application driven the wrong
+	// way reports as an application that does not work.
+	Kind string `json:"kind" yaml:"kind"`
+	// Application is the Electron binary, or the .app bundle for a native
+	// application. Relative paths are resolved against the directory holding
+	// the manifest before the runner is told, because the runner is started
+	// from somewhere the manifest never mentions.
+	Application string `json:"application" yaml:"application"`
+	// Args are passed as written and never through a shell.
+	Args []string `json:"args,omitempty" yaml:"args,omitempty"`
+	// Process is what macOS calls the running application when that is not
+	// the bundle's own name: Visual Studio Code.app runs as Code. Only for
+	// "macos", and refused on "electron", which is launched directly and
+	// never looked up. Empty means the bundle's name without .app.
+	Process string `json:"process,omitempty" yaml:"process,omitempty"`
+}
+
+// DesktopWorkflow is one thing the agents do in a desktop application.
+//
+// No persona and no start path, which is the whole reason it is not a Workflow
+// with a surface key: a desktop application has no address bar to open and no
+// cookie to set, so signing in is a workflow that types into the fields the
+// application shows rather than a thing done to the session beforehand.
+type DesktopWorkflow struct {
+	Name        string `json:"name" yaml:"name"`
+	Description string `json:"description" yaml:"description"`
+	// Expect is what the screen must show. At least one, as for a terminal
+	// workflow: a workflow with nothing to expect can only report that
+	// nothing confirmed or contradicted it, which is blocked.
+	Expect []string `json:"expect,omitempty" yaml:"expect,omitempty"`
+	// Answers is what to type into fields this workflow names, keyed by any
+	// part of a field's accessible name. A table, not a script.
+	Answers map[string]string `json:"answers,omitempty" yaml:"answers,omitempty"`
+	Budget  *DesktopBudget    `json:"budget,omitempty" yaml:"budget,omitempty"`
+}
+
+// DesktopBudget caps what one desktop workflow may take.
+//
+// A duration AND a step count, unlike a terminal workflow, because a desktop
+// workflow is planned rather than written down: something decides what to press
+// next, and a plan that never finishes has to be stopped by a count as well as
+// by a clock.
+type DesktopBudget struct {
+	Duration string `json:"duration,omitempty" yaml:"duration,omitempty"`
+	Steps    int    `json:"steps,omitempty" yaml:"steps,omitempty"`
+}
+
 // TerminalScreen is how big the terminal the program is given is.
 type TerminalScreen struct {
 	Rows int `json:"rows,omitempty" yaml:"rows,omitempty"`
@@ -728,6 +793,20 @@ const (
 // names no budget. It matches the runner's own default, so a workflow with no
 // budget and one that writes this duration down behave identically.
 const DefaultTerminalDuration = "30s"
+
+// DefaultDesktopDuration and DefaultDesktopSteps are what a desktop workflow
+// may spend when it says nothing.
+//
+// Longer and larger than a terminal workflow's, because a desktop workflow is
+// PLANNED rather than written down: every step is a look at the screen, a
+// decision and an action, against an application that redraws between them, so
+// the same amount of work costs more of both. They are the browser's own
+// numbers for the same reason, since a desktop run is the browser's loop with a
+// different tree under it.
+const (
+	DefaultDesktopDuration = "2m"
+	DefaultDesktopSteps    = 40
+)
 
 // Budget caps what one workflow may consume.
 type Budget struct {

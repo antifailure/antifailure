@@ -172,6 +172,13 @@ type jobDocument struct {
 	// runner not to open a browser, consult the goals or probe access: none of
 	// those mean anything without a page. Absent means the ordinary web run.
 	Surface string `json:"surface,omitempty"`
+	// Desktop is which application a desktop run drives, and DesktopWorkflows
+	// are the workflows driven in it. Both absent for a run that drives only a
+	// browser, which is most runs. They are two fields rather than one because
+	// the application is declared once per manifest and the workflows are a
+	// list, exactly as BaseURL and Workflows are.
+	Desktop          *desktopAppDoc `json:"desktop,omitempty"`
+	DesktopWorkflows []desktopDoc   `json:"desktopWorkflows,omitempty"`
 	// Diversity is the resolved per-agent personality plan. Absent means one
 	// neutral agent per workflow, today's behavior. The engine resolves it so
 	// the runner stays a mechanism that consumes a fixed plan rather than
@@ -222,6 +229,34 @@ type terminalDoc struct {
 	// to a question the engine has already answered.
 	Cwd   string `json:"cwd,omitempty"`
 	MaxMs int64  `json:"maxMs,omitempty"`
+}
+
+// desktopAppDoc is which application a desktop run drives. It is the shape
+// runner/src/drivers/desktop.ts reads, so the path is already absolute and the
+// process name already derived by the time it is sent: the runner is started
+// from somewhere the manifest never mentions, and a second answer to a question
+// the engine has already answered is how the two come to disagree.
+type desktopAppDoc struct {
+	Kind string `json:"kind"`
+	// ExecutablePath is what an Electron run launches. Named for the field the
+	// runner's ElectronTarget reads rather than for the manifest's key,
+	// because this document IS that type's input.
+	ExecutablePath string   `json:"executablePath,omitempty"`
+	Args           []string `json:"args,omitempty"`
+	// BundlePath and Name are what a native run launches and then finds.
+	BundlePath string `json:"bundlePath,omitempty"`
+	Name       string `json:"name,omitempty"`
+}
+
+// desktopDoc is one workflow driven in a desktop application. It carries no
+// persona and no start path, because a desktop application has neither.
+type desktopDoc struct {
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Expect      []string          `json:"expect"`
+	Answers     map[string]string `json:"answers,omitempty"`
+	MaxSteps    int               `json:"maxSteps,omitempty"`
+	MaxMs       int64             `json:"maxMs,omitempty"`
 }
 
 type terminalScreenDoc struct {
@@ -282,7 +317,14 @@ func (o *Orchestrator) Test(ctx context.Context, opts TestOptions) (*TestReport,
 
 	workflows := o.workflowDocs(opts.Only)
 	terminals := o.terminalDocs(opts.Only)
-	if len(workflows)+len(terminals) == 0 {
+	desktops := o.desktopDocs(opts.Only)
+	// EVERY list counts here, and forgetting one is how a surface ends up
+	// perfectly implemented and unreachable. A manifest whose only workflows
+	// are desktop ones was refused by this line as declaring no workflows at
+	// all, which is the same defect the desktop driver was built to close,
+	// one layer up: the work exists, the transport exists, and one count says
+	// there is nothing to do.
+	if len(workflows)+len(terminals)+len(desktops) == 0 {
 		return nil, aferrors.Coded(aferrors.AFAGT001,
 			"detail", "the manifest declares no workflows to run")
 	}
@@ -327,7 +369,10 @@ func (o *Orchestrator) Test(ctx context.Context, opts TestOptions) (*TestReport,
 	defer closeSession(rs)
 	runStartedAt := o.opts.Clock.Now()
 	id := runID(runStartedAt, o.envID)
-	o.reportRunStarted(rs, id, "workflows", runStartedAt, len(workflows)+len(terminals))
+	// All three lists, because this is the number the console shows as "how
+	// many workflows this run declared" and a count that leaves one surface
+	// out is a progress bar that can never reach its own end.
+	o.reportRunStarted(rs, id, "workflows", runStartedAt, len(workflows)+len(terminals)+len(desktops))
 
 	// The personality plan is resolved here, in the process that owns the run
 	// identity and the seed, so the runner consumes a fixed assignment rather
@@ -344,7 +389,8 @@ func (o *Orchestrator) Test(ctx context.Context, opts TestOptions) (*TestReport,
 	report, err := o.driveRunner(ctx, runnerJob{
 		Runner: runner, BaseURL: status.URL, Artifacts: artifacts,
 		Workflows: workflows, Personas: o.personaDocs(provisioned),
-		Terminal: terminals, Surface: surfaceFor(workflows, terminals),
+		Terminal: terminals, Desktop: o.desktopApp(desktops), Desktops: desktops,
+		Surface:   surfaceFor(workflows, terminals, desktops),
 		Diversity: divPtr,
 		WorkDir:   o.opts.Root, Attempts: opts.Attempts, Headless: !opts.Headed,
 		LiveSocket: opts.LiveSocket,
@@ -576,6 +622,8 @@ type runnerJob struct {
 	WorkDir   string
 	Workflows []workflowDoc
 	Terminal  []terminalDoc
+	Desktop   *desktopAppDoc
+	Desktops  []desktopDoc
 	Surface   string
 	Personas  []personaDoc
 	Diversity *personality.Resolved
@@ -609,6 +657,7 @@ func (o *Orchestrator) driveRunner(ctx context.Context, job runnerJob) (*TestRep
 		BaseURL: job.BaseURL, Artifacts: job.Artifacts,
 		Workflows: job.Workflows, Personas: job.Personas,
 		Terminal: job.Terminal, Surface: job.Surface,
+		Desktop: job.Desktop, DesktopWorkflows: job.Desktops,
 		Diversity: job.Diversity,
 		AF:        self, WorkDir: job.WorkDir,
 		Attempts: job.Attempts, Headless: job.Headless,
@@ -764,14 +813,90 @@ func (o *Orchestrator) terminalDocs(only []string) []terminalDoc {
 	return out
 }
 
+// desktopApp is the application the desktop workflows drive, resolved into the
+// shape the runner reads, or nil when this run has no desktop workflows.
+//
+// Nil when the list is empty even if the manifest declared an application,
+// because a document carrying an application nothing opens invites the runner
+// to launch something for no reason. The validator already refuses that
+// manifest; this makes the document honest even if it ever stops.
+//
+// The path is made absolute HERE. The runner is a subprocess started from
+// somewhere the manifest never mentions, so a relative path resolved there
+// would name a different file, and the symptom would be an application that
+// could not be found for a reason nothing in the report could name.
+func (o *Orchestrator) desktopApp(desktops []desktopDoc) *desktopAppDoc {
+	app := o.opts.Manifest.Desktop
+	if app == nil || len(desktops) == 0 {
+		return nil
+	}
+	resolved := app.Application
+	if !filepath.IsAbs(resolved) {
+		resolved = filepath.Join(o.opts.Root, resolved)
+	}
+	doc := &desktopAppDoc{Kind: app.Kind, Args: app.Args}
+	if app.Kind == "macos" {
+		doc.BundlePath = resolved
+		doc.Name = app.Process
+		return doc
+	}
+	doc.ExecutablePath = resolved
+	return doc
+}
+
+// desktopDocs builds the desktop workflows the run will drive, filtered by the
+// same --only set the other two lists are, so a person naming one workflow gets
+// that workflow whichever surface it is written for.
+func (o *Orchestrator) desktopDocs(only []string) []desktopDoc {
+	wanted := map[string]bool{}
+	for _, n := range only {
+		wanted[n] = true
+	}
+	var out []desktopDoc
+	for i := range o.opts.Manifest.DesktopWorkflows {
+		w := &o.opts.Manifest.DesktopWorkflows[i]
+		if len(wanted) > 0 && !wanted[w.Name] {
+			continue
+		}
+		doc := desktopDoc{
+			Name: w.Name, Description: w.Description,
+			Expect: w.Expect, Answers: w.Answers,
+		}
+		if w.Budget != nil {
+			doc.MaxSteps = w.Budget.Steps
+			if d, err := manifest.ParseDuration(w.Budget.Duration); err == nil && d > 0 {
+				doc.MaxMs = d.Milliseconds()
+			}
+		}
+		out = append(out, doc)
+	}
+	return out
+}
+
 // surfaceFor is which surface the runner is told this run drives.
 //
-// "terminal" only when there is nothing for a browser to do. A run with both
-// kinds of workflow is a web run that also has terminal workflows in it, and
-// saying otherwise would stop the browser half from running at all. A run with
-// neither cannot reach here: Test refuses it above.
-func surfaceFor(workflows []workflowDoc, terminals []terminalDoc) string {
-	if len(workflows) == 0 && len(terminals) > 0 {
+// It answers exactly ONE question: is a browser opened. That is what the
+// runner does with it, and it is why a run with browser workflows and terminal
+// ones is a web run rather than a terminal one; saying otherwise would stop the
+// browser half from running at all. A run with none of the three cannot reach
+// here: Test refuses it above.
+//
+// Desktop is named the same way and for the same reason, and the ordering
+// between the two non web surfaces is deliberate rather than alphabetical.
+// Terminal workflows run whatever the surface says, because a command line
+// program needs nothing opened for it. Desktop workflows need an application
+// launched, so a run that has them and no browser work says so, and a run that
+// has browser work stays a web run and drives its desktop workflows alongside
+// it. Neither surface can be starved by the other: the runner dispatches all
+// three lists and only the BROWSER is gated on this string.
+func surfaceFor(workflows []workflowDoc, terminals []terminalDoc, desktops []desktopDoc) string {
+	if len(workflows) > 0 {
+		return ""
+	}
+	if len(desktops) > 0 {
+		return "desktop"
+	}
+	if len(terminals) > 0 {
 		return "terminal"
 	}
 	return ""

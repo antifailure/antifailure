@@ -143,10 +143,27 @@ func TestTerminalDocs_OnlySelectsAcrossBothLists(t *testing.T) {
 func TestSurfaceFor_TerminalOnlyWhenThereIsNothingForABrowserToDo(t *testing.T) {
 	web := []workflowDoc{{Name: "checkout"}}
 	term := []terminalDoc{{Name: "deploy"}}
-	require.Equal(t, "terminal", surfaceFor(nil, term))
-	require.Equal(t, "", surfaceFor(web, term),
+	require.Equal(t, "terminal", surfaceFor(nil, term, nil))
+	require.Equal(t, "", surfaceFor(web, term, nil),
 		"a run with browser workflows was told it was a terminal run, so the browser half would never run")
-	require.Equal(t, "", surfaceFor(web, nil))
+	require.Equal(t, "", surfaceFor(web, nil, nil))
+
+	// And the same question asked of the desktop surface, which shares this
+	// function. A browser workflow still wins, because this string gates only
+	// the BROWSER and the runner drives all three lists; a run with desktop
+	// workflows and no browser work says so, so that no browser is opened for
+	// a run that has no page to open.
+	desk := []desktopDoc{{Name: "sign-in"}}
+	require.Equal(t, "desktop", surfaceFor(nil, nil, desk))
+	require.Equal(t, "", surfaceFor(web, nil, desk),
+		"a run with browser workflows was told it was a desktop run, so the browser half would never run")
+	// Desktop outranks terminal when there is no browser work, because a
+	// terminal workflow needs nothing opened for it and a desktop one needs an
+	// application launched. Neither is starved: the runner dispatches both
+	// lists whatever this says.
+	require.Equal(t, "desktop", surfaceFor(nil, term, desk))
+	require.Equal(t, "terminal", surfaceFor(nil, term, nil))
+	require.Equal(t, "", surfaceFor(nil, nil, nil))
 }
 
 // Every command that runs declared workflows reaches the runner through
@@ -191,9 +208,10 @@ func TestTest_SendsTheTerminalWorkflowsAndCountsThem(t *testing.T) {
 	src := string(body)
 	for _, line := range []string{
 		"terminals := o.terminalDocs(opts.Only)",
-		"if len(workflows)+len(terminals) == 0 {",
-		`o.reportRunStarted(rs, id, "workflows", runStartedAt, len(workflows)+len(terminals))`,
-		"Terminal: terminals, Surface: surfaceFor(workflows, terminals),",
+		"if len(workflows)+len(terminals)+len(desktops) == 0 {",
+		`o.reportRunStarted(rs, id, "workflows", runStartedAt, len(workflows)+len(terminals)+len(desktops))`,
+		"Terminal: terminals, Desktop: o.desktopApp(desktops), Desktops: desktops,",
+		"Surface:   surfaceFor(workflows, terminals, desktops),",
 	} {
 		require.Containsf(t, src, line,
 			"Orchestrator.Test no longer carries %q, so terminal workflows are built and never run", line)
@@ -235,7 +253,7 @@ func TestTest_ARealFullScreenProgramIsDrivenAndCounted(t *testing.T) {
 			Artifacts: filepath.Join(t.TempDir(), "artifacts"),
 			Workflows: o.workflowDocs(nil),
 			Terminal:  terminals,
-			Surface:   surfaceFor(o.workflowDocs(nil), terminals),
+			Surface:   surfaceFor(o.workflowDocs(nil), terminals, nil),
 			WorkDir:   o.opts.Root,
 			Headless:  true,
 		})
@@ -288,7 +306,7 @@ func TestTest_TheEnvironmentAddressReachesTheProgram(t *testing.T) {
 		BaseURL:   "http://127.0.0.1:45999",
 		Artifacts: filepath.Join(t.TempDir(), "artifacts"),
 		Terminal:  terminals,
-		Surface:   surfaceFor(nil, terminals),
+		Surface:   surfaceFor(nil, terminals, nil),
 		WorkDir:   o.opts.Root,
 		Headless:  true,
 	})

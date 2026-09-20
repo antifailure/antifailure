@@ -260,6 +260,27 @@ func Explain(m *schema.Manifest, width int) string {
 		b.WriteString("\n")
 	}
 
+	if len(m.DesktopWorkflows) > 0 {
+		// The application is printed once, above the list, because it is
+		// declared once: a reader deciding whether these workflows prove what
+		// their names say needs to know what they were driven against, and
+		// repeating it on every line would say it is per workflow when it is
+		// not.
+		app := "no application"
+		if m.Desktop != nil {
+			app = m.Desktop.Kind + " " + m.Desktop.Application
+			if m.Desktop.Kind == "macos" && m.Desktop.Process != "" {
+				app += " (as " + m.Desktop.Process + ")"
+			}
+		}
+		fmt.Fprintf(&b, "Desktop workflows, against %s\n", app)
+		for _, w := range m.DesktopWorkflows {
+			fmt.Fprintf(&b, "  %-24s %s, up to %d steps in %s\n",
+				w.Name, value(w.Description, 27, width), w.Budget.Steps, w.Budget.Duration)
+		}
+		b.WriteString("\n")
+	}
+
 	if len(m.Invariants) > 0 {
 		b.WriteString("Invariants\n")
 		for _, inv := range m.Invariants {
@@ -503,6 +524,9 @@ func Summary(m *schema.Manifest) string {
 	}
 	if n := len(m.TerminalWorkflows); n > 0 {
 		out += fmt.Sprintf(", %d terminal %s", n, plural("workflow", n))
+	}
+	if n := len(m.DesktopWorkflows); n > 0 {
+		out += fmt.Sprintf(", %d desktop %s", n, plural("workflow", n))
 	}
 	return out
 }

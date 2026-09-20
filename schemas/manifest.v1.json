@@ -109,6 +109,17 @@
     },
     "security": {
       "$ref": "#/$defs/security"
+    },
+    "desktop": {
+      "$ref": "#/$defs/desktop_application"
+    },
+    "desktop_workflows": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "$ref": "#/$defs/desktop_workflow"
+      },
+      "description": "What the agents do in a desktop application. Written the same way a browser workflow is, as a goal and what proves it happened, and run in the same `af test` against the same environment, so a desktop result is counted and reported exactly like a browser one. Requires `desktop` to say which application they drive."
     }
   },
   "$defs": {
@@ -2328,6 +2339,110 @@
           "pattern": "^[0-9]+(ms|s|m|h|d)$",
           "default": "336h",
           "description": "How old the profile may be before it is refused. A stale profile is not a smaller number, it is an unknown one, so it is refused the way a stale golden is rather than quoted. Fourteen days by default rather than the volume profile's thirty, because an endpoint mix moves at the rate a team ships rather than at the rate a business grows."
+        }
+      }
+    },
+    "desktop_application": {
+      "title": "Desktop application",
+      "description": "Which application the desktop workflows drive, declared once because a manifest describes one product. It is the desktop counterpart of `base_url`: the workflows say what to do and this says what to do it to.\n\nThe application is driven through its ACCESSIBILITY TREE, the same thing a screen reader reads, which is why a desktop workflow reads like a browser one. Nothing here names a coordinate, a window position or a control's internal id.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "application"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "electron",
+            "macos"
+          ],
+          "description": "Which kind of application this is, and so which accessibility tree it publishes.\n\n`electron` covers anything built on Electron, which is most of the desktop software a team would want rehearsed: VS Code, Slack, Discord. Underneath one is Chromium, so it publishes the same accessibility tree a web page does.\n\n`macos` covers a native application, read through AXUIElement, the platform's own accessibility API. It needs the macOS Accessibility permission, which a person grants in System Settings and which nothing in software can grant. A run without it is reported as blocked with that step named, never as an application with no controls on it.\n\nStated rather than guessed from the path, because guessing would mean an application that is driven the wrong way reports as an application that does not work."
+        },
+        "application": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "description": "What to launch. For `electron`, the Electron binary itself, which inside a packaged application is the executable in Contents/MacOS and in a project under development is the one in node_modules. For `macos`, the .app bundle. Relative paths are resolved against the directory holding the manifest, because the runner is a subprocess started from somewhere the manifest never mentions and a path resolved there would mean a different file."
+        },
+        "args": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "description": "The arguments, one per entry. Passed as written and never through a shell, so a space in a value is part of that value. An Electron project under development is usually launched by passing the directory holding its package.json. A native application is given these after its bundle is opened."
+        },
+        "process": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "What macOS calls the running application, when that is not the bundle's own name. Only for `macos`, and refused on `electron`, which is launched directly and never looked up.\n\nIt exists because opening a bundle returns before the application is ready, so the process still has to be found by name, and the two names are not always the same: Visual Studio Code.app runs as Code. Defaults to the bundle's name without .app, which is right for most applications."
+        }
+      }
+    },
+    "desktop_workflow": {
+      "title": "Desktop workflow",
+      "description": "One thing the agents do in a desktop application, written exactly as a browser workflow is: a sentence saying what a person would do, and what proves it happened.\n\nWHY THIS IS ITS OWN LIST rather than a `surface` key on `workflows`, which is the same reason terminal workflows are their own list. A browser workflow needs a persona to sign in as and a path to start at; a desktop application has neither, because there is no address bar to open and no cookie to set, and signing in is itself a workflow that types into the fields the application shows. Putting both in one entry would mean half of every entry's keys are refused by the other half's surface. The list a workflow is written in says which surface it drives, and that is a fact a person can see.\n\nNames are unique across all three lists, because a name is what `--only` selects and what the report prints.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "description",
+        "expect"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",
+          "maxLength": 64,
+          "description": "What the report calls it and what the `--only` flag selects. Unique across this list, `workflows` and `terminal_workflows` together."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 4000,
+          "description": "What a person would do and what proves it happened, in sentences. It is also read: a control whose whole visible label appears here is one the agent is willing to press, which is how a screen nothing else recognises is still driven."
+        },
+        "expect": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50,
+          "items": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "description": "What the screen must show, written as sentences about what a person would read. Judged against the accessible text of the window: the headings, labels and static text a screen reader would announce.\n\nIt is NOT judged against what the agent typed. A field's own value is left out of that text deliberately, because an expectation a workflow can satisfy by filling a box with its own answer is a check that cannot say no.\n\nAt least one is required, as for a terminal workflow: a desktop workflow with nothing to expect can only ever report that nothing confirmed or contradicted it, which is blocked, so declaring one writes a workflow that cannot pass.\n\nA sentence in double quotes is required on screen character for character."
+        },
+        "answers": {
+          "type": "object",
+          "maxProperties": 50,
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "description": "What to type into fields this workflow names, keyed by any part of a field's accessible name and matched without regard to case.\n\nA table, not a script. It says what an answer IS, never what order to do things in or which control to press, so a workflow with answers is still a sentence with some of its nouns pinned down. The planner still decides everything else."
+        },
+        "budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "What this workflow may spend. Both a duration and a number of steps, unlike a terminal workflow, because a desktop workflow is planned rather than written down: something decides what to press next, and a plan that never finishes has to be stopped by a count as well as by a clock.",
+          "properties": {
+            "duration": {
+              "type": "string",
+              "pattern": "^[0-9]+(s|m)$",
+              "default": "2m",
+              "description": "The time the whole workflow may take, retries included. Past it the workflow is blocked with the budget named, never judged on a half finished screen."
+            },
+            "steps": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 40,
+              "description": "The most actions one attempt may take. A workflow that reaches it is judged on the screen it got to and blocked if that screen shows nothing either way, because running out of steps is not the application failing."
+            }
+          }
         }
       }
     }

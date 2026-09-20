@@ -86,6 +86,15 @@ interface JobDocument {
    *  REQUIRED then, because there is no default application the way there is a
    *  default base_url. A desktop run without it is blocked and says so. */
   readonly desktop?: DesktopApp;
+  /** desktopWorkflows are the workflows driven in that application.
+   *
+   *  Its own list rather than reusing `workflows`, because `workflows` is what
+   *  a BROWSER run drives and one list read by two drivers is two drivers
+   *  fighting over it: a manifest that declares both would have had its
+   *  desktop workflows opened in a browser, or its browser workflows typed
+   *  into an application. Tolerant like the others: absent, null and empty all
+   *  mean none. */
+  readonly desktopWorkflows?: readonly Workflow[] | null;
   /** live is the path to a local socket the engine is listening on, present
    *  only when somebody is watching this run. Absent means no watcher, which is
    *  the ordinary case: the sink becomes a no-op and the run is unchanged. The
@@ -240,9 +249,16 @@ async function main(): Promise<number> {
       env: { AF_BASE_URL: doc.base_url },
     });
   }
-  if (surface === 'desktop') {
+  // The desktop workflows run whenever the engine sent any, whatever the
+  // surface says, exactly as the terminal ones do above. The surface decides
+  // whether a BROWSER is opened, and those are two different questions: a
+  // manifest with a checkout workflow and a desktop sign in declares both, and
+  // one run has to answer for both of them.
+  const desktopWorkflows = doc.desktopWorkflows ?? [];
+  if (desktopWorkflows.length > 0) {
     // The refusal and the dispatch are the same branch on purpose: there is no
     // state in which the registry says desktop is available and nothing runs.
+    assertAvailable('desktop');
     if (!doc.desktop) {
       throw new Error(
         'this run asks for the desktop surface and names no application to drive. ' +
@@ -257,7 +273,7 @@ async function main(): Promise<number> {
     // earlier.
     results = [...results, ...await runDesktop({
       app: doc.desktop,
-      workflows,
+      workflows: desktopWorkflows,
       live,
       ...(doc.attempts === undefined ? {} : { attempts: doc.attempts }),
       ...(model ? { model } : {}),

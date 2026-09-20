@@ -501,6 +501,7 @@ func suggest(got string, siblings []string) string {
 // which keys are legal in which position.
 var knownKeys = []string{
 	"version", "name", "services", "database", "datastores", "egress", "personas", "auth", "workflows",
+	"desktop", "desktop_workflows", "application", "process", "answers",
 	"invariants", "insights", "change", "explore", "fidelity",
 	"load", "policy", "runtime", "github",
 	"path", "kind", "build", "command", "port", "health_path", "health_timeout",
