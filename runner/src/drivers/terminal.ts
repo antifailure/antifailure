@@ -165,13 +165,48 @@ async function runOneTerminal(
   sink.agent(desc, 'ended', classified.verdict);
   return {
     workflow: workflow.name,
-    outcome: classified,
+    // The reproduction is filled in here for the same reason the web driver
+    // fills in its own: classify() cannot write one, because what a person
+    // would have to DO to see this again is a fact about the surface. A
+    // terminal workflow that reached here with the empty list classify
+    // returns produced a failing verdict with nothing under it, and the
+    // report's "how to see this yourself" block is skipped entirely when the
+    // list is empty, so the reader of a failed check was shown the verdict
+    // and no way to reach it.
+    outcome: { ...classified, reproduction: reproduction(workflow, invocation, classified) },
     steps,
     evidence: { console: [], failed: [] },
     durationMs: Date.now() - started,
     startedAt: new Date(started).toISOString(),
     finishedAt: new Date().toISOString(),
   };
+}
+
+/** reproduction turns the workflow into steps a person can follow at their own
+ *  terminal, in the same shape the web driver produces: the invocation, what
+ *  was typed, what was expected and what happened instead.
+ *
+ *  The RENDERED SCREENS are deliberately not in here. A grid of cells is a
+ *  picture rather than an instruction, and the markdown report writes one
+ *  reproduction entry per line, where a run of spaces is collapsed and the
+ *  columns that make a screen readable stop lining up. The screens are in the
+ *  result's steps, which is where the live cast reads them and where the JSON
+ *  report keeps them whole. */
+function reproduction(
+  workflow: TerminalWorkflow, invocation: string, outcome: { verdict: string; detail: string },
+): string[] {
+  if (outcome.verdict === 'pass') return [];
+  const how = workflow.screen
+    ? `Run ${invocation} on a ${workflow.screen.rows} by ${workflow.screen.cols} terminal`
+    : `Run ${invocation}`;
+  const typed = (workflow.input ?? []).map((entry, i) => `${i + 2}. ${describeEntry(entry)}`);
+  return [
+    'Bring the environment up with af up, then follow these:',
+    `1. ${how}`,
+    ...typed,
+    `Expected: ${workflow.expect.join(' ')}`,
+    `Got: ${outcome.detail}`,
+  ];
 }
 
 /** The pipe path, for a program that reads lines and prints lines. Unchanged

@@ -398,3 +398,52 @@ test('the job environment reaches the program on both paths', async () => {
   assert.equal(results[0]!.outcome.verdict, 'pass', results[0]!.outcome.detail);
   assert.equal(results[1]!.outcome.verdict, 'pass', results[1]!.outcome.detail);
 });
+
+test('a failed terminal workflow carries steps a person can follow', async () => {
+  // classify() returns an empty reproduction, and the markdown report SKIPS
+  // the "how to see this yourself" block entirely when the list is empty. So
+  // a terminal workflow that failed reported a verdict with nothing under it,
+  // and the reader of a red check was shown no way to reach it.
+  const results = await runTerminal({
+    workflows: [{
+      name: 'inbox',
+      command: execPath,
+      args: [fixture('menu-tui.mjs')],
+      screen: { rows: 12, cols: 50 },
+      input: ['<down>', '<enter>'],
+      expect: ['"Forty posts are live."'],
+    }],
+  });
+  const outcome = results[0]!.outcome;
+  assert.equal(outcome.verdict, 'fail', outcome.detail);
+  const how = outcome.reproduction.join('\n');
+  assert.match(how, /af up/);
+  assert.match(how, /menu-tui\.mjs on a 12 by 50 terminal/,
+    `the invocation and the terminal size are missing:\n${how}`);
+  assert.match(how, /2\. Press down/);
+  assert.match(how, /3\. Press enter/);
+  assert.match(how, /Expected: "Forty posts are live\."/);
+  assert.match(how, /Got: /);
+  // A grid of cells is a picture rather than an instruction, and the report
+  // writes one entry per line where its columns would stop lining up. The
+  // screens stay in the steps.
+  assert.ok(!outcome.reproduction.some((line) => line.includes('\n')),
+    'a rendered screen reached the reproduction, where its columns collapse');
+  assert.ok(results[0]!.steps.some((s) => s.includes('> Drafts')),
+    'the screens left the steps as well');
+});
+
+test('a terminal workflow that passed carries no reproduction', async () => {
+  // The same rule the web driver follows: nobody reproduces a pass, and a
+  // list of instructions under a green result is noise in every report.
+  const results = await runTerminal({
+    workflows: [{
+      name: 'greeting',
+      command: execPath,
+      args: ['-e', 'process.stdout.write("Welcome aboard\\n")'],
+      expect: ['"Welcome aboard"'],
+    }],
+  });
+  assert.equal(results[0]!.outcome.verdict, 'pass');
+  assert.deepEqual(results[0]!.outcome.reproduction, []);
+});
