@@ -14,6 +14,27 @@ and the per change entries are what make it a wall. `just relnotes` refuses an
 unbalanced marker, a second region in one section, an empty region, and a
 section that omits all of itself.
 
+## v1.5.4
+
+A pull request check said one workflow failed and linked to a console page that
+said no run had reported. Everything a run gathers past the counts reaches the
+control plane through the pull request callback rather than the events stream,
+so none of it was projected into the tables the run page read, and the report
+the engine had already rendered for a person sat unread in the generation. The
+run page reads it now, so the findings and their fixes, the migration rehearsal
+and its locks, the invariants, the access probe readings and the load
+percentiles reach the person who has to act on them.
+
+<!-- relnotes:omit -->
+### Added
+
+The console run page shows the whole report a pull request check carried, at
+`/runs?pr=<n>`, under a scannable strip of the counts: the findings and their
+fixes, the migration rehearsal, the invariants, the load, the reproductions
+folded one click away. It needs no run row to exist, so a repository reports
+here the first time its check runs (#503).
+<!-- relnotes:end -->
+
 ## v1.5.3
 
 The control plane could start an agents run or a load run against an environment
