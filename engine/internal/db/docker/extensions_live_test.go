@@ -38,6 +38,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -100,6 +101,9 @@ const (
 	customAMImage = "antifailure/test-custom-am:17"
 	// customAMName is the access method the extension registers.
 	customAMName = "af_demo"
+	// citusImage carries `columnar`, the access method people actually ask
+	// about, and the test below runs against it wherever it can run natively.
+	citusImage = "citusdata/citus:13.0"
 )
 
 // The extension, as the files a PGXS build expects. Embedded rather than kept
@@ -950,4 +954,100 @@ func TestASubsetLoadsIntoACustomTableAccessMethod(t *testing.T) {
 		"the rows the subset selected did not arrive in the custom access method")
 	require.Equal(t, int64(1), scan[int64](t, conn, `SELECT count(*) FROM tenants`),
 		"the heap table beside it did not get the seed row, so this says nothing about the subset")
+}
+
+// requireNativeImage skips unless an image's architecture matches this host's.
+//
+// It exists because an emulated container is not a slower container, it is a
+// different machine. Measured on this arm64 laptop against the amd64 citus
+// image: the same golden that branched in 474 seconds when the machine was
+// quiet later produced a branch whose checkpoint took 43 seconds to write 147
+// buffers and never became usable, and another that answered every connection
+// with "the database system is in recovery mode" for five minutes. Neither of
+// those says anything about the product.
+//
+// So the emulated case is SKIPPED, with the architectures named, rather than
+// run and read. A skip that says which two architectures disagreed is a skip
+// somebody can act on; a red from qemu is a red nobody can.
+func requireNativeImage(t *testing.T, ref string) {
+	t.Helper()
+	cli, err := dockerutil.Client()
+	if err != nil {
+		t.Skipf("skipped: no Docker daemon is reachable: %v", err)
+	}
+	defer func() { _ = cli.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	info, err := cli.ImageInspect(ctx, ref)
+	if err != nil {
+		t.Skipf("skipped: %s could not be inspected for its architecture: %v", ref, err)
+	}
+	if info.Architecture != runtime.GOARCH {
+		t.Skipf("skipped: %s is %s and this host is %s, so it would run under emulation; "+
+			"the built fixture in TestACustomTableAccessMethodSurvivesTheGoldenAndTheBranch "+
+			"covers the same path natively", ref, info.Architecture, runtime.GOARCH)
+	}
+}
+
+// TestCitusColumnarSurvivesTheGoldenAndTheBranch is the same claim as the
+// built fixture's, made against the access method people actually ask about.
+//
+// It is a second test rather than a replacement, and the two are not
+// redundant. The built fixture's storage routines are the heap's, so it settles
+// that an access method's IDENTITY survives the pipeline and nothing about its
+// storage. citus columnar's storage is genuinely not the heap: it refuses ctid
+// scans and UPDATE outright, which is the measurement the masking refusal is
+// designed against. Only this one can say that rows written by an engine with
+// different storage come back.
+//
+// It has passed, on this branch's provider code, in 474.36 seconds. It is
+// gated on the architecture because it cannot pass reliably under emulation,
+// which is what the gate's own comment measures.
+func TestCitusColumnarSurvivesTheGoldenAndTheBranch(t *testing.T) {
+	requireImage(t, citusImage)
+	requireNativeImage(t, citusImage)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	e := newExtensionProvider(t, dockerdb.Options{
+		Version: 17, PortFrom: 48800,
+		Image: citusImage,
+		// citus is loaded by the postmaster and the columnar access method
+		// lives in that library, so this is the preload path and the extension
+		// path in one manifest. It must lead the list: started second, the
+		// postmaster exits during initdb with "Citus has to be loaded first".
+		PreloadLibraries: []string{"citus"},
+		Extensions:       []string{"citus_columnar"},
+		SeedSQL: `
+			CREATE TABLE ordinary (id int primary key, note text);
+			INSERT INTO ordinary VALUES (1, 'on the heap'), (2, 'also on the heap');
+			CREATE TABLE measurements (id int, sensor text, reading double precision) USING columnar;
+			INSERT INTO measurements
+			SELECT g, 'sensor-' || g, g * 1.25 FROM generate_series(1, 7) g;`,
+	})
+
+	gv := e.refresh(ctx, provider.GoldenSpec{
+		Version: 17, RulesHash: "cituscol1", Provenance: "extensions-citus-columnar",
+	})
+	b := e.branch(ctx, gv.ID, "env_cituscolumnar01")
+	conn := e.open(ctx, b)
+
+	require.True(t, scan[bool](t, conn,
+		`SELECT EXISTS (SELECT 1 FROM pg_am WHERE amname = 'columnar' AND amtype = 't')`),
+		"the branch has no columnar table access method, so nothing stored in one could be read")
+	require.Equal(t, "columnar", scan[string](t, conn,
+		`SELECT am.amname FROM pg_class c JOIN pg_am am ON am.oid = c.relam
+		 WHERE c.relname = 'measurements'`),
+		"the table came back on a different access method than it was created with")
+	require.Equal(t, "heap", scan[string](t, conn,
+		`SELECT am.amname FROM pg_class c JOIN pg_am am ON am.oid = c.relam
+		 WHERE c.relname = 'ordinary'`),
+		"the ordinary table beside it is the control and it is not on the heap either")
+	require.Equal(t, int64(7), scan[int64](t, conn, `SELECT count(*) FROM measurements`),
+		"the rows in the custom access method did not reach the branch")
+	require.InDelta(t, 8.75,
+		scan[float64](t, conn, `SELECT reading FROM measurements WHERE id = 7`), 0.0001,
+		"a row came back with the wrong value, so the storage round trip is not faithful")
 }
