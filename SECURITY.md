@@ -13,9 +13,12 @@ public issue for a security problem. Blank issues are disabled and the issue
 chooser offers a security link that points here instead of a form.
 
 There is no security mailbox, and that is stated rather than left to be
-discovered. The antifailure.dev domain publishes no mail exchanger and its SPF
-policy authorises no sender, so an address printed here would be a report
-nobody receives.
+discovered. The antifailure.dev domain does now accept mail, so this is a
+choice rather than a limitation: no address on it is monitored for security
+reports, nothing routes one to the maintainers, and a report sent to a person
+there would miss every commitment made below. The domain also authorises no
+sender from its root, `v=spf1 -all` with DMARC `p=reject`, so mail that claims
+to come from it is refused rather than merely suspected.
 
 Include, as far as you can:
 
