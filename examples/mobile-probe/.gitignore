@@ -1,0 +1,5 @@
+# Build outputs. Both halves are built by their own build.sh from the sources
+# beside it, so committing the products would add a signed apk and a Mach-O
+# binary to every clone and guarantee they drift from the source they came
+# from.
+build/
