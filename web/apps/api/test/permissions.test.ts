@@ -66,6 +66,7 @@ function inputsFor(org: Org): Record<string, unknown> {
     'runs.get': { runId: '00000000-0000-0000-0000-000000000000' },
     'runs.verdicts': { runId: '00000000-0000-0000-0000-000000000000' },
     'runs.artifacts': { runId: '00000000-0000-0000-0000-000000000000' },
+    'runs.report': { pr: 1 },
     'network.effective': { repository: org.repository },
     'network.explain': { host: 'api.stripe.com', tls: true, path: '/v1/charges' },
     'network.decisions': { limit: 10 },

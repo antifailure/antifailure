@@ -102,7 +102,12 @@ test("the runs page mounts the report and the report reads the pull request", ()
   const page = readFileSync(new URL("../app/(app)/runs/page.tsx", import.meta.url), "utf8");
   assert.ok(page.includes("<ReportMarkdown"), "runs/page.tsx never mounts the report renderer");
   assert.ok(page.includes("<PullRequestReport"), "runs/page.tsx never mounts PullRequestReport");
-  assert.ok(page.includes('query("runs.report"'), "PullRequestReport never calls runs.report");
+  // A regex rather than a substring, and not for whitespace tolerance alone:
+  // routecheck reads every .ts and .tsx file under console for call sites, and
+  // a literal `query("runs.report"` written here is read as a call site whose
+  // path it cannot resolve, which fails that gate over a source read. Escaping
+  // the parenthesis keeps the assertion and leaves nothing for it to mistake.
+  assert.match(page, /query\(\s*"runs\.report"/, "PullRequestReport never calls runs.report");
   const view = readFileSync(new URL("./reportmarkdown.tsx", import.meta.url), "utf8");
   assert.ok(view.includes("parseReport("), "the renderer never calls the parser this file tests");
 });
