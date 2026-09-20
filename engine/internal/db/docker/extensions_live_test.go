@@ -139,12 +139,24 @@ CREATE ACCESS METHOD af_demo TYPE TABLE HANDLER af_demo_am_handler;
 		"PG_CONFIG = pg_config\n" +
 		"PGXS := $(shell $(PG_CONFIG) --pgxs)\n" +
 		"include $(PGXS)\n"
-	customAMDockerfile = `FROM postgres:17
+	// Two stages, and the second one is why. Building an extension needs the
+	// server headers, and on Debian those depend on LLVM, so a single stage
+	// image is about four times the size of the one it started from. Every
+	// golden built from it is a commit of that, and a commit of two gigabytes
+	// is minutes rather than seconds. The runtime stage is the stock image
+	// plus three files: the shared object and the two the extension machinery
+	// reads.
+	customAMDockerfile = `FROM postgres:17 AS build
 RUN apt-get update \
  && apt-get install -y --no-install-recommends build-essential postgresql-server-dev-17 \
  && rm -rf /var/lib/apt/lists/*
 COPY af_demo_am.c af_demo_am.control af_demo_am--1.0.sql Makefile /src/
 RUN cd /src && make && make install
+
+FROM postgres:17
+COPY --from=build /usr/lib/postgresql/17/lib/af_demo_am.so /usr/lib/postgresql/17/lib/
+COPY --from=build /usr/share/postgresql/17/extension/af_demo_am.control /usr/share/postgresql/17/extension/
+COPY --from=build /usr/share/postgresql/17/extension/af_demo_am--1.0.sql /usr/share/postgresql/17/extension/
 `
 )
 
