@@ -16,10 +16,12 @@ buildpacks
 burstable
 BYPASSRLS
 bytea
+citus
 cobra
 CREATEDB
 CREATEROLE
 cspell
+ctid
 dblab
 dbname
 dedupe
@@ -38,6 +40,7 @@ goroutines
 gosec
 govulncheck
 hardlinks
+hypertable
 idor
 kubeconfig
 kubelet
@@ -54,10 +57,12 @@ partitionable
 pgbench
 pgbench's
 pgbouncer
+PGDATA
 pgurl
 pgvector
 PKCE
 pooler
+postgis
 postgres
 posthog
 Procfile
@@ -82,6 +87,7 @@ syft
 tembo
 testcontainers
 tfvars
+timescaledb
 TOTP
 tripwire
 tripwires

@@ -16,22 +16,27 @@ package docker_test
 // the only rule that can settle this: a provider reporting that it created an
 // extension is a provider reporting on its own intentions.
 //
-// The images are real and third party. pgvector is the out of tree extension
-// people ask for most; timescaledb is the one that proves the preload path,
-// because it is loaded by the postmaster and a server carrying its catalog
-// entries without its library refuses to start rather than starting degraded;
-// citus carries `columnar`, which is a genuine table access method with
-// genuinely different semantics from the heap, and it is the only one of the
-// three that could not be faked by a table that behaves normally.
+// Two of the images are real and third party. pgvector is the out of tree
+// extension people ask for most; timescaledb is the one that proves the
+// preload path, because it is loaded by the postmaster and a server carrying
+// its catalog entries without its library refuses to start rather than
+// starting degraded. The third is built here, because the access method it
+// carries has to be one whose relam is not the heap and no published image
+// exists for that alone; the comment on customAMImage says what that does and
+// does not settle, and where the semantics it is designed against were
+// measured.
 //
 // They are SKIPPED rather than failed when the image cannot be had, and the
 // skip says which image and why. A machine with no daemon, no network, or no
 // room is not a machine that has disproved anything.
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -63,23 +68,152 @@ const (
 	// shared_preload_libraries, which is what makes this image the instrument
 	// for the preload path rather than a second copy of the pgvector case.
 	timescaleImage = "timescale/timescaledb:2.17.2-pg17"
-	// citusImage carries `columnar`, a table access method whose storage is
-	// not the heap. Measured on 17.2 in this image: a columnar table accepts a
-	// PRIMARY KEY, accepts COPY ... FORMAT BINARY, reports through pg_am and
-	// pg_class.relam like any other, and refuses both `SELECT ctid` and
-	// `UPDATE` with "UPDATE and CTID scans not supported for ColumnarScan".
-	// Those four facts together are the whole reason this file exists.
-	citusImage = "citusdata/citus:13.0"
+	// customAMImage carries a table access method compiled here rather than
+	// pulled, and the reason is the whole difficulty of testing this.
+	//
+	// The access method people ask about is citus `columnar`, and it was
+	// measured directly while this was written, on Postgres 17.2 in
+	// citusdata/citus:13.0: a columnar table accepts a PRIMARY KEY, accepts
+	// COPY ... FORMAT BINARY, reports through pg_am and pg_class.relam like
+	// any other, and refuses both `SELECT ctid::text FROM t` and `UPDATE t SET
+	// ... WHERE id = 2` with "UPDATE and CTID scans not supported for
+	// ColumnarScan". Those four facts are what the refusal in the masking
+	// dialect is designed against and they are quoted where that refusal
+	// lives.
+	//
+	// What that image cannot be is a TEST fixture here. citus publishes amd64
+	// only, so on an arm64 machine every container runs under emulation, and
+	// measured on this one a branch of an emulated citus golden reached a
+	// checkpoint that took 43 seconds to write 147 buffers and never became
+	// usable. A test that cannot pass on the machine people develop on is a
+	// test people learn to ignore.
+	//
+	// So the fixture is an extension built from four files below: a handler
+	// function, a control file, an install script and a Makefile. It is a
+	// genuine out of tree table access method, with its own shared object, its
+	// own pg_am row of amtype 't' and its own relam on every table created
+	// USING it, which is exactly what everything in this pipeline reads. Its
+	// storage routines are the heap's, and that is stated rather than hidden:
+	// it proves that an access method survives a golden, a branch, a dump and
+	// restore and a subset with its identity intact, and it does not prove
+	// that an engine with different storage semantics does.
+	customAMImage = "antifailure/test-custom-am:17"
+	// customAMName is the access method the extension registers.
+	customAMName = "af_demo"
 )
+
+// The extension, as the files a PGXS build expects. Embedded rather than kept
+// beside this file so that the build context is assembled from the test binary
+// and no path outside it has to exist.
+const (
+	customAMSource = `#include "postgres.h"
+#include "fmgr.h"
+#include "access/heapam.h"
+#include "access/tableam.h"
+
+PG_MODULE_MAGIC;
+
+PG_FUNCTION_INFO_V1(af_demo_am_handler);
+
+Datum
+af_demo_am_handler(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_POINTER(GetHeapamTableAmRoutine());
+}
+`
+	customAMControl = `comment = 'a table access method for proving custom storage survives a golden'
+default_version = '1.0'
+module_pathname = '$libdir/af_demo_am'
+relocatable = true
+`
+	customAMInstall = `CREATE FUNCTION af_demo_am_handler(internal)
+RETURNS table_am_handler
+AS 'MODULE_PATHNAME'
+LANGUAGE C STRICT;
+
+CREATE ACCESS METHOD af_demo TYPE TABLE HANDLER af_demo_am_handler;
+`
+	customAMMakefile = "MODULES = af_demo_am\n" +
+		"EXTENSION = af_demo_am\n" +
+		"DATA = af_demo_am--1.0.sql\n" +
+		"PG_CONFIG = pg_config\n" +
+		"PGXS := $(shell $(PG_CONFIG) --pgxs)\n" +
+		"include $(PGXS)\n"
+	customAMDockerfile = `FROM postgres:17
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends build-essential postgresql-server-dev-17 \
+ && rm -rf /var/lib/apt/lists/*
+COPY af_demo_am.c af_demo_am.control af_demo_am--1.0.sql Makefile /src/
+RUN cd /src && make && make install
+`
+)
+
+// requireCustomAccessMethodImage builds the fixture image if the daemon does
+// not already have it.
+//
+// Built rather than pulled, because no published image carries an access
+// method whose only job is to be a different relam. The build needs apt and a
+// compiler, so it is skipped rather than failed when it cannot happen: a
+// machine with no network has not disproved anything.
+func requireCustomAccessMethodImage(t *testing.T) {
+	t.Helper()
+	if os.Getenv("AF_SKIP_DOCKER") != "" {
+		t.Skip("skipped: AF_SKIP_DOCKER is set")
+	}
+	cli, err := dockerutil.Client()
+	if err != nil {
+		t.Skipf("skipped: no Docker daemon is reachable: %v", err)
+	}
+	defer func() { _ = cli.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	defer cancel()
+	if _, err := cli.ImageInspect(ctx, customAMImage); err == nil {
+		return
+	}
+
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for name, body := range map[string]string{
+		"Dockerfile":          customAMDockerfile,
+		"af_demo_am.c":        customAMSource,
+		"af_demo_am.control":  customAMControl,
+		"af_demo_am--1.0.sql": customAMInstall,
+		"Makefile":            customAMMakefile,
+	} {
+		if err := tw.WriteHeader(&tar.Header{
+			Name: name, Mode: 0o644, Size: int64(len(body)),
+		}); err != nil {
+			t.Skipf("skipped: the build context could not be assembled: %v", err)
+		}
+		if _, err := tw.Write([]byte(body)); err != nil {
+			t.Skipf("skipped: the build context could not be assembled: %v", err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Skipf("skipped: the build context could not be assembled: %v", err)
+	}
+
+	res, err := cli.ImageBuild(ctx, &buf, client.ImageBuildOptions{
+		Tags: []string{customAMImage}, Remove: true, Dockerfile: "Dockerfile",
+	})
+	if err != nil {
+		t.Skipf("skipped: %s could not be built: %v", customAMImage, err)
+	}
+	// The stream has to be drained before the build is finished, exactly as a
+	// pull does, or the image is only partly there when the next call looks.
+	dockerutil.Discard(res.Body)
+	if _, err := cli.ImageInspect(ctx, customAMImage); err != nil {
+		t.Skipf("skipped: %s is not present after building it: %v", customAMImage, err)
+	}
+}
 
 // requireImage skips unless the daemon has, or can fetch, an image.
 //
 // Separate from requireDocker because the two say different things. A missing
 // daemon means no container test in this package can run; a missing image
 // means this one cannot, and saying which image is the difference between a
-// skip somebody can act on and a skip nobody reads. citus publishes amd64
-// only, so on an arm64 machine it runs emulated and slowly, which is a reason
-// for the generous timeouts below and not a reason to skip.
+// skip somebody can act on and a skip nobody reads.
 func requireImage(t *testing.T, ref string) {
 	t.Helper()
 	if os.Getenv("AF_SKIP_DOCKER") != "" {
@@ -149,16 +283,49 @@ func (e *extensionProvider) refresh(ctx context.Context, spec provider.GoldenSpe
 }
 
 // branch starts a branch and registers its removal.
+//
+// A failure here carries the container's own last words, because the two
+// failures this has actually produced on an emulated image, an abrupt EOF and
+// a server answering "the database system is in recovery mode", are
+// indistinguishable from outside and the server log is the only thing that
+// separates them. A refused dial with no log is a failure nobody can act on.
 func (e *extensionProvider) branch(ctx context.Context, version, envID string) provider.Branch {
 	e.t.Helper()
 	b, err := e.p.Branch(ctx, version, envID)
-	require.NoError(e.t, err)
+	if err != nil {
+		e.t.Fatalf("the branch did not come up: %v\n\ncontainer log:\n%s",
+			err, branchLog(ctx, envID))
+	}
 	e.t.Cleanup(func() {
 		clean, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
 		_ = e.p.Destroy(clean, b)
 	})
 	return b
+}
+
+// branchLog is the branch container's own output, by the deterministic name
+// the provider derives from the environment identifier. Best effort: this runs
+// on a path that has already failed and must not replace the caller's problem
+// with its own.
+func branchLog(ctx context.Context, envID string) string {
+	cli, err := dockerutil.Client()
+	if err != nil {
+		return "unavailable: " + err.Error()
+	}
+	defer func() { _ = cli.Close() }()
+	rc, err := cli.ContainerLogs(ctx, "af-db-"+envID, client.ContainerLogsOptions{
+		ShowStdout: true, ShowStderr: true, Tail: "40",
+	})
+	if err != nil {
+		return "unavailable: " + err.Error()
+	}
+	defer func() { _ = rc.Close() }()
+	body, err := io.ReadAll(rc)
+	if err != nil {
+		return "unreadable: " + err.Error()
+	}
+	return string(body)
 }
 
 // open connects to a branch through the provider's own connection string,
@@ -351,7 +518,7 @@ func TestABranchCarriesTheLibraryItsGoldenWasBuiltWithEvenWhenTheManifestStops(t
 const columnarSeed = `
 CREATE TABLE ordinary (id int primary key, note text);
 INSERT INTO ordinary VALUES (1, 'on the heap'), (2, 'also on the heap');
-CREATE TABLE measurements (id int, sensor text, reading double precision) USING columnar;
+CREATE TABLE measurements (id int, sensor text, reading double precision) USING af_demo;
 INSERT INTO measurements
 SELECT g, 'sensor-' || g, g * 1.25 FROM generate_series(1, 7) g;`
 
@@ -364,20 +531,16 @@ SELECT g, 'sensor-' || g, g * 1.25 FROM generate_series(1, 7) g;`
 // the access method. A custom access method that survives as a heap table is
 // not a custom access method that survived.
 func TestACustomTableAccessMethodSurvivesTheGoldenAndTheBranch(t *testing.T) {
-	requireImage(t, citusImage)
+	requireCustomAccessMethodImage(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
 	e := newExtensionProvider(t, dockerdb.Options{
 		Version: 17, PortFrom: 47900,
-		Image: citusImage,
-		// citus is loaded by the postmaster, and the columnar access method
-		// lives in that library, so this is the preload path and the extension
-		// path in one manifest.
-		PreloadLibraries: []string{"citus"},
-		Extensions:       []string{"citus_columnar"},
-		SeedSQL:          columnarSeed,
+		Image:      customAMImage,
+		Extensions: []string{"af_demo_am"},
+		SeedSQL:    columnarSeed,
 	})
 
 	gv := e.refresh(ctx, provider.GoldenSpec{Version: 17, RulesHash: "columnar1", Provenance: "extensions-columnar"})
@@ -386,12 +549,12 @@ func TestACustomTableAccessMethodSurvivesTheGoldenAndTheBranch(t *testing.T) {
 
 	// The access method exists on the branch as a table access method.
 	require.True(t, scan[bool](t, conn,
-		`SELECT EXISTS (SELECT 1 FROM pg_am WHERE amname = 'columnar' AND amtype = 't')`),
-		"the branch has no columnar table access method, so nothing stored in one could be read")
+		`SELECT EXISTS (SELECT 1 FROM pg_am WHERE amname = 'af_demo' AND amtype = 't')`),
+		"the branch has no custom table access method, so nothing stored in one could be read")
 
 	// The TABLE is still stored in it. This is the assertion the whole test is
 	// for: relam, read on the far side of a commit and a container start.
-	require.Equal(t, "columnar", scan[string](t, conn,
+	require.Equal(t, customAMName, scan[string](t, conn,
 		`SELECT am.amname FROM pg_class c JOIN pg_am am ON am.oid = c.relam
 		 WHERE c.relname = 'measurements'`),
 		"the table came back on a different access method than it was created with")
@@ -417,17 +580,16 @@ func TestACustomTableAccessMethodSurvivesTheGoldenAndTheBranch(t *testing.T) {
 // heap. So the first golden is the source of the second, and the second's
 // branch is where relam is read.
 func TestACustomTableAccessMethodSurvivesPgDumpAndPgRestore(t *testing.T) {
-	requireImage(t, citusImage)
+	requireCustomAccessMethodImage(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
 	origin := newExtensionProvider(t, dockerdb.Options{
 		Version: 17, PortFrom: 48000,
-		Image:            citusImage,
-		PreloadLibraries: []string{"citus"},
-		Extensions:       []string{"citus_columnar"},
-		SeedSQL:          columnarSeed,
+		Image:      customAMImage,
+		Extensions: []string{"af_demo_am"},
+		SeedSQL:    columnarSeed,
 	})
 	seeded := origin.refresh(ctx, provider.GoldenSpec{
 		Version: 17, RulesHash: "columnar2", Provenance: "extensions-columnar-source",
@@ -439,9 +601,8 @@ func TestACustomTableAccessMethodSurvivesPgDumpAndPgRestore(t *testing.T) {
 	// method is the AF-DB-007 case rather than this one.
 	copied := newExtensionProvider(t, dockerdb.Options{
 		Version: 17, PortFrom: 48100,
-		Image:            citusImage,
-		PreloadLibraries: []string{"citus"},
-		Extensions:       []string{"citus_columnar"},
+		Image:      customAMImage,
+		Extensions: []string{"af_demo_am"},
 	})
 	gv := copied.refresh(ctx, provider.GoldenSpec{
 		Version: 17, RulesHash: "columnar3", Provenance: "extensions-columnar-copied",
@@ -450,7 +611,7 @@ func TestACustomTableAccessMethodSurvivesPgDumpAndPgRestore(t *testing.T) {
 	b := copied.branch(ctx, gv.ID, "env_columnar000003")
 	conn := copied.open(ctx, b)
 
-	require.Equal(t, "columnar", scan[string](t, conn,
+	require.Equal(t, customAMName, scan[string](t, conn,
 		`SELECT am.amname FROM pg_class c JOIN pg_am am ON am.oid = c.relam
 		 WHERE c.relname = 'measurements'`),
 		"pg_dump and pg_restore carried the table and dropped its access method, which is the "+
@@ -466,29 +627,36 @@ func TestACustomTableAccessMethodSurvivesPgDumpAndPgRestore(t *testing.T) {
 //
 // Masking addresses a row either by its primary key or, failing that, by ctid,
 // and BOTH of those are heap guarantees. Against citus columnar on 17.2 both
-// are refused outright, and a masking run that discovers that partway through
-// a table leaves data neither real nor safe. So the catalog reads relam and
-// the plan refuses before anything is written.
+// are refused outright, which is the measurement the refusal is designed
+// against, and a masking run that discovers that partway through a table
+// leaves data neither real nor safe. So the catalog reads relam and the plan
+// refuses before anything is written.
+//
+// The fixture here is the built access method rather than that one, and the
+// refusal is keyed on "not the heap" rather than on what a particular engine
+// implements, so the same rule is what is being measured. That the refusal is
+// conservative for an access method which would in fact have accepted the
+// rewrite is the deliberate choice, and the second half of this test is what
+// keeps it survivable.
 //
 // The refusal is narrow, and the second half of this test is what proves that:
 // a column on the same custom access method that masking would NOT rewrite
 // goes through untouched, which is what lets a golden carry such a table at
 // all.
 func TestMaskingRefusesToRewriteATableOnACustomAccessMethod(t *testing.T) {
-	requireImage(t, citusImage)
+	requireCustomAccessMethodImage(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
 	e := newExtensionProvider(t, dockerdb.Options{
 		Version: 17, PortFrom: 48200,
-		Image:            citusImage,
-		PreloadLibraries: []string{"citus"},
-		Extensions:       []string{"citus_columnar"},
+		Image:      customAMImage,
+		Extensions: []string{"af_demo_am"},
 		SeedSQL: `
 			CREATE TABLE people (id int primary key, email text);
 			INSERT INTO people VALUES (1, 'real.one@example.com'), (2, 'real.two@example.com');
-			CREATE TABLE archived_people (id int, email text) USING columnar;
+			CREATE TABLE archived_people (id int, email text) USING af_demo;
 			INSERT INTO archived_people VALUES (3, 'real.three@example.com');`,
 	})
 	gv := e.refresh(ctx, provider.GoldenSpec{Version: 17, RulesHash: "columnar4", Provenance: "extensions-columnar-mask"})
@@ -507,7 +675,7 @@ func TestMaskingRefusesToRewriteATableOnACustomAccessMethod(t *testing.T) {
 	// refusal below could not exist, because nothing would know.
 	require.Equal(t, "heap", byName["people"].AccessMethod,
 		"an ordinary table must report the heap, or the refusal would catch every table there is")
-	require.Equal(t, "columnar", byName["archived_people"].AccessMethod,
+	require.Equal(t, customAMName, byName["archived_people"].AccessMethod,
 		"the catalog did not read the custom access method, so masking cannot know to refuse")
 
 	// The whole assignment pass, through the real rule set, so that the
@@ -527,7 +695,7 @@ func TestMaskingRefusesToRewriteATableOnACustomAccessMethod(t *testing.T) {
 	require.Contains(t, problems, "archived_people.email",
 		"masking planned a rewrite of a column in a custom access method; against this one it "+
 			"would fail partway through and leave the table neither real nor safe")
-	require.Contains(t, problems["archived_people.email"], "columnar",
+	require.Contains(t, problems["archived_people.email"], customAMName,
 		"the refusal does not name the access method, so nobody reading it can tell what to do")
 	require.NotContains(t, problems, "people.email",
 		"the refusal reached an ordinary table, which would stop every masking run there is")
@@ -692,25 +860,24 @@ func TestAnImageThatDeclaresAVolumeOverTheDataDirectoryIsRefused(t *testing.T) {
 // is a different claim from a restore into it and is proved separately.
 //
 // The relationship is VIRTUAL rather than a foreign key, and that is not a
-// convenience. citus columnar's support for constraints is its own business,
-// so making the test depend on a foreign key it accepts would make this a test
-// of citus. A declared relationship is the product's own answer for a link the
-// schema does not enforce, and it follows identically.
+// convenience. What constraints an access method accepts is that engine's own
+// business, so a test that depended on one would be measuring the engine
+// rather than the subset. A declared relationship is the product's own answer
+// for a link the schema does not enforce, and it follows identically.
 func TestASubsetLoadsIntoACustomTableAccessMethod(t *testing.T) {
-	requireImage(t, citusImage)
+	requireCustomAccessMethodImage(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
 	opts := dockerdb.Options{
 		Version: 17, PortFrom: 48600,
-		Image:            citusImage,
-		PreloadLibraries: []string{"citus"},
-		Extensions:       []string{"citus_columnar"},
+		Image:      customAMImage,
+		Extensions: []string{"af_demo_am"},
 		SeedSQL: `
 			CREATE TABLE tenants (id int primary key, name text);
 			INSERT INTO tenants VALUES (1, 'keep'), (2, 'drop');
-			CREATE TABLE measurements (id int, tenant_id int, reading double precision) USING columnar;
+			CREATE TABLE measurements (id int, tenant_id int, reading double precision) USING af_demo;
 			INSERT INTO measurements
 			SELECT g, CASE WHEN g <= 4 THEN 1 ELSE 2 END, g * 1.25 FROM generate_series(1, 8) g;`,
 	}
@@ -760,7 +927,7 @@ func TestASubsetLoadsIntoACustomTableAccessMethod(t *testing.T) {
 	require.NoError(t, err, "the subset could not load a table stored in a custom access method")
 
 	conn := target.open(ctx, into)
-	require.Equal(t, "columnar", scan[string](t, conn,
+	require.Equal(t, customAMName, scan[string](t, conn,
 		`SELECT am.amname FROM pg_class c JOIN pg_am am ON am.oid = c.relam
 		 WHERE c.relname = 'measurements'`),
 		"the schema copy put the table on a different access method than the source has")

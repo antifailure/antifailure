@@ -138,6 +138,11 @@ Measured against `columnar` from citus on Postgres 17.2, both are refused:
 and CTID scans not supported for ColumnarScan", and the table accepts a primary
 key regardless, so nothing about its shape warns you first.
 
+The refusal is keyed on the access method not being the heap, rather than on
+what any one engine implements, so it is conservative: an access method that
+would in fact have accepted the rewrite is refused too. There is nothing to ask
+that would distinguish them.
+
 So masking refuses at planning time, before anything is written, naming the
 table and the access method. A run that discovered this partway through a table
 would leave data neither real nor safe.
