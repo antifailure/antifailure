@@ -247,6 +247,30 @@ export function socketSink(path: string): LiveSink {
     },
     async close() {
       if (broken || !socket) return;
+      // A run can finish before the socket has finished connecting, and
+      // everything it emitted is still sitting in `pending`: nothing is
+      // written until the `connect` handler above flushes it. Ending the
+      // socket here without waiting for that throws the ENTIRE live stream
+      // away, and the watcher sees not one event rather than a few.
+      //
+      // It is not theoretical and it is not a slow machine. A desktop or
+      // terminal agent whose work is a few function calls finishes in under a
+      // millisecond, which is well inside one turn of the event loop, so the
+      // faster the run the less a watcher is told about it. Bounded, so a
+      // socket nobody is listening on still cannot hold the run open: an
+      // already refused connection has set `broken` and returned above, and a
+      // connection that fails during this wait costs the same half second the
+      // drain below already allows.
+      if (!connected) {
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, 500);
+          timer.unref?.();
+          const settle = () => { clearTimeout(timer); resolve(); };
+          socket?.once('connect', settle);
+          socket?.once('error', settle);
+        });
+      }
+      if (broken || !socket) return;
       await new Promise<void>((resolve) => {
         const s = socket!;
         const finish = () => resolve();

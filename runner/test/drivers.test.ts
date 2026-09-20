@@ -1,7 +1,7 @@
-// The surface driver abstraction and the two drivers that are built. Web is
-// exercised by the whole browser suite; here we prove the registry, the loud
-// refusal of the scaffolded surfaces, and the terminal driver against a real
-// process.
+// The surface driver abstraction and the drivers that are built. Web is
+// exercised by the whole browser suite and desktop by test/desktop.test.ts;
+// here we prove the registry, the loud refusal of the surface that is still
+// scaffolded, and the terminal driver against a real process.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,7 +13,6 @@ import { execPath } from 'node:process';
 import {
   driverFor, surfaces, assertAvailable, NotImplementedError, type Surface,
 } from '../src/drivers/driver.ts';
-import * as desktop from '../src/drivers/desktop.ts';
 import * as ios from '../src/drivers/ios.ts';
 import { runTerminal } from '../src/drivers/terminal.ts';
 import { socketSink, decode, type LiveEvent } from '../src/live.ts';
@@ -23,7 +22,7 @@ test('the registry knows every surface and which are available', () => {
   assert.deepEqual([...surfaces()].sort(), ['desktop', 'ios', 'terminal', 'web']);
   assert.equal(driverFor('web').available, true);
   assert.equal(driverFor('terminal').available, true);
-  assert.equal(driverFor('desktop').available, false);
+  assert.equal(driverFor('desktop').available, true);
   assert.equal(driverFor('ios').available, false);
 });
 
@@ -31,9 +30,10 @@ test('assertAvailable passes a built surface and refuses a scaffolded one loudly
   // Built surfaces do not throw.
   assertAvailable('web');
   assertAvailable('terminal');
+  assertAvailable('desktop');
   // Scaffolded surfaces throw, so a run that targets them fails rather than
   // returning a green verdict that tested nothing.
-  for (const surface of ['desktop', 'ios'] as Surface[]) {
+  for (const surface of ['ios'] as Surface[]) {
     assert.throws(() => assertAvailable(surface), (err: unknown) => {
       assert.ok(err instanceof NotImplementedError);
       assert.equal((err as NotImplementedError).surface, surface);
@@ -42,10 +42,8 @@ test('assertAvailable passes a built surface and refuses a scaffolded one loudly
   }
 });
 
-test('the scaffolded drivers throw rather than silently pass', () => {
-  assert.throws(() => desktop.drive(), NotImplementedError);
+test('the scaffolded driver throws rather than silently passing', () => {
   assert.throws(() => ios.drive(), NotImplementedError);
-  assert.equal(desktop.desktop.available, false);
   assert.equal(ios.ios.available, false);
 });
 

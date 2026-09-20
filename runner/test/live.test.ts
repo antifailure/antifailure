@@ -143,6 +143,35 @@ test('socketSink buffers events sent before the connection is up and flushes the
   c.close();
 });
 
+test('socketSink flushes what a run emitted when the run finished before the socket connected', async () => {
+  const c = await collector();
+  const sink = socketSink(c.path);
+  sink.hello('fast');
+  sink.agent({ id: 'a', surface: 'desktop' }, 'ended', 'pass');
+  // Closed in the SAME TICK the sink was created, with no wait of any kind.
+  // The socket cannot have connected yet, so every event is still in the
+  // buffer, and a close that does not wait for the connection throws all of
+  // them away: the watcher of a run that finished in under a millisecond saw
+  // not one event rather than a few. The test above cannot catch this,
+  // because it waits for the lines before closing, which is the one thing a
+  // finished run does not do.
+  await sink.close();
+  try {
+    // Polled after the close rather than before it, because close() is what
+    // flushes and because a socket write arriving is not the same event as
+    // the server having read it. Two seconds is the budget every other test
+    // here uses; a flush that never comes spends all of it and then says so.
+    await until(() => c.lines().length >= 2);
+    assert.equal(c.lines().length, 2, `the live stream was lost on close: ${c.raw()}`);
+    assert.equal(c.lines()[0]!.t, 'hello');
+    assert.equal(c.lines()[1]!.t, 'agent');
+  } finally {
+    // In a finally: a listening server left behind by a red assertion holds
+    // the event loop open, and one failed test then reads as a hung suite.
+    c.close();
+  }
+});
+
 test('socketSink degrades to a no-op when the socket cannot connect', async () => {
   // A path nobody is listening on. Every call must return and close must
   // resolve: a watcher that never arrives cannot be allowed to fail the run.

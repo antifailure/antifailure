@@ -23,6 +23,7 @@ import { emit } from './emit.ts';
 import { nullSink, socketSink, type LiveSink } from './live.ts';
 import { assertAvailable, type Surface } from './drivers/driver.ts';
 import { runTerminal, type TerminalWorkflow } from './drivers/terminal.ts';
+import { runDesktop, type DesktopApp } from './drivers/desktop.ts';
 import type { Persona } from './login.ts';
 import type { Workflow } from './workflow.ts';
 import type { ResolvedDiversity } from './personality.ts';
@@ -79,6 +80,12 @@ interface JobDocument {
    *  verdicts and two chances for them to disagree about the same change.
    *  Tolerant like the lists above: absent, null and empty all mean none. */
   readonly terminal?: readonly TerminalWorkflow[] | null;
+  /** desktop says which application a desktop-surface run drives, and how to
+   *  reach it: an Electron binary and its arguments, or a macOS application by
+   *  name with a bundle to launch. Present only when surface is 'desktop', and
+   *  REQUIRED then, because there is no default application the way there is a
+   *  default base_url. A desktop run without it is blocked and says so. */
+  readonly desktop?: DesktopApp;
   /** live is the path to a local socket the engine is listening on, present
    *  only when somebody is watching this run. Absent means no watcher, which is
    *  the ordinary case: the sink becomes a no-op and the run is unchanged. The
@@ -198,9 +205,23 @@ async function main(): Promise<number> {
   const surface: Surface = doc.surface ?? 'web';
   let results: WorkflowResult[] = [];
   let explorations: Exploration[] = [];
-  if (surface !== 'web' && surface !== 'terminal') {
-    // desktop or ios: throws NotImplementedError, which main's catch reports as
-    // the runner's own failure with a clear reason.
+  // Whether anything in this file actually DRIVES this surface.
+  //
+  // Tracked rather than assumed, and this variable is the whole reason the
+  // desktop surface did not ship as a silent green nothing. assertAvailable
+  // was the only thing failing a run that named an unbuilt surface. The day a
+  // driver becomes available that line stops throwing, and if nothing takes
+  // its place `results` stays the empty array it is initialised to and the run
+  // exits zero having driven nothing: a loud, correct refusal converted into a
+  // quiet pass. web and terminal are driven below, so they start true; every
+  // other surface has to say it was driven, and the check after the dispatch
+  // is what stops the driver registry's flag from lying about work nobody
+  // does. Adding a member to Surface and marking it available, without adding
+  // a branch below, now fails the run instead of passing it.
+  let driven = surface === 'web' || surface === 'terminal';
+  if (!driven) {
+    // ios: throws NotImplementedError, which main's catch reports as the
+    // runner's own failure with a clear reason.
     assertAvailable(surface);
   }
   // The terminal workflows run whenever the engine sent any, whatever the
@@ -218,6 +239,31 @@ async function main(): Promise<number> {
       // shell points at, which is either nothing or, far worse, production.
       env: { AF_BASE_URL: doc.base_url },
     });
+  }
+  if (surface === 'desktop') {
+    // The refusal and the dispatch are the same branch on purpose: there is no
+    // state in which the registry says desktop is available and nothing runs.
+    if (!doc.desktop) {
+      throw new Error(
+        'this run asks for the desktop surface and names no application to drive. ' +
+        'Send a `desktop` block saying which application: an Electron binary and its ' +
+        'arguments, or a macOS application by name. There is no default the way there ' +
+        'is a default base_url.',
+      );
+    }
+    // Accumulated rather than assigned, exactly as the web branch below does
+    // it, so a manifest that declares both desktop workflows and a deploy
+    // command keeps both sets of results instead of the later one erasing the
+    // earlier.
+    results = [...results, ...await runDesktop({
+      app: doc.desktop,
+      workflows,
+      live,
+      ...(doc.attempts === undefined ? {} : { attempts: doc.attempts }),
+      ...(model ? { model } : {}),
+      ...(complete ? { complete } : {}),
+    })];
+    driven = true;
   }
   if (surface === 'web') {
     results = [...results, ...(workflows.length > 0 ? await run(job) : [])];
@@ -271,6 +317,22 @@ async function main(): Promise<number> {
       case 'unverified': counted.unverified++; break;
     }
   }
+  // The driver registry said this surface was available and nothing above
+  // drove it. That combination is the exact defect the surface abstraction
+  // exists to prevent, and it is INVISIBLE without this line: the run would
+  // emit an empty result list, count zero of everything, exit zero, and read
+  // as a clean rehearsal that tested the change against nothing at all.
+  // Refused here rather than reported, because a verdict nobody produced is
+  // worse than a run that failed.
+  if (!driven) {
+    throw new Error(
+      `the ${surface} surface is marked available in the driver registry and nothing in ` +
+      `main.ts drives it. An available driver with no call site returns an empty result ` +
+      `and exits zero, which reads as a clean run that tested nothing. Add the dispatch ` +
+      `beside the others above, or mark the surface unavailable until it has one.`,
+    );
+  }
+
   // The run is over. Tell any watcher the final tally and drain the socket
   // before the process exits, so the last frames and the done event make it
   // out rather than being lost with the connection.
