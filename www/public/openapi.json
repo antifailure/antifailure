@@ -6526,6 +6526,98 @@
         }
       }
     },
+    "/trpc/runs.report": {
+      "get": {
+        "operationId": "trpc_runs_report",
+        "summary": "runs.report",
+        "description": "Requires the environments.view permission, held by: owner, admin, member, viewer.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "input",
+            "in": "query",
+            "required": true,
+            "description": "JSON-encoded tRPC input. This route refuses a request without it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "pr": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "commit": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "pr"
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The tRPC result envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The input did not satisfy this route's validator.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The role does not hold environments.view.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The route threw. tRPC formats this one, so it is a tRPC envelope rather than the ServerFailure body, and the stack is withheld: it names internal paths and table names to anyone who can provoke an error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/trpc/runs.verdicts": {
       "get": {
         "operationId": "trpc_runs_verdicts",
