@@ -51,8 +51,15 @@ export interface SurfaceDriver {
 }
 
 // The registry. Every surface appears here exactly once, so the set of surfaces
-// is one list rather than a switch repeated in five places. web and terminal
-// are available; desktop and ios are declared and not yet available.
+// is one list rather than a switch repeated in five places. web, terminal and
+// desktop are available; ios is declared and unbuilt.
+//
+// `available` is a claim about runner/src/main.ts as much as about this file.
+// Marking a surface available removes the only thing that was failing a run
+// which named it, so main.ts tracks whether anything actually drove the
+// surface and refuses the run when nothing did. Flip a flag here without
+// adding a dispatch there and the run fails loudly rather than returning an
+// empty result with a zero exit code.
 const drivers: Record<Surface, SurfaceDriver> = {
   web: {
     surface: 'web',
@@ -66,8 +73,8 @@ const drivers: Record<Surface, SurfaceDriver> = {
   },
   desktop: {
     surface: 'desktop',
-    available: false,
-    summary: 'Will drive native and Electron apps through the macOS accessibility API (AXUIElement), captured with ScreenCaptureKit. Needs a macOS runner pool and per-app accessibility grants.',
+    available: true,
+    summary: 'Drives native macOS apps through AXUIElement and Electron apps through Chromium\'s accessibility tree, with the same planner, expectations and verdict a browser run uses. Native needs the macOS Accessibility permission, which a person grants.',
   },
   ios: {
     surface: 'ios',
