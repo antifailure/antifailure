@@ -10,7 +10,7 @@ import { Session } from './browser.ts';
 import { signIn, type Persona, type Page } from './login.ts';
 import type { InboxSource } from './inbox.ts';
 import {
-  DeterministicPlanner, failureSentence, freshIdentity, judgeAll,
+  DeterministicPlanner, failureSentence, freshIdentity, judgeAll, unmatchable,
   type Action, type Planner, type Snapshot, type Workflow,
 } from './workflow.ts';
 import { classify, type Attempt, type Cause, type Outcome } from './verdict.ts';
@@ -491,7 +491,20 @@ export function finalJudgement(
         taken,
       };
     }
-    default:
+    default: {
+      // An expectation nothing could ever match is named, rather than left for
+      // the reader to infer from an unverified row. The advice below is true
+      // when the page is the hard part and actively misleading when the
+      // expectation is: it sends somebody to look at a page that may be showing
+      // exactly what was asked for.
+      const blind = unmatchable(workflow.expect);
+      const advice = blind.length > 0
+        ? `${blind.length === 1 ? 'This expectation has' : 'These expectations have'} no word ` +
+          `this can look for, so ${blind.length === 1 ? 'it' : 'they'} could not have been met ` +
+          `whatever the page showed: ${blind.map((e) => JSON.stringify(e)).join(', ')}. Quote a ` +
+          `string to require it exactly, or write words of three letters or more.`
+        : `Set a model key so the runner can read the page, or write an expectation whose words ` +
+          `appear on it.`;
       return {
         // page-unreadable, not synthesized-response. This branch is about a
         // page nobody could read; the other name belongs to a response a
@@ -501,10 +514,10 @@ export function finalJudgement(
         cause: 'page-unreadable',
         detail:
           `${why} Nothing on the page contradicts what was expected, and nothing confirms it ` +
-          `either, so this run proved nothing. Set a model key so the runner can read the page, ` +
-          `or write an expectation whose words appear on it.`,
+          `either, so this run proved nothing. ${advice}`,
         taken,
       };
+    }
   }
 }
 

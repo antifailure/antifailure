@@ -621,17 +621,74 @@ const STOP_WORDS = new Set([
   'rather', 'than', 'back', 'you', 'your', 'completes', 'complete', 'arrives',
 ]);
 
-/** keywords pulls the words that carry meaning out of an expectation. */
+/** keywords pulls the words that carry meaning out of an expectation.
+ *
+ * THE RULE, and it is the whole of this function's correctness: a keyword may
+ * be NARROWED to a substring of the word it came from, and may never be
+ * REWRITTEN into a different string. The page is compared against it with
+ * `includes`, and the page is only lowercased and whitespace-collapsed, so a
+ * keyword that is not a substring of what the author wrote is a keyword no page
+ * can ever contain.
+ *
+ * THE FAILURE. This used to strip every character that is not a letter or a
+ * digit, from anywhere in the word: `word = raw.replace(/[^a-z0-9]/g, '')`.
+ * That is a rewrite rather than a narrowing, and it made an ordinary
+ * expectation permanently unmeetable. `total_cents` was searched for as
+ * `totalcents`, `order_id` as `orderid`, `v1.2.3` as `v123`, `application/json`
+ * as `applicationjson`. None of those appear on any page that shows the string
+ * the author actually wrote, so the keyword scored zero for the life of the
+ * manifest and `judge` answered `unclear`, which is reported as UNVERIFIED and
+ * exits zero. The expectation could neither pass nor fail, and nothing said so.
+ *
+ * THIS REPOSITORY WAS ITSELF AN INSTANCE. The dogfood workflow
+ * `a-visitor-finds-the-operator-door` expects "Operator sign-in" against the
+ * operator portal, whose title is the words "Operator sign-in". `sign-in`
+ * became `signin`, one of its two keywords could never hit, and the workflow
+ * read `unclear` on the page it was written for.
+ *
+ * WHY THE TRIMMING STAYS. The stripping was there for prose, so that
+ * "Welcome back!" matches a page saying "Welcome back" and a sentence's final
+ * full stop does not cost a word. In prose the punctuation that gets in the way
+ * is at the EDGES of a word, so trimming the edges keeps all of that and gives
+ * up nothing: `credentials.` still becomes `credentials`, which is a substring
+ * of what was written. Only the inner separators, the ones that carry meaning
+ * in an identifier, are kept.
+ *
+ * Letters and digits in any script count, so an accented word narrows to itself
+ * rather than to the ASCII fragment in the middle of it.
+ */
 export function keywords(expectation: string): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const raw of normalize(expectation).split(/\s+/)) {
-    const word = raw.replace(/[^a-z0-9]/g, '');
+    const word = trimPunctuation(raw);
     if (word.length < 3 || STOP_WORDS.has(word) || seen.has(word)) continue;
     seen.add(word);
     out.push(word);
   }
   return out;
+}
+
+/** trimPunctuation removes the punctuation wrapped around a word and leaves the
+ *  word itself alone, so the result is always a substring of the input. */
+function trimPunctuation(word: string): string {
+  return word.replace(/^[^\p{L}\p{N}]+/u, '').replace(/[^\p{L}\p{N}]+$/u, '');
+}
+
+/** unmatchable names the expectations that no page could ever have satisfied.
+ *
+ * An expectation reaches the word-ratio path with nothing to look for when
+ * every word in it is a stop word or shorter than three characters: `judge`
+ * answers `unclear` forever, whatever the application does. That is the same
+ * silent shape the separator bug had, and the answer to it is the same one:
+ * say it, rather than let a reader conclude from an unverified row that the
+ * page was at fault.
+ *
+ * Quoted expectations are never listed. A quoted string is required exactly and
+ * its absence is `unmet`, which is an answer.
+ */
+export function unmatchable(expectations: readonly string[]): string[] {
+  return expectations.filter((e) => verbatim(e) === undefined && keywords(e).length === 0);
 }
 
 function normalize(s: string): string {

@@ -60,6 +60,13 @@ because an expectation carries connective words no page repeats and requiring
 all of them would mean writing expectations for the matcher instead of for a
 person.
 
+A word is read as you wrote it. The punctuation wrapped around it is ignored, so
+a sentence's final full stop and a bracketed aside cost nothing, and the
+characters inside a word are kept, so `total_cents`, `order_id`, `v1.2.3` and
+`application/json` are looked for on the page exactly that way. A word of fewer
+than three letters carries no weight. An expectation left with no word to look
+for is named in the run's own report rather than reported as an unclear page.
+
 That reading is wrong for a page that renders one specific sentence when
 something works and a different one when it does not, which is the ordinary case
 for a form. Put such a sentence in double quotes and it is required on the page
