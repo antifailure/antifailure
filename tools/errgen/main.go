@@ -68,6 +68,7 @@ var areaNames = map[string]string{
 	"WLD": "Workloads",
 	"EXT": "Extensions",
 	"DSC": "Dynamic security checks",
+	"CHS": "Fault injection and crash recovery",
 }
 
 func main() {

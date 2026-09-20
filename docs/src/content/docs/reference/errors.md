@@ -334,6 +334,116 @@ The Dockerfile {dockerfile} for {service} is outside the build context {context}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/build](/docs/guides/build) |
 
+## Fault injection and crash recovery
+
+### AF-CHS-001
+
+A fault names the target {target}, which this environment does not have: {detail}
+
+**What to do.** Name a target the environment is running. 'af status' lists them, and 'af chaos list' lists the ones a fault may reach.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/chaos](/docs/guides/chaos) |
+
+### AF-CHS-002
+
+The fault kind {kind} cannot be run as written: {detail}
+
+**What to do.** Correct the fault in the manifest's chaos block. The reference page lists each kind and the parameters it requires.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/chaos](/docs/guides/chaos) |
+
+### AF-CHS-003
+
+The fault {fault} could not be injected into {target}: {detail}
+
+**What to do.** Read what the container said. A fault that could not be injected has measured nothing, so the run reports that rather than a recovery.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [guides/chaos](/docs/guides/chaos) |
+
+### AF-CHS-004
+
+The fault {fault} was applied to {target} and changed nothing: {detail}
+
+**What to do.** A fault that changes nothing makes every recovery check that follows it meaningless, so it is refused rather than reported as survived. Fix the fault, or the environment it is aimed at.
+
+| | |
+| --- | --- |
+| Exit code | `7` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/chaos](/docs/guides/chaos) |
+
+### AF-CHS-005
+
+The fault {fault} is refused because its effect would reach past {target}: {detail}
+
+**What to do.** A fault may only affect the environment that declared it. Narrow the fault, or give the target the dedicated volume the fault needs.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/chaos](/docs/guides/chaos) |
+
+### AF-CHS-006
+
+The database did not come back within {timeout} after the fault {fault}: {detail}
+
+**What to do.** Read the database's own log for how far recovery reached. A database that never came back has not passed a recovery check and has not failed one either.
+
+| | |
+| --- | --- |
+| Exit code | `7` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/chaos](/docs/guides/chaos) |
+
+### AF-CHS-007
+
+Faults are not available on the {provider} runtime.
+
+**What to do.** Run the chaos suite against the local runtime, which is the one whose containers this engine can reach.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/chaos](/docs/guides/chaos) |
+
+### AF-CHS-008
+
+Recovery after {fault} lost data the client was told was committed: {detail}
+
+**What to do.** Open the finding for how many acknowledged commits are missing. This is a durability failure in the database or its configuration, not in the rehearsal.
+
+| | |
+| --- | --- |
+| Exit code | `7` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/chaos](/docs/guides/chaos) |
+
+### AF-CHS-009
+
+The chaos suite could not establish what it set out to check after {fault}: {detail}
+
+**What to do.** An unverified recovery is not a passed one. Read what could not be measured and fix that before trusting the result.
+
+| | |
+| --- | --- |
+| Exit code | `6` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/chaos](/docs/guides/chaos) |
+
 ## Control plane
 
 ### AF-CP-003

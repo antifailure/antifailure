@@ -682,6 +682,7 @@ const defaultTuning = `{
       "why": "a web service built from an image, a golden from production, egress in sandbox mode",
       "overrides": {
         "database.provider": "docker",
+        "chaos.faults[].kind": "process_kill",
         "database.golden.schedule": "0 3 * * *",
         "database.golden.max_age": "720h",
         "database.volume.max_age": "720h",
@@ -717,6 +718,9 @@ const defaultTuning = `{
         }
       },
       "prune": [
+        "chaos.faults[].service",
+        "chaos.faults[].headroom_bytes",
+        "chaos.faults[].max_fill_bytes",
         "database.seed",
         "datastores[].from",
         "datastores[].topics",
@@ -745,6 +749,8 @@ const defaultTuning = `{
       "why": "the other side of every mutually exclusive pair: a seeded database, a cron service, an egress rule in mock mode, a derived datastore, a variable read from the environment",
       "overrides": {
         "database.provider": "docker",
+        "chaos.faults[].kind": "disk_fill",
+        "chaos.faults[].max_fill_bytes": 1073741824,
         "database.golden.schedule": "0 3 * * *",
         "database.golden.max_age": "720h",
         "database.volume.max_age": "720h",
@@ -781,6 +787,8 @@ const defaultTuning = `{
         "datastores[].from": "primary"
       },
       "prune": [
+        "chaos.faults[].service",
+        "chaos.faults[].process",
         "database.source_url_env",
         "datastores[].topics",
         "egress.rules[].credential",
@@ -802,6 +810,7 @@ const defaultTuning = `{
       "why": "the third side the other two cannot carry: a topics_only broker, whose topics key is refused on every other stance",
       "overrides": {
         "database.provider": "docker",
+        "chaos.faults[].kind": "container_kill",
         "database.golden.schedule": "0 3 * * *",
         "database.golden.max_age": "720h",
         "database.volume.max_age": "720h",
@@ -838,6 +847,10 @@ const defaultTuning = `{
         }
       },
       "prune": [
+        "chaos.faults[].service",
+        "chaos.faults[].process",
+        "chaos.faults[].headroom_bytes",
+        "chaos.faults[].max_fill_bytes",
         "database.seed",
         "datastores[].from",
         "datastores[].rebuild",
@@ -865,6 +878,9 @@ const defaultTuning = `{
       "why": "the third side of the egress mode pair: a rule answered by an emulator inside the environment, which is the only mode that may carry an emulator and may carry neither a credential nor a rate limit",
       "overrides": {
         "database.provider": "docker",
+        "chaos.faults[].kind": "container_kill",
+        "chaos.faults[].target": "service",
+        "chaos.faults[].service": "web",
         "database.golden.schedule": "0 3 * * *",
         "database.golden.max_age": "720h",
         "database.volume.max_age": "720h",
@@ -901,6 +917,9 @@ const defaultTuning = `{
         }
       },
       "prune": [
+        "chaos.faults[].process",
+        "chaos.faults[].headroom_bytes",
+        "chaos.faults[].max_fill_bytes",
         "database.seed",
         "datastores[].from",
         "datastores[].topics",
@@ -1409,6 +1428,7 @@ func TestSchemaConstraintReport(t *testing.T) {
 // max_statements and thresholds.mean_increase instead. Without that split the
 // base manifest is refused by this feature's own three cross field rules,
 // which is the #315 failure exactly.
+//
 // Then 755. The three keys that say what the Postgres a golden is built in
 // actually is: database.image, which declares a type and a maxLength;
 // database.extensions and database.preload_libraries, each of which declares a
@@ -1536,7 +1556,48 @@ func TestSchemaConstraintReport(t *testing.T) {
 // direction, not a value the fixture cannot invent but a fixture the rule
 // cannot permit, and it is the thing to check before adding any cross field
 // rule to a section the generator fills.
-const wantConstraints = 840
+//
+// Then 888. The chaos block landed: faults a rehearsal may inject and the
+// durability proof run around one. 48 new constraints, counted from the schema
+// rather than by adding to the previous number. 44 of them are the chaos block
+// itself: type and additionalProperties on chaos, on a fault, and on
+// crash_recovery; type on enabled and on faults, with the array's maxItems;
+// the two required fields on a fault, name and kind; the fault's name with its
+// type, pattern and two lengths; the kind and target enums with their types;
+// the type and maxLength on process and on service; the type and pattern on
+// after and on hold; the type, minimum and maximum on headroom_bytes and on
+// max_fill_bytes; and inside crash_recovery, the type on enabled, the type,
+// minimum and maximum on writers and on commits_before_fault, the
+// synchronous_commit enum with its type, and recovery_timeout's type and
+// pattern. The other 4 are the two new policy keys, chaos_failure and
+// chaos_unverified, each a string with the same three level enum every other
+// policy key carries. Every one comes back ENFORCED from the bounds pass.
+//
+// The tuning above gained a kind override and three or four prunes per base,
+// which is the #315 failure being avoided rather than a gap. The generator
+// fills every property it can, and a fault that carries BOTH a process and a
+// fill cap, or a database target and a service name, is refused by the
+// validator's cross field rules: the base manifest would be refused and every
+// cell measured against it would say nothing. So each base pins a kind and
+// prunes the parameters that belong to the other kinds, and the seed base
+// takes disk_fill with a cap above its headroom so that the fill only bounds
+// are still exercised on a base where they are legal.
+//
+// 791 is a count of the merged schema and not 743 plus 48. Counting the whole
+// file again is the only version of this that survives a rebase: the terminal
+// surface and the chaos block landed in parallel, and adding one lane's delta
+// to the other lane's total would agree with itself whatever the file says.
+// 888 comes from the GATE, which is the only source for it. This number has
+// been wrong twice tonight from arithmetic that felt safe, because four lanes
+// added a top level key each and every one of them counted a different tree.
+// The gate was asked on the tree this rebase produced and said 888. Two
+// independent routes then agreed with it rather than replacing it: walking the
+// merged schema by hand also gives 888, and 888 less the 48 that are the chaos
+// block and its two policy keys is 840, which is exactly the number main's own
+// constant carries. A method that agrees with the gate whenever the gate is
+// available, and is unavailable when it is not, is not a method, so the gate is
+// the source and the other two are the check on it.
+const wantConstraints = 888
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and

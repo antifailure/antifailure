@@ -9133,6 +9133,180 @@ same: it is the difference between a two second rebuild and a two minute one.
 
 Related: [detection](/docs/concepts/detection), [the local runtime](/docs/guides/local-runtime).
 `,
+	"guides/chaos.md": `---
+title: Fault injection and crash recovery
+description: Break the environment on purpose, then prove the database did not lose a commit it said it had.
+sidebar:
+  order: 28
+---
+
+A rehearsal tells you what a change does to a system that works. The chaos
+block tells you what the system does when it stops working, and then it proves
+the answer instead of reporting that everything came back.
+
+` + "`" + "`" + "`" + `yaml
+chaos:
+  enabled: true
+  faults:
+    - name: postgres-crash
+      kind: process_kill
+      target: database
+      process: "postgres: checkpointer"
+` + "`" + "`" + "`" + `
+
+Run it with ` + "`" + `af chaos` + "`" + ` against a running environment, or let ` + "`" + `af ci` + "`" + ` run it at
+the end of a check.
+
+## What it proves
+
+Around a fault aimed at the database, concurrent writers commit into a schema
+the engine owns, and the fault lands while they are committing. Afterwards the
+run establishes four things:
+
+1. **No lost durable commit.** Every transaction the client was told was
+   committed is still there.
+2. **No phantom commit.** Nothing is there that no client ever tried to write.
+3. **The write ahead log replayed.** Recovery started at the position the
+   control file named before the crash, and reached past the last flush a
+   writer saw.
+4. **The relations survived.** A sequential scan and an index only scan count
+   the same rows, and ` + "`" + `amcheck` + "`" + ` finds an index entry for every live heap tuple.
+
+The first two need something the database cannot give you, because they are
+claims about what the database *said* rather than about what it holds. The
+engine keeps a ledger on the client side of the wire: an identifier goes in
+before the statement is sent, and moves to acknowledged only when the call
+returns without an error. A commit that returned success and is absent
+afterwards is a durability failure whatever caused it.
+
+## The faults
+
+| Kind | What happens | Undo |
+| --- | --- | --- |
+| ` + "`" + `process_kill` + "`" + ` | ` + "`" + `SIGKILL` + "`" + ` to one process inside the container, matched by a substring of its command line. The container keeps running. | None. The recovery is the system's own, and that is the fault. |
+| ` + "`" + `container_kill` + "`" + ` | ` + "`" + `SIGKILL` + "`" + ` to the container's main process. The container stops. | Starts it again. |
+| ` + "`" + `container_stop` + "`" + ` | ` + "`" + `SIGTERM` + "`" + `, then ` + "`" + `SIGKILL` + "`" + ` after a grace period. | Starts it again. |
+| ` + "`" + `container_pause` + "`" + ` | Freezes every process with the cgroup freezer. Nothing is killed and no connection closes. | Thaws it. |
+| ` + "`" + `network_partition` + "`" + ` | Detaches the container from the environment's network. | Attaches it again, with the aliases it had. |
+| ` + "`" + `read_only_data` + "`" + ` | Removes write permission from the data directory. | Restores the mode it recorded. |
+| ` + "`" + `disk_fill` + "`" + ` | Fills the filesystem holding the data directory to a stated headroom. | Removes the file it wrote. |
+
+` + "`" + `process_kill` + "`" + ` and ` + "`" + `container_kill` + "`" + ` are the two kinds that stop Postgres
+uncleanly, so they are the two the recovery proof expects a replay from. The
+others are useful and they are honest about what they are: a ` + "`" + `container_stop` + "`" + `
+shuts the database down cleanly and replays nothing, and a run that declared it
+as a crash reports that it could not establish a recovery rather than reporting
+a clean one.
+
+## What it will not touch
+
+A fault reaches the containers this environment created and nothing else. The
+target resolves from the labels the runtime stamped at create time, never from
+a name a fault supplied, and the ownership is read again from the daemon at the
+instant of the act. Three refusals have no override:
+
+- a container carrying no ` + "`" + `dev.antifailure.managed` + "`" + ` label is not ours
+- a container belonging to a different environment
+- the egress sidecar and the emulators, whatever environment they belong to
+
+The sidecar carries the egress policy. A fault that could stop it would switch
+off the control that decides what the environment may reach, and a chaos
+feature that can disable a safety control is a way out with a feature name. An
+emulator stands in for a third party the environment must not reach, so
+stopping one does not produce an outage: it produces a request that goes
+looking for the real host.
+
+` + "`" + `disk_fill` + "`" + ` carries a fourth refusal. A container's writable layer is the
+daemon's own disk, so filling a directory on it fills the machine and every
+other container running on it. The fault checks that the directory is a mount
+of its own and refuses when it is not.
+
+## Nothing that changed nothing counts as survived
+
+A fault that was applied and had no effect is refused, not reported. The
+reason is the whole point of the feature: every assertion after such a fault
+describes a system that never broke, and a recovery check that passes on one is
+a check that answers the same whether or not it ran.
+
+So a ` + "`" + `process_kill` + "`" + ` whose pattern matches nothing is refused rather than
+reported as a crash the database survived. A ` + "`" + `read_only_data` + "`" + ` fault probes a
+write as the directory's owner and refuses if the write still succeeds, which
+is what happens on a directory owned by root, because root ignores the mode.
+A ` + "`" + `container_pause` + "`" + ` that the daemon accepts and that leaves the container
+running is refused.
+
+The same discipline runs through the findings. A run that could not establish
+what it set out to is reported as unverified and never as a pass:
+
+| Finding | Meaning |
+| --- | --- |
+| ` + "`" + `chaos.durability.lost_commit` + "`" + ` | A transaction the client was told was committed is gone. |
+| ` + "`" + `chaos.durability.phantom_commit` + "`" + ` | A row is present that no client wrote. |
+| ` + "`" + `chaos.recovery.replay_short` + "`" + ` | Recovery stopped before the last position the client saw flushed. |
+| ` + "`" + `chaos.recovery.timeline_moved` + "`" + ` | The timeline changed, and crash recovery does not change it. |
+| ` + "`" + `chaos.integrity.relation_damaged` + "`" + ` | The heap and its index disagree. |
+| ` + "`" + `chaos.recovery.no_crash` + "`" + ` | The fault was declared as a crash and nothing crashed. |
+| ` + "`" + `chaos.recovery.no_replay` + "`" + ` | The database came back and the log records no replay. |
+| ` + "`" + `chaos.integrity.checksums_off` + "`" + ` | Data page checksums are off, so a torn page would not be seen. |
+| ` + "`" + `chaos.integrity.amcheck_unavailable` + "`" + ` | The index could not be verified. |
+| ` + "`" + `chaos.durability.inconsistent_ledger` + "`" + ` | The engine's own bookkeeping does not add up. |
+
+The first five are failures and carry ` + "`" + `policy.chaos_failure` + "`" + `, which defaults to
+` + "`" + `fail` + "`" + `. The last five are the ones the run could not look at, and they carry
+` + "`" + `policy.chaos_unverified` + "`" + `, which defaults to ` + "`" + `warn` + "`" + `. They are two keys because
+a check that found a problem and a check that could not look are different
+facts, and reporting the second as the first teaches a project to ignore both.
+
+## Asking for a run that loses data
+
+` + "`" + `crash_recovery.synchronous_commit` + "`" + ` sets what the writers ask of the database.
+With it off, Postgres acknowledges a commit before the write ahead log record
+has left shared memory, so a crash that discards shared memory loses commits
+the client was told were durable. That is the setting's documented behavior and
+the run reports the loss:
+
+` + "`" + "`" + "`" + `yaml
+chaos:
+  enabled: true
+  crash_recovery:
+    synchronous_commit: off
+  faults:
+    - name: prove-the-check-can-say-no
+      kind: process_kill
+      target: database
+      process: "postgres: checkpointer"
+` + "`" + "`" + "`" + `
+
+Leave it out unless you mean it. A manifest that sets it to ` + "`" + `off` + "`" + ` is asking for
+a run that is expected to report lost commits, which is useful exactly once:
+to see the check say no before you trust it saying yes.
+
+## Tuning
+
+| Key | Default | What it is |
+| --- | --- | --- |
+| ` + "`" + `crash_recovery.writers` + "`" + ` | 8 | Connections committing at once. |
+| ` + "`" + `crash_recovery.commits_before_fault` + "`" + ` | 200 | Acknowledged commits before a fault lands. |
+| ` + "`" + `crash_recovery.recovery_timeout` + "`" + ` | ` + "`" + `2m` + "`" + ` | How long the database has to answer a query again. |
+| ` + "`" + `faults[].after` + "`" + ` | ` + "`" + `5s` + "`" + ` | A floor on how long the workload runs first. |
+| ` + "`" + `faults[].hold` + "`" + ` | ` + "`" + `3s` + "`" + ` | How long the fault stays in place. |
+
+` + "`" + `commits_before_fault` + "`" + ` counts commits rather than seconds on purpose. A second
+on a loaded machine can be a second in which nothing committed, and a crash
+with nothing to lose passes every durability assertion by having none to make.
+
+## Limits
+
+Faults run on the local runtime, against Docker containers. On Kubernetes the
+run reports ` + "`" + `AF-CHS-007` + "`" + ` rather than injecting anything.
+
+Network latency and packet loss are not implemented. Shaping traffic needs
+` + "`" + `tc` + "`" + ` inside the target's network namespace, which the database and application
+images do not carry and which the environment cannot fetch, because everything
+it reaches goes through a default deny egress policy. A declared fault that
+silently did nothing would be worse than an absent one, so the kind does not
+exist. ` + "`" + `network_partition` + "`" + ` is the network fault that does work.
+`,
 	"guides/dashboard.md": `---
 title: Watching a run
 description: The live dashboard, what each pane means, and what you get where there is no terminal.
@@ -17583,6 +17757,55 @@ af change --diff pr.patch
 | ` + "`" + `--head` + "`" + ` | - | Ref to measure, defaulting to HEAD. |
 | ` + "`" + `-w` + "`" + `, ` + "`" + `--write` + "`" + ` | - | Write the report section here as markdown. |
 
+### ` + "`" + `af chaos` + "`" + `
+
+Break this environment on purpose and prove the recovery.
+
+Injects the faults the manifest's chaos block declares into the running
+environment, one at a time, and reads what the system did about each one.
+
+The faults are real. A process is killed with SIGKILL, a container is stopped,
+a container is frozen, a container is detached from the network, a data
+directory is made read only. Nothing is simulated, and nothing is aimed
+anywhere but at the containers this environment created: a target is resolved
+from the labels the runtime stamped at create time, the ownership is proved
+again from the daemon at the instant of the act, and the egress sidecar is
+refused whatever a fault asks for, because a fault that can stop the thing
+deciding where the environment may connect is a way out rather than an outage.
+
+Around a fault aimed at the database, the durability proof runs. Concurrent
+writers commit into a schema of the engine's own while the fault lands, and
+afterwards every commit the client was told was committed must still be there
+and nothing may be there that no client ever wrote. That needs a record the
+database cannot provide, because the claim is about what the database SAID,
+and the write ahead log is then read for the evidence that it actually
+replayed: the position recovery started from, against the one the control file
+named before the crash, and the position it reached, against the last flush a
+writer saw.
+
+Anything that could not be established is reported as unverified rather than as
+a pass. A fault that was applied and changed nothing is refused, because every
+assertion after it would be measuring a system that never broke.
+
+` + "`" + "`" + "`" + `
+af chaos [flags]
+` + "`" + "`" + "`" + `
+
+` + "`" + "`" + "`" + `
+# Inject the manifest's faults and prove what the recovery did.
+af chaos
+
+# Against a branch other than the checked out one.
+af chaos --branch fix-the-outbox
+
+# The whole result, including the acknowledged commit ledger.
+af chaos -o json
+` + "`" + "`" + "`" + `
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| ` + "`" + `--branch` + "`" + ` | - | Branch to break, defaulting to the checked out one. |
+
 ### ` + "`" + `af ci` + "`" + `
 
 Bring an environment up, run everything, write a report, tear it down.
@@ -21450,6 +21673,116 @@ The Dockerfile {dockerfile} for {service} is outside the build context {context}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/build](/docs/guides/build) |
 
+## Fault injection and crash recovery
+
+### AF-CHS-001
+
+A fault names the target {target}, which this environment does not have: {detail}
+
+**What to do.** Name a target the environment is running. 'af status' lists them, and 'af chaos list' lists the ones a fault may reach.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `3` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/chaos](/docs/guides/chaos) |
+
+### AF-CHS-002
+
+The fault kind {kind} cannot be run as written: {detail}
+
+**What to do.** Correct the fault in the manifest's chaos block. The reference page lists each kind and the parameters it requires.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `3` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/chaos](/docs/guides/chaos) |
+
+### AF-CHS-003
+
+The fault {fault} could not be injected into {target}: {detail}
+
+**What to do.** Read what the container said. A fault that could not be injected has measured nothing, so the run reports that rather than a recovery.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `5` + "`" + ` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [guides/chaos](/docs/guides/chaos) |
+
+### AF-CHS-004
+
+The fault {fault} was applied to {target} and changed nothing: {detail}
+
+**What to do.** A fault that changes nothing makes every recovery check that follows it meaningless, so it is refused rather than reported as survived. Fix the fault, or the environment it is aimed at.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `7` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/chaos](/docs/guides/chaos) |
+
+### AF-CHS-005
+
+The fault {fault} is refused because its effect would reach past {target}: {detail}
+
+**What to do.** A fault may only affect the environment that declared it. Narrow the fault, or give the target the dedicated volume the fault needs.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `3` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/chaos](/docs/guides/chaos) |
+
+### AF-CHS-006
+
+The database did not come back within {timeout} after the fault {fault}: {detail}
+
+**What to do.** Read the database's own log for how far recovery reached. A database that never came back has not passed a recovery check and has not failed one either.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `7` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/chaos](/docs/guides/chaos) |
+
+### AF-CHS-007
+
+Faults are not available on the {provider} runtime.
+
+**What to do.** Run the chaos suite against the local runtime, which is the one whose containers this engine can reach.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `3` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/chaos](/docs/guides/chaos) |
+
+### AF-CHS-008
+
+Recovery after {fault} lost data the client was told was committed: {detail}
+
+**What to do.** Open the finding for how many acknowledged commits are missing. This is a durability failure in the database or its configuration, not in the rehearsal.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `7` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/chaos](/docs/guides/chaos) |
+
+### AF-CHS-009
+
+The chaos suite could not establish what it set out to check after {fault}: {detail}
+
+**What to do.** An unverified recovery is not a passed one. Read what could not be measured and fix that before trusting the result.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `6` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/chaos](/docs/guides/chaos) |
+
 ## Control plane
 
 ### AF-CP-003
@@ -23315,6 +23648,7 @@ what it deliberately does not cover.
 | ` + "`" + `runtime` + "`" + ` | block | Where and how long environments run. |
 | ` + "`" + `infrastructure` + "`" + ` | block | Where your infrastructure as code lives, one stack at a time. The one section that describes production rather than the copy. |
 | ` + "`" + `github` + "`" + ` | block | The pull request integration. |
+| ` + "`" + `chaos` + "`" + ` | block | Faults a rehearsal may inject into its own environment, and the recovery it proves. |
 
 ## ` + "`" + `services` + "`" + `
 
@@ -23889,9 +24223,28 @@ refused at the line rather than treated as the weakest one.
 | ` + "`" + `cleanup` + "`" + ` | ` + "`" + `fail` + "`" + ` | Teardown left a resource behind. |
 | ` + "`" + `workflows_unverified` + "`" + ` | ` + "`" + `fail` + "`" + ` | No workflow reached a verdict about the application, because every one was blocked or unverified or because none was declared. |
 | ` + "`" + `review` + "`" + ` | ` + "`" + `warn` + "`" + ` | The static code reviewer flagged a correctness defect in the change's added lines. Advisory by default because the reviewer is model backed; runs only when a model key is configured. |
+| ` + "`" + `chaos_failure` + "`" + ` | ` + "`" + `fail` + "`" + ` | A fault's recovery was wrong: a commit the client was told was committed is gone, a row is present that no client wrote, a replay stopped short, a heap and an index disagree. |
+| ` + "`" + `chaos_unverified` + "`" + ` | ` + "`" + `warn` + "`" + ` | A fault run could not establish what it set out to: nothing crashed, no replay is recorded, the control file would not parse, ` + "`" + `amcheck` + "`" + ` is absent. A separate key because a check that found a problem and a check that could not look are different facts. |
 
 See [verdicts](/docs/concepts/verdicts) for what each level does to the run
 and to the exit code.
+## ` + "`" + `chaos` + "`" + `
+
+The whole block is in [Fault injection and crash
+recovery](/docs/guides/chaos), including the seven fault kinds and what each
+one refuses. The shape:
+
+| Key | Default | What it is |
+| --- | --- | --- |
+| ` + "`" + `enabled` + "`" + ` | ` + "`" + `false` + "`" + ` | Whether anything is broken on purpose. |
+| ` + "`" + `faults` + "`" + ` | none | The faults, injected in the order they are written, one at a time, each undone before the next begins. |
+| ` + "`" + `crash_recovery` + "`" + ` | on | The durability proof run around a fault aimed at the database. |
+
+A fault reaches the containers this environment created and nothing else. The
+target resolves from the labels the runtime stamped at create time, the
+ownership is read again from the daemon at the instant of the act, and the
+egress sidecar is refused whatever a fault asks for.
+
 ## ` + "`" + `load` + "`" + `
 
 The whole block is in [Load](/docs/concepts/load). One key is here because it
@@ -25246,6 +25599,7 @@ This page is generated from ` + "`" + `schemas/manifest.v1.json` + "`" + `. Edit
 | --- | --- | --- | --- |
 | ` + "`" + `auth` + "`" + ` | [auth](#auth) | no | How personas come to exist. |
 | ` + "`" + `change` + "`" + ` | [Change](#change) | no | How a pull request's diff is classified. |
+| ` + "`" + `chaos` + "`" + ` | [Chaos](#chaos) | no | Faults a rehearsal may inject into the environment, and the recovery it proves afterwards. |
 | ` + "`" + `database` + "`" + ` | [Database](#database) | no | Where the environment's Postgres comes from, and how the production copy is made safe before anyone can branch from it. |
 | ` + "`" + `datastores` + "`" + ` | list of [Datastore](#datastore) | no | Every store the environment holds, and what is done about each one's contents. The database: block above normalizes into the entry named primary, so a manifest that declares only database: already has this list and does not have to write it. A stance is declared rather than defaulted, because an empty ClickHouse nobody chose looks exactly like an empty ClickHouse somebody decided on. Max items 25. |
 | ` + "`" + `desktop` + "`" + ` | [Desktop application](#desktop-application) | no | Which application the desktop workflows drive, declared once because a manifest describes one product. |
@@ -25357,6 +25711,28 @@ One path pattern and what the paths it matches are. It says what a file IS, neve
 | ` + "`" + `note` + "`" + ` | string | no | The sentence the report prints for this rule, replacing the default one that restates the pattern. Max length 200. |
 | ` + "`" + `path` + "`" + ` | string | **yes** | A glob against the repository relative path. A single star does not cross a slash and a double star does. A pattern that matches everything is refused, because it would defeat the rule that an unrecognised path selects every check. Min length 1, max length 256. |
 | ` + "`" + `surface` + "`" + ` | ` + "`" + `schema` + "`" + `, ` + "`" + `code` + "`" + `, ` + "`" + `asset` + "`" + `, ` + "`" + `build` + "`" + `, ` + "`" + `dependency` + "`" + `, ` + "`" + `config` + "`" + `, ` + "`" + `infrastructure` + "`" + `, ` + "`" + `pipeline` + "`" + `, ` + "`" + `test` + "`" + `, ` + "`" + `docs` + "`" + ` | **yes** | What the matched paths are. Surfaces the engine assigns from the manifest itself, such as a service or the masking rules file, cannot be set here. |
+
+## Chaos
+
+Faults a rehearsal may inject into the environment, and the recovery it proves afterwards. Off by default: absent, or present with enabled false, runs exactly as before and injects nothing. A fault reaches the containers this environment created and nothing else, which the engine enforces by the labels the runtime stamped at create time rather than by the name a fault names, and the egress sidecar is refused whatever a fault asks for, because a fault that can stop the thing deciding what the environment may reach is a way out rather than an outage. Every fault carries an undo that runs even when the run fails, and a fault that was applied and changed nothing is refused rather than reported as survived, because every assertion after it would be measuring a system that never broke.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| ` + "`" + `crash_recovery` + "`" + ` | [Crash recovery](#crash-recovery) | no | The durability proof run around a fault: concurrent writers commit to a schema of the engine's own while the fault lands, and afterwards every commit the client was told was committed must still be there and nothing may be there that no client ever wrote. |
+| ` + "`" + `enabled` + "`" + ` | boolean | no | Whether faults are injected. Off is today's behavior: the environment is built, tested and torn down with nothing broken on purpose. Defaults to ` + "`" + `false` + "`" + `. |
+| ` + "`" + `faults` + "`" + ` | list of [Fault](#fault) | no | The faults to inject, in the order they are written. Each one is applied, held for its own duration, and then undone before the next begins, so a report says which fault a finding came from rather than which combination. Max items 20. |
+
+## Crash recovery
+
+The durability proof run around a fault: concurrent writers commit to a schema of the engine's own while the fault lands, and afterwards every commit the client was told was committed must still be there and nothing may be there that no client ever wrote. It is the part that needs a record the database cannot provide, because the claim is about what the database SAID and not about what it holds. The write ahead log is then read for evidence that it actually replayed, from the position the control file named to past the last flush a writer saw, and the heap is checked against its index. Anything that could not be established, an unreadable control file, a log with no replay in it, a missing amcheck extension, is reported as unverified and never as a pass.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| ` + "`" + `commits_before_fault` + "`" + ` | integer | no | How many commits must be acknowledged before a fault is injected. Commits rather than seconds, because a second on a loaded machine can be a second in which nothing committed, and a crash with nothing to lose passes every durability assertion by having none. Defaults to ` + "`" + `200` + "`" + `. Minimum 1, maximum 1e+06. |
+| ` + "`" + `enabled` + "`" + ` | boolean | no | Whether the durability proof runs around each fault aimed at the database. On by default when the chaos block is on, because a fault injected into a database with nothing measuring the result is an outage nobody learned anything from. Defaults to ` + "`" + `true` + "`" + `. |
+| ` + "`" + `recovery_timeout` + "`" + ` | string | no | How long the database has to answer a query again after the fault. A database that never came back has not passed a recovery check and has not failed one either, so the timeout is reported as its own outcome. Defaults to ` + "`" + `2m` + "`" + `. Matches ` + "`" + `^[0-9]+(s\|m)$` + "`" + `. |
+| ` + "`" + `synchronous_commit` + "`" + ` | ` + "`" + `on` + "`" + `, ` + "`" + `off` + "`" + `, ` + "`" + `local` + "`" + `, ` + "`" + `remote_write` + "`" + `, ` + "`" + `remote_apply` + "`" + ` | no | What the writers set synchronous_commit to, or absent to leave the database's own value alone. It is here because it is the one knob that makes the durability check falsifiable: with it off Postgres acknowledges a commit before the write ahead log record has left shared memory, so a crash loses acknowledged commits by design and the check reports them. Setting it to off in a manifest therefore asks for a run that is EXPECTED to report lost commits, and a project that has not decided to do that should leave it out. |
+| ` + "`" + `writers` + "`" + ` | integer | no | How many connections commit at once. More than one by default: a crash under a serial workload exercises none of the concurrency recovery has to get right. Defaults to ` + "`" + `8` + "`" + `. Minimum 1, maximum 64. |
 
 ## Database
 
@@ -25492,6 +25868,22 @@ Agents that pursue a goal with no declared workflow, discover the paths an appli
 | --- | --- | --- | --- |
 | ` + "`" + `enabled` + "`" + ` | boolean | no | Defaults to ` + "`" + `false` + "`" + `. |
 | ` + "`" + `goals` + "`" + ` | list of [Goal](#goal) | no | One thing an exploratory agent tries to achieve. Max items 50. |
+
+## Fault
+
+One failure injected into one container. The name is what a report calls it, the kind is what is done, and the target is what it is done to.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| ` + "`" + `after` + "`" + ` | string | no | How long the workload runs before this fault is injected. It is a floor rather than the whole wait: the engine also waits for real acknowledged commits, because a fault injected into a database that has committed nothing yet has nothing to lose and passes every durability check by having none to make. Defaults to ` + "`" + `5s` + "`" + `. Matches ` + "`" + `^[0-9]+(ms\|s\|m)$` + "`" + `. |
+| ` + "`" + `headroom_bytes` + "`" + ` | integer | no | How little room disk_fill leaves free. A filesystem filled to exactly zero leaves no space to write the file that empties it, so this is required and bounded rather than defaulted to nothing. Defaults to ` + "`" + `1.6777216e+07` + "`" + `. Minimum 1.048576e+06, maximum 1.073741824e+09. |
+| ` + "`" + `hold` + "`" + ` | string | no | How long the fault stays in place before it is undone. A fault with no undo, such as a killed process, ignores this and the value says how long the run waits before reading the result. Defaults to ` + "`" + `3s` + "`" + `. Matches ` + "`" + `^[0-9]+(ms\|s\|m)$` + "`" + `. |
+| ` + "`" + `kind` + "`" + ` | ` + "`" + `process_kill` + "`" + `, ` + "`" + `container_kill` + "`" + `, ` + "`" + `container_stop` + "`" + `, ` + "`" + `container_pause` + "`" + `, ` + "`" + `network_partition` + "`" + `, ` + "`" + `read_only_data` + "`" + `, ` + "`" + `disk_fill` + "`" + ` | **yes** | What is done. process_kill sends SIGKILL to one process inside the container and leaves the container running, which is the real database crash: the postmaster discards shared memory and replays its write ahead log. container_kill sends SIGKILL to the container's main process, so the container stops and is started again, which is the node that went away. container_stop sends SIGTERM and then SIGKILL, which is a clean shutdown and deliberately does NO recovery, so it is the contrast that shows a recovery check is looking. container_pause freezes every process with the cgroup freezer, killing nothing and closing no connection, which is the stall. network_partition detaches the container from the environment's network and attaches it again with the same aliases. read_only_data removes write permission from the data directory, so a write meets a real errno. disk_fill fills the filesystem holding the data directory, and is refused unless that filesystem is a mount of its own. |
+| ` + "`" + `max_fill_bytes` + "`" + ` | integer | no | The most disk_fill will write, whatever the filesystem reports free. A cap that is never reached costs nothing, and a missing cap is bounded only by the machine. Defaults to ` + "`" + `1.073741824e+09` + "`" + `. Minimum 1.048576e+06, maximum 1.073741824e+10. |
+| ` + "`" + `name` + "`" + ` | string | **yes** | What a report calls this fault. Lower case, so the name reads the same in a table, a log line and a finding. Min length 1, max length 100, matches ` + "`" + `^[a-z0-9][a-z0-9-]*$` + "`" + `. |
+| ` + "`" + `process` + "`" + ` | string | no | The substring of a command line process_kill matches, required for that kind and refused for every other. A pattern that matches nothing is refused rather than reported as a fault that was survived. For a crash of the database itself, 'postgres: checkpointer' is a process the postmaster always supervises. Max length 200. |
+| ` + "`" + `service` + "`" + ` | string | no | The service to aim at, required when target is service and refused otherwise. It must be a service this manifest declares. Max length 63. |
+| ` + "`" + `target` + "`" + ` | ` + "`" + `database` + "`" + `, ` + "`" + `service` + "`" + ` | no | Which container in this environment. database is the branch this environment is running on, and service names one of the services above through service:. The sidecar and the emulators are not targets and naming one is refused. Defaults to ` + "`" + `database` + "`" + `. |
 
 ## Fidelity
 
@@ -25716,6 +26108,8 @@ What each class of finding does to the pull request check. A finding at 'fail' f
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
+| ` + "`" + `chaos_failure` + "`" + ` | ` + "`" + `ignore` + "`" + `, ` + "`" + `warn` + "`" + `, ` + "`" + `fail` + "`" + ` | no | A fault whose recovery was wrong: a transaction the client was told was committed that is gone after recovery, a row present that no client ever wrote, a replay that stopped short of what the client saw flushed, or a heap and an index that no longer agree. It defaults to fail, unlike almost everything else here, because none of those is a matter of taste: a commit that returned success and is not there is a durability failure whatever the project's appetite. Defaults to ` + "`" + `fail` + "`" + `. |
+| ` + "`" + `chaos_unverified` + "`" + ` | ` + "`" + `ignore` + "`" + `, ` + "`" + `warn` + "`" + `, ` + "`" + `fail` + "`" + ` | no | A fault run that could not establish what it set out to: it was declared as a crash and nothing crashed, the write ahead log carries no replay, the control file could not be read, or the amcheck extension is not installed so a damaged index would not have been seen. It is a separate key from chaos_failure because a check that found a problem and a check that could not look are different facts, and reporting the second as the first is how a project learns to ignore both. Defaults to ` + "`" + `warn` + "`" + `. |
 | ` + "`" + `cleanup` + "`" + ` | ` + "`" + `ignore` + "`" + `, ` + "`" + `warn` + "`" + `, ` + "`" + `fail` + "`" + ` | no | Teardown left a resource behind. The journal remembers what is left, so 'af down' can finish the job. Defaults to ` + "`" + `fail` + "`" + `. |
 | ` + "`" + `egress_surprise` + "`" + ` | ` + "`" + `ignore` + "`" + `, ` + "`" + `warn` + "`" + `, ` + "`" + `fail` + "`" + ` | no | The environment tried to reach a host the manifest does not mention. The request was refused either way; this decides whether the attempt stops the merge. Defaults to ` + "`" + `fail` + "`" + `. |
 | ` + "`" + `load_regression` + "`" + ` | ` + "`" + `ignore` + "`" + `, ` + "`" + `warn` + "`" + `, ` + "`" + `fail` + "`" + ` | no | A load threshold from the load block being exceeded. Defaults to ` + "`" + `warn` + "`" + `. |

@@ -124,7 +124,16 @@ var commandExamples = map[string]string{
 		"# Save a report on the base branch, compare against it on this one.\n" +
 		"af insights --save baseline.json\n" +
 		"af insights --baseline baseline.json",
-	"af invariants":      "af invariants",
+	"af invariants": "af invariants",
+	"af chaos": "" +
+		"# Inject the manifest's faults and prove what the recovery did.\n" +
+		"af chaos\n" +
+		"\n" +
+		"# Against a branch other than the checked out one.\n" +
+		"af chaos --branch fix-the-outbox\n" +
+		"\n" +
+		"# The whole result, including the acknowledged commit ledger.\n" +
+		"af chaos -o json",
 	"af license":         "af license status",
 	"af license install": "af license install AF-LICENSE-KEY",
 	"af license remove":  "af license remove",

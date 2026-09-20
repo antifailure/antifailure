@@ -13,6 +13,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/antifailure/antifailure/engine/internal/explore"
 )
@@ -60,6 +61,9 @@ type Run struct {
 	Verification *Verification
 	Cleanup      *Cleanup
 	Insights     *Insights
+	// Chaos is what the fault injection run broke and what the recovery
+	// afterwards was shown to have done.
+	Chaos *Chaos
 	// Notes say what could not be measured, and why. A report that silently
 	// omits a check reads exactly like a check that found nothing.
 	Notes []string
@@ -714,6 +718,11 @@ func (r Run) Markdown() string {
 	}
 
 	b.WriteString(r.migrationSection())
+	// After the migration and before the masking verification. The chaos run
+	// happens last in a check and this section sits in the middle of the
+	// report, because a reader is looking for what the change did to the
+	// database and a crash recovery is the most database shaped thing here.
+	b.WriteString(r.chaosSection())
 
 	if v := r.Verification; v != nil {
 		switch {
@@ -1039,4 +1048,168 @@ func (r Run) migrationSection() string {
 	}
 	b.WriteString("</details>\n\n")
 	return b.String()
+}
+
+// Chaos is what the fault injection run did, and what it proved about the
+// recovery that followed.
+//
+// A section of its own rather than findings alone, because a reader needs the
+// numbers whether or not anything was wrong: the count of acknowledged commits
+// is what makes "nothing was lost" mean something, and a run that lost nothing
+// out of four commits has said almost nothing. The findings say what to do and
+// this says what was measured.
+type Chaos struct {
+	// Faults is one entry per fault the manifest declared, in the order they
+	// were run.
+	Faults []ChaosFault
+	// Skipped is why the chaos block did not run, when it did not. It is here
+	// rather than in Notes because a chaos block that was declared and did not
+	// run has to be visible next to the section it would have filled.
+	Skipped string
+}
+
+// ChaosFault is one fault and its outcome.
+type ChaosFault struct {
+	Name   string
+	Kind   string
+	Target string
+	// Evidence is what the injector said it did at the moment it did it: the
+	// process it killed, the exit code the container carried, the network it
+	// detached. It is what backs the claim that the fault landed.
+	Evidence string
+	// Injected is whether the fault was applied at all, and Undone is whether
+	// its undo ran. A fault that was applied and not undone leaves an
+	// environment in a state the next thing to run will meet.
+	Injected bool
+	Undone   bool
+	// Error is why the fault could not be injected, when it could not.
+	Error string
+	// Recovery is the durability proof, when one was run around this fault.
+	Recovery *ChaosRecovery
+	// DurationMs is how long the fault and its verification took.
+	DurationMs int64
+}
+
+// ChaosRecovery is what the crash proof established.
+type ChaosRecovery struct {
+	// Crashed and Signal are read from the database's own log.
+	Crashed bool
+	Signal  int
+	// Replayed says the write ahead log was replayed, and RedoStart and
+	// RedoEnd are how far.
+	Replayed           bool
+	RedoStart, RedoEnd string
+	// StateBefore and StateAfter are the cluster state from its control file
+	// either side of the fault.
+	StateBefore, StateAfter string
+	// Acknowledged is how many commits the client was told were committed,
+	// Present is how many rows survived, Lost is how many acknowledged commits
+	// are gone, Phantom is how many rows no client wrote, and InFlightLanded
+	// is how many commits that were in flight at the crash did land.
+	Acknowledged, Present, Lost, Phantom, InFlightLanded int
+	// HeapRows and IndexRows are the two independent counts, and Amcheck is
+	// what the index verifier said.
+	HeapRows, IndexRows int64
+	Amcheck             string
+	// ChecksumsOn reports whether a torn page would have been detected.
+	ChecksumsOn bool
+	// DowntimeMs is how long the database did not answer a query.
+	DowntimeMs int64
+	// Verified reports whether the run established what it set out to. A run
+	// that is not verified has not passed: it has not looked.
+	Verified bool
+}
+
+// chaosSection renders what the faults did.
+func (r Run) chaosSection() string {
+	c := r.Chaos
+	if c == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("**What happened when this environment was broken on purpose**\n\n")
+	if c.Skipped != "" {
+		fmt.Fprintf(&b, "No fault was injected: %s\n\n", oneLine(c.Skipped))
+		return b.String()
+	}
+	for _, f := range c.Faults {
+		target := f.Target
+		if target == "" {
+			target = "the environment"
+		}
+		switch {
+		case f.Error != "":
+			fmt.Fprintf(&b, "Fault `%s` could not be injected into %s: %s Nothing after it was measured.\n\n",
+				f.Name, oneLine(target), oneLine(f.Error))
+			continue
+		case !f.Injected:
+			fmt.Fprintf(&b, "Fault `%s` did not run.\n\n", f.Name)
+			continue
+		}
+		fmt.Fprintf(&b, "Fault `%s` (%s) on %s: %s\n\n", f.Name, oneLine(f.Kind), oneLine(target), oneLine(f.Evidence))
+		rec := f.Recovery
+		if rec == nil {
+			continue
+		}
+		b.WriteString("| What was measured | Result |\n| --- | --- |\n")
+		fmt.Fprintf(&b, "| The database crashed | %s |\n", crashCell(rec))
+		fmt.Fprintf(&b, "| The write ahead log replayed | %s |\n", replayCell(rec))
+		fmt.Fprintf(&b, "| Commits the client was told were committed | %d |\n", rec.Acknowledged)
+		fmt.Fprintf(&b, "| Of those, missing after recovery | %d |\n", rec.Lost)
+		fmt.Fprintf(&b, "| Rows present that no client wrote | %d |\n", rec.Phantom)
+		fmt.Fprintf(&b, "| Commits in flight at the crash that landed | %d |\n", rec.InFlightLanded)
+		fmt.Fprintf(&b, "| Heap and index agree | %s |\n", agreeCell(rec))
+		fmt.Fprintf(&b, "| Cluster state, before and after | %s, then %s |\n",
+			orUnknown(rec.StateBefore), orUnknown(rec.StateAfter))
+		fmt.Fprintf(&b, "| The database was unreachable for | %s |\n", millis(rec.DowntimeMs))
+		b.WriteString("\n")
+		if !rec.Verified {
+			b.WriteString("This fault's recovery was not established. The findings above say what could not be looked at.\n\n")
+		}
+	}
+	return b.String()
+}
+
+// crashCell says whether the database crashed, in the words the log used.
+func crashCell(rec *ChaosRecovery) string {
+	if !rec.Crashed {
+		return "no, and the log carries no process killed by a signal"
+	}
+	return fmt.Sprintf("yes, a server process was killed by signal %d", rec.Signal)
+}
+
+// replayCell says how far replay reached.
+func replayCell(rec *ChaosRecovery) string {
+	if !rec.Replayed {
+		return "no replay is recorded in the log"
+	}
+	return fmt.Sprintf("yes, from %s to %s", oneLine(rec.RedoStart), oneLine(rec.RedoEnd))
+}
+
+// agreeCell says whether the two independent counts matched.
+func agreeCell(rec *ChaosRecovery) string {
+	if rec.Amcheck == "" {
+		return "not checked"
+	}
+	if rec.HeapRows != rec.IndexRows {
+		return fmt.Sprintf("**no: the heap counted %d and the index counted %d**", rec.HeapRows, rec.IndexRows)
+	}
+	return fmt.Sprintf("yes, %d rows both ways", rec.HeapRows)
+}
+
+// orUnknown is a cluster state, or a word for not having read one.
+func orUnknown(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "unread"
+	}
+	return oneLine(s)
+}
+
+// millis renders a duration a reader can compare, from the milliseconds the
+// report carries across its JSON boundary.
+func millis(ms int64) string {
+	if ms <= 0 {
+		return "no measurable time"
+	}
+	return (time.Duration(ms) * time.Millisecond).Round(time.Millisecond).String()
 }

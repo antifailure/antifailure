@@ -115,6 +115,9 @@
     },
     "security": {
       "$ref": "#/$defs/security"
+    },
+    "chaos": {
+      "$ref": "#/$defs/chaos"
     }
   },
   "$defs": {
@@ -2051,6 +2054,26 @@
           "default": "warn",
           "description": "A finding from the static code reviewer, the model-backed lane that reads the change's added lines and reports the correctness defects a diff introduces: an off-by-one, a nil dereference, an unhandled error, a boundary the new code does not hold, a new code path with no caller. It defaults to warn rather than fail because the reviewer is an LLM reading a diff and its findings are probabilistic, so it advises without blocking a merge on a model's say-so. Raise it to fail once the project trusts it, or set it to ignore to drop the findings. The reviewer runs only when the change touched code and only when a model key is configured; with no key it is skipped and the run says so."
         },
+        "chaos_failure": {
+          "type": "string",
+          "enum": [
+            "ignore",
+            "warn",
+            "fail"
+          ],
+          "default": "fail",
+          "description": "A fault whose recovery was wrong: a transaction the client was told was committed that is gone after recovery, a row present that no client ever wrote, a replay that stopped short of what the client saw flushed, or a heap and an index that no longer agree. It defaults to fail, unlike almost everything else here, because none of those is a matter of taste: a commit that returned success and is not there is a durability failure whatever the project's appetite."
+        },
+        "chaos_unverified": {
+          "type": "string",
+          "enum": [
+            "ignore",
+            "warn",
+            "fail"
+          ],
+          "default": "warn",
+          "description": "A fault run that could not establish what it set out to: it was declared as a crash and nothing crashed, the write ahead log carries no replay, the control file could not be read, or the amcheck extension is not installed so a damaged index would not have been seen. It is a separate key from chaos_failure because a check that found a problem and a check that could not look are different facts, and reporting the second as the first is how a project learns to ignore both."
+        },
         "security": {
           "type": "object",
           "additionalProperties": {
@@ -2605,6 +2628,151 @@
           "minLength": 1,
           "maxLength": 128,
           "description": "What macOS calls the running application, when that is not the bundle's own name. Only for `macos`, and refused on `electron`, which is launched directly and never looked up.\n\nIt exists because opening a bundle returns before the application is ready, so the process still has to be found by name, and the two names are not always the same: Visual Studio Code.app runs as Code. Defaults to the bundle's name without .app, which is right for most applications."
+        }
+      }
+    },
+    "chaos": {
+      "title": "Chaos",
+      "description": "Faults a rehearsal may inject into the environment, and the recovery it proves afterwards. Off by default: absent, or present with enabled false, runs exactly as before and injects nothing. A fault reaches the containers this environment created and nothing else, which the engine enforces by the labels the runtime stamped at create time rather than by the name a fault names, and the egress sidecar is refused whatever a fault asks for, because a fault that can stop the thing deciding what the environment may reach is a way out rather than an outage. Every fault carries an undo that runs even when the run fails, and a fault that was applied and changed nothing is refused rather than reported as survived, because every assertion after it would be measuring a system that never broke.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether faults are injected. Off is today's behavior: the environment is built, tested and torn down with nothing broken on purpose."
+        },
+        "faults": {
+          "type": "array",
+          "maxItems": 20,
+          "description": "The faults to inject, in the order they are written. Each one is applied, held for its own duration, and then undone before the next begins, so a report says which fault a finding came from rather than which combination.",
+          "items": {
+            "$ref": "#/$defs/fault"
+          }
+        },
+        "crash_recovery": {
+          "$ref": "#/$defs/crash_recovery"
+        }
+      }
+    },
+    "fault": {
+      "title": "Fault",
+      "description": "One failure injected into one container. The name is what a report calls it, the kind is what is done, and the target is what it is done to.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "kind"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "description": "What a report calls this fault. Lower case, so the name reads the same in a table, a log line and a finding."
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "process_kill",
+            "container_kill",
+            "container_stop",
+            "container_pause",
+            "network_partition",
+            "read_only_data",
+            "disk_fill"
+          ],
+          "description": "What is done. process_kill sends SIGKILL to one process inside the container and leaves the container running, which is the real database crash: the postmaster discards shared memory and replays its write ahead log. container_kill sends SIGKILL to the container's main process, so the container stops and is started again, which is the node that went away. container_stop sends SIGTERM and then SIGKILL, which is a clean shutdown and deliberately does NO recovery, so it is the contrast that shows a recovery check is looking. container_pause freezes every process with the cgroup freezer, killing nothing and closing no connection, which is the stall. network_partition detaches the container from the environment's network and attaches it again with the same aliases. read_only_data removes write permission from the data directory, so a write meets a real errno. disk_fill fills the filesystem holding the data directory, and is refused unless that filesystem is a mount of its own."
+        },
+        "target": {
+          "type": "string",
+          "enum": [
+            "database",
+            "service"
+          ],
+          "default": "database",
+          "description": "Which container in this environment. database is the branch this environment is running on, and service names one of the services above through service:. The sidecar and the emulators are not targets and naming one is refused."
+        },
+        "service": {
+          "type": "string",
+          "maxLength": 63,
+          "description": "The service to aim at, required when target is service and refused otherwise. It must be a service this manifest declares."
+        },
+        "process": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "The substring of a command line process_kill matches, required for that kind and refused for every other. A pattern that matches nothing is refused rather than reported as a fault that was survived. For a crash of the database itself, 'postgres: checkpointer' is a process the postmaster always supervises."
+        },
+        "after": {
+          "type": "string",
+          "pattern": "^[0-9]+(ms|s|m)$",
+          "default": "5s",
+          "description": "How long the workload runs before this fault is injected. It is a floor rather than the whole wait: the engine also waits for real acknowledged commits, because a fault injected into a database that has committed nothing yet has nothing to lose and passes every durability check by having none to make."
+        },
+        "hold": {
+          "type": "string",
+          "pattern": "^[0-9]+(ms|s|m)$",
+          "default": "3s",
+          "description": "How long the fault stays in place before it is undone. A fault with no undo, such as a killed process, ignores this and the value says how long the run waits before reading the result."
+        },
+        "headroom_bytes": {
+          "type": "integer",
+          "minimum": 1048576,
+          "maximum": 1073741824,
+          "default": 16777216,
+          "description": "How little room disk_fill leaves free. A filesystem filled to exactly zero leaves no space to write the file that empties it, so this is required and bounded rather than defaulted to nothing."
+        },
+        "max_fill_bytes": {
+          "type": "integer",
+          "minimum": 1048576,
+          "maximum": 10737418240,
+          "default": 1073741824,
+          "description": "The most disk_fill will write, whatever the filesystem reports free. A cap that is never reached costs nothing, and a missing cap is bounded only by the machine."
+        }
+      }
+    },
+    "crash_recovery": {
+      "title": "Crash recovery",
+      "description": "The durability proof run around a fault: concurrent writers commit to a schema of the engine's own while the fault lands, and afterwards every commit the client was told was committed must still be there and nothing may be there that no client ever wrote. It is the part that needs a record the database cannot provide, because the claim is about what the database SAID and not about what it holds. The write ahead log is then read for evidence that it actually replayed, from the position the control file named to past the last flush a writer saw, and the heap is checked against its index. Anything that could not be established, an unreadable control file, a log with no replay in it, a missing amcheck extension, is reported as unverified and never as a pass.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the durability proof runs around each fault aimed at the database. On by default when the chaos block is on, because a fault injected into a database with nothing measuring the result is an outage nobody learned anything from."
+        },
+        "writers": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64,
+          "default": 8,
+          "description": "How many connections commit at once. More than one by default: a crash under a serial workload exercises none of the concurrency recovery has to get right."
+        },
+        "commits_before_fault": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000,
+          "default": 200,
+          "description": "How many commits must be acknowledged before a fault is injected. Commits rather than seconds, because a second on a loaded machine can be a second in which nothing committed, and a crash with nothing to lose passes every durability assertion by having none."
+        },
+        "synchronous_commit": {
+          "type": "string",
+          "enum": [
+            "on",
+            "off",
+            "local",
+            "remote_write",
+            "remote_apply"
+          ],
+          "description": "What the writers set synchronous_commit to, or absent to leave the database's own value alone. It is here because it is the one knob that makes the durability check falsifiable: with it off Postgres acknowledges a commit before the write ahead log record has left shared memory, so a crash loses acknowledged commits by design and the check reports them. Setting it to off in a manifest therefore asks for a run that is EXPECTED to report lost commits, and a project that has not decided to do that should leave it out."
+        },
+        "recovery_timeout": {
+          "type": "string",
+          "pattern": "^[0-9]+(s|m)$",
+          "default": "2m",
+          "description": "How long the database has to answer a query again after the fault. A database that never came back has not passed a recovery check and has not failed one either, so the timeout is reported as its own outcome."
         }
       }
     }

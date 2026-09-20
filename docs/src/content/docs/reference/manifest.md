@@ -41,6 +41,7 @@ what it deliberately does not cover.
 | `runtime` | block | Where and how long environments run. |
 | `infrastructure` | block | Where your infrastructure as code lives, one stack at a time. The one section that describes production rather than the copy. |
 | `github` | block | The pull request integration. |
+| `chaos` | block | Faults a rehearsal may inject into its own environment, and the recovery it proves. |
 
 ## `services`
 
@@ -615,9 +616,28 @@ refused at the line rather than treated as the weakest one.
 | `cleanup` | `fail` | Teardown left a resource behind. |
 | `workflows_unverified` | `fail` | No workflow reached a verdict about the application, because every one was blocked or unverified or because none was declared. |
 | `review` | `warn` | The static code reviewer flagged a correctness defect in the change's added lines. Advisory by default because the reviewer is model backed; runs only when a model key is configured. |
+| `chaos_failure` | `fail` | A fault's recovery was wrong: a commit the client was told was committed is gone, a row is present that no client wrote, a replay stopped short, a heap and an index disagree. |
+| `chaos_unverified` | `warn` | A fault run could not establish what it set out to: nothing crashed, no replay is recorded, the control file would not parse, `amcheck` is absent. A separate key because a check that found a problem and a check that could not look are different facts. |
 
 See [verdicts](/docs/concepts/verdicts) for what each level does to the run
 and to the exit code.
+## `chaos`
+
+The whole block is in [Fault injection and crash
+recovery](/docs/guides/chaos), including the seven fault kinds and what each
+one refuses. The shape:
+
+| Key | Default | What it is |
+| --- | --- | --- |
+| `enabled` | `false` | Whether anything is broken on purpose. |
+| `faults` | none | The faults, injected in the order they are written, one at a time, each undone before the next begins. |
+| `crash_recovery` | on | The durability proof run around a fault aimed at the database. |
+
+A fault reaches the containers this environment created and nothing else. The
+target resolves from the labels the runtime stamped at create time, the
+ownership is read again from the daemon at the instant of the act, and the
+egress sidecar is refused whatever a fault asks for.
+
 ## `load`
 
 The whole block is in [Load](/docs/concepts/load). One key is here because it

@@ -60,6 +60,18 @@ const (
 	DefaultRegressionFac    = 1.5
 	DefaultRegressionMS     = 5
 	DefaultLargeTable       = 100000
+	// The chaos block's defaults. DefaultFaultAfter is a floor rather than the
+	// whole wait: the engine also waits for DefaultCrashCommitsBeforeFault
+	// acknowledged commits, because a fault injected into a database that has
+	// committed nothing has nothing to lose and passes every durability
+	// assertion by having none to make.
+	DefaultFaultAfter              = "5s"
+	DefaultFaultHold               = "3s"
+	DefaultFaultHeadroomBytes      = int64(16 << 20)
+	DefaultFaultMaxFillBytes       = int64(1 << 30)
+	DefaultCrashWriters            = 8
+	DefaultCrashCommitsBeforeFault = 200
+	DefaultCrashRecoveryTimeout    = "2m"
 	// DefaultOracleFailOn is the lowest severity that fails af oracle.
 	//
 	// critical rather than any difference. A pull request exists to change
@@ -134,6 +146,7 @@ func normalize(m *schema.Manifest, root string) {
 	normalizeRuntime(m)
 	normalizeGitHub(m)
 	normalizeSecurity(m)
+	normalizeChaos(m)
 }
 
 // normalizeSecurity defaults each access object's canary kind, so a fixture
@@ -150,6 +163,57 @@ func normalizeSecurity(m *schema.Manifest) {
 		if o.CanaryKind == "" {
 			o.CanaryKind = schema.CanaryPII
 		}
+	}
+}
+
+// normalizeChaos fills in each fault's defaults and the crash recovery
+// block's.
+//
+// Every default here matches the schema's, so a manifest read through this
+// package and one validated against the published schema agree about what an
+// unwritten key means. The one that is not a plain value is crash_recovery's
+// enabled: its default is true, so it is a pointer and an absent block turns
+// into an enabled one rather than into a disabled one.
+func normalizeChaos(m *schema.Manifest) {
+	if m.Chaos == nil {
+		return
+	}
+	for i := range m.Chaos.Faults {
+		f := &m.Chaos.Faults[i]
+		if f.Target == "" {
+			f.Target = schema.FaultTargetDatabase
+		}
+		if f.After == "" {
+			f.After = DefaultFaultAfter
+		}
+		if f.Hold == "" {
+			f.Hold = DefaultFaultHold
+		}
+		if f.Kind == schema.FaultDiskFill {
+			if f.HeadroomBytes == 0 {
+				f.HeadroomBytes = DefaultFaultHeadroomBytes
+			}
+			if f.MaxFillBytes == 0 {
+				f.MaxFillBytes = DefaultFaultMaxFillBytes
+			}
+		}
+	}
+	if m.Chaos.CrashRecovery == nil {
+		m.Chaos.CrashRecovery = &schema.CrashRecovery{}
+	}
+	cr := m.Chaos.CrashRecovery
+	if cr.Enabled == nil {
+		on := true
+		cr.Enabled = &on
+	}
+	if cr.Writers == 0 {
+		cr.Writers = DefaultCrashWriters
+	}
+	if cr.CommitsBeforeFault == 0 {
+		cr.CommitsBeforeFault = DefaultCrashCommitsBeforeFault
+	}
+	if cr.RecoveryTimeout == "" {
+		cr.RecoveryTimeout = DefaultCrashRecoveryTimeout
 	}
 }
 

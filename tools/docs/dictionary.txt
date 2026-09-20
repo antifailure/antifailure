@@ -3,6 +3,7 @@
 # line diff a reviewer can read, and so the list stays sorted.
 # Words this project uses that no general dictionary has.
 aiven
+amcheck
 antifailure
 autocapture
 autocaptured
@@ -16,6 +17,7 @@ buildpacks
 burstable
 BYPASSRLS
 bytea
+checkpointer
 citus
 cobra
 CREATEDB

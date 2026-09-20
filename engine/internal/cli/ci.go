@@ -151,6 +151,10 @@ change.`),
 			started := e.Clock.Now()
 			run.Exploration = declaredExploration(m)
 			var migration []report.Finding
+			// The fault injection findings. The faults run last of all, after
+			// everything else has measured an environment nothing broke on
+			// purpose, and are appended in finish in one line like the rest.
+			var chaosResults []report.Finding
 			// The security families' findings, run against the twin while it is
 			// up and appended in finish in one line, exactly as migration is.
 			var securityResults []report.Finding
@@ -261,6 +265,11 @@ change.`),
 				// Verdict, the exit code and the pull request comment like every
 				// other finding, at the advisory level the policy resolved.
 				run.Findings = append(run.Findings, reviewResults...)
+				// The fault injection findings, computed above while the twin
+				// was still up. One append line, the same wiring as every
+				// other family: from here a lost commit rides Verdict, the
+				// exit code and the pull request comment.
+				run.Findings = append(run.Findings, chaosResults...)
 				run.Duration = e.Clock.Since(started).Round(time.Second).String()
 				writeReport(e, run, output, jsonOutput)
 			}
@@ -362,6 +371,21 @@ change.`),
 			// by the one append line in finish. Empty registry, empty result.
 			securityResults = securityFindings(ctx, e, o, reg, gate, &run, m, decisions, branch,
 				runner, ciRunTTL(timeout, m))
+
+			// The faults run LAST, after everything else has been measured,
+			// and that ordering is the whole of their safety. Every check
+			// above ran against an environment nothing had broken on purpose;
+			// a fault injected earlier would leave every one of them
+			// describing a system this command had damaged, and a workflow
+			// that failed because the database was killed under it would be
+			// reported as a workflow the change broke.
+			if chaos, cErr := o.RunChaos(ctx, gate); cErr != nil {
+				e.Out.Printf("  %s %s\n", e.Out.S(StyleWarn, SymbolWarn), cErr.Error())
+				run.Notes = append(run.Notes, "the faults were not injected: "+cErr.Error())
+			} else if chaos != nil {
+				run.Chaos = &chaos.Report
+				chaosResults = chaos.Findings
+			}
 
 			finish()
 			return ciExit(run)
