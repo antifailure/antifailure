@@ -40,6 +40,7 @@ func validate(m *schema.Manifest, doc *yaml.Node, root string) []Problem {
 	v.auth(m)
 	v.workflows(m)
 	v.terminalWorkflows(m)
+	v.mobileWorkflows(m)
 	v.diversity(m)
 	v.invariants(m)
 	v.oracle(m)
@@ -1547,6 +1548,121 @@ func (v *validator) terminalWorkflows(m *schema.Manifest) {
 						"A terminal echoes what is typed into it, so that expectation is met by this workflow rather than by the program. Expect something the program draws.")
 				}
 			}
+		}
+	}
+}
+
+// mobileWorkflows checks the cross field rules the mobile lists have and the
+// schema cannot express.
+//
+// The bounds pass already refuses a missing platform, a malformed identifier
+// and an empty expectation list, straight from the published schema. What is
+// here needs to look at more than one field at once, or at the other lists.
+func (v *validator) mobileWorkflows(m *schema.Manifest) {
+	// A LIST WITH NOTHING TO DRIVE IS REFUSED HERE, because the schema cannot
+	// say "required only when that other list is used". Without this, a
+	// manifest declaring mobile workflows and no application passes
+	// validation, reaches the runner, and fails there with a message about a
+	// job document rather than about the line that was wrong.
+	if len(m.MobileWorkflows) > 0 && m.Mobile == nil {
+		v.add("mobile",
+			"There are mobile workflows and no application to drive.",
+			"Add a mobile block naming the platform and the bundle identifier or package name.")
+	}
+	// And the other direction, because a block nothing reads is a promise the
+	// run does not keep.
+	if m.Mobile != nil && len(m.MobileWorkflows) == 0 {
+		v.add("mobile",
+			"A mobile application is declared and no mobile workflow drives it.",
+			"Add a mobile_workflows entry, or remove the mobile block.")
+	}
+
+	if mo := m.Mobile; mo != nil {
+		// A FIELD THAT WOULD BE SILENTLY IGNORED IS REFUSED RATHER THAN
+		// IGNORED. `activity` names the Android component to launch and `avd`
+		// names an Android emulator image; neither means anything to iOS, so
+		// an iOS run carrying one has written down an intention nothing will
+		// act on. Accepting it would make the manifest say something the run
+		// does not do.
+		if mo.Platform == "ios" {
+			if strings.TrimSpace(mo.Activity) != "" {
+				v.add("mobile.activity",
+					"This is an iOS run and it names an Android activity.",
+					"activity names the Android component to launch and is not read on iOS. Remove it, or set platform to android.")
+			}
+			if strings.TrimSpace(mo.AVD) != "" {
+				v.add("mobile.avd",
+					"This is an iOS run and it names an Android emulator image.",
+					"avd names an Android virtual device and is not read on iOS. Remove it, or set platform to android.")
+			}
+		}
+
+		// The application has to be the KIND the platform can install. A
+		// simulator installs a .app bundle and Android installs an .apk, and
+		// handing either the other's artifact fails inside the device tooling
+		// with a message about the bundle rather than about the manifest,
+		// which is a long way from the line that was actually wrong.
+		if app := strings.TrimSpace(mo.App); app != "" {
+			ext := strings.ToLower(filepath.Ext(strings.TrimSuffix(app, string(filepath.Separator))))
+			switch mo.Platform {
+			case "ios":
+				if ext != ".app" {
+					v.add("mobile.app",
+						fmt.Sprintf("This is an iOS run and its app is %q.", app),
+						"An iOS run installs a .app bundle built for the simulator.")
+				}
+			case "android":
+				if ext != ".apk" {
+					v.add("mobile.app",
+						fmt.Sprintf("This is an Android run and its app is %q.", app),
+						"An Android run installs an .apk.")
+				}
+			}
+		}
+	}
+
+	// ONE RUN OPENS ONE THING, so a manifest declaring both kinds is refused
+	// rather than half run. `surface` tells the runner what to open, and a
+	// mobile run opens a device and no browser. A manifest carrying both lists
+	// would therefore run its mobile workflows and SILENTLY NOT RUN its
+	// browser ones, reporting a verdict that covered half of what it declared
+	// while looking complete. Refusing it here says so at the line that is
+	// wrong, and splitting them into two manifests is what the author meant
+	// anyway: two surfaces are two environments, two installs and two reports.
+	if len(m.MobileWorkflows) > 0 && len(m.Workflows) > 0 {
+		v.add("mobile_workflows",
+			"This manifest declares both browser workflows and mobile workflows.",
+			"One run opens one thing, so the browser ones would not run. Put the mobile workflows in their own manifest.")
+	}
+
+	// Names are one namespace across ALL THREE lists, for the reason
+	// terminalWorkflows gives: a name is what --only selects and what the
+	// report prints.
+	names := map[string]bool{}
+	for _, w := range m.Workflows {
+		names[w.Name] = true
+	}
+	for _, w := range m.TerminalWorkflows {
+		names[w.Name] = true
+	}
+	seen := map[string]bool{}
+	for i := range m.MobileWorkflows {
+		w := &m.MobileWorkflows[i]
+		base := fmt.Sprintf("mobile_workflows[%d]", i)
+		if names[w.Name] || seen[w.Name] {
+			v.add(base+".name",
+				fmt.Sprintf("Two workflows are both named %q.", w.Name),
+				"Names are shared between workflows, terminal_workflows and mobile_workflows, because a name is what --only selects and what the report prints.")
+		}
+		seen[w.Name] = true
+
+		// The same floor the other two lists have, for the same reason: the
+		// description is what a reader of the report is told this workflow was
+		// for, and three words cannot carry a verb, an object and an outcome.
+		if len(strings.TrimSpace(w.Description)) < 10 || len(strings.Fields(w.Description)) < 4 {
+			v.add(base+".description",
+				fmt.Sprintf("The description of %q is too short to read in a report.", w.Name),
+				"Say what a person would do in the application and what proves it worked.")
 		}
 	}
 }

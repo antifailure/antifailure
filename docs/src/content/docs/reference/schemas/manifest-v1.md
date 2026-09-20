@@ -25,6 +25,8 @@ This page is generated from `schemas/manifest.v1.json`. Edit the schema, then ru
 | `insights` | [Insights](#insights) | no | The Postgres native checks that turn a preview environment into a database review. |
 | `invariants` | list of [Invariant](#invariant) | no | Read only statements that must hold after every workflow. They are the assertions a test cannot make from the outside: no orphaned rows, no negative balances, no subscription without a customer. Max items 100. |
 | `load` | [Load](#load) | no | Traffic shaped like production, compared between the base branch and this one. |
+| `mobile` | [Mobile application under test](#mobile-application-under-test) | no | Which application the mobile workflows drive, and on what.  WHY THIS IS NOT PART OF EACH WORKFLOW. |
+| `mobile_workflows` | list of [Mobile workflow](#mobile-workflow) | no | What the agents do in a phone application. Written the same way a browser workflow is, as a goal and what proves it happened, and run in the same `af test` against the same environment, so a mobile result is counted and reported exactly like a browser one. Max items 200. |
 | `name` | string | no | A short name for this application, used in environment hostnames and in the control plane. Defaults to the repository directory name. Max length 40, matches `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`. |
 | `oracle` | [Oracle](#oracle) | no | Deploy a baseline version alongside the candidate, send both the same requests, and report every difference in what came back and in what ended up in the database. |
 | `personas` | list of [Persona](#persona) | no | The accounts agents log in as. Each is created or reconciled in the golden by the authentication adapter, so a persona is a real user of the application rather than a bypass. Max items 50. |
@@ -350,6 +352,40 @@ Where the project's own SQL migrations live, for a project whose migrate command
 | `dir` | string | **yes** | Directory of .sql files, relative to the repository root, applied in filename order. A directory of numbered files such as 0042_add_index.sql is also recognised without this key when no tool is; declaring it removes the guess. Max length 512. |
 | `format` | `sql` | no | How the files are read. Only sql exists. Defaults to `sql`. |
 | `table` | string | no | The ledger table the project's runner records applied files in, so the rehearsal computes the pending set the way the runner would: a file is applied when its name, its stem or its leading number appears in the table's name, version, filename or migration column. Unset, schema_migrations and migrations are tried. Max length 128, matches `^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$`. |
+
+## Mobile application under test
+
+Which application the mobile workflows drive, and on what.
+
+WHY THIS IS NOT PART OF EACH WORKFLOW. The application under test is a property of the environment a run rehearses, the same way `base_url` is for a browser run: one run installs one application on one device and drives it. Repeating the bundle identifier and the artifact path on every workflow would be the same value written many times, and the first time two of them disagreed the run would have to either reinstall between workflows or quietly honour one and ignore the others.
+
+A run that drives iOS and Android is therefore two runs, which is what it already is: two devices, two artifacts and two installs.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `activity` | string | no | The Android launchable activity. Refused on iOS, where nothing reads it. Absent lets the driver resolve it from the package's own manifest. Max length 255. |
+| `app` | string | no | The built application to install: an `.app` bundle for the simulator or an `.apk` for Android. Relative paths are resolved against the directory holding the manifest. Absent drives an application already on the device, which is what a run against a preloaded device does. Max length 512. |
+| `avd` | string | no | The Android emulator image to boot when no device is attached. Refused on iOS. Absent with exactly one image installed boots that one. Max length 255. |
+| `device` | string | no | The simulator udid or the adb serial to drive. Absent picks the device that is already booted, or boots the only emulator image installed, so a machine with one device does not have to be told which. Max length 255. |
+| `id` | string | **yes** | The iOS bundle identifier or the Android package name, such as `dev.antifailure.probe`. Required: a device holds many applications and nothing else says which one this run is about. Min length 1, max length 255, matches `^[A-Za-z0-9_]+(\.[A-Za-z0-9_-]+)+$`. |
+| `platform` | `ios`, `android` | **yes** | Which kind of device this drives. Required, because it decides what is opened and there is no safe default: inferring it from whichever toolchain a machine happens to have would make the same manifest mean different things on two laptops. |
+
+## Mobile workflow
+
+One thing the agents do in the application named by `mobile`: a goal written as a sentence, and what the screen must show for it to have happened.
+
+WHY THIS IS ITS OWN LIST rather than a `surface` key on `workflows`. A browser workflow needs a persona to sign in as and a path to start at; neither exists in an application, which has no addresses and signs in through its own screens. One entry would have half its keys refused by whichever surface it was not, which is the same reasoning `terminal_workflows` gives.
+
+There is no step list and no list of controls to press. A mobile workflow is PLANNED rather than scripted: the agent reads what the accessibility tree announces, which is what a screen reader would say, and decides the next action itself, exactly as it does in a browser. That is what lets one sentence drive a web page and an application and mean the same thing.
+
+Names are unique across every workflow list, because a name is what `--only` selects and what the report prints, and two workflows answering to one name is a run nobody can read.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `budget` | object | no | What this workflow may spend. A duration and a step count, because unlike a terminal workflow a mobile one is planned rather than scripted: its actions are decided one at a time, so steps are a real thing to run out of. |
+| `description` | string | **yes** | What a person would do in the application and what proves it happened, in sentences. The agent reads it too: a control whose visible label appears here is one the agent knows it may press. Min length 10, max length 4000. |
+| `expect` | list of string | **yes** | What the screen must show, written as sentences about what a person would read. Judged against what the accessibility tree announces, and never against what the agent itself typed into a field.  At least one is required here, as it is for a terminal workflow. A mobile workflow with nothing to expect can only ever report that nothing confirmed or contradicted it, which is blocked, so a manifest that declares one has written a workflow that cannot pass.  A sentence in double quotes is required on screen character for character. Min items 1, max items 50. |
+| `name` | string | **yes** | What the report calls it and what the `--only` flag selects. Unique across this list, `workflows` and `terminal_workflows` together. Max length 64, matches `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`. |
 
 ## Oracle
 

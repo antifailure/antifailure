@@ -526,6 +526,7 @@ var knownKeys = []string{
 	// program, where it runs, and the screen it is given when it draws one.
 	// command and args are already above, under the service build block.
 	"terminal_workflows", "input", "cwd", "screen", "rows", "cols",
+	"mobile", "mobile_workflows", "platform", "activity", "device", "avd", "app",
 	"goals", "goal", "slow_ms",
 	// The diversity block: how many personality varied agents drive each
 	// workflow, which personalities may be drawn, and a workflow's personality

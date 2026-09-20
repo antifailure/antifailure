@@ -115,6 +115,7 @@ func normalize(m *schema.Manifest, root string) {
 	normalizeAuth(m)
 	normalizeWorkflows(m)
 	normalizeTerminalWorkflows(m)
+	normalizeMobileWorkflows(m)
 	normalizeInsights(m)
 	normalizeOracle(m)
 	normalizeExplore(m)
@@ -410,6 +411,31 @@ func normalizeTerminalWorkflows(m *schema.Manifest) {
 		}
 		if w.Budget.Duration == "" {
 			w.Budget.Duration = schema.DefaultTerminalDuration
+		}
+	}
+}
+
+// normalizeMobileWorkflows fills in the budget a mobile workflow leaves
+// unsaid, so the engine sends the runner a complete job and `af explain` shows
+// the same numbers the run will use.
+//
+// It never fills in a DEVICE that is absent, for the same reason the terminal
+// normalizer never fills in a screen: the absence is the decision. An absent
+// device means "whatever this machine has booted", which is what makes one
+// manifest work on a laptop with one simulator and in a farm with many, and
+// writing a udid in here would pin it to the machine that happened to run
+// `af explain`.
+func normalizeMobileWorkflows(m *schema.Manifest) {
+	for i := range m.MobileWorkflows {
+		w := &m.MobileWorkflows[i]
+		if w.Budget == nil {
+			w.Budget = &schema.MobileBudget{}
+		}
+		if w.Budget.Duration == "" {
+			w.Budget.Duration = schema.DefaultMobileDuration
+		}
+		if w.Budget.Steps == 0 {
+			w.Budget.Steps = schema.DefaultMobileSteps
 		}
 	}
 }

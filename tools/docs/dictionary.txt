@@ -40,6 +40,7 @@ hardlinks
 idor
 kubeconfig
 kubelet
+launchable
 livekey
 llms
 lockfile
@@ -83,6 +84,7 @@ TOTP
 tripwire
 tripwires
 trufflehog
+udid
 unfilterable
 unmask
 unmasked

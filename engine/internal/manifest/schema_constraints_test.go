@@ -724,7 +724,9 @@ const defaultTuning = `{
         "load.thresholds.query_count_increase",
         "services[].env[].from",
         "services[].env[].sandbox",
-        "services[].env[].scope"
+        "services[].env[].scope",
+        "mobile",
+        "mobile_workflows"
       ],
       "append": {
         "services": [
@@ -781,7 +783,9 @@ const defaultTuning = `{
         "services[].depends_on",
         "services[].resources",
         "load.thresholds.query_count_increase",
-        "services[].env[].value"
+        "services[].env[].value",
+        "mobile",
+        "mobile_workflows"
       ]
     },
     {
@@ -831,7 +835,9 @@ const defaultTuning = `{
         "load.thresholds.query_count_increase",
         "services[].env[].from",
         "services[].env[].sandbox",
-        "services[].env[].scope"
+        "services[].env[].scope",
+        "mobile",
+        "mobile_workflows"
       ],
       "append": {
         "services": [
@@ -886,6 +892,75 @@ const defaultTuning = `{
         "egress.rules[].fixtures",
         "egress.rules[].credential",
         "egress.rules[].rate_limit",
+        "services[].schedule",
+        "services[].resources",
+        "load.thresholds.query_count_increase",
+        "services[].env[].from",
+        "services[].env[].sandbox",
+        "services[].env[].scope",
+        "mobile",
+        "mobile_workflows"
+      ],
+      "append": {
+        "services": [
+          {
+            "name": "dep",
+            "kind": "worker"
+          }
+        ]
+      }
+    },
+    {
+      "name": "mobile",
+      "why": "a mobile run: an application on a device with no browser workflows, because one run opens one thing and the engine refuses a manifest declaring both",
+      "overrides": {
+        "database.golden.schedule": "0 3 * * *",
+        "database.golden.max_age": "720h",
+        "database.volume.max_age": "720h",
+        "database.subset.virtual_relationships[].from": "orders.user_id",
+        "database.subset.virtual_relationships[].to": "users.id",
+        "egress.rules[].mode": "sandbox",
+        "explore.goals[].name": "explore-goal",
+        "invariants[].sql": "SELECT id FROM orders WHERE id IS NULL",
+        "load.source": "otel",
+        "load.traffic.max_age": "336h",
+        "load.unsafe_routes": [
+          "/admin"
+        ],
+        "oracle.ignore.fields[]": "$.field",
+        "oracle.probes[].method": "POST",
+        "personas[].email": "person@example.com",
+        "diversity.personalities[].id": "skeptic",
+        "workflows[].personality": "skeptic",
+        "terminal_workflows[].name": "deploy-plan",
+        "terminal_workflows[].expect[]": "\"Applied 3 changes\"",
+        "terminal_workflows[].input[]": "y",
+        "security.access.objects[].route": "/api/orders/{id}",
+        "services[].build.strategy": "image",
+        "services[].depends_on": [
+          "dep"
+        ],
+        "services[].env[].value": "http://example.com",
+        "load.source_config": {
+          "path": "telemetry/traces.json"
+        },
+        "mobile.platform": "android",
+        "mobile.id": "dev.antifailure.probe",
+        "mobile.app": "build/probe.apk",
+        "mobile.activity": "dev.antifailure.probe.MainActivity",
+        "mobile_workflows[].name": "mobile-workflow",
+        "mobile_workflows[].description": "Signing in shows the greeting on the home screen.",
+        "mobile_workflows[].expect[]": "\"Welcome back\"",
+        "mobile_workflows[].budget.duration": "90s"
+      },
+      "prune": [
+        "workflows",
+        "database.seed",
+        "datastores[].from",
+        "datastores[].topics",
+        "datastores[].rebuild",
+        "egress.rules[].fixtures",
+        "egress.rules[].emulator",
         "services[].schedule",
         "services[].resources",
         "load.thresholds.query_count_increase",
@@ -1373,7 +1448,7 @@ func TestSchemaConstraintReport(t *testing.T) {
 // makes the expectation the same string the workflow types, so the tuning
 // above overrides all three in every base; without them the base is refused by
 // this feature's own two cross field rules, which is the #315 failure exactly.
-const wantConstraints = 743
+const wantConstraints = 786
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and

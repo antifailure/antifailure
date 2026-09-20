@@ -260,6 +260,23 @@ func Explain(m *schema.Manifest, width int) string {
 		b.WriteString("\n")
 	}
 
+	if len(m.MobileWorkflows) > 0 {
+		b.WriteString("Mobile workflows\n")
+		for _, w := range m.MobileWorkflows {
+			// The application and the platform, because they are what decides
+			// what these workflows were actually driven against, and a reader
+			// deciding whether a verdict means anything needs to know which
+			// application on which kind of device produced it.
+			where := "no application declared"
+			if m.Mobile != nil {
+				where = fmt.Sprintf("%s on %s", m.Mobile.ID, m.Mobile.Platform)
+			}
+			fmt.Fprintf(&b, "  %-24s %s, up to %d steps in %s\n",
+				w.Name, value(where, 27, width), w.Budget.Steps, w.Budget.Duration)
+		}
+		b.WriteString("\n")
+	}
+
 	if len(m.Invariants) > 0 {
 		b.WriteString("Invariants\n")
 		for _, inv := range m.Invariants {
@@ -503,6 +520,9 @@ func Summary(m *schema.Manifest) string {
 	}
 	if n := len(m.TerminalWorkflows); n > 0 {
 		out += fmt.Sprintf(", %d terminal %s", n, plural("workflow", n))
+	}
+	if n := len(m.MobileWorkflows); n > 0 {
+		out += fmt.Sprintf(", %d mobile %s", n, plural("workflow", n))
 	}
 	return out
 }

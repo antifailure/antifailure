@@ -143,10 +143,10 @@ func TestTerminalDocs_OnlySelectsAcrossBothLists(t *testing.T) {
 func TestSurfaceFor_TerminalOnlyWhenThereIsNothingForABrowserToDo(t *testing.T) {
 	web := []workflowDoc{{Name: "checkout"}}
 	term := []terminalDoc{{Name: "deploy"}}
-	require.Equal(t, "terminal", surfaceFor(nil, term))
-	require.Equal(t, "", surfaceFor(web, term),
+	require.Equal(t, "terminal", surfaceFor(nil, term, nil, ""))
+	require.Equal(t, "", surfaceFor(web, term, nil, ""),
 		"a run with browser workflows was told it was a terminal run, so the browser half would never run")
-	require.Equal(t, "", surfaceFor(web, nil))
+	require.Equal(t, "", surfaceFor(web, nil, nil, ""))
 }
 
 // Every command that runs declared workflows reaches the runner through
@@ -193,7 +193,13 @@ func TestTest_SendsTheTerminalWorkflowsAndCountsThem(t *testing.T) {
 		"terminals := o.terminalDocs(opts.Only)",
 		"if len(workflows)+len(terminals) == 0 {",
 		`o.reportRunStarted(rs, id, "workflows", runStartedAt, len(workflows)+len(terminals))`,
-		"Terminal: terminals, Surface: surfaceFor(workflows, terminals),",
+		// Two lines rather than one since the mobile surface arrived: the
+		// surface is computed above the guard that counts the workflows,
+		// because a manifest declaring only mobile workflows has an empty
+		// browser list and an empty terminal list. Both halves are asserted,
+		// so deleting either still reds this test.
+		"surfaceFor(workflows, terminals,",
+		"Terminal: terminals, Surface: surface,",
 	} {
 		require.Containsf(t, src, line,
 			"Orchestrator.Test no longer carries %q, so terminal workflows are built and never run", line)
@@ -235,7 +241,7 @@ func TestTest_ARealFullScreenProgramIsDrivenAndCounted(t *testing.T) {
 			Artifacts: filepath.Join(t.TempDir(), "artifacts"),
 			Workflows: o.workflowDocs(nil),
 			Terminal:  terminals,
-			Surface:   surfaceFor(o.workflowDocs(nil), terminals),
+			Surface:   surfaceFor(o.workflowDocs(nil), terminals, nil, ""),
 			WorkDir:   o.opts.Root,
 			Headless:  true,
 		})
@@ -288,7 +294,7 @@ func TestTest_TheEnvironmentAddressReachesTheProgram(t *testing.T) {
 		BaseURL:   "http://127.0.0.1:45999",
 		Artifacts: filepath.Join(t.TempDir(), "artifacts"),
 		Terminal:  terminals,
-		Surface:   surfaceFor(nil, terminals),
+		Surface:   surfaceFor(nil, terminals, nil, ""),
 		WorkDir:   o.opts.Root,
 		Headless:  true,
 	})

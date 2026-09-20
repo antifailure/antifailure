@@ -109,6 +109,17 @@
     },
     "security": {
       "$ref": "#/$defs/security"
+    },
+    "mobile": {
+      "$ref": "#/$defs/mobile"
+    },
+    "mobile_workflows": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "$ref": "#/$defs/mobile_workflow"
+      },
+      "description": "What the agents do in a phone application. Written the same way a browser workflow is, as a goal and what proves it happened, and run in the same `af test` against the same environment, so a mobile result is counted and reported exactly like a browser one."
     }
   },
   "$defs": {
@@ -2328,6 +2339,108 @@
           "pattern": "^[0-9]+(ms|s|m|h|d)$",
           "default": "336h",
           "description": "How old the profile may be before it is refused. A stale profile is not a smaller number, it is an unknown one, so it is refused the way a stale golden is rather than quoted. Fourteen days by default rather than the volume profile's thirty, because an endpoint mix moves at the rate a team ships rather than at the rate a business grows."
+        }
+      }
+    },
+    "mobile": {
+      "title": "Mobile application under test",
+      "description": "Which application the mobile workflows drive, and on what.\n\nWHY THIS IS NOT PART OF EACH WORKFLOW. The application under test is a property of the environment a run rehearses, the same way `base_url` is for a browser run: one run installs one application on one device and drives it. Repeating the bundle identifier and the artifact path on every workflow would be the same value written many times, and the first time two of them disagreed the run would have to either reinstall between workflows or quietly honour one and ignore the others.\n\nA run that drives iOS and Android is therefore two runs, which is what it already is: two devices, two artifacts and two installs.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "platform",
+        "id"
+      ],
+      "properties": {
+        "platform": {
+          "type": "string",
+          "enum": [
+            "ios",
+            "android"
+          ],
+          "description": "Which kind of device this drives. Required, because it decides what is opened and there is no safe default: inferring it from whichever toolchain a machine happens to have would make the same manifest mean different things on two laptops."
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "^[A-Za-z0-9_]+(\\.[A-Za-z0-9_-]+)+$",
+          "description": "The iOS bundle identifier or the Android package name, such as `dev.antifailure.probe`. Required: a device holds many applications and nothing else says which one this run is about."
+        },
+        "app": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "The built application to install: an `.app` bundle for the simulator or an `.apk` for Android. Relative paths are resolved against the directory holding the manifest. Absent drives an application already on the device, which is what a run against a preloaded device does."
+        },
+        "activity": {
+          "type": "string",
+          "maxLength": 255,
+          "description": "The Android launchable activity. Refused on iOS, where nothing reads it. Absent lets the driver resolve it from the package's own manifest."
+        },
+        "device": {
+          "type": "string",
+          "maxLength": 255,
+          "description": "The simulator udid or the adb serial to drive. Absent picks the device that is already booted, or boots the only emulator image installed, so a machine with one device does not have to be told which."
+        },
+        "avd": {
+          "type": "string",
+          "maxLength": 255,
+          "description": "The Android emulator image to boot when no device is attached. Refused on iOS. Absent with exactly one image installed boots that one."
+        }
+      }
+    },
+    "mobile_workflow": {
+      "title": "Mobile workflow",
+      "description": "One thing the agents do in the application named by `mobile`: a goal written as a sentence, and what the screen must show for it to have happened.\n\nWHY THIS IS ITS OWN LIST rather than a `surface` key on `workflows`. A browser workflow needs a persona to sign in as and a path to start at; neither exists in an application, which has no addresses and signs in through its own screens. One entry would have half its keys refused by whichever surface it was not, which is the same reasoning `terminal_workflows` gives.\n\nThere is no step list and no list of controls to press. A mobile workflow is PLANNED rather than scripted: the agent reads what the accessibility tree announces, which is what a screen reader would say, and decides the next action itself, exactly as it does in a browser. That is what lets one sentence drive a web page and an application and mean the same thing.\n\nNames are unique across every workflow list, because a name is what `--only` selects and what the report prints, and two workflows answering to one name is a run nobody can read.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "description",
+        "expect"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",
+          "maxLength": 64,
+          "description": "What the report calls it and what the `--only` flag selects. Unique across this list, `workflows` and `terminal_workflows` together."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 4000,
+          "description": "What a person would do in the application and what proves it happened, in sentences. The agent reads it too: a control whose visible label appears here is one the agent knows it may press."
+        },
+        "expect": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50,
+          "items": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "description": "What the screen must show, written as sentences about what a person would read. Judged against what the accessibility tree announces, and never against what the agent itself typed into a field.\n\nAt least one is required here, as it is for a terminal workflow. A mobile workflow with nothing to expect can only ever report that nothing confirmed or contradicted it, which is blocked, so a manifest that declares one has written a workflow that cannot pass.\n\nA sentence in double quotes is required on screen character for character."
+        },
+        "budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "What this workflow may spend. A duration and a step count, because unlike a terminal workflow a mobile one is planned rather than scripted: its actions are decided one at a time, so steps are a real thing to run out of.",
+          "properties": {
+            "duration": {
+              "type": "string",
+              "pattern": "^[0-9]+(s|m)$",
+              "default": "5m",
+              "description": "The time this workflow may take. Past it the run is stopped and the workflow is blocked with the budget named, never judged on a half finished screen."
+            },
+            "steps": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 40,
+              "description": "The most actions one attempt may take before the workflow is stopped."
+            }
+          }
         }
       }
     }

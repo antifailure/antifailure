@@ -29,18 +29,28 @@ type Manifest struct {
 	// schema's terminal_workflow description for why that is a list and not
 	// a conditional.
 	TerminalWorkflows []TerminalWorkflow `json:"terminal_workflows,omitempty" yaml:"terminal_workflows,omitempty"`
-	Invariants        []Invariant        `json:"invariants,omitempty" yaml:"invariants,omitempty"`
-	Insights          *Insights          `json:"insights,omitempty" yaml:"insights,omitempty"`
-	Change            *Change            `json:"change,omitempty" yaml:"change,omitempty"`
-	Oracle            *Oracle            `json:"oracle,omitempty" yaml:"oracle,omitempty"`
-	Explore           *Explore           `json:"explore,omitempty" yaml:"explore,omitempty"`
-	Diversity         *Diversity         `json:"diversity,omitempty" yaml:"diversity,omitempty"`
-	Fidelity          *Fidelity          `json:"fidelity,omitempty" yaml:"fidelity,omitempty"`
-	Load              *Load              `json:"load,omitempty" yaml:"load,omitempty"`
-	Policy            *Policy            `json:"policy,omitempty" yaml:"policy,omitempty"`
-	Runtime           *Runtime           `json:"runtime,omitempty" yaml:"runtime,omitempty"`
-	GitHub            *GitHub            `json:"github,omitempty" yaml:"github,omitempty"`
-	Security          *Security          `json:"security,omitempty" yaml:"security,omitempty"`
+	// MobileWorkflows are the workflows driven in a phone application rather
+	// than a browser or a command line. Written the same way, counted in the
+	// same run, and reported the same way; only the surface underneath differs.
+	MobileWorkflows []MobileWorkflow `json:"mobile_workflows,omitempty" yaml:"mobile_workflows,omitempty"`
+	// Mobile is the application the mobile workflows drive and the device it
+	// runs on. Required when MobileWorkflows is non empty and meaningless
+	// otherwise, which validate.go enforces rather than the schema, because
+	// "this field is required only when that list is used" is a conditional
+	// the schema has nowhere else.
+	Mobile     *Mobile     `json:"mobile,omitempty" yaml:"mobile,omitempty"`
+	Invariants []Invariant `json:"invariants,omitempty" yaml:"invariants,omitempty"`
+	Insights   *Insights   `json:"insights,omitempty" yaml:"insights,omitempty"`
+	Change     *Change     `json:"change,omitempty" yaml:"change,omitempty"`
+	Oracle     *Oracle     `json:"oracle,omitempty" yaml:"oracle,omitempty"`
+	Explore    *Explore    `json:"explore,omitempty" yaml:"explore,omitempty"`
+	Diversity  *Diversity  `json:"diversity,omitempty" yaml:"diversity,omitempty"`
+	Fidelity   *Fidelity   `json:"fidelity,omitempty" yaml:"fidelity,omitempty"`
+	Load       *Load       `json:"load,omitempty" yaml:"load,omitempty"`
+	Policy     *Policy     `json:"policy,omitempty" yaml:"policy,omitempty"`
+	Runtime    *Runtime    `json:"runtime,omitempty" yaml:"runtime,omitempty"`
+	GitHub     *GitHub     `json:"github,omitempty" yaml:"github,omitempty"`
+	Security   *Security   `json:"security,omitempty" yaml:"security,omitempty"`
 }
 
 // ServiceKind is what a service is.
@@ -698,6 +708,74 @@ type TerminalWorkflow struct {
 	Cwd    string          `json:"cwd,omitempty" yaml:"cwd,omitempty"`
 	Budget *TerminalBudget `json:"budget,omitempty" yaml:"budget,omitempty"`
 }
+
+// Mobile is the application the mobile workflows drive, and the device it is
+// driven on.
+//
+// NOT PART OF EACH WORKFLOW, and the reason is the same one that keeps
+// base_url out of a browser workflow: the application under test is a property
+// of the environment a run rehearses. One run installs one application on one
+// device. Repeating the identifier and the artifact path on every workflow
+// would be one value written many times, and the first time two of them
+// disagreed the run would have to either reinstall between workflows or
+// quietly honour one and ignore the rest.
+type Mobile struct {
+	// Platform is "ios" or "android". Required, because it decides which
+	// device is opened and there is no safe default: inferring it from
+	// whichever toolchain a machine happens to have would make the same
+	// manifest mean different things on two laptops.
+	Platform string `json:"platform" yaml:"platform"`
+	// ID is the iOS bundle identifier or the Android package name. Required:
+	// a device holds many applications and nothing else says which one this
+	// run is about.
+	ID string `json:"id" yaml:"id"`
+	// App is the built application to install, relative to the directory
+	// holding the manifest unless absolute. Absent drives an application
+	// already on the device.
+	App string `json:"app,omitempty" yaml:"app,omitempty"`
+	// Activity is the Android launchable activity, refused on iOS.
+	Activity string `json:"activity,omitempty" yaml:"activity,omitempty"`
+	// Device is the simulator udid or the adb serial.
+	Device string `json:"device,omitempty" yaml:"device,omitempty"`
+	// AVD is the Android emulator image to boot when nothing is attached.
+	AVD string `json:"avd,omitempty" yaml:"avd,omitempty"`
+}
+
+// MobileWorkflow is one thing the agents do in the application named by
+// Mobile: a goal written as a sentence, and what proves it happened.
+//
+// No steps and no controls to press. A mobile workflow is PLANNED rather than
+// scripted: the agent reads what the accessibility tree announces and decides
+// the next action itself, exactly as it does in a browser, which is what lets
+// one sentence drive a web page and an application and mean the same thing.
+type MobileWorkflow struct {
+	Name        string   `json:"name" yaml:"name"`
+	Description string   `json:"description" yaml:"description"`
+	Expect      []string `json:"expect,omitempty" yaml:"expect,omitempty"`
+	// Budget caps what this workflow may take. Steps and duration, because
+	// unlike a terminal workflow a mobile one is planned rather than scripted:
+	// its actions are decided one at a time, so a step budget is a real thing
+	// to spend and a real thing to run out of.
+	Budget *MobileBudget `json:"budget,omitempty" yaml:"budget,omitempty"`
+}
+
+// MobileBudget caps what one mobile workflow may take.
+type MobileBudget struct {
+	Duration string `json:"duration,omitempty" yaml:"duration,omitempty"`
+	Steps    int    `json:"steps,omitempty" yaml:"steps,omitempty"`
+}
+
+// DefaultMobileSteps is how many actions one mobile workflow may take when it
+// names no budget. The same number the browser driver uses, because it is the
+// same planner deciding the same kind of step.
+const DefaultMobileSteps = 40
+
+// DefaultMobileDuration is how long one mobile workflow may take when it names
+// no budget. Longer than a terminal workflow's by a wide margin, and the
+// reason is the device rather than the application: the FIRST run on a machine
+// builds WebDriverAgent with xcodebuild, and a cold emulator takes minutes to
+// finish booting before anything can be installed on it.
+const DefaultMobileDuration = "5m"
 
 // TerminalScreen is how big the terminal the program is given is.
 type TerminalScreen struct {

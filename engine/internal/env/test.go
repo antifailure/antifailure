@@ -167,10 +167,14 @@ type jobDocument struct {
 	// only a browser, which is most runs, and then the runner opens no pseudo
 	// terminal and loads none of the machinery for one.
 	Terminal []terminalDoc `json:"terminal,omitempty"`
+	// Mobile is the application the mobile workflows drive and the device it
+	// runs on. Absent for every run that is not a mobile one.
+	Mobile *mobileDoc `json:"mobile,omitempty"`
 	// Surface is which surface this run drives. Sent as "terminal" when the
-	// run has terminal workflows and no browser ones, which is what tells the
-	// runner not to open a browser, consult the goals or probe access: none of
-	// those mean anything without a page. Absent means the ordinary web run.
+	// run has terminal workflows and no browser ones, and as "ios" or
+	// "android" when it has mobile ones, which is what tells the runner not to
+	// open a browser, consult the goals or probe access: none of those mean
+	// anything without a page. Absent means the ordinary web run.
 	Surface string `json:"surface,omitempty"`
 	// Diversity is the resolved per-agent personality plan. Absent means one
 	// neutral agent per workflow, today's behavior. The engine resolves it so
@@ -204,6 +208,26 @@ type workflowDoc struct {
 	// manifest said. Zero means the runner's default for that half.
 	MaxSteps int   `json:"maxSteps,omitempty"`
 	MaxMs    int64 `json:"maxMs,omitempty"`
+}
+
+// mobileDoc is the application under test as the runner reads it.
+//
+// The workflows themselves ride the ordinary `workflows` array, because a
+// mobile workflow IS a workflowDoc: a name, a description, the expectations
+// and a budget, with the persona and the start path simply absent. That is not
+// a convenience, it is the point of the whole design: the planner reads a
+// Snapshot and does not know what produced it, so a mobile workflow and a
+// browser workflow are the same document and only the surface differs.
+type mobileDoc struct {
+	// App is already ABSOLUTE by the time it is sent, resolved here for the
+	// same reason terminalDoc.Cwd is: the runner is a subprocess started from
+	// somewhere the manifest never mentions, so a relative path resolved there
+	// would name a different file than the author wrote down.
+	App      string `json:"app,omitempty"`
+	ID       string `json:"id"`
+	Activity string `json:"activity,omitempty"`
+	Device   string `json:"device,omitempty"`
+	AVD      string `json:"avd,omitempty"`
 }
 
 // terminalDoc is one command line workflow as the runner reads it. The screen
@@ -282,6 +306,28 @@ func (o *Orchestrator) Test(ctx context.Context, opts TestOptions) (*TestReport,
 
 	workflows := o.workflowDocs(opts.Only)
 	terminals := o.terminalDocs(opts.Only)
+
+	// The mobile workflows, and the application they drive. Computed HERE
+	// rather than beside the runner job below, because the count is what the
+	// guard on the next line reads: a manifest declaring only mobile workflows
+	// has an empty browser list and an empty terminal list, and would have been
+	// refused as declaring nothing to run.
+	//
+	// They are sent in the SAME `workflows` array the browser uses, because the
+	// runner's planner reads a Snapshot and cannot tell what produced it, so a
+	// mobile workflow and a browser workflow are the same document. `surface`
+	// is what says which one is opened, and validation has already refused a
+	// manifest declaring both kinds.
+	mobiles := o.mobileWorkflowDocs(opts.Only)
+	mobilePlatform := ""
+	if o.opts.Manifest.Mobile != nil {
+		mobilePlatform = o.opts.Manifest.Mobile.Platform
+	}
+	surface := surfaceFor(workflows, terminals, mobiles, mobilePlatform)
+	if surface == "ios" || surface == "android" {
+		workflows = mobiles
+	}
+
 	if len(workflows)+len(terminals) == 0 {
 		return nil, aferrors.Coded(aferrors.AFAGT001,
 			"detail", "the manifest declares no workflows to run")
@@ -344,7 +390,8 @@ func (o *Orchestrator) Test(ctx context.Context, opts TestOptions) (*TestReport,
 	report, err := o.driveRunner(ctx, runnerJob{
 		Runner: runner, BaseURL: status.URL, Artifacts: artifacts,
 		Workflows: workflows, Personas: o.personaDocs(provisioned),
-		Terminal: terminals, Surface: surfaceFor(workflows, terminals),
+		Terminal: terminals, Surface: surface,
+		Mobile:    o.mobileConfigDoc(),
 		Diversity: divPtr,
 		WorkDir:   o.opts.Root, Attempts: opts.Attempts, Headless: !opts.Headed,
 		LiveSocket: opts.LiveSocket,
@@ -576,6 +623,7 @@ type runnerJob struct {
 	WorkDir   string
 	Workflows []workflowDoc
 	Terminal  []terminalDoc
+	Mobile    *mobileDoc
 	Surface   string
 	Personas  []personaDoc
 	Diversity *personality.Resolved
@@ -608,7 +656,7 @@ func (o *Orchestrator) driveRunner(ctx context.Context, job runnerJob) (*TestRep
 	stdout, err := o.invokeRunner(ctx, job.Runner, jobDocument{
 		BaseURL: job.BaseURL, Artifacts: job.Artifacts,
 		Workflows: job.Workflows, Personas: job.Personas,
-		Terminal: job.Terminal, Surface: job.Surface,
+		Terminal: job.Terminal, Mobile: job.Mobile, Surface: job.Surface,
 		Diversity: job.Diversity,
 		AF:        self, WorkDir: job.WorkDir,
 		Attempts: job.Attempts, Headless: job.Headless,
@@ -764,13 +812,73 @@ func (o *Orchestrator) terminalDocs(only []string) []terminalDoc {
 	return out
 }
 
+// mobileWorkflowDocs builds the mobile workflows the run will drive, filtered
+// by the same --only set the other two lists are, so a person naming one
+// workflow gets that workflow whichever surface it is written for.
+//
+// They are ordinary workflowDocs. A mobile workflow is a name, a description,
+// the expectations and a budget, which is exactly a browser workflow with the
+// persona and the start path absent, because the planner that drives both
+// reads a Snapshot and cannot tell what produced it.
+func (o *Orchestrator) mobileWorkflowDocs(only []string) []workflowDoc {
+	wanted := map[string]bool{}
+	for _, n := range only {
+		wanted[n] = true
+	}
+	var out []workflowDoc
+	for i := range o.opts.Manifest.MobileWorkflows {
+		w := &o.opts.Manifest.MobileWorkflows[i]
+		if len(wanted) > 0 && !wanted[w.Name] {
+			continue
+		}
+		doc := workflowDoc{Name: w.Name, Description: w.Description, Expect: w.Expect}
+		if w.Budget != nil {
+			doc.MaxSteps = w.Budget.Steps
+			if d, err := manifest.ParseDuration(w.Budget.Duration); err == nil && d > 0 {
+				doc.MaxMs = d.Milliseconds()
+			}
+		}
+		out = append(out, doc)
+	}
+	return out
+}
+
+// mobileConfigDoc is the application under test, with its artifact resolved to
+// an absolute path here rather than in the runner, for the reason terminalDocs
+// gives about a working directory.
+func (o *Orchestrator) mobileConfigDoc() *mobileDoc {
+	mo := o.opts.Manifest.Mobile
+	if mo == nil {
+		return nil
+	}
+	doc := &mobileDoc{
+		ID: mo.ID, Activity: mo.Activity, Device: mo.Device, AVD: mo.AVD,
+	}
+	if mo.App != "" {
+		doc.App = mo.App
+		if !filepath.IsAbs(doc.App) {
+			doc.App = filepath.Join(o.opts.Root, mo.App)
+		}
+	}
+	return doc
+}
+
 // surfaceFor is which surface the runner is told this run drives.
 //
 // "terminal" only when there is nothing for a browser to do. A run with both
 // kinds of workflow is a web run that also has terminal workflows in it, and
 // saying otherwise would stop the browser half from running at all. A run with
 // neither cannot reach here: Test refuses it above.
-func surfaceFor(workflows []workflowDoc, terminals []terminalDoc) string {
+func surfaceFor(workflows []workflowDoc, terminals []terminalDoc, mobiles []workflowDoc, platform string) string {
+	// A mobile run first, because it is the most specific answer: the surface
+	// names the DEVICE that is opened, and a run with mobile workflows opens
+	// one whether or not it also has terminal workflows, which open nothing.
+	// It is exclusive with a browser run rather than additive, and validation
+	// refuses a manifest declaring both, because one run opens one thing and a
+	// browser workflow silently not running is the failure that would follow.
+	if len(mobiles) > 0 && (platform == "ios" || platform == "android") {
+		return platform
+	}
 	if len(workflows) == 0 && len(terminals) > 0 {
 		return "terminal"
 	}
