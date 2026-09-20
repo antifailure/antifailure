@@ -91,6 +91,49 @@ export function preamble(a: Assignment): string {
   return lines.join('\n');
 }
 
+/** traits is the computed profile in a few words, for a watcher's pane.
+ *
+ * Three axes rather than all six, and short words rather than the preamble's
+ * sentences, because this has to be readable at a glance in a pane thirty
+ * characters wide beside five others. The three chosen are the ones that show
+ * up in what an agent visibly DOES: how fast it moves, how far off the obvious
+ * path it will go, and what it looks at. The rest of the profile is still in
+ * the preamble and still in the report.
+ */
+export function traits(profile: DiversityProfile): string {
+  return [
+    shortPace(profile.pacingStyle),
+    shortRisk(profile.riskStyle),
+    shortAttention(profile.attentionBias),
+  ].join(' \u00b7 ');
+}
+
+function shortPace(s: string): string {
+  switch (s) {
+    case 'slow': return 'unhurried';
+    case 'fast': return 'impatient';
+    default: return 'steady';
+  }
+}
+
+function shortRisk(s: string): string {
+  switch (s) {
+    case 'conservative': return 'cautious';
+    case 'risky': return 'bold';
+    default: return 'balanced';
+  }
+}
+
+function shortAttention(s: string): string {
+  switch (s) {
+    case 'visual_heavy': return 'follows prominence';
+    case 'text_heavy': return 'reads labels';
+    case 'cta_focused': return 'button first';
+    case 'navigation_focused': return 'nav first';
+    default: return 'reads evenly';
+  }
+}
+
 function pace(s: string): string {
   switch (s) {
     case 'slow': return 'read labels and any help or trust text before acting';

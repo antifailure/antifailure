@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ModelPlanner, prompt, type ModelConfig } from '../src/model.ts';
 import { Cassette, keyFor } from '../src/cassette.ts';
-import { preamble, agentsFor, type Assignment, type ResolvedDiversity } from '../src/personality.ts';
+import { preamble, agentsFor, traits, type Assignment, type ResolvedDiversity } from '../src/personality.ts';
 import type { Snapshot, Workflow } from '../src/workflow.ts';
 
 const config: ModelConfig = { provider: 'anthropic', apiKey: 'sk-secret-value-xyz', model: 'test' };
@@ -115,4 +115,36 @@ test('agentsFor returns one neutral run with no plan, and the assigned agents wi
 test('preamble ends by restating that only listed controls are available', () => {
   const text = preamble(assignment('edge_case', 'You are an EDGE-CASE EXPLORER.'));
   assert.ok(text.includes('never adds a control that is not listed'), 'the capability surface is restated');
+});
+
+test('traits reads as a few short words a watcher can tell two agents apart by', () => {
+  const careful = assignment('skeptic', 'You are a SKEPTIC.', 'slow');
+  const hasty = assignment('fast_actor', 'You are a FAST ACTOR.', 'fast');
+  const a = traits(careful.profile);
+  const b = traits({ ...hasty.profile, riskStyle: 'risky', attentionBias: 'text_heavy' });
+
+  assert.notEqual(a, b, 'two different profiles read the same, so a watcher cannot tell them apart');
+  assert.ok(a.includes('unhurried'), `the slow pace is not in ${a}`);
+  assert.ok(b.includes('impatient'), `the fast pace is not in ${b}`);
+  assert.ok(b.includes('bold'), `the risky style is not in ${b}`);
+  assert.ok(b.includes('reads labels'), `the text bias is not in ${b}`);
+
+  // A pane is about thirty characters wide beside five others, so this has to
+  // fit. The preamble is where the full sentences live.
+  for (const phrase of [a, b]) {
+    assert.ok(phrase.length <= 40, `"${phrase}" is ${phrase.length} characters, too long for a pane`);
+  }
+});
+
+test('a profile with values nothing recognises still says something rather than nothing', () => {
+  // The profile crosses a process boundary as JSON. A field the engine adds a
+  // value to that this build has never seen must not blank the line a watcher
+  // heads its pane with.
+  const odd = traits({
+    ...assignment('x', 'p').profile,
+    pacingStyle: 'glacial', riskStyle: 'reckless', attentionBias: 'smell',
+  });
+  assert.ok(odd.length > 0, 'an unrecognised profile produced an empty line');
+  assert.ok(odd.includes('steady') && odd.includes('balanced'),
+    `an unrecognised value did not fall back to the neutral word: ${odd}`);
 });

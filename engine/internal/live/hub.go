@@ -29,6 +29,11 @@ type Agent struct {
 	Surface  string
 	State    string
 	Verdict  string
+	// Personality is what this agent behaves like, by name, and Traits is the
+	// profile under it in a few words. Both empty for a run with no diversity
+	// block.
+	Personality string
+	Traits      string
 	// Frame is the latest frame, kept by highest Seq so a late lower-Seq frame
 	// cannot replace a newer one. Nil for a terminal surface or before the
 	// first frame.
@@ -101,6 +106,16 @@ func (h *Hub) Publish(ev Event) {
 		}
 		if ev.Verdict != "" {
 			a.Verdict = ev.Verdict
+		}
+		// Sent on every one of an agent's lifecycle events and kept from the
+		// first that carried it. A later event with the field absent must not
+		// blank the pane's heading, which is what a plain assignment would do
+		// the moment anything on the wire stopped repeating it.
+		if ev.Personality != "" {
+			a.Personality = ev.Personality
+		}
+		if ev.Traits != "" {
+			a.Traits = ev.Traits
 		}
 	case KindStep:
 		a := h.ensure(ev.Agent)

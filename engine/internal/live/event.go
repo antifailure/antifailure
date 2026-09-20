@@ -48,6 +48,17 @@ type Event struct {
 	Workflow string `json:"workflow,omitempty"`
 	Verdict  string `json:"verdict,omitempty"`
 
+	// Personality is the behavioural lens the engine drew for this agent, by
+	// name, and Traits is the computed profile under it in a few words. Both
+	// are carried rather than rebuilt by the watcher, because the engine
+	// resolves the whole plan from the seed before the run starts and a watcher
+	// that recomputed it would be a second implementation of the draw.
+	//
+	// Empty for a run with no diversity block, which is one neutral agent per
+	// workflow and has no personality to name.
+	Personality string `json:"personality,omitempty"`
+	Traits      string `json:"traits,omitempty"`
+
 	// Step and frame ordering. One counter per agent covers both, so the
 	// latest of either is the highest Seq.
 	Seq int `json:"seq,omitempty"`

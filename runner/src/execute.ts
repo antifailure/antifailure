@@ -15,7 +15,7 @@ import {
 } from './workflow.ts';
 import { classify, type Attempt, type Cause, type Outcome } from './verdict.ts';
 import { ModelPlanner } from './model.ts';
-import { agentsFor, type Assignment, type ResolvedDiversity } from './personality.ts';
+import { agentsFor, traits, type Assignment, type ResolvedDiversity } from './personality.ts';
 import { nullSink, type LiveSink } from './live.ts';
 
 /** Everything one run needs. */
@@ -86,14 +86,19 @@ function agentFor(job: Job, workflow: Workflow, assignment?: Assignment) {
   const persona = workflow.personas?.[0] ?? workflow.persona
     ?? job.personas[0]?.name;
   const id = assignment ? `${workflow.name}#${assignment.agentIndex}` : workflow.name;
-  const label = assignment
-    ? `${workflow.name} (${assignment.personality.id})`
-    : workflow.name;
+  // The personality is its own field rather than parenthesised onto the
+  // workflow name. A watcher heads each pane with it, and a name that has to be
+  // parsed back out of another field is a name a view cannot lay out: the
+  // workflow and the personality want different widths, different emphasis and,
+  // when the pane is narrow, different survival.
   return {
     id,
-    workflow: label,
+    workflow: workflow.name,
     surface: 'web' as const,
     ...(persona ? { persona } : {}),
+    ...(assignment
+      ? { personality: assignment.personality.name, traits: traits(assignment.profile) }
+      : {}),
   };
 }
 

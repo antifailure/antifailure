@@ -126,6 +126,31 @@ func orchestratorWithManifest(env2 *Env, branch string) (*env.Orchestrator, *sch
 	return orchestratorWithManifest2(env2, lifecycleOptions{branch: branch})
 }
 
+// progressEmitter is how a run reports what it is doing.
+//
+// A named function rather than a closure at the one call site, so that the
+// decision it makes can be exercised without a container. The decision is
+// whether anything is written AT ALL, and getting it wrong is not a cosmetic
+// fault: a command that draws its own screen and also lets this write to the
+// same stream has two writers on one terminal.
+//
+// Note what silence does beyond suppressing a line. progressFor is called from
+// in here and nowhere else, so a silent run never builds a Progress, and
+// therefore never starts the goroutine that rewrites a status line once a
+// second. Returning early is the whole of the fix; there is no second switch
+// to remember.
+func progressEmitter(env2 *Env, opts lifecycleOptions, r *redact.Redactor) func(string) {
+	return func(line string) {
+		// Progress is prose, not data, so it is suppressed in JSON mode rather
+		// than interleaved into a document a script is parsing, and in
+		// dashboard mode, where it would be written over a frame.
+		if opts.silent {
+			return
+		}
+		progressFor(env2).Step(r.String(line))
+	}
+}
+
 // progressFor returns the status line a run reports through, remembering it on
 // the Env so that the command can close it when the run ends.
 //
@@ -173,15 +198,7 @@ func orchestratorWithManifest2(env2 *Env, opts lifecycleOptions) (*env.Orchestra
 		Repository: currentRepository(env2, root), PullRequest: currentPullRequest(env2),
 		Rebuild: rebuild, Redactor: r, Verbose: env2.Out.Verbose, Getenv: env2.Getenv,
 		ControlPlaneURL: cpURL, ControlPlaneToken: cpToken,
-		Progress: func(line string) {
-			// Progress is prose, not data, so it is suppressed in JSON mode
-			// rather than interleaved into a document a script is parsing,
-			// and in dashboard mode, where it would be written over a frame.
-			if opts.silent {
-				return
-			}
-			progressFor(env2).Step(r.String(line))
-		},
+		Progress: progressEmitter(env2, opts, r),
 	})
 	if err != nil {
 		return nil, nil, err

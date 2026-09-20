@@ -13,6 +13,7 @@ import (
 
 	"github.com/antifailure/antifailure/engine/internal/env"
 	"github.com/antifailure/antifailure/engine/internal/live"
+	"github.com/antifailure/antifailure/engine/internal/termimg"
 )
 
 // newWatchCommand runs the manifest's workflows and shows them live in the
@@ -28,19 +29,27 @@ func newWatchCommand(e *Env) *cobra.Command {
 	var branch, runner string
 	var only []string
 	var attempts int
-	var headed bool
+	var headed, noImages bool
 	cmd := &cobra.Command{
 		Use:   "watch",
 		Short: "Watch the manifest's workflows run live in the terminal",
 		Long: strings.TrimSpace(`
-Runs the workflows and streams them as they happen, one pane per agent, so you
-can see the run rather than read what it did afterwards.
+Runs the workflows and streams them as they happen, every agent on screen at
+once, so you can see the swarm rather than read what it did afterwards.
 
-Switch between agents with the number keys, the arrows, or tab, and quit with q.
-An agent on a browser or app surface streams frames to the console watch view;
-here its pane shows the live step and the frame's own detail, because a terminal
-cannot show the image itself. An agent on a terminal surface shows its cast
-directly. The frames never leave this machine for the control plane.
+Each pane names the personality driving that agent, the workflow it is running,
+the account it signed in as, its state and its current step, and shows the
+agent's most recent frame as a real picture in the terminal, about once a
+second. Focus a pane with the number keys, the arrows or tab, press f to give
+one agent the whole screen, and quit with q.
+
+The picture needs a terminal that draws inline images, and the terminal is asked
+rather than guessed at: iTerm2, kitty and anything that reports sixel graphics
+all draw. A terminal that draws none of them gets the same panes with the
+frame's own detail in place of the picture, and the footer says which terminal
+you have. Set AF_IMAGES to iterm2, kitty, sixel or off when the question cannot
+reach your terminal, which is what a multiplexer or a forwarded connection can
+do to it. The frames never leave this machine for the control plane.
 
 The verdict is the same one a plain run produces, printed when it finishes.`),
 		Args: cobra.NoArgs,
@@ -48,11 +57,11 @@ The verdict is the same one a plain run produces, printed when it finishes.`),
 			if fork := forkGate(e); fork.Refused {
 				return refuseFork(fork)
 			}
-			o, err := orchestrator(e, branch, false)
+			o, err := orchestratorWithManifest3(e, watchLifecycle(e, branch))
 			if err != nil {
 				return err
 			}
-			return watchRun(cmd.Context(), e, o, env.TestOptions{
+			return watchRun(cmd.Context(), e, o, noImages, env.TestOptions{
 				Only: only, Attempts: attempts, Headed: headed, RunnerPath: runner,
 			})
 		},
@@ -62,13 +71,17 @@ The verdict is the same one a plain run produces, printed when it finishes.`),
 	cmd.Flags().IntVar(&attempts, "attempts", 0, "how many times to try a workflow")
 	cmd.Flags().BoolVar(&headed, "headed", false, "show the browser window as well")
 	cmd.Flags().StringVar(&runner, "runner", "", "override where the runner lives")
+	cmd.Flags().BoolVar(&noImages, "no-images", false,
+		"draw no pictures even on a terminal that would show them")
 	return cmd
 }
 
 // watchRun wires the live socket to a hub, drives the run against it, and
 // renders. The socket lives in a short-named temp directory because a unix
 // socket path has a hard length limit that a deep artifacts path can exceed.
-func watchRun(ctx context.Context, e *Env, o *env.Orchestrator, opts env.TestOptions) error {
+func watchRun(
+	ctx context.Context, e *Env, o *env.Orchestrator, noImages bool, opts env.TestOptions,
+) error {
 	dir, err := os.MkdirTemp("", "afw")
 	if err != nil {
 		return err
@@ -95,7 +108,10 @@ func watchRun(ctx context.Context, e *Env, o *env.Orchestrator, opts env.TestOpt
 	defer cancel()
 
 	if e.Out.TTY {
-		prog := watchProgram(e, hub)
+		// Asked before the display starts, because the query writes to the
+		// terminal and reads its reply, and neither is possible once a full
+		// screen program owns both.
+		prog := watchProgram(e, hub, imageCapability(e, noImages))
 		go func() {
 			report, runErr := o.Test(runCtx, opts)
 			result <- outcome{report, runErr}
@@ -140,13 +156,73 @@ func watchRun(ctx context.Context, e *Env, o *env.Orchestrator, opts env.TestOpt
 	return nil
 }
 
+// watchLifecycle is how this command asks for its environment, and the one
+// thing it says that af test does not is that the run must keep quiet.
+//
+// `af watch` had TWO writers on one terminal, and this was the omission.
+// Building the orchestrator makes a Progress that is live on a TTY and rewrites
+// a status line to e.Out.Out once a second, and the Bubble Tea program then
+// takes the alternate screen on that same writer. Measured on a six second run
+// against a real environment: six "elapsed, on this step" lines painted
+// straight over the panes, with the permanent step records between them.
+//
+// The seam was already here and already carried a comment naming this exact
+// case. `af up --live` has passed it since the dashboard was built and af watch
+// never did, which is why the bug was invisible until this view had something
+// worth covering up.
+//
+// Silence only when there is a screen to protect. A piped run has no dashboard,
+// its events are already being streamed as plain lines, and the run's prose
+// belongs in that log exactly as it does for af test.
+//
+// Nothing is lost either way: everything the prose would have said is on the
+// panes, and the verdict is printed through e.Out after the program has exited
+// and given the terminal back.
+func watchLifecycle(e *Env, branch string) lifecycleOptions {
+	return lifecycleOptions{branch: branch, silent: e.Out.TTY}
+}
+
+// imageCapability decides what this terminal will draw, and always says why.
+//
+// Three different answers land here and they are not the same fact: the person
+// switched pictures off, there is no terminal to draw on, or the terminal was
+// asked and answered. The reason travels into the view's footer so that
+// somebody looking at a pane of text can tell which one they have rather than
+// assuming the frames stopped arriving.
+func imageCapability(e *Env, noImages bool) termimg.Capability {
+	if noImages {
+		return termimg.Capability{Why: "pictures were switched off with --no-images"}
+	}
+	in, inOK := e.Stdin.(*os.File)
+	out, outOK := e.Out.Out.(*os.File)
+	if !inOK || !outOK {
+		// A test's buffer, or a stream somebody redirected. Nothing to query and
+		// nothing that would draw the answer.
+		return termimg.Capability{Why: "this run's streams are not a terminal, so no picture was drawn"}
+	}
+	getenv := e.Getenv
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	// The terminal's own answer, then the person's, because a multiplexer or a
+	// connection that rewrites escapes can stop the question ever reaching the
+	// program that would answer it.
+	return termimg.Override(termimg.Detect(in, out, getenv), getenv("AF_IMAGES"))
+}
+
 // plainLine renders one event as a single line for the non-terminal fallback.
 func plainLine(ev live.Event) string {
 	switch ev.T {
 	case live.KindAgent:
+		// The personality first, because on a run with a diversity block it is
+		// the only thing that distinguishes one agent's lines from another's
+		// running the same workflow.
 		who := ev.Agent
 		if ev.Persona != "" {
 			who = ev.Persona + " / " + ev.Agent
+		}
+		if ev.Personality != "" {
+			who = ev.Personality + " / " + who
 		}
 		if ev.Verdict != "" {
 			return fmt.Sprintf("[%s] %s: %s", ev.State, who, ev.Verdict)
@@ -191,10 +267,16 @@ type liveTickMsg struct{}
 // snapshot, so the view is a pure function of the hub and the focus and the
 // rendering logic is the one already tested in the live package.
 type watchModel struct {
-	hub   *live.Hub
-	color bool
-	width int
-	focus int
+	hub    *live.Hub
+	color  bool
+	images termimg.Capability
+	width  int
+	height int
+	focus  int
+	// solo gives the focused agent the whole screen. The swarm is the default
+	// because the swarm is the thing worth seeing; solo is for looking closely
+	// at one agent without losing where the others got to.
+	solo  bool
 	start time.Time
 	done  bool
 }
@@ -205,6 +287,7 @@ func (m watchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
+		m.height = msg.Height
 		return m, nil
 	case liveEventMsg, liveTickMsg:
 		return m, nil
@@ -215,6 +298,9 @@ func (m watchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q", "ctrl+c", "esc":
 			return m, tea.Quit
+		case "f", "enter":
+			m.solo = !m.solo
+			return m, nil
 		default:
 			n := len(m.hub.Snapshot().Agents)
 			m.focus = live.SwitchKey(msg.String(), m.focus, n)
@@ -228,7 +314,11 @@ func (m watchModel) View() string {
 	return live.Render(m.hub.Snapshot(), live.RenderOpts{
 		Focus:   m.focus,
 		Width:   m.width,
+		Height:  m.height,
 		Color:   m.color,
+		Light:   m.images.Background == termimg.BackgroundLight,
+		Images:  m.images,
+		Solo:    m.solo,
 		Elapsed: mmssSince(m.start),
 	})
 }
@@ -236,8 +326,11 @@ func (m watchModel) View() string {
 // watchProgram builds the Bubble Tea program and the goroutines that pump live
 // events and a one-second tick into it, so the view refreshes as the run
 // progresses and the elapsed clock moves.
-func watchProgram(e *Env, hub *live.Hub) *tea.Program {
-	m := watchModel{hub: hub, color: e.Out.Color, width: e.Out.Width, start: e.Clock.Now()}
+func watchProgram(e *Env, hub *live.Hub, images termimg.Capability) *tea.Program {
+	m := watchModel{
+		hub: hub, color: e.Out.Color, images: images,
+		width: e.Out.Width, start: e.Clock.Now(),
+	}
 	prog := tea.NewProgram(m, tea.WithInput(e.Stdin), tea.WithOutput(e.Out.Out), tea.WithAltScreen())
 
 	sub, unsub := hub.Subscribe()

@@ -40,6 +40,13 @@ export interface AgentDescriptor {
   readonly persona?: string;
   readonly workflow?: string;
   readonly surface: Surface;
+  /** The behavioural lens this agent runs as, by name, and the computed
+   *  profile under it in a few words. Both come from the plan the engine
+   *  resolved from the seed before the run started, so a watcher shows what
+   *  was drawn rather than drawing anything itself. Absent on a run with no
+   *  diversity block, which is one neutral agent per workflow. */
+  readonly personality?: string;
+  readonly traits?: string;
 }
 
 /** Where an agent is in its life. `pending` is declared but not started;
@@ -67,6 +74,8 @@ export interface AgentEvent {
   readonly persona?: string;
   readonly workflow?: string;
   readonly verdict?: string;
+  readonly personality?: string;
+  readonly traits?: string;
 }
 
 export interface StepEvent {
@@ -228,6 +237,12 @@ export function socketSink(path: string): LiveSink {
         t: 'agent', at: now(), agent: desc.id, surface: desc.surface, state,
         ...(desc.persona ? { persona: desc.persona } : {}),
         ...(desc.workflow ? { workflow: desc.workflow } : {}),
+        // Repeated on every lifecycle event rather than sent once with the
+        // first. A watcher that attaches to a run already in progress has
+        // missed the pending announcement, and a pane headed by an empty
+        // personality is the one thing this view exists to avoid.
+        ...(desc.personality ? { personality: desc.personality } : {}),
+        ...(desc.traits ? { traits: desc.traits } : {}),
         ...(verdict ? { verdict } : {}),
       });
     },

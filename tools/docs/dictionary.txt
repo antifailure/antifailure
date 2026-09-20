@@ -45,6 +45,7 @@ govulncheck
 hardlinks
 hypertable
 idor
+iterm
 kubeconfig
 kubelet
 livekey
@@ -78,6 +79,7 @@ semgrep
 SIEM
 signups
 Sigstore
+sixel
 Souza
 starlight
 subprocessor

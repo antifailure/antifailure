@@ -20270,14 +20270,22 @@ af volume show
 
 Watch the manifest's workflows run live in the terminal.
 
-Runs the workflows and streams them as they happen, one pane per agent, so you
-can see the run rather than read what it did afterwards.
+Runs the workflows and streams them as they happen, every agent on screen at
+once, so you can see the swarm rather than read what it did afterwards.
 
-Switch between agents with the number keys, the arrows, or tab, and quit with q.
-An agent on a browser or app surface streams frames to the console watch view;
-here its pane shows the live step and the frame's own detail, because a terminal
-cannot show the image itself. An agent on a terminal surface shows its cast
-directly. The frames never leave this machine for the control plane.
+Each pane names the personality driving that agent, the workflow it is running,
+the account it signed in as, its state and its current step, and shows the
+agent's most recent frame as a real picture in the terminal, about once a
+second. Focus a pane with the number keys, the arrows or tab, press f to give
+one agent the whole screen, and quit with q.
+
+The picture needs a terminal that draws inline images, and the terminal is asked
+rather than guessed at: iTerm2, kitty and anything that reports sixel graphics
+all draw. A terminal that draws none of them gets the same panes with the
+frame's own detail in place of the picture, and the footer says which terminal
+you have. Set AF_IMAGES to iterm2, kitty, sixel or off when the question cannot
+reach your terminal, which is what a multiplexer or a forwarded connection can
+do to it. The frames never leave this machine for the control plane.
 
 The verdict is the same one a plain run produces, printed when it finishes.
 
@@ -20295,6 +20303,7 @@ af watch --only checkout
 | ` + "`" + `--attempts` + "`" + ` | ` + "`" + `0` + "`" + ` | how many times to try a workflow. |
 | ` + "`" + `--branch` + "`" + ` | - | the branch to watch, defaulting to the checkout's. |
 | ` + "`" + `--headed` + "`" + ` | ` + "`" + `false` + "`" + ` | show the browser window as well. |
+| ` + "`" + `--no-images` + "`" + ` | ` + "`" + `false` + "`" + ` | draw no pictures even on a terminal that would show them. |
 | ` + "`" + `--only` + "`" + ` | - | watch just these workflows. |
 | ` + "`" + `--runner` + "`" + ` | - | override where the runner lives. |
 
