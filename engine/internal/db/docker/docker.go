@@ -79,6 +79,15 @@ type Provider struct {
 	// seedSQL is applied to a golden candidate when there is no source
 	// database, which is the case for a project that has not connected one yet.
 	seedSQL string
+	// image, when set, replaces the stock Postgres image this provider would
+	// otherwise build from version.
+	image string
+	// extensions are created in a golden candidate before the source is
+	// copied into it.
+	extensions []string
+	// preload are the libraries every container in this chain loads at server
+	// start, beyond the statistics module.
+	preload []string
 
 	// ports remembers what this process allocated, so two branches created in
 	// the same run cannot be handed the same port between the probe and the
@@ -98,6 +107,25 @@ type Options struct {
 	Getenv func(string) string
 	// SeedSQL initialises a golden candidate when no source is configured.
 	SeedSQL string
+	// Image is the container image to run Postgres from, instead of the stock
+	// one this provider builds from Version.
+	//
+	// It is what makes a schema using PostGIS, pgvector, TimescaleDB, pg_cron
+	// or a table access method out of an extension copyable at all: the stock
+	// image carries the contrib modules and nothing else, so the restore stops
+	// on the first object whose extension is not there. The declared Version
+	// is still checked against what the image's server reports.
+	Image string
+	// Extensions are created in a golden candidate, in order, before the
+	// source is copied into it. An extension the image carries and nobody
+	// created has no types, no operators and no table access methods, so
+	// naming an image is half the answer and this is the other half.
+	Extensions []string
+	// PreloadLibraries are added to shared_preload_libraries, never a
+	// replacement for it. An extension such as timescaledb, citus or pg_cron
+	// is loaded by the postmaster before any database exists, and a server
+	// carrying its catalog entries without its library refuses to start.
+	PreloadLibraries []string
 	// Clock is the time source.
 	Clock clock.Clock
 }
@@ -128,6 +156,7 @@ func New(opts Options) (*Provider, error) {
 	return &Provider{
 		cli: cli, clock: opts.Clock, version: opts.Version,
 		portFrom: opts.PortFrom, seedSQL: opts.SeedSQL,
+		image: opts.Image, extensions: opts.Extensions, preload: opts.PreloadLibraries,
 		ports: dockerutil.NewPortAllocator(opts.PortFrom),
 	}, nil
 }
@@ -208,9 +237,10 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 	p.sweepCandidates(ctx)
 
 	candidate := fmt.Sprintf("af-candidate-%d", p.clock.Now().UnixNano())
-	c, err := p.start(ctx, candidate, p.imageFor(spec.Version), map[string]string{
+	img := p.imageFor(spec.Version)
+	c, err := p.start(ctx, candidate, img, map[string]string{
 		LabelKind: "candidate",
-	})
+	}, p.preload)
 	if err != nil {
 		return provider.GoldenVersion{}, err
 	}
@@ -221,6 +251,17 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 
 	conn := p.connString(c.port)
 	if err := p.waitReady(ctx, conn); err != nil {
+		return provider.GoldenVersion{}, err
+	}
+	// Both of these run against the candidate and before anything is loaded
+	// into it, which is the only point at which either is cheap. A version
+	// mismatch discovered after the copy has cost the whole copy, and an
+	// extension created after the restore is too late for the restore that
+	// needed it.
+	if err := p.versionMatches(ctx, conn, spec.Version, img); err != nil {
+		return provider.GoldenVersion{}, err
+	}
+	if err := p.createExtensions(ctx, conn, img); err != nil {
 		return provider.GoldenVersion{}, err
 	}
 	if err := p.loadSource(ctx, conn, spec); err != nil {
@@ -271,6 +312,18 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 	}
 	if spec.Provenance != "" {
 		changes = append(changes, `LABEL `+dockerutil.LabelProvenance+`=`+spec.Provenance)
+	}
+	// What this golden's server was started with, so that a branch of it can
+	// be started the same way. A library like timescaledb is loaded by the
+	// postmaster and a server holding its catalog entries without it refuses
+	// to start, so a branch taken by a tree whose manifest has since stopped
+	// naming the library would be a container that never comes up, out of a
+	// golden that is perfectly good. Written even when the list is empty is
+	// wrong, hence the guard: an absent label and a label meaning "nothing"
+	// are different for a golden built before this existed, and only the
+	// absent one should fall back to what the manifest says.
+	if len(p.preload) > 0 {
+		changes = append(changes, `LABEL `+dockerutil.LabelPreload+`=`+strings.Join(p.preload, ","))
 	}
 	if attestation != "" {
 		changes = append(changes, `LABEL `+dockerutil.LabelAttestation+`=`+
@@ -446,7 +499,8 @@ func (p *Provider) Branch(ctx context.Context, version, envID string) (provider.
 	}
 
 	tag := ImageRepo + ":" + version
-	if _, err := p.cli.ImageInspect(ctx, tag); err != nil {
+	info, err := p.cli.ImageInspect(ctx, tag)
+	if err != nil {
 		if cerrdefs.IsNotFound(err) {
 			// What DOES exist, at the moment the missing one was asked for.
 			//
@@ -478,7 +532,7 @@ func (p *Provider) Branch(ctx context.Context, version, envID string) (provider.
 		LabelKind:   "branch",
 		LabelEnv:    envID,
 		LabelGolden: version,
-	})
+	}, p.branchPreload(goldenLabels(info)))
 	if err != nil {
 		return provider.Branch{}, err
 	}
@@ -491,6 +545,47 @@ func (p *Provider) Branch(ctx context.Context, version, envID string) (provider.
 		return b, err
 	}
 	return b, nil
+}
+
+// goldenLabels reads an inspected image's labels, which live under its config
+// rather than beside it the way a container listing's do. Nil config is an
+// image the daemon described without one, and an empty map is the honest
+// reading of that.
+func goldenLabels(info client.ImageInspectResult) map[string]string {
+	if info.Config == nil {
+		return nil
+	}
+	return info.Config.Labels
+}
+
+// branchPreload is what a branch of this golden loads at server start.
+//
+// The golden's own record wins over what the manifest currently says, and that
+// ordering is the whole reason the label exists. A golden built with
+// timescaledb preloaded holds an extension whose library the postmaster loads
+// before any database is opened; start a container from that image without the
+// library and Postgres refuses to start with "the extension must be loaded via
+// shared_preload_libraries", so removing the line from the manifest would
+// break every branch of every golden built before the removal, which is a
+// worse answer than the golden being out of date.
+//
+// A golden with no such label is one built before this was recorded, or one
+// built with nothing extra. Both fall back to the manifest, which is the only
+// other source there is, and neither can be made worse by it: the fallback can
+// only ADD libraries to a server, and a library the image does not carry fails
+// loudly at start rather than producing a golden that looks right.
+func (p *Provider) branchPreload(labels map[string]string) []string {
+	recorded := strings.Split(labels[dockerutil.LabelPreload], ",")
+	var out []string
+	for _, lib := range recorded {
+		if lib = strings.TrimSpace(lib); lib != "" {
+			out = append(out, lib)
+		}
+	}
+	if len(out) == 0 {
+		return p.preload
+	}
+	return out
 }
 
 // Reset returns a branch to its golden state.

@@ -156,6 +156,19 @@ func CopySchema(ctx context.Context, source, target secrets.Value) error {
 // not there, the error has to name the version needed and the package that
 // carries it, because the message Postgres gives names neither.
 
+// ServerMajor asks a database what major version it is, and answers zero when
+// it could not ask.
+//
+// Exported for the one caller outside this package that needs the same
+// question for a different reason: the docker provider lets a manifest name
+// its own image, and an image decides its own Postgres version while the
+// manifest declares one, so the two have to be compared against the running
+// server rather than against a tag. Zero means "could not ask", never
+// "version zero", and a caller must not read it as a mismatch.
+func ServerMajor(ctx context.Context, conn secrets.Value) int {
+	return serverMajor(ctx, conn)
+}
+
 // serverMajor asks a database what version it is, so the right client can be
 // chosen before anything is spawned. A failure here is not fatal: it falls back
 // to whatever is on PATH, which is the behaviour this had before.

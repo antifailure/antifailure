@@ -681,6 +681,7 @@ const defaultTuning = `{
       "name": "source",
       "why": "a web service built from an image, a golden from production, egress in sandbox mode",
       "overrides": {
+        "database.provider": "docker",
         "database.golden.schedule": "0 3 * * *",
         "database.golden.max_age": "720h",
         "database.volume.max_age": "720h",
@@ -741,6 +742,7 @@ const defaultTuning = `{
       "name": "seed",
       "why": "the other side of every mutually exclusive pair: a seeded database, a cron service, an egress rule in mock mode, a derived datastore, a variable read from the environment",
       "overrides": {
+        "database.provider": "docker",
         "database.golden.schedule": "0 3 * * *",
         "database.golden.max_age": "720h",
         "database.volume.max_age": "720h",
@@ -795,6 +797,7 @@ const defaultTuning = `{
       "name": "topics",
       "why": "the third side the other two cannot carry: a topics_only broker, whose topics key is refused on every other stance",
       "overrides": {
+        "database.provider": "docker",
         "database.golden.schedule": "0 3 * * *",
         "database.golden.max_age": "720h",
         "database.volume.max_age": "720h",
@@ -855,6 +858,7 @@ const defaultTuning = `{
       "name": "emulate",
       "why": "the third side of the egress mode pair: a rule answered by an emulator inside the environment, which is the only mode that may carry an emulator and may carry neither a credential nor a rate limit",
       "overrides": {
+        "database.provider": "docker",
         "database.golden.schedule": "0 3 * * *",
         "database.golden.max_age": "720h",
         "database.volume.max_age": "720h",
@@ -1397,7 +1401,33 @@ func TestSchemaConstraintReport(t *testing.T) {
 // max_statements and thresholds.mean_increase instead. Without that split the
 // base manifest is refused by this feature's own three cross field rules,
 // which is the #315 failure exactly.
-const wantConstraints = 770
+const wantConstraints = 782
+// Then 755. The three keys that say what the Postgres a golden is built in
+// actually is: database.image, which declares a type and a maxLength;
+// database.extensions and database.preload_libraries, each of which declares a
+// type and a maxItems of its own and a type, a pattern and a maxLength on its
+// items. Twelve, every one ENFORCED and measured in every base.
+//
+// COUNTED, NEVER INCREMENTED, and counted TWICE because this branch was
+// rebased across the terminal surface landing. The control is a separate walk
+// of the published document, written for this branch, resolving only #/$defs/
+// and stopping at the same depth. Before the rebase it returned 699 on the
+// main of the day and 711 here; after it, it returns 743 on origin/main, which
+// is the figure the constant above arrived at independently and for entirely
+// different reasons, and 755 here. Reproducing somebody else's number on their
+// tree is what makes the number on this one worth anything. Both times the per
+// keyword inventory accounts for the difference exactly and with no row lost:
+// type +5, maxLength +3, maxItems +2, pattern +2, and every other keyword
+// unchanged.
+//
+// The tuning above gained one override per base, database.provider set to
+// docker. These three keys configure the container the docker provider starts
+// and are refused beside a provider that has no container, and the generator
+// fills provider with a candidate string that is not a provider at all, so
+// without the override the base manifest was itself refused and the gate
+// reported red having measured NOTHING. That is the #315 failure exactly, and
+// it is the second time this file has caught it, which is the argument for the
+// base being asserted before the verdicts are.
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and

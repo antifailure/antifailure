@@ -39,7 +39,28 @@ type Table struct {
 	// Rows is the planner's estimate, used to size chunks and to report
 	// progress. It is an estimate and is treated as one.
 	Rows int64
+	// AccessMethod is the table access method the engine stores this table
+	// with, as pg_am names it. Empty for a store that has no such concept and
+	// for a Table nobody read from a catalog; "heap" for an ordinary Postgres
+	// table.
+	//
+	// It is here because the Postgres dialect's whole addressing scheme is a
+	// heap guarantee wearing the clothes of a universal one. Every heap table
+	// has a ctid, so a table with no primary key can still be rewritten one
+	// row at a time, and that sentence stops being true the moment relam is
+	// not the heap: measured against citus columnar on Postgres 17.2, even
+	// `SELECT ctid FROM t` is refused with "UPDATE and CTID scans not
+	// supported for ColumnarScan", and so is an UPDATE addressed by the
+	// primary key, because that access method implements no UPDATE at all.
+	// Nothing in the catalog says which of those an access method supports,
+	// so the engine cannot ask; what it can do is know it is not on the heap
+	// and refuse at planning time.
+	AccessMethod string
 }
+
+// heapAccessMethod is Postgres's own table access method, and the only one
+// whose storage the addressing in this package may assume.
+const heapAccessMethod = "heap"
 
 // ColumnNamed returns a column by name, and the zero value when there is
 // none, which is what a caller checking a field wants rather than an error.
@@ -115,12 +136,31 @@ SELECT c.table_schema, c.table_name, c.column_name, c.data_type,
        format_type(att.atttypid, att.atttypmod) AS sql_type,
        c.is_nullable = 'YES' AS nullable,
        c.is_generated <> 'NEVER' OR c.identity_generation IS NOT NULL AS generated,
-       c.ordinal_position
+       c.ordinal_position,
+       -- A partitioned parent holds no rows of its own and carries no access
+       -- method, and masking addresses one through the parent, so reading
+       -- relam off the parent alone would report "" for a tree whose leaves
+       -- are all columnar and mask it by a ctid none of them has. The whole
+       -- tree is walked rather than its direct children, because a partition
+       -- of a partition is where a leaf actually lives, and the first non heap
+       -- leaf is the answer: one is enough to make the parent unaddressable.
+       COALESCE(
+         CASE WHEN cl.relkind = 'p' THEN (
+           SELECT pam.amname
+           FROM pg_partition_tree(cl.oid) pt
+           JOIN pg_class part ON part.oid = pt.relid
+           JOIN pg_am pam ON pam.oid = part.relam
+           WHERE pam.amname <> 'heap'
+           ORDER BY pam.amname
+           LIMIT 1
+         ) END,
+         am.amname, '') AS access_method
 FROM information_schema.columns c
 JOIN information_schema.tables t
   ON t.table_schema = c.table_schema AND t.table_name = c.table_name
 JOIN pg_namespace ns ON ns.nspname = c.table_schema
 JOIN pg_class cl ON cl.relname = c.table_name AND cl.relnamespace = ns.oid
+LEFT JOIN pg_am am ON am.oid = cl.relam
 JOIN pg_attribute att ON att.attrelid = cl.oid AND att.attname = c.column_name
 WHERE t.table_type = 'BASE TABLE'
   AND NOT cl.relispartition
@@ -137,10 +177,11 @@ ORDER BY c.table_schema, c.table_name, c.ordinal_position`
 	byTable := map[string]*Table{}
 	var order []string
 	for rows.Next() {
-		var schema, table, column, dataType, sqlType string
+		var schema, table, column, dataType, sqlType, accessMethod string
 		var nullable, generated bool
 		var position int
-		if err := rows.Scan(&schema, &table, &column, &dataType, &sqlType, &nullable, &generated, &position); err != nil {
+		if err := rows.Scan(&schema, &table, &column, &dataType, &sqlType, &nullable, &generated,
+			&position, &accessMethod); err != nil {
 			return nil, fmt.Errorf("masking: reading the catalog: %w", err)
 		}
 		key := schema + "." + table
@@ -148,7 +189,10 @@ ORDER BY c.table_schema, c.table_name, c.ordinal_position`
 			// Stamped rather than left to the empty default, so that a table
 			// read from Postgres says so and the compatibility case in
 			// DialectFor covers only values nothing read from a database.
-			byTable[key] = &Table{Engine: enginePostgres, Schema: schema, Name: table}
+			byTable[key] = &Table{
+				Engine: enginePostgres, Schema: schema, Name: table,
+				AccessMethod: accessMethod,
+			}
 			order = append(order, key)
 		}
 		byTable[key].Columns = append(byTable[key].Columns, ColumnInfo{
