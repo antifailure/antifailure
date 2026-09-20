@@ -23,6 +23,11 @@ import { emit } from './emit.ts';
 import { nullSink, socketSink, type LiveSink } from './live.ts';
 import { assertAvailable, type Surface } from './drivers/driver.ts';
 import { runTerminal, type TerminalWorkflow } from './drivers/terminal.ts';
+import { runMobile, type MobilePlatform } from './drivers/mobile.ts';
+import { iosPlatform, listSimulators, prepareSimulator } from './drivers/ios.ts';
+import {
+  androidPlatform, avds, bootEmulator, devices, installApk, toolsPresent,
+} from './drivers/android.ts';
 import type { Persona } from './login.ts';
 import type { Workflow } from './workflow.ts';
 import type { ResolvedDiversity } from './personality.ts';
@@ -69,7 +74,7 @@ interface JobDocument {
   readonly headless?: boolean;
   /** surface names what this run drives. Absent means 'web', which is every
    *  run the engine sends today. A run that names a surface whose driver is not
-   *  built (desktop, ios) is refused loudly rather than reported as green. */
+   *  built (desktop) is refused loudly rather than reported as green. */
   readonly surface?: Surface;
   /** terminal are the command line workflows this run drives.
    *
@@ -79,12 +84,127 @@ interface JobDocument {
    *  verdicts and two chances for them to disagree about the same change.
    *  Tolerant like the lists above: absent, null and empty all mean none. */
   readonly terminal?: readonly TerminalWorkflow[] | null;
+  /** mobile is the device and application an ios or android run drives.
+   *  Present only when surface is one of those two. Absent is a legal
+   *  document and blocks the run with a reason rather than failing it, which
+   *  is the same rule every other missing prerequisite follows here. */
+  readonly mobile?: MobileDoc;
   /** live is the path to a local socket the engine is listening on, present
    *  only when somebody is watching this run. Absent means no watcher, which is
    *  the ordinary case: the sink becomes a no-op and the run is unchanged. The
    *  frames this streams never leave the machine the engine relays them from,
    *  and never reach the control plane. */
   readonly live?: string;
+}
+
+/** The device and application a mobile run drives.
+ *
+ *  Every field is optional except the application's identifier, because a
+ *  machine with exactly one simulator or one attached device is the ordinary
+ *  case and making somebody paste a udid into a manifest to describe it would
+ *  be ceremony. What cannot be guessed is which app to drive, so that is
+ *  required and its absence is refused rather than defaulted.
+ */
+interface MobileDoc {
+  /** The simulator udid or the adb serial. Absent picks the booted device,
+   *  or the newest available one. */
+  readonly device?: string;
+  /** The built .app or .apk to install. Absent drives an application that is
+   *  already installed. */
+  readonly app?: string;
+  /** The iOS bundle identifier, or the Android package name. */
+  readonly id: string;
+  /** The Android launchable activity. Ignored on iOS. */
+  readonly activity?: string;
+  /** The Android emulator image to boot when no device is attached. Ignored on
+   *  iOS. Absent with exactly one image installed boots that one, because a
+   *  machine with a single emulator does not need to be told which. */
+  readonly avd?: string;
+  /** Where the Appium server is listening. */
+  readonly server?: string;
+}
+
+/** Where an Appium server listens unless a job says otherwise. The port is
+ *  Appium's own default, so a server started with no arguments is found. */
+const DEFAULT_APPIUM_SERVER = 'http://127.0.0.1:4723';
+
+/** sdkHint names where the Android SDK was looked for, so a refusal points at
+ *  a path somebody can check rather than at a generic phrase. */
+function sdkHint(): string {
+  return process.env['ANDROID_HOME'] ?? process.env['ANDROID_SDK_ROOT']
+    ?? '~/Library/Android/sdk';
+}
+
+/** mobilePlatformFor prepares the device and returns the platform the shared
+ *  mobile loop drives.
+ *
+ *  Preparation happens HERE rather than inside the loop because it is per run
+ *  rather than per workflow: booting a simulator and installing an app is slow
+ *  and shared, and doing it once keeps it out of every workflow's time budget.
+ *
+ *  Everything it cannot do is thrown with a reason. A throw out of main is
+ *  reported as the runner's own failure and the run is BLOCKED, which is
+ *  exactly right: a device that would not boot is not evidence about the
+ *  application.
+ */
+async function mobilePlatformFor(
+  surface: 'ios' | 'android', doc: MobileDoc | undefined,
+): Promise<MobilePlatform> {
+  if (!doc?.id) {
+    throw new Error(
+      `a ${surface} run needs a mobile.id naming the ` +
+      `${surface === 'ios' ? 'bundle identifier' : 'package name'} of the application to drive`,
+    );
+  }
+
+  if (surface === 'ios') {
+    const udid = doc.device ?? (await listSimulators())[0]?.udid;
+    if (!udid) {
+      throw new Error(
+        'no iOS simulator is available on this machine. Install one with Xcode, or name a ' +
+        'device with mobile.device. "xcrun simctl list devices available" lists them.',
+      );
+    }
+    const target = { udid, bundleId: doc.id, ...(doc.app ? { app: doc.app } : {}) };
+    await prepareSimulator(target);
+    return iosPlatform(target);
+  }
+
+  // Whether the SDK is here at all, asked before anything is driven, so a
+  // missing toolchain is reported as a missing toolchain rather than as a
+  // device that would not answer.
+  if (!await toolsPresent()) {
+    throw new Error(
+      `no Android SDK platform-tools found under ${sdkHint()}. Install the SDK, or set ` +
+      'ANDROID_HOME to where it lives.',
+    );
+  }
+
+  let serial = doc.device ?? (await devices()).find((d) => d.state === 'device')?.serial;
+  if (!serial) {
+    // Nothing attached, so boot one. Named by the job, or the only one
+    // installed: a machine with a single emulator image does not need to be
+    // told which to use, and a machine with several cannot be guessed at.
+    const available = await avds();
+    const avd = doc.avd ?? (available.length === 1 ? available[0] : undefined);
+    if (!avd) {
+      throw new Error(
+        'no Android device or emulator is attached' +
+        (available.length === 0
+          ? ', and this machine has no emulator images to boot. Create one with avdmanager.'
+          : `, and this machine has several images to choose from (${available.join(', ')}). ` +
+            'Name one with mobile.avd, or attach a device.'),
+      );
+    }
+    serial = await bootEmulator(avd);
+  }
+  if (doc.app) await installApk(serial, doc.app);
+  return androidPlatform({
+    serial,
+    appPackage: doc.id,
+    ...(doc.activity ? { appActivity: doc.activity } : {}),
+    ...(doc.app ? { app: doc.app } : {}),
+  });
 }
 
 /** The document the engine reads back. */
@@ -188,19 +308,21 @@ async function main(): Promise<number> {
   // every exploration, so af explore died here with a TypeError before it
   // reached the goals it was given. A caller that sends no workflows means no
   // workflows, which is a legal document and not a fault.
-  // Which surface this run drives, meaning whether a BROWSER is opened. Web is
-  // the default; the engine sends `terminal` when the manifest's terminal
-  // workflows are all there is to run, and then no browser is started, no goal
-  // is explored and no access object is probed, because none of the three
-  // means anything without a page. Desktop and ios are declared and not built,
-  // and a run that asks for one is refused here rather than returning an
+  // Which surface this run drives, meaning WHAT IS OPENED. Web is the default;
+  // the engine sends `terminal` when the manifest's terminal workflows are all
+  // there is to run, and `ios` or `android` when the workflows drive an
+  // application on a device. In each of the three non web cases no browser is
+  // started, no goal is explored and no access object is probed, because none
+  // of the three means anything without a page. Desktop is declared and not
+  // built, and a run that asks for it is refused here rather than returning an
   // empty, misleadingly green result.
   const surface: Surface = doc.surface ?? 'web';
   let results: WorkflowResult[] = [];
   let explorations: Exploration[] = [];
   if (surface !== 'web' && surface !== 'terminal') {
-    // desktop or ios: throws NotImplementedError, which main's catch reports as
-    // the runner's own failure with a clear reason.
+    // desktop, or a mobile surface nobody has driven: throws
+    // NotImplementedError, which main's catch reports as the runner's own
+    // failure with a clear reason.
     assertAvailable(surface);
   }
   // The terminal workflows run whenever the engine sent any, whatever the
@@ -218,6 +340,33 @@ async function main(): Promise<number> {
       // shell points at, which is either nothing or, far worse, production.
       env: { AF_BASE_URL: doc.base_url },
     });
+  }
+  // A mobile run drives the workflow list against an APPLICATION rather than a
+  // page, so it is exclusive with the web branch below and ADDITIVE with the
+  // terminal one above, for the same reason the terminal one is: a manifest
+  // that declares a deploy command and a sign-in flow has one environment and
+  // has to produce one report about it. The surface decides what is opened;
+  // the terminal list decides whether a program is also run.
+  if (surface === 'ios' || surface === 'android') {
+    // Refused before a device is touched. runMobile refuses an empty run too,
+    // and that is the guarantee every caller gets; this one is here because
+    // mobilePlatformFor BOOTS A SIMULATOR and installs an application, and
+    // spending a minute of somebody's machine on a run that is about to be
+    // refused is its own small failure.
+    if (workflows.length === 0) {
+      throw new Error(
+        `the ${surface} surface was given no workflows to drive, so there is nothing to judge. ` +
+        `A run that drives nothing is refused rather than reported as passing, because zero ` +
+        `failures out of zero workflows is not evidence about the application.`,
+      );
+    }
+    results = [...results, ...await runMobile({
+      platform: await mobilePlatformFor(surface, doc.mobile),
+      workflows,
+      serverURL: doc.mobile?.server ?? DEFAULT_APPIUM_SERVER,
+      artifacts: doc.artifacts,
+      live,
+    })];
   }
   if (surface === 'web') {
     results = [...results, ...(workflows.length > 0 ? await run(job) : [])];

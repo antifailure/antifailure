@@ -121,3 +121,63 @@ test('the runner still says nothing on stdout when the document is not JSON', as
   assert.ok(stderr.includes('af-runner:'), stderr);
   assert.ok(artifacts.length > 0);
 });
+
+// The mobile surfaces, at the entry point, guarding the one failure that is
+// quieter than the scaffold it replaced.
+//
+// While a surface is scaffolded main.ts sends it through assertAvailable,
+// which THROWS. The moment `available` becomes true that throw stops, and if
+// no dispatch takes its place the run falls through with `results` still the
+// empty array it was initialised to: zero passed, zero failed, and EXIT CODE
+// ZERO, because exitCodeFor only fails a run when a verdict counts against the
+// application. A customer would be told a mobile run passed by a run that
+// drove nothing. These three cases are the ones that can reach that state.
+
+test('an ios run with workflows reaches the driver rather than returning nothing', async () => {
+  // A device that does not exist, so this needs no simulator and still proves
+  // the dispatch was REACHED: reaching it is what tries to prepare the device
+  // and fails. The empty-green path would instead exit zero with two empty
+  // lists, which is exactly what this asserts against.
+  const { code, stdout } = await runMain({
+    surface: 'ios',
+    base_url: 'http://unused.invalid',
+    mobile: { id: 'dev.antifailure.probe', device: 'not-a-real-udid' },
+    workflows: [{ name: 'sign in', description: 'Sign in.', expect: ['Welcome'] }],
+    personas: [],
+  });
+  assert.notEqual(code, 0, 'a mobile run that could not reach a device exited zero');
+  if (stdout.trim()) {
+    const out = JSON.parse(stdout) as RunnerOutput & { passed: number };
+    assert.notDeepEqual(
+      { results: out.results, passed: out.passed }, { results: [], passed: 0 },
+      'the run reported an empty, passing document having driven nothing');
+  }
+});
+
+test('an ios run with no workflows is refused rather than reported as passing', async () => {
+  const { code, stdout } = await runMain({
+    surface: 'ios',
+    base_url: 'http://unused.invalid',
+    mobile: { id: 'dev.antifailure.probe' },
+    workflows: [],
+    personas: [],
+  });
+  assert.notEqual(code, 0, 'a mobile run with nothing to drive exited zero');
+  assert.equal(stdout.trim(), '', 'a refused run still emitted a result document');
+});
+
+test('an android run is refused loudly, because no run has ever driven it', async () => {
+  // The scaffold's throw is a TRUE statement and a silent green is not, so a
+  // surface nobody has driven keeps the loud refusal however complete its code
+  // looks. This is what flips when somebody proves android, and it should flip
+  // in the same commit as the run that proves it.
+  const { code, stderr } = await runMain({
+    surface: 'android',
+    base_url: 'http://unused.invalid',
+    mobile: { id: 'dev.antifailure.probe' },
+    workflows: [{ name: 'sign in', description: 'Sign in.', expect: ['Welcome'] }],
+    personas: [],
+  });
+  assert.notEqual(code, 0);
+  assert.match(stderr, /not implemented yet|NOT yet proven/);
+});
