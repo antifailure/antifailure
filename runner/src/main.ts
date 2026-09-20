@@ -71,9 +71,14 @@ interface JobDocument {
    *  run the engine sends today. A run that names a surface whose driver is not
    *  built (desktop, ios) is refused loudly rather than reported as green. */
   readonly surface?: Surface;
-  /** terminal are the command line workflows a terminal-surface run drives.
-   *  Present only when surface is 'terminal'. */
-  readonly terminal?: readonly TerminalWorkflow[];
+  /** terminal are the command line workflows this run drives.
+   *
+   *  Sent alongside `workflows` rather than instead of them. A manifest may
+   *  declare both, and a run that carried only one of the two lists would have
+   *  to be two runs against one environment, which is two reports, two
+   *  verdicts and two chances for them to disagree about the same change.
+   *  Tolerant like the lists above: absent, null and empty all mean none. */
+  readonly terminal?: readonly TerminalWorkflow[] | null;
   /** live is the path to a local socket the engine is listening on, present
    *  only when somebody is watching this run. Absent means no watcher, which is
    *  the ordinary case: the sink becomes a no-op and the run is unchanged. The
@@ -183,25 +188,39 @@ async function main(): Promise<number> {
   // every exploration, so af explore died here with a TypeError before it
   // reached the goals it was given. A caller that sends no workflows means no
   // workflows, which is a legal document and not a fault.
-  // Which surface this run drives. Web is the default and the only surface the
-  // engine sends today. Terminal drives command line programs. Desktop and ios
-  // are declared but not built, and a run that asks for one is refused here
-  // rather than returning an empty, misleadingly green result.
+  // Which surface this run drives, meaning whether a BROWSER is opened. Web is
+  // the default; the engine sends `terminal` when the manifest's terminal
+  // workflows are all there is to run, and then no browser is started, no goal
+  // is explored and no access object is probed, because none of the three
+  // means anything without a page. Desktop and ios are declared and not built,
+  // and a run that asks for one is refused here rather than returning an
+  // empty, misleadingly green result.
   const surface: Surface = doc.surface ?? 'web';
   let results: WorkflowResult[] = [];
   let explorations: Exploration[] = [];
-  if (surface === 'terminal') {
-    results = await runTerminal({
-      workflows: doc.terminal ?? [],
-      live,
-      ...(doc.work_dir ? { cwd: doc.work_dir } : {}),
-    });
-  } else if (surface !== 'web') {
+  if (surface !== 'web' && surface !== 'terminal') {
     // desktop or ios: throws NotImplementedError, which main's catch reports as
     // the runner's own failure with a clear reason.
     assertAvailable(surface);
-  } else {
-    results = workflows.length > 0 ? await run(job) : [];
+  }
+  // The terminal workflows run whenever the engine sent any, whatever the
+  // surface says. The surface decides whether a BROWSER is opened, and those
+  // are two different questions: a manifest with a checkout workflow and a
+  // deploy command declares both, and one run has to answer for both of them.
+  const terminalWorkflows = doc.terminal ?? [];
+  if (terminalWorkflows.length > 0) {
+    results = await runTerminal({
+      workflows: terminalWorkflows,
+      live,
+      ...(doc.work_dir ? { cwd: doc.work_dir } : {}),
+      // Where the environment this run is rehearsing actually is. Without it a
+      // command line tool under test would talk to whatever the developer's
+      // shell points at, which is either nothing or, far worse, production.
+      env: { AF_BASE_URL: doc.base_url },
+    });
+  }
+  if (surface === 'web') {
+    results = [...results, ...(workflows.length > 0 ? await run(job) : [])];
     explorations = doc.goals?.length
       ? await explore({
           baseURL: doc.base_url,

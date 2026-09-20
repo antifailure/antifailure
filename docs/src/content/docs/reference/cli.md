@@ -2084,6 +2084,11 @@ Run the manifest's workflows against the environment.
 Agents drive the application the way a person does, through the accessibility
 tree, and return a verdict with a video, a trace, and steps to reproduce it.
 
+The manifest's terminal workflows run in the same pass and are counted in the
+same verdict. A terminal's rendered cells are its accessibility tree, so a
+program that draws a full screen is driven on a real pseudo terminal and judged
+on what it drew rather than on the bytes it wrote.
+
 Five verdicts, not two. The one that matters is blocked: a browser that
 crashed, a page that never loaded, or a persona with no password is not
 evidence about the application, and charging it to the application is how
@@ -2103,7 +2108,7 @@ af test --only checkout --headed
 | `--attempts` | `2` | How many times to try a workflow before deciding. |
 | `--branch` | - | Branch to run against, defaulting to the checked out one. |
 | `--headed` | `false` | Show the browser rather than running it hidden. |
-| `--only` | - | Run just these workflows, by name. |
+| `--only` | - | Run just these workflows, by name, from either list. |
 | `--runner` | - | Path to the runner's entry point. |
 
 ### `af token`

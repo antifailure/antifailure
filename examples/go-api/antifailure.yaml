@@ -143,6 +143,40 @@ workflows:
       - "Grace Hopper"
     tags: [smoke]
 
+# The same run, at a command line. bin/orders is the operator's tool for this
+# service, and Antifailure starts it with AF_BASE_URL pointing at the
+# environment this run is rehearsing, so the tool an operator would point at
+# production is pointed at the copy instead.
+#
+# Its own list rather than a key on the workflows above, because the two
+# surfaces share the sentence and nothing else: the workflow above needs a
+# persona to sign in as and a path to start at, and this one needs a program.
+#
+# Neither of these declares a `screen`, so both are driven through a pipe and
+# judged on everything they printed. A program that takes over the screen
+# declares one and is given a real pseudo terminal; see the terminal workflows
+# guide.
+terminal_workflows:
+  - name: operator-tool-health
+    description: >-
+      Run the operator's own command against the environment and confirm it
+      reports the service as healthy rather than unreachable or unwell.
+    command: ./bin/orders
+    args: [health]
+    expect:
+      - '"orders: the service is healthy"'
+
+  - name: operator-tool-customers
+    description: >-
+      Ask the operator's command for the customer list and confirm it returns
+      the two seeded customers rather than an empty list.
+    command: ./bin/orders
+    args: [customers]
+    expect:
+      - '"Ada Lovelace"'
+      - '"Grace Hopper"'
+      - '"orders: 2 customers"'
+
 # Run this change beside the version it replaces, on the same data, and report
 # what the two did differently.
 #

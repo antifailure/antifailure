@@ -58,6 +58,9 @@ func newRunWorkflowsTool(p *Project, eng *Engine, drive driveWorkflows) *Tool {
 			"Agents drive the running environment through a real browser, using the " +
 			"accessibility tree the way a person uses the screen, and each declared " +
 			"workflow returns a verdict with a video, a trace and steps to reproduce it. " +
+			"The manifest's terminal workflows run in the same pass and are counted in " +
+			"the same verdict: a command line program, including one that draws a full " +
+			"screen, driven on a real pseudo terminal and judged on what it drew. " +
 			"After the workflows, the manifest's invariants are asked of the data the " +
 			"run left behind, so an order that reached a success page and then has no " +
 			"user is a failure rather than a pass. " +

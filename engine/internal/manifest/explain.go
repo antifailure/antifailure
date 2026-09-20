@@ -242,6 +242,24 @@ func Explain(m *schema.Manifest, width int) string {
 		b.WriteString("\n")
 	}
 
+	if len(m.TerminalWorkflows) > 0 {
+		b.WriteString("Terminal workflows\n")
+		for _, w := range m.TerminalWorkflows {
+			// The screen, because it is the fact that decides how the program
+			// is driven, and a reader deciding whether this workflow proves
+			// what its name says needs to know whether it was given a terminal
+			// or a pipe.
+			how := "through a pipe"
+			if w.Screen != nil {
+				how = fmt.Sprintf("on a %d by %d screen", w.Screen.Rows, w.Screen.Cols)
+			}
+			invocation := strings.TrimSpace(w.Command + " " + strings.Join(w.Args, " "))
+			fmt.Fprintf(&b, "  %-24s %s, %s, up to %s\n",
+				w.Name, value(invocation, 27, width), how, w.Budget.Duration)
+		}
+		b.WriteString("\n")
+	}
+
 	if len(m.Invariants) > 0 {
 		b.WriteString("Invariants\n")
 		for _, inv := range m.Invariants {
@@ -482,6 +500,9 @@ func Summary(m *schema.Manifest) string {
 	out := fmt.Sprintf("%s: %s, %s database", m.Name, strings.Join(parts, ", "), m.Database.Provider)
 	if n := len(m.Workflows); n > 0 {
 		out += fmt.Sprintf(", %d %s", n, plural("workflow", n))
+	}
+	if n := len(m.TerminalWorkflows); n > 0 {
+		out += fmt.Sprintf(", %d terminal %s", n, plural("workflow", n))
 	}
 	return out
 }

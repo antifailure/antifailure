@@ -163,6 +163,15 @@ type jobDocument struct {
 	// runner does no access probing.
 	AccessProbes []accessProbeDoc `json:"accessProbes,omitempty"`
 	Personas     []personaDoc     `json:"personas"`
+	// Terminal are the command line workflows. Empty for a run that drives
+	// only a browser, which is most runs, and then the runner opens no pseudo
+	// terminal and loads none of the machinery for one.
+	Terminal []terminalDoc `json:"terminal,omitempty"`
+	// Surface is which surface this run drives. Sent as "terminal" when the
+	// run has terminal workflows and no browser ones, which is what tells the
+	// runner not to open a browser, consult the goals or probe access: none of
+	// those mean anything without a page. Absent means the ordinary web run.
+	Surface string `json:"surface,omitempty"`
 	// Diversity is the resolved per-agent personality plan. Absent means one
 	// neutral agent per workflow, today's behavior. The engine resolves it so
 	// the runner stays a mechanism that consumes a fixed plan rather than
@@ -195,6 +204,29 @@ type workflowDoc struct {
 	// manifest said. Zero means the runner's default for that half.
 	MaxSteps int   `json:"maxSteps,omitempty"`
 	MaxMs    int64 `json:"maxMs,omitempty"`
+}
+
+// terminalDoc is one command line workflow as the runner reads it. The screen
+// is a pointer for the same reason it is one in the manifest: its absence says
+// the program prints rather than draws, and that selects a pipe over a pseudo
+// terminal.
+type terminalDoc struct {
+	Name    string             `json:"name"`
+	Command string             `json:"command"`
+	Args    []string           `json:"args,omitempty"`
+	Input   []string           `json:"input,omitempty"`
+	Expect  []string           `json:"expect"`
+	Screen  *terminalScreenDoc `json:"screen,omitempty"`
+	// Cwd is already absolute by the time it is sent. The runner has no idea
+	// where the manifest lives and resolving it there would be a second answer
+	// to a question the engine has already answered.
+	Cwd   string `json:"cwd,omitempty"`
+	MaxMs int64  `json:"maxMs,omitempty"`
+}
+
+type terminalScreenDoc struct {
+	Rows int `json:"rows"`
+	Cols int `json:"cols"`
 }
 
 // accessProbeDoc is one declared object the runner reaches as each persona. The
@@ -249,7 +281,8 @@ func (o *Orchestrator) Test(ctx context.Context, opts TestOptions) (*TestReport,
 	}
 
 	workflows := o.workflowDocs(opts.Only)
-	if len(workflows) == 0 {
+	terminals := o.terminalDocs(opts.Only)
+	if len(workflows)+len(terminals) == 0 {
 		return nil, aferrors.Coded(aferrors.AFAGT001,
 			"detail", "the manifest declares no workflows to run")
 	}
@@ -294,7 +327,7 @@ func (o *Orchestrator) Test(ctx context.Context, opts TestOptions) (*TestReport,
 	defer closeSession(rs)
 	runStartedAt := o.opts.Clock.Now()
 	id := runID(runStartedAt, o.envID)
-	o.reportRunStarted(rs, id, "workflows", runStartedAt, len(workflows))
+	o.reportRunStarted(rs, id, "workflows", runStartedAt, len(workflows)+len(terminals))
 
 	// The personality plan is resolved here, in the process that owns the run
 	// identity and the seed, so the runner consumes a fixed assignment rather
@@ -311,6 +344,7 @@ func (o *Orchestrator) Test(ctx context.Context, opts TestOptions) (*TestReport,
 	report, err := o.driveRunner(ctx, runnerJob{
 		Runner: runner, BaseURL: status.URL, Artifacts: artifacts,
 		Workflows: workflows, Personas: o.personaDocs(provisioned),
+		Terminal: terminals, Surface: surfaceFor(workflows, terminals),
 		Diversity: divPtr,
 		WorkDir:   o.opts.Root, Attempts: opts.Attempts, Headless: !opts.Headed,
 		LiveSocket: opts.LiveSocket,
@@ -541,6 +575,8 @@ type runnerJob struct {
 	Artifacts string
 	WorkDir   string
 	Workflows []workflowDoc
+	Terminal  []terminalDoc
+	Surface   string
 	Personas  []personaDoc
 	Diversity *personality.Resolved
 	Attempts  int
@@ -572,6 +608,7 @@ func (o *Orchestrator) driveRunner(ctx context.Context, job runnerJob) (*TestRep
 	stdout, err := o.invokeRunner(ctx, job.Runner, jobDocument{
 		BaseURL: job.BaseURL, Artifacts: job.Artifacts,
 		Workflows: job.Workflows, Personas: job.Personas,
+		Terminal: job.Terminal, Surface: job.Surface,
 		Diversity: job.Diversity,
 		AF:        self, WorkDir: job.WorkDir,
 		Attempts: job.Attempts, Headless: job.Headless,
@@ -681,6 +718,63 @@ func (o *Orchestrator) workflowDocs(only []string) []workflowDoc {
 		out = append(out, doc)
 	}
 	return out
+}
+
+// terminalDocs builds the command line workflows the run will drive, filtered
+// by the same --only set the browser ones are, so a person naming one workflow
+// gets that workflow whichever surface it is written for.
+//
+// The working directory is resolved HERE and sent absolute. The runner is a
+// subprocess started from somewhere the manifest never mentions, so a relative
+// path resolved there would mean a different directory than the one the author
+// wrote down, and the symptom would be a program that could not find its own
+// files for a reason nothing in the report could name.
+func (o *Orchestrator) terminalDocs(only []string) []terminalDoc {
+	wanted := map[string]bool{}
+	for _, n := range only {
+		wanted[n] = true
+	}
+	var out []terminalDoc
+	for i := range o.opts.Manifest.TerminalWorkflows {
+		w := &o.opts.Manifest.TerminalWorkflows[i]
+		if len(wanted) > 0 && !wanted[w.Name] {
+			continue
+		}
+		doc := terminalDoc{
+			Name: w.Name, Command: w.Command, Args: w.Args,
+			Input: w.Input, Expect: w.Expect,
+			Cwd: o.opts.Root,
+		}
+		if w.Cwd != "" {
+			doc.Cwd = w.Cwd
+			if !filepath.IsAbs(doc.Cwd) {
+				doc.Cwd = filepath.Join(o.opts.Root, w.Cwd)
+			}
+		}
+		if w.Screen != nil {
+			doc.Screen = &terminalScreenDoc{Rows: w.Screen.Rows, Cols: w.Screen.Cols}
+		}
+		if w.Budget != nil {
+			if d, err := manifest.ParseDuration(w.Budget.Duration); err == nil && d > 0 {
+				doc.MaxMs = d.Milliseconds()
+			}
+		}
+		out = append(out, doc)
+	}
+	return out
+}
+
+// surfaceFor is which surface the runner is told this run drives.
+//
+// "terminal" only when there is nothing for a browser to do. A run with both
+// kinds of workflow is a web run that also has terminal workflows in it, and
+// saying otherwise would stop the browser half from running at all. A run with
+// neither cannot reach here: Test refuses it above.
+func surfaceFor(workflows []workflowDoc, terminals []terminalDoc) string {
+	if len(workflows) == 0 && len(terminals) > 0 {
+		return "terminal"
+	}
+	return ""
 }
 
 // diversityRefs is the workflow name and personality pin the resolver needs,

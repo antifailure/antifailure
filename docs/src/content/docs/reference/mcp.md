@@ -396,10 +396,11 @@ that ran nothing and reported green is a check everybody believes is running.
 
 ### `run_browser_workflows`
 
-Drives the manifest's declared workflows through a real browser, then asks the
-manifest's invariants of the rows they left behind, so an order that reached a
-success page and now has no user is a failure the screen was never going to
-show.
+Drives the manifest's declared workflows, the browser ones through a real
+browser and the [terminal ones](/docs/guides/terminal) on a real pseudo
+terminal, then asks the manifest's invariants of the rows they left behind, so
+an order that reached a success page and now has no user is a failure the
+screen was never going to show.
 
 Blocked and unverified are statements about the environment rather than
 verdicts about the application and are not counted against the change. A run in

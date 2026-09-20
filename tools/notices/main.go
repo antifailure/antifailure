@@ -346,8 +346,10 @@ func render(targets []target, mods []module) string {
 
 	b.WriteString("\n### Node packages\n\n")
 	b.WriteString("The agent runner depends on Playwright, which is Apache 2.0 licensed,\n")
-	b.WriteString("and on its own transitive dependencies. Run `npm ls --all` inside\n")
-	b.WriteString("`runner/` for the full tree of whatever version is installed.\n")
+	b.WriteString("on @lydell/node-pty and @xterm/headless, which are MIT licensed and\n")
+	b.WriteString("are what let it drive a full screen terminal program, and on their\n")
+	b.WriteString("own transitive dependencies. Run `npm ls --all` inside `runner/` for\n")
+	b.WriteString("the full tree of whatever version is installed.\n")
 	return b.String()
 }
 

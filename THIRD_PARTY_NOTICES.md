@@ -694,8 +694,10 @@ engine starts the containers from.
 ### Node packages
 
 The agent runner depends on Playwright, which is Apache 2.0 licensed,
-and on its own transitive dependencies. Run `npm ls --all` inside
-`runner/` for the full tree of whatever version is installed.
+on @lydell/node-pty and @xterm/headless, which are MIT licensed and
+are what let it drive a full screen terminal program, and on their
+own transitive dependencies. Run `npm ls --all` inside `runner/` for
+the full tree of whatever version is installed.
 
 ## The community control plane image
 

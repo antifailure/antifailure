@@ -39,6 +39,7 @@ func validate(m *schema.Manifest, doc *yaml.Node, root string) []Problem {
 	v.personas(m)
 	v.auth(m)
 	v.workflows(m)
+	v.terminalWorkflows(m)
 	v.diversity(m)
 	v.invariants(m)
 	v.oracle(m)
@@ -1475,6 +1476,77 @@ func (v *validator) workflows(m *schema.Manifest) {
 			v.add(base+".description",
 				fmt.Sprintf("The description of %q is too short to plan from.", w.Name),
 				"Say what a person would do and what proves it worked. The agent plans from this text.")
+		}
+	}
+}
+
+// terminalWorkflows checks the cross field rules a terminal workflow has and
+// the schema cannot express.
+//
+// The bounds pass already refuses a missing command, an empty expectation list
+// and a screen outside its range, straight from the published schema. What is
+// here is everything that needs to look at more than one field at once, or at
+// the other list.
+func (v *validator) terminalWorkflows(m *schema.Manifest) {
+	// Names are one namespace across both lists. A name is what --only selects
+	// and what the report prints against a verdict, so two workflows answering
+	// to one name is a run whose report cannot be read and a --only that runs
+	// something the author did not mean.
+	names := map[string]bool{}
+	for _, w := range m.Workflows {
+		names[w.Name] = true
+	}
+	seen := map[string]bool{}
+	for i := range m.TerminalWorkflows {
+		w := &m.TerminalWorkflows[i]
+		base := fmt.Sprintf("terminal_workflows[%d]", i)
+		if names[w.Name] || seen[w.Name] {
+			v.add(base+".name",
+				fmt.Sprintf("Two workflows are both named %q.", w.Name),
+				"Names are shared between workflows and terminal_workflows, because a name is what --only selects and what the report prints.")
+		}
+		seen[w.Name] = true
+
+		// The same floor the browser workflows have, for the same reason: the
+		// description is what a reader of the report is told this workflow was
+		// for, and three words cannot carry a verb, an object and an outcome.
+		if len(strings.TrimSpace(w.Description)) < 10 || len(strings.Fields(w.Description)) < 4 {
+			v.add(base+".description",
+				fmt.Sprintf("The description of %q is too short to read in a report.", w.Name),
+				"Say what a person would do at the terminal and what proves it worked.")
+		}
+
+		// There is deliberately no hand written check on budget.duration here.
+		// The schema's own pattern is ^[0-9]+(s|m)$, which is STRICTLY NARROWER
+		// than ParseDuration accepts, so a second check reading the parser
+		// could never fire on a value the bounds pass had already let through:
+		// it would be a rule that looks like enforcement and enforces nothing,
+		// which is the exact shape this package keeps finding in itself. The
+		// pattern is enforced by the bounds pass and measured by
+		// TestEverySchemaConstraintIsEnforced, and a mutation table proved the
+		// hand written version dead before it was deleted.
+
+		// THE CHECK THAT CANNOT SAY NO, refused before it can be written. A
+		// pseudo terminal echoes what is typed into it, so on a screen the
+		// driver's own keystrokes are drawn before the program has done
+		// anything. An expectation naming exactly what the workflow types is
+		// therefore satisfied by the workflow itself: it passes against a
+		// program that printed nothing at all, and it passes against a program
+		// that is completely broken. That is worse than having no expectation,
+		// because it looks like one.
+		if w.Screen != nil {
+			typed := map[string]bool{}
+			for _, in := range w.Input {
+				typed[strings.ToLower(strings.TrimSpace(in))] = true
+			}
+			for j, e := range w.Expect {
+				want := strings.ToLower(strings.TrimSpace(strings.Trim(strings.TrimSpace(e), `"`)))
+				if want != "" && typed[want] {
+					v.add(fmt.Sprintf("%s.expect[%d]", base, j),
+						fmt.Sprintf("Workflow %q expects %q and also types it.", w.Name, e),
+						"A terminal echoes what is typed into it, so that expectation is met by this workflow rather than by the program. Expect something the program draws.")
+				}
+			}
 		}
 	}
 }

@@ -114,6 +114,7 @@ func normalize(m *schema.Manifest, root string) {
 	normalizePersonas(m)
 	normalizeAuth(m)
 	normalizeWorkflows(m)
+	normalizeTerminalWorkflows(m)
 	normalizeInsights(m)
 	normalizeOracle(m)
 	normalizeExplore(m)
@@ -381,6 +382,35 @@ func normalizePersonas(m *schema.Manifest) {
 			p.Email = p.Name + "@" + DefaultPersonaDomain
 		}
 		p.Email = strings.ToLower(strings.TrimSpace(p.Email))
+	}
+}
+
+// normalizeTerminalWorkflows fills in the sizes and the budget a terminal
+// workflow leaves unsaid, so the engine sends the runner a complete job and
+// `af explain` shows the same numbers the run will use.
+//
+// It never fills in a SCREEN that is absent. The absence is the decision: it
+// says the program prints rather than draws, and it selects a pipe over a
+// pseudo terminal. Defaulting it would silently move every line oriented
+// workflow onto a terminal that echoes what the driver types, which is the one
+// way this feature can report a pass that proves nothing.
+func normalizeTerminalWorkflows(m *schema.Manifest) {
+	for i := range m.TerminalWorkflows {
+		w := &m.TerminalWorkflows[i]
+		if w.Screen != nil {
+			if w.Screen.Rows == 0 {
+				w.Screen.Rows = schema.DefaultTerminalRows
+			}
+			if w.Screen.Cols == 0 {
+				w.Screen.Cols = schema.DefaultTerminalCols
+			}
+		}
+		if w.Budget == nil {
+			w.Budget = &schema.TerminalBudget{}
+		}
+		if w.Budget.Duration == "" {
+			w.Budget.Duration = schema.DefaultTerminalDuration
+		}
 	}
 }
 
