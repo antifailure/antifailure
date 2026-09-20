@@ -116,6 +116,18 @@ interface Aggregate {
   findings: number | null
   goals: number | null
   goalsReached: number | null
+  clients: number | null
+  transactions: number | null
+  transactionsFailed: number | null
+  retries: number | null
+  deadlocks: number | null
+  serializationFailures: number | null
+  statementsRun: number | null
+  statementsFailed: number | null
+  rowsTouched: number | null
+  tps: number | null
+  peakOpenTransactions: number | null
+  backendsSeen: number | null
   durationMs: number | null
   source: string | null
   errorReasons: Record<string, number>
@@ -208,6 +220,10 @@ function aggregateFor(kind: WorkloadKind, r: Record<string, unknown>): Aggregate
     workflowsFlaky: null, workflowsBlocked: null, workflowsUnverified: null,
     steps: null,
     findings: null, goals: null, goalsReached: null,
+    clients: null, transactions: null, transactionsFailed: null, retries: null,
+    deadlocks: null, serializationFailures: null,
+    statementsRun: null, statementsFailed: null, rowsTouched: null, tps: null,
+    peakOpenTransactions: null, backendsSeen: null,
     durationMs: num(r.duration_ms, 0, 1e12),
     source: str(r.source, 200),
     // Failures by reason. Bounded and coerced per entry, because it is a map
@@ -293,6 +309,39 @@ function aggregateFor(kind: WorkloadKind, r: Record<string, unknown>): Aggregate
         workflowsBlocked: whole(r.workflows_blocked, 0, 100_000),
         workflowsUnverified: whole(r.workflows_unverified, 0, 100_000),
         steps: whole(r.steps, 0, 1_000_000),
+      }
+    case 'sql_workload':
+      return {
+        ...empty,
+        // The percentiles are the latency of a committed TRANSACTION here. The
+        // columns are shared with the two kinds that send requests because a
+        // percentile is a percentile and the comparison differences them by
+        // name; the unit differs and the kind column is what says so.
+        ...percentiles,
+        errorRate: num(r.error_rate, 0, 1),
+        // Zero rather than null for the reason a load result's request count
+        // is: the CHECK requires a SQL result to carry a transaction count and
+        // a client count, and refusing the whole row would lose the
+        // percentiles, the throughput and the deadlocks with it. A run that
+        // committed nothing is a real and important outcome, and it is exactly
+        // the one that arrives with a zero.
+        transactions: whole(r.transactions, 0, 2_147_483_647) ?? 0,
+        clients: whole(r.clients, 1, 1_000_000) ?? 1,
+        transactionsFailed: whole(r.transactions_failed, 0, 2_147_483_647),
+        retries: whole(r.retries, 0, 2_147_483_647),
+        deadlocks: whole(r.deadlocks, 0, 2_147_483_647),
+        serializationFailures: whole(r.serialization_failures, 0, 2_147_483_647),
+        statementsRun: whole(r.statements_run, 0, 2_147_483_647),
+        statementsFailed: whole(r.statements_failed, 0, 2_147_483_647),
+        rowsTouched: whole(r.rows_touched, 0, 9_007_199_254_740_991),
+        tps: num(r.tps, 0, 1e9),
+        // Left null when the engine sent null, which is the whole point of
+        // them: null means nobody watched the run and zero means the run's
+        // clients never overlapped. `whole` returns null for an absent value,
+        // so no coalescing here is what keeps the two apart all the way into
+        // the column.
+        peakOpenTransactions: whole(r.peak_open_transactions, 0, 1_000_000),
+        backendsSeen: whole(r.backends_seen, 0, 1_000_000),
       }
     case 'exploration':
       return {
@@ -413,7 +462,11 @@ export async function writeReport(
       sessions, iterations, scheduled_ms,
       workflows, workflows_passed, workflows_failed,
       workflows_flaky, workflows_blocked, workflows_unverified, steps,
-      findings, goals, goals_reached, duration_ms, source, error_reasons, refused_routes)
+      findings, goals, goals_reached,
+      clients, transactions, transactions_failed, retries, deadlocks,
+      serialization_failures, statements_run, statements_failed, rows_touched, tps,
+      peak_open_transactions, backends_seen,
+      duration_ms, source, error_reasons, refused_routes)
     VALUES (
       ${input.orgId}, ${input.runId}, ${input.kind}::workload_kind,
       ${a.requests}, ${a.failures}, ${a.errorRate},
@@ -422,7 +475,12 @@ export async function writeReport(
       ${a.sessions}, ${a.iterations}, ${a.scheduledMs},
       ${a.workflows}, ${a.workflowsPassed}, ${a.workflowsFailed},
       ${a.workflowsFlaky}, ${a.workflowsBlocked}, ${a.workflowsUnverified}, ${a.steps},
-      ${a.findings}, ${a.goals}, ${a.goalsReached}, ${a.durationMs}, ${a.source},
+      ${a.findings}, ${a.goals}, ${a.goalsReached},
+      ${a.clients}, ${a.transactions}, ${a.transactionsFailed}, ${a.retries}, ${a.deadlocks},
+      ${a.serializationFailures}, ${a.statementsRun}, ${a.statementsFailed},
+      ${a.rowsTouched}, ${a.tps},
+      ${a.peakOpenTransactions}, ${a.backendsSeen},
+      ${a.durationMs}, ${a.source},
       ${JSON.stringify(a.errorReasons)}::jsonb,
       -- sql.param rather than the bare array. The template inlines a JavaScript
       -- array as a parenthesised value list, so an empty one renders as an empty

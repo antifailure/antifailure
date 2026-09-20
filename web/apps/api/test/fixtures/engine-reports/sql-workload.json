@@ -1,0 +1,144 @@
+{
+  "detail": "4212 transactions committed at 70.2 a second, 18 failed, 31 retried, 1 threshold exceeded",
+  "duration_ms": 0,
+  "engine": {
+    "commit": "4206c1ad",
+    "edition": "oss",
+    "version": "0.0.0-dev"
+  },
+  "environment": {
+    "branch": "w-sql-workload",
+    "env_id": "aftest-04e645",
+    "url": "http://127.0.0.1:8081"
+  },
+  "evidence": [],
+  "finished_at": "2026-09-20T06:40:00Z",
+  "kind": "sql_workload",
+  "outcome": "succeeded",
+  "reproduce": {
+    "argv": [
+      "af",
+      "load",
+      "sql",
+      "--duration",
+      "1m0s",
+      "--seed",
+      "7",
+      "--concurrency",
+      "8"
+    ],
+    "command": "af load sql --duration 1m0s --seed 7 --concurrency 8",
+    "manifest_digest": "sha256:0d1e2f",
+    "note": "run this from the repository root, against an environment that is already up for the same branch"
+  },
+  "result": {
+    "achieved_rate": null,
+    "backends_seen": 8,
+    "clients": 8,
+    "deadlocks": 22,
+    "duration_ms": 60000,
+    "error_rate": 0.004255,
+    "errors": {
+      "SQLSTATE 23505": 18,
+      "deadlock": 22,
+      "serialization failure": 9
+    },
+    "failures": null,
+    "findings": null,
+    "goals": null,
+    "goals_reached": null,
+    "iterations": null,
+    "max_ms": 744,
+    "p50_ms": 22.4,
+    "p90_ms": 61.8,
+    "p95_ms": 96.3,
+    "p99_ms": 210.5,
+    "peak_open_transactions": 8,
+    "refused_routes": [
+      "write_not_allowed: DELETE FROM order_lines WHERE order_id = $1"
+    ],
+    "requests": null,
+    "retries": 31,
+    "rows_touched": 51907,
+    "scheduled_ms": null,
+    "serialization_failures": 9,
+    "sessions": null,
+    "source": "statement_statistics",
+    "statements_failed": 18,
+    "statements_run": 8424,
+    "steps": null,
+    "target_rate": null,
+    "tps": 70.2,
+    "transactions": 4212,
+    "transactions_failed": 18,
+    "workflows": null,
+    "workflows_blocked": null,
+    "workflows_failed": null,
+    "workflows_flaky": null,
+    "workflows_passed": null,
+    "workflows_unverified": null
+  },
+  "routes": [
+    {
+      "baseline_p95_ms": 3.471,
+      "errors": 18,
+      "max_ms": 744,
+      "p50_ms": 31.7,
+      "p90_ms": 88.4,
+      "p95_increase": 0.11,
+      "p95_ms": 140.1,
+      "p99_ms": 260.9,
+      "position": 0,
+      "route": "UPDATE orders SET status = $1 WHERE id = $2",
+      "scenario": "UPDATE orders SET status = $1 WHERE id = $2",
+      "sent": 1032
+    },
+    {
+      "baseline_p95_ms": 0.685,
+      "errors": 0,
+      "max_ms": 520,
+      "p50_ms": 18.1,
+      "p90_ms": 44.2,
+      "p95_increase": 0.42,
+      "p95_ms": 71.5,
+      "p99_ms": 160.2,
+      "position": 1,
+      "route": "SELECT id, status FROM orders WHERE id = $1",
+      "scenario": "SELECT id, status FROM orders WHERE id = $1",
+      "sent": 3180
+    }
+  ],
+  "schema": "antifailure.workload.result/v1",
+  "started_at": "2026-09-20T06:40:00Z",
+  "state": "succeeded",
+  "thresholds": [
+    {
+      "measure": "error_rate",
+      "name": "error_rate",
+      "observed": 0.004255,
+      "position": 0,
+      "threshold": 0.01,
+      "value": "pass"
+    },
+    {
+      "measure": "mean_increase",
+      "name": "mean_increase",
+      "observed": 0.42,
+      "position": 1,
+      "scope": "SELECT id, status FROM orders WHERE id = $1",
+      "threshold": 0.25,
+      "value": "fail"
+    },
+    {
+      "measure": "mean_increase",
+      "name": "mean_increase",
+      "observed": 0.11,
+      "position": 2,
+      "scope": "UPDATE orders SET status = $1 WHERE id = $2",
+      "threshold": 0.25,
+      "value": "pass"
+    }
+  ],
+  "verdict": "fail",
+  "workload_run_id": "3c0f1f6e-0f2e-4a1c-9d3a-9b0b7a4b1f11"
+}

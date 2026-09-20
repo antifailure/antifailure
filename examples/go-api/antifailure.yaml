@@ -232,3 +232,29 @@ invariants:
     description: An order's total is always positive, whatever the masking did to it.
     sql: |
       SELECT id AS order_id, total_cents FROM orders WHERE total_cents <= 0
+
+# A concurrent SQL workload, run by `af load sql` and by nothing else.
+#
+# Everything else here reaches the database through the API, so every number
+# those produce is the API's latency with the database somewhere inside it.
+# That is the right measurement for a change to a handler and the wrong one for
+# a change to an index or a lock. This one opens connections and runs
+# transactions on them, so it measures the database.
+#
+# There is no `enabled` key, deliberately. Declaring the block is what turns it
+# on, because `af load sql` is the only thing that runs it, and a flag nothing
+# reads would be one more promise the reference makes and the engine keeps by
+# accident.
+load:
+  sql:
+    source: declared
+    script: workload.yaml
+    clients: 8
+    duration: 30s
+    # A tenth of a second between transactions, so the clients hold their
+    # connections the way an application holds them rather than saturating the
+    # server. Zero measures the server at its ceiling, which is a different and
+    # also useful question.
+    think_time: 100ms
+    thresholds:
+      error_rate: 0.01

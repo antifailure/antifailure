@@ -160,6 +160,16 @@ type Reproduce struct {
 // own CHECK constraint refuses a row shaped like the wrong kind.
 type Measured struct {
 	// Sent traffic. observed_load and http_scenario only.
+	//
+	// The five latency columns are the exception to the "only" above: a
+	// sql_workload fills them with the latency of a committed TRANSACTION,
+	// which is the unit of work that kind measures the way a request is the
+	// unit the two above measure. They are shared rather than duplicated
+	// because a percentile is a percentile, compare.go differences them by
+	// name, and a second set of columns holding milliseconds would be a second
+	// thing for every consumer to learn and a second place to disagree.
+	// Requests itself stays null for a SQL workload: it counts requests, and a
+	// SQL workload sends none.
 	Requests     *int     `json:"requests"`
 	Failures     *int     `json:"failures"`
 	ErrorRate    *float64 `json:"error_rate"`
@@ -197,6 +207,42 @@ type Measured struct {
 	Goals        *int `json:"goals"`
 	GoalsReached *int `json:"goals_reached"`
 	Findings     *int `json:"findings"`
+
+	// A concurrent SQL workload. sql_workload only.
+	//
+	// Transactions and TransactionsFailed rather than one total, and Retries
+	// beside them rather than folded into either, because the three are three
+	// different facts about a concurrent run. A transaction that deadlocked
+	// and committed on its second attempt is a success whose run is contended,
+	// and a shape that could only say "committed" or "failed" would report it
+	// as a clean run.
+	Clients               *int `json:"clients"`
+	Transactions          *int `json:"transactions"`
+	TransactionsFailed    *int `json:"transactions_failed"`
+	Retries               *int `json:"retries"`
+	Deadlocks             *int `json:"deadlocks"`
+	SerializationFailures *int `json:"serialization_failures"`
+	StatementsRun         *int `json:"statements_run"`
+	StatementsFailed      *int `json:"statements_failed"`
+	// RowsTouched is how many rows the statements returned or changed. It is
+	// the column that says whether a derived mix's generated parameters
+	// matched anything, and without it a run that found nothing quickly reads
+	// as a fast one.
+	RowsTouched *int `json:"rows_touched"`
+	// TPS is committed transactions per second, counted over commits alone. A
+	// rate that counted failures would report a database refusing every
+	// transaction instantly as the fastest one anybody measured.
+	TPS *float64 `json:"tps"`
+	// PeakOpenTransactions and BackendsSeen are what the SERVER reported about
+	// this run while it was going: the most of its own backends that were
+	// inside a transaction at one instant, and how many distinct backends it
+	// ever held. They are the evidence that a run asking for eight clients
+	// really had eight sessions and that they overlapped, and they are nil
+	// rather than zero when nobody looked, because "no overlap" and "not
+	// measured" are different answers and a console cannot tell them apart
+	// from a zero.
+	PeakOpenTransactions *int `json:"peak_open_transactions"`
+	BackendsSeen         *int `json:"backends_seen"`
 
 	DurationMs *float64 `json:"duration_ms"`
 	// Source is where the traffic mix came from, so a reader can tell

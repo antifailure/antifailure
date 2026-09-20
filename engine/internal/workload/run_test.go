@@ -16,6 +16,7 @@ import (
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/explore"
 	"github.com/antifailure/antifailure/engine/internal/load"
+	"github.com/antifailure/antifailure/engine/internal/sqlload"
 	"github.com/antifailure/antifailure/engine/internal/workload"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 )
@@ -67,8 +68,12 @@ type fakeRunner struct {
 	testErr       error
 	exploreReport *explore.Report
 	exploreErr    error
+	sqlResult     *sqlload.Result
+	sqlPlan       *env.SQLLoadPlan
+	sqlErr        error
 
-	p95Increase, errorRate float64
+	p95Increase, errorRate             float64
+	sqlMeanIncrease, sqlErrorRateLimit float64
 
 	teardown     *env.Teardown
 	teardownErr  error
@@ -141,7 +146,21 @@ func (f *fakeRunner) Explore(ctx context.Context, _ env.ExploreOptions) (*explor
 	return f.exploreReport, f.exploreErr
 }
 
+func (f *fakeRunner) SQLLoad(ctx context.Context, _ env.SQLLoadOptions) (*sqlload.Result, *env.SQLLoadPlan, error) {
+	if err := f.wait(ctx); err != nil {
+		// The real runner returns what it measured before it stopped alongside
+		// the context error, so this one does too or the partial result path
+		// is exercised by nothing.
+		return f.sqlResult, f.sqlPlan, err
+	}
+	return f.sqlResult, f.sqlPlan, f.sqlErr
+}
+
 func (f *fakeRunner) Thresholds() (float64, float64) { return f.p95Increase, f.errorRate }
+
+func (f *fakeRunner) SQLThresholds() (float64, float64) {
+	return f.sqlMeanIncrease, f.sqlErrorRateLimit
+}
 
 func (f *fakeRunner) Down(ctx context.Context) (*env.Teardown, error) {
 	f.downCalls++

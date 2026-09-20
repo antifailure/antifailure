@@ -991,6 +991,7 @@ Subcommands:
 - [`af load run`](#af-load-run) Run the full load profile.
 - [`af load scenario`](#af-load-scenario) Run the declared journeys against the environment.
 - [`af load smoke`](#af-load-smoke) Send a short burst, to check the environment answers under any load at all.
+- [`af load sql`](#af-load-sql) Run a concurrent SQL workload against the branch's database.
 
 ### `af load run`
 
@@ -1062,6 +1063,54 @@ af load smoke
 | `--duration` | `10s` | How long to send for. |
 | `--scale` | `0.1` | Multiplier on production's rate. |
 | `--seed` | `1` | Makes two runs send the same sequence. |
+
+### `af load sql`
+
+Run a concurrent SQL workload against the branch's database.
+
+Clients, each on its own connection, running whole transactions against the
+database directly rather than through the application.
+
+Everything else this engine sends goes over HTTP, so the number it reports is
+the application's latency with the database somewhere inside it. That is the
+right measurement for an application change and the wrong one for a database
+change. Somebody changing an index, a lock, a storage parameter or a query
+wants transactions per second and statement latency, and can only reach them
+through whatever the application happens to do on a route they can reach.
+
+The statements come from a document in the repository, or from
+pg_stat_statements on the branch, which is the traffic that really ran weighted
+by how often it ran. A derived mix cannot recover the values, because the
+statistics normalise them away, so it asks the server for the parameter types
+and generates values of those types. It refuses a write unless the manifest
+allows one, and every run reports the rows its statements actually touched, so
+a reader can tell a fast query from a query that found nothing.
+
+The run reports how many of its own backends the server had inside a
+transaction at one instant, read from pg_stat_activity while it was going. N
+clients are not N concurrent sessions and that number is the evidence rather
+than the claim.
+
+```
+af load sql [flags]
+```
+
+```
+# Clients on their own connections, running transactions against the database.
+af load sql
+af load sql --concurrency 16 --duration 2m --think-time 20ms
+af load sql --only 'read one order' --transactions 500
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--branch` | - | Branch to run against, defaulting to the checked out one. |
+| `--concurrency` | `8` | How many clients run at once, each on its own connection. |
+| `--duration` | `1m0s` | How long to run for. |
+| `--only` | - | Run only these transactions, by name. Repeat the flag for several. |
+| `--seed` | `1` | Makes two runs execute the same sequence. |
+| `--think-time` | `0s` | How long a client waits between transactions. |
+| `--transactions` | `0` | How many transactions each client runs, instead of a duration. |
 
 ### `af login`
 

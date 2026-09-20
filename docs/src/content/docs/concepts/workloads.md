@@ -2,7 +2,7 @@
 title: Workloads
 description: A saved selection out of your manifest, run through the command that names it, with the exact command that reproduces the result.
 sidebar:
-  order: 15
+  order: 16
 ---
 
 A workload is a saved selection out of your manifest plus the knobs the command
@@ -26,7 +26,7 @@ af workload promote   <report.json> --only --persona --seed --against
 af workload compare   <baseline.json> <candidate.json>
 ```
 
-## Four kinds, and they stay four
+## Five kinds, and they stay separate
 
 | Kind | Runs through | Measures |
 |---|---|---|
@@ -34,12 +34,20 @@ af workload compare   <baseline.json> <candidate.json>
 | `http_scenario` | `af load scenario` | a declared journey with waits, sessions and assertions. An order, no browser. |
 | `browser_workflow` | `af test` | declared workflows driven through a real browser. Steps and a verdict, no request rate. |
 | `exploration` | `af explore` | a seeded wander towards a goal. Findings rather than a pass. |
+| `sql_workload` | `af load sql` | clients on their own connections running transactions against the database. Throughput and statement latency, no application. |
 
 There is no shared representation underneath them and there is not going to be
 one. A mix has no order, a journey has no browser, a workflow has no request
-rate, and an exploration has no pass. A single type that all four compiled into
-would have to be the union of what none of them share, and every reader of it
-would then have to ask which fields are real for the run in front of them.
+rate, an exploration has no pass, and a SQL workload never touches the
+application. A single type that all of them compiled into would have to be the
+union of what none of them share, and every reader of it would then have to ask
+which fields are real for the run in front of them.
+
+The fifth is the clearest case for that rule rather than an exception to it.
+The first four all go over HTTP, so each of them measures the application with
+the database somewhere inside the number. [A SQL
+workload](/docs/concepts/sql-workloads) measures the database, which is a
+different thing to know and not a fifth flavour of the same one.
 
 ## The result carries the command that reproduces it
 
@@ -72,17 +80,20 @@ author wrote, and nothing in the result would say so.
 The rule is exactly that, with nothing added: a knob is refused when, and only
 when, the command this kind runs has no flag for it.
 
-| Knob | `observed_load` | `http_scenario` | `browser_workflow` | `exploration` |
-|---|---|---|---|---|
-| `--select` | refused | required | optional, empty means all | required |
-| `--duration` | yes | refused | refused | refused |
-| `--scale` | yes | refused | refused | refused |
-| `--seed` | yes, a number | yes, a number | refused | yes, free text |
-| `--concurrency` | refused | yes | refused | refused |
+| Knob | `observed_load` | `http_scenario` | `browser_workflow` | `exploration` | `sql_workload` |
+|---|---|---|---|---|---|
+| `--select` | refused | required | optional, empty means all | required | optional, empty means all |
+| `--duration` | yes | refused | refused | refused | yes |
+| `--scale` | yes | refused | refused | refused | refused |
+| `--seed` | yes, a number | yes, a number | refused | yes, free text | yes, a number |
+| `--concurrency` | refused | yes | refused | refused | yes, as a client count |
 
 An empty selection is refused for `http_scenario` and `exploration`, because
 those commands would then run everything the manifest declares, and a manifest
-that gains a scenario would silently change what a saved workload runs.
+that gains a scenario would silently change what a saved workload runs. It is
+allowed for `sql_workload` for the opposite reason: the transactions of one mix
+are weighted against each other inside one run rather than being separate runs,
+so running all of them is the ordinary request rather than a different one.
 
 ## What the exit code means
 

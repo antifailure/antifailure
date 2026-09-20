@@ -138,6 +138,11 @@ var commandExamples = map[string]string{
 		"af load scenario\n" +
 		"af load scenario --only checkout --concurrency 20",
 	"af load smoke": "af load smoke",
+	"af load sql": "" +
+		"# Clients on their own connections, running transactions against the database.\n" +
+		"af load sql\n" +
+		"af load sql --concurrency 16 --duration 2m --think-time 20ms\n" +
+		"af load sql --only 'read one order' --transactions 500",
 	"af login": "" +
 		"af login\n" +
 		"af login --control-plane https://app.antifailure.dev --no-browser",

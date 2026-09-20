@@ -7,9 +7,12 @@ import {
   AVAILABILITY_FACTS,
   REASON_NOTES,
   VERDICT_FACTS,
+  attemptNoun,
+  committedNothing,
   count,
   duration,
   increase,
+  neverOverlapped,
   isNumericMeasure,
   measured,
   ms,
@@ -172,6 +175,106 @@ function Wander({ result }: { result: RunResult }) {
 }
 
 /**
+ * The tiles for a concurrent SQL workload.
+ *
+ * TWO BANNERS BEFORE THE NUMBERS, and each is a run this page would otherwise
+ * draw as the best one it has ever rendered.
+ *
+ * A run that committed nothing has a throughput of zero and a latency of zero,
+ * and every threshold it carries passed over an empty measurement. Drawn as
+ * tiles it is a run with no failed thresholds.
+ *
+ * A run whose clients never overlapped measured latency under no contention,
+ * whatever its client count said, which is the one thing a concurrent workload
+ * exists to measure. The number behind that banner comes from the server's own
+ * pg_stat_activity rather than from the engine's client count, and it is null
+ * rather than zero when nobody watched, so "nobody looked" never renders as
+ * "no overlap".
+ */
+function SQLWorkload({ result }: { result: RunResult }) {
+  const empty = committedNothing(result);
+  const flat = neverOverlapped(result);
+  const failed = (result.transactionsFailed ?? 0) > 0;
+  const contended = (result.deadlocks ?? 0) > 0 || (result.serializationFailures ?? 0) > 0;
+  const foundNothing = result.rowsTouched !== null && result.rowsTouched === 0;
+
+  return (
+    <>
+      {empty ? (
+        <p
+          role="status"
+          className="border-b border-rule bg-[rgba(150,32,32,0.07)] px-4 py-2.5 text-[12.5px] leading-6 text-fail"
+        >
+          This run committed no transaction, so it measured neither a throughput nor a latency.
+          Every threshold it carries passed over an empty measurement, which is not the same as
+          passing.
+        </p>
+      ) : null}
+      {flat ? (
+        <p
+          role="status"
+          className="border-b border-rule bg-[rgba(138,90,0,0.07)] px-4 py-2.5 text-[12.5px] leading-6 text-warn"
+        >
+          The server never had more than one of this run&apos;s transactions open at a time, so
+          nothing here was measured under contention. The client count says what was asked for;
+          this is what the database saw.
+        </p>
+      ) : null}
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-5 px-4 py-4 sm:grid-cols-4">
+        <Stat
+          label="Transactions a second"
+          value={rate(result.tps)}
+          note="committed only"
+          tone={empty ? "fail" : undefined}
+        />
+        <Stat label="Committed" value={count(result.transactions)} />
+        <Stat
+          label="Failed"
+          value={count(result.transactionsFailed)}
+          tone={failed ? "fail" : undefined}
+        />
+        <Stat
+          label="Retried"
+          value={count(result.retries)}
+          note="after a deadlock or a lost race"
+          tone={contended ? "warn" : undefined}
+        />
+        <Stat
+          label="Clients"
+          value={count(result.clients)}
+          note={
+            result.backendsSeen === null
+              ? "the server was not watched"
+              : `${count(result.backendsSeen)} sessions on the server`
+          }
+        />
+        <Stat
+          label="Open at once"
+          value={count(result.peakOpenTransactions)}
+          note={
+            result.peakOpenTransactions === null
+              ? "nobody sampled pg_stat_activity"
+              : "transactions the server held at one instant"
+          }
+          tone={flat ? "warn" : undefined}
+        />
+        <Stat
+          label="Rows touched"
+          value={count(result.rowsTouched)}
+          note={
+            foundNothing
+              ? "the statements matched nothing, so this is the cost of finding nothing"
+              : "returned or changed"
+          }
+          tone={foundNothing ? "warn" : undefined}
+        />
+        <Stat label="Took" value={duration(result.durationMs)} />
+      </dl>
+    </>
+  );
+}
+
+/**
  * The measurements, by kind.
  *
  * A switch and not a superset. The schema carries a CHECK refusing a result of
@@ -179,11 +282,25 @@ function Wander({ result }: { result: RunResult }) {
  * and an observed mix has no workflow count. Drawing all of them and letting
  * the empty ones render as dashes would present a column that does not apply
  * as a measurement that failed.
+ *
+ * Named kinds rather than a fall through to Traffic, which is what this was. A
+ * kind the enum gains reached the traffic tiles, so a SQL workload would have
+ * been drawn with a request count, an achieved rate and an error rate against
+ * a target it never had: a latency chart over numbers that are not those
+ * numbers, which is the exact failure the schema's CHECK exists to prevent one
+ * layer down.
  */
 export function ResultSummary({ result }: { result: RunResult }) {
-  if (result.kind === "browser_workflow") return <Workflows result={result} />;
-  if (result.kind === "exploration") return <Wander result={result} />;
-  return <Traffic result={result} />;
+  switch (result.kind) {
+    case "browser_workflow":
+      return <Workflows result={result} />;
+    case "exploration":
+      return <Wander result={result} />;
+    case "sql_workload":
+      return <SQLWorkload result={result} />;
+    default:
+      return <Traffic result={result} />;
+  }
 }
 
 /* -------------------------------------------------------------------------
@@ -204,8 +321,16 @@ export function ResultSummary({ result }: { result: RunResult }) {
  * reason the console has not been taught is still the truth about the run.
  */
 export function ErrorReasons({ result }: { result: RunResult }) {
+  // What the count counts, which is not the same word for every kind: a mix
+  // counts requests and a SQL workload counts transaction attempts.
+  const noun = attemptNoun(result.kind);
   if (result.errorReasons.length === 0) {
-    return (
+    return result.kind === "sql_workload" ? (
+      <Empty title="No failed transactions">
+        Every transaction this run attempted committed, and no deadlock or lost
+        race was retried on the way.
+      </Empty>
+    ) : (
       <Empty title="No failed requests">
         Every request this run sent came back without a transport error and
         without a status at or above 500.
@@ -219,7 +344,7 @@ export function ErrorReasons({ result }: { result: RunResult }) {
         <thead>
           <tr>
             <Th>Reason</Th>
-            <Th numeric>Requests</Th>
+            <Th numeric>{noun}</Th>
             <Th>Share of errors</Th>
             <Th>What it usually means</Th>
           </tr>
@@ -228,7 +353,7 @@ export function ErrorReasons({ result }: { result: RunResult }) {
           {result.errorReasons.map((e) => (
             <Row key={e.reason}>
               <Td mono>{e.reason}</Td>
-              <Td label="Requests" numeric>
+              <Td label={noun} numeric>
                 {count(e.count)}
               </Td>
               <Td label="Share">
@@ -255,7 +380,13 @@ export function ErrorReasons({ result }: { result: RunResult }) {
                   <span className="text-dim">
                     {/^\d{3}$/.test(e.reason)
                       ? "The application answered with this status."
-                      : "A reason this console has no note for. It came from the runner as written."}
+                      : /^SQLSTATE /.test(e.reason)
+                        ? // The engine names the SQLSTATEs a concurrent workload
+                          // produces and passes the rest through as the code. A
+                          // code is not nothing: it is the one string that finds
+                          // the answer, so say where rather than shrugging.
+                          `The server refused the statement with this SQLSTATE, which this console has no note for. Postgres lists every code in Appendix A of its documentation.`
+                        : "A reason this console has no note for. It came from the runner as written."}
                   </span>
                 )}
               </Td>

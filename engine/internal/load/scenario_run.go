@@ -376,7 +376,7 @@ func (a Assertion) reading(m *scenarioMeter) (threshold, observed *float64) {
 	case a.P95BelowMs > 0:
 		threshold = &a.P95BelowMs
 		if ok && stat.sent > 0 {
-			p95 := percentiles(stat.samples).P95Ms
+			p95 := Percentiles(stat.samples).P95Ms
 			observed = &p95
 		}
 	case a.ErrorRateBelow > 0:
@@ -456,7 +456,7 @@ func evaluateVerdict(a Assertion, m *scenarioMeter) AssertionResult {
 				stat.failed, stat.sent, scope, stat.reasons())}
 
 	case a.P95BelowMs > 0:
-		measured := percentiles(stat.samples).P95Ms
+		measured := Percentiles(stat.samples).P95Ms
 		if measured < a.P95BelowMs {
 			return AssertionResult{Name: a.Name, Verdict: VerdictPass,
 				Detail: fmt.Sprintf("%s served a p95 of %.0fms, under %.0fms", scope, measured, a.P95BelowMs)}
@@ -630,11 +630,11 @@ func (m *scenarioMeter) fill(r *ScenarioResult) {
 	defer m.mu.Unlock()
 	r.Sent = m.all.sent
 	r.DurationMs = float64(m.last.Microseconds()) / 1000
-	r.Overall = percentiles(m.all.samples)
+	r.Overall = Percentiles(m.all.samples)
 	for name, stat := range m.byName {
 		r.Steps = append(r.Steps, RouteResult{
 			Route: name, Sent: stat.sent, Errors: stat.failed,
-			Latency: percentiles(stat.samples),
+			Latency: Percentiles(stat.samples),
 		})
 	}
 	sort.Slice(r.Steps, func(i, j int) bool {
@@ -658,5 +658,5 @@ func totals(meters []*scenarioMeter) (sent, failed int, p95 float64) {
 		failed += stat.failed
 		all = append(all, stat.samples...)
 	}
-	return sent, failed, percentiles(all).P95Ms
+	return sent, failed, Percentiles(all).P95Ms
 }

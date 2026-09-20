@@ -29,6 +29,23 @@ the engine renames a field; these fail the day the decoder stops reading one.
 To refresh them after an engine change, write a test in
 `engine/internal/cli` that builds a `*workload.Result` through
 `workload.Execute` with a fake `workload.Runner`, calls `hostedPayload`, and
-writes `json.MarshalIndent` of the result to these paths. Keep all four kinds:
-two of them carried the defect and the other two are what proves the fix did
-not simply move it.
+writes `json.MarshalIndent` of the result to these paths. Keep every kind: two
+of them carried the defect and the others are what proves the fix did not
+simply move it.
+
+`sql-workload.json` is the first one written that way, and its generator is a
+CHECK rather than only a writer.
+`TestTheSQLWorkloadWireFixtureIsWhatThisEngineWouldSend` in
+`engine/internal/cli/workload_fixture_test.go` produces the document and
+requires the checked in bytes to equal it, so the day a field in
+`workload.Measured` is renamed the engine's suite goes red in the same commit.
+Regenerate it with:
+
+    go test ./internal/cli \
+      -run TestTheSQLWorkloadWireFixtureIsWhatThisEngineWouldSend \
+      -update-wire-fixture
+
+The other four are deliberately left alone. They carry timestamps, an engine
+commit and numbers from the run that produced them, and rewriting them from a
+fixture somebody invented would replace real bytes with synthetic ones, which
+is the property this file exists to protect.

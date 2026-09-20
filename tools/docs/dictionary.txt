@@ -34,6 +34,7 @@ gitleaks
 golangci
 goldens
 goleak
+goroutines
 gosec
 govulncheck
 hardlinks
@@ -50,6 +51,8 @@ millicores
 ndjson
 neon
 partitionable
+pgbench
+pgbench's
 pgbouncer
 pgurl
 pgvector

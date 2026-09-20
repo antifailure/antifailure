@@ -1458,7 +1458,7 @@ Related: [masking](/docs/concepts/masking), [verification](/docs/concepts/verifi
 title: Insights
 description: What Postgres itself can tell you about a change, before anybody clicks anything.
 sidebar:
-  order: 13
+  order: 14
 ---
 
 A branch is a real database with production's shape in it, which makes some
@@ -2721,7 +2721,20 @@ Load runs against environments Antifailure made, and refuses anything else.
 This is a load generator with a production traffic shape pointed at it; the one
 thing it must never do is point at production.
 
-Related: [insights](/docs/concepts/insights), [scheduling](/docs/concepts/scheduling).
+## Everything on this page goes over HTTP
+
+Which is the right measurement for a change to a handler and the wrong one for
+a change to an index, a lock or a query. A mix, a scenario and a workflow all
+reach the database through the application, so the number each reports is the
+application's latency with the database somewhere inside it.
+
+[A SQL workload](/docs/concepts/sql-workloads) is the other half: clients on
+their own connections running whole transactions against the branch, reported
+as transactions per second and statement latency. It runs under ` + "`" + `af load sql` + "`" + `
+and is configured under ` + "`" + `load.sql` + "`" + `.
+
+Related: [SQL workloads](/docs/concepts/sql-workloads),
+[insights](/docs/concepts/insights), [scheduling](/docs/concepts/scheduling).
 `,
 	"concepts/masking.md": `---
 title: Masking
@@ -3081,7 +3094,7 @@ Related: [transforms](/docs/reference/transforms), [goldens](/docs/concepts/gold
 title: The differential oracle
 description: Run a change beside the version it replaces, on the same data, and report what the two did differently.
 sidebar:
-  order: 16
+  order: 17
 ---
 
 A test says whether the application does what you told it to. The oracle says
@@ -3394,7 +3407,7 @@ check they turned off, and ` + "`" + `af oracle` + "`" + ` says so and exits zer
 title: Scheduling
 description: How runs are ordered when there is more work than capacity.
 sidebar:
-  order: 14
+  order: 15
 ---
 
 A busy repository asks for more environments than there is capacity for. The
@@ -3470,7 +3483,7 @@ Related: [provider limits](/docs/providers/limits), [the journal](/docs/concepts
 title: Security checks
 description: How Antifailure routes security check families at exactly what a change touched, and the boundary every finding respects.
 sidebar:
-  order: 18
+  order: 19
 ---
 
 A security check is an ordinary finding in a new namespace. It rehearses the
@@ -3539,6 +3552,282 @@ already in the store, grouped by family and filterable by level and location.
 It returns the rule, the level, the title, the bounded description, the fix and
 the location, and never a value, so the loop is read a finding, read its fix
 and its location, change the code, re-run the rehearsal, and read again.
+`,
+	"concepts/sql-workloads.md": `---
+title: SQL workloads
+description: Clients on their own connections running transactions against the branch, so a database change is measured as a database change.
+sidebar:
+  order: 13
+---
+
+Every other kind of traffic in this product goes over HTTP. A load run sends a
+weighted mix of requests, a scenario walks a journey, a workflow drives a
+browser. All three reach the database only through the application, so the
+number they report is the application's latency with the database somewhere
+inside it.
+
+That is the right measurement for an application change and the wrong one for a
+database change. If you are altering an index, a lock, a storage parameter or a
+query, you want transactions per second and the cost of one statement. The HTTP
+path can answer that only through whatever the application happens to do on a
+route you can reach.
+
+A SQL workload opens connections to the branch and runs statements on them. N
+clients, each on its own connection, each running whole transactions, with think
+time between them and a seed that makes two runs execute the same sequence.
+
+` + "`" + "`" + "`" + `yaml
+load:
+  sql:
+    source: statement_statistics
+    clients: 16
+    duration: 2m
+    think_time: 10ms
+` + "`" + "`" + "`" + `
+
+` + "`" + "`" + "`" + `
+af load sql
+` + "`" + "`" + "`" + `
+
+## Where the statements come from
+
+Two sources, and they answer different questions.
+
+### Declared
+
+A document in the repository holds the transactions. You write the statements
+and say where their parameter values come from, so it is exact, and it is the
+only way to rehearse a write path honestly: you are the only one who knows which
+values are legal.
+
+` + "`" + "`" + "`" + `yaml
+load:
+  sql:
+    source: declared
+    script: db/workload.yaml
+    clients: 8
+    duration: 60s
+` + "`" + "`" + "`" + `
+
+` + "`" + "`" + "`" + `yaml
+sql_workload: storefront
+description: the read path a storefront runs
+transactions:
+  - transaction: read one order
+    weight: 8
+    statements:
+      - label: order by id
+        sql: SELECT id, status, total FROM orders WHERE id = $1
+        params:
+          - query: SELECT id FROM orders
+  - transaction: a merchant page
+    weight: 2
+    statements:
+      - label: orders for a merchant
+        sql: SELECT id, total FROM orders WHERE merchant_id = $1 ORDER BY created_at DESC LIMIT 20
+        params:
+          - int: {min: 1, max: 200}
+      - label: the merchant
+        sql: SELECT name FROM merchants WHERE id = $1
+        params:
+          - int: {min: 1, max: 200}
+` + "`" + "`" + "`" + `
+
+A transaction is an ordered list of statements that run inside one ` + "`" + `BEGIN` + "`" + ` and
+` + "`" + `COMMIT` + "`" + `, because that is the unit a database's throughput is measured in and
+because a lock held across two statements is the thing worth rehearsing. The
+weights decide how often each one is picked, relative to the others.
+
+A parameter sets exactly one of three things:
+
+| Parameter | What it draws from |
+| --------- | ------------------ |
+| ` + "`" + `int: {min, max}` + "`" + ` | A whole number in the range, inclusive |
+| ` + "`" + `text: {values: [...]}` + "`" + ` | One of the strings you list |
+| ` + "`" + `query: SELECT ...` + "`" + ` | The values the query's first column returned when the run started |
+
+` + "`" + `query` + "`" + ` is the one that turns a benchmark into a rehearsal. An id drawn from the
+table is an id that exists, so the statement reads a row rather than proving
+that an empty result is fast. The query runs once when the run starts, on one
+connection, and every client draws from the same pool, so the seed alone decides
+which value each client picks. A query that returns no rows fails the run before
+anything executes, because a statement bound to nothing measures nothing.
+
+The statements are sent to the server unchanged and the values are bound by the
+driver. There is no substitution language, so a value can never become syntax,
+and the statement in the document is the statement you can paste into ` + "`" + `psql` + "`" + `.
+
+### Derived from ` + "`" + `pg_stat_statements` + "`" + `
+
+The other source reads the statistics on the branch and takes the statements
+that actually ran, weighted by how often they ran. The mix is your own traffic
+rather than a shape somebody invented, and the mean the statistics recorded for
+each statement becomes a baseline.
+
+` + "`" + "`" + "`" + `yaml
+load:
+  sql:
+    source: statement_statistics
+    max_statements: 20
+    thresholds:
+      mean_increase: 0.25
+` + "`" + "`" + "`" + `
+
+What it cannot do is recover the parameter values, because ` + "`" + `pg_stat_statements` + "`" + `
+stores the normalised text with every literal replaced. Two things follow, and
+neither is hidden.
+
+**A write is refused unless you ask for it.** A generated value in a ` + "`" + `SET` + "`" + `
+clause writes nonsense and a generated value in the ` + "`" + `WHERE` + "`" + ` clause of a ` + "`" + `DELETE` + "`" + `
+either deletes nothing or deletes the wrong row. Set ` + "`" + `writes: true` + "`" + ` when the
+branch is disposable and you want them replayed anyway. Anything that is not a
+query is refused under every setting.
+
+**A read is replayed with a value of the right type and not the right value.**
+The type is not guessed: the statement is prepared on the branch and the server
+reports what it inferred, so a uuid primary key comes back as a uuid. The plan,
+the locks, the buffer traffic and the storage engine are exercised faithfully,
+and the result set size is not. A selective predicate filled this way may match
+no rows, which is why every run reports the rows its statements touched. A run
+of forty thousand statements that touched nothing measured the cost of finding
+nothing, which is a real measurement of an index and is not a measurement of
+your result sets.
+
+Values can be generated for ` + "`" + `smallint` + "`" + `, ` + "`" + `integer` + "`" + `, ` + "`" + `bigint` + "`" + `, ` + "`" + `numeric` + "`" + `, ` + "`" + `real` + "`" + `,
+` + "`" + `double precision` + "`" + `, ` + "`" + `text` + "`" + `, ` + "`" + `character varying` + "`" + `, ` + "`" + `name` + "`" + `, ` + "`" + `boolean` + "`" + `, ` + "`" + `uuid` + "`" + `,
+` + "`" + `date` + "`" + ` and the two timestamp types.
+
+An integer is drawn from one to a million, a string is twelve lowercase
+letters, and a timestamp falls in the five years after 2020. Any other type is
+refused by name, so a ` + "`" + `jsonb` + "`" + ` parameter tells you it cannot be replayed rather
+than being filled with an empty object you would read as a measurement of your
+document workload.
+
+Preparing every candidate has a second use worth as much as the first. A
+statement that will not prepare does not parse against this branch's schema: a
+column your change renamed, a function it dropped, a type it altered. Those
+appear as refusals naming the server's own message, before a single transaction
+runs.
+
+## What a run measures
+
+` + "`" + "`" + "`" + `
+af load sql --concurrency 8 --duration 3s
+` + "`" + "`" + "`" + `
+
+` + "`" + "`" + "`" + `
+Running a SQL workload
+
+  declared statements, the read path a storefront runs.
+  8 clients held 8 separate sessions, and the server had 7 of them inside a transaction at once (5 executing).
+  231 transactions committed in 3.082s at 75.0 a second, 0 failed, 0 retried.
+  Transaction p50 70.0ms, p95 341.0ms, p99 511.7ms. 281 statements touched 1193 rows.
+
+  TRANSACTION      STATEMENT              RAN      P95  ROWS  ERRORS
+  a merchant page  orders for a merchant   48  235.6ms   960       0
+  a merchant page  the merchant            47  187.0ms    47       0
+  read one order   order by id            186  121.2ms   186       0
+` + "`" + "`" + "`" + `
+
+Those are measurements rather than an illustration: one run of eight clients
+against a Postgres 18 container on a busy laptop, which is why the latencies
+are what they are. The statements are listed slowest first, because that is the
+line somebody changing an index is looking for.
+
+Throughput is counted from committed transactions alone. A rate that counted
+failures would report a database refusing every transaction instantly as the
+fastest database anybody ever measured.
+
+A run that commits nothing reports no throughput and no latency, and exits
+non-zero. Every threshold it carries passed over an empty measurement, which is
+not the same as passing, so the run says so rather than leaving three zeros to
+be read as a fast run:
+
+` + "`" + "`" + "`" + `
+Running a SQL workload
+
+  declared statements.
+  2 clients held 2 separate sessions, and the server had 0 of them inside a transaction at once (0 executing).
+  0 transactions committed in 812ms at 0.0 a second, 40 failed, 0 retried.
+  Transaction p50 0.0ms, p95 0.0ms, p99 0.0ms. 0 statements touched 0 rows.
+
+  warn 40 attempts: SQLSTATE 22012
+
+  fail This run committed nothing, so it measured neither a throughput nor a latency: all 40 transaction attempts failed, so there is neither a throughput nor a latency to report.
+` + "`" + "`" + "`" + `
+
+A deadlock and a serialization failure are retried up to three times, counted,
+and reported on their own line. They are what a database says when two
+transactions wanted the same rows, and the correct response is to run the
+transaction again. A generator that did not retry would report every concurrent
+run as broken. The error rate counts transactions that failed, over commits plus
+failures, with retries in neither.
+
+### The evidence that it was concurrent
+
+N goroutines are not N database sessions, and N sessions are not N overlapping
+ones. A pool, a lock, a client library that serialises or a think time longer
+than the statement all produce a run that asked for eight clients and never had
+two statements in the server at once.
+
+So the claim is measured rather than made. A separate connection samples
+` + "`" + `pg_stat_activity` + "`" + ` while the run is going and reports three numbers: how many
+distinct backends of this run it ever saw, the most it saw executing a statement
+at one instant, and the most it saw holding a transaction open. A run whose peak
+is one did not rehearse concurrency whatever its client count said, and you can
+see that without taking anybody's word for it.
+
+The sampling understates rather than overstates. Two statements that overlapped
+entirely between two samples are not counted, which is the right direction for
+the error to go: it can never manufacture the evidence it exists to provide. A
+run whose watching connection could not open reports nothing rather than zero,
+because "no overlap" and "nobody looked" are different answers.
+
+## Thresholds
+
+` + "`" + "`" + "`" + `yaml
+load:
+  sql:
+    source: statement_statistics
+    thresholds:
+      mean_increase: 0.25
+      error_rate: 0.01
+` + "`" + "`" + "`" + `
+
+` + "`" + `error_rate` + "`" + ` is the share of transaction attempts that may fail. It is counted
+from the run's own attempts, so it needs no baseline and works under both
+sources.
+
+` + "`" + `mean_increase` + "`" + ` divides a transaction's measured mean by the mean
+` + "`" + `pg_stat_statements` + "`" + ` recorded for it. It needs a baseline, so it applies under
+` + "`" + `statement_statistics` + "`" + ` only, and the engine refuses it under ` + "`" + `declared` + "`" + ` where a
+statement somebody wrote has never run and nothing could compare it with. A
+threshold that was in force and measured nothing exits non-zero rather than
+passing, for the same reason ` + "`" + `af load run` + "`" + ` refuses an inert ` + "`" + `p95_increase` + "`" + `: a
+check that ran nothing and reported green is a check everybody believes is
+running.
+
+## What this does not do
+
+It does not bring up a second environment. Comparing two builds is
+` + "`" + `af workload compare` + "`" + `, which differences two results that already exist.
+
+It does not replace the differential oracle, which brings up a baseline
+revision, branches one golden for both sides and diffs the responses and the
+database contents. That is a much stronger claim than a throughput comparison.
+
+It does not shell out to ` + "`" + `pgbench` + "`" + `. The generator is Go, so it is present
+wherever the engine is, its output is the same result shape every other workload
+produces, and the parameter types the server reported are bound directly rather
+than being written into a second script language and hoping the quoting
+survived.
+
+It measures the database this environment is running, which is a copy of
+production's shape rather than production's hardware. Two runs against two
+environments are not a controlled experiment: the seed makes the sequence the
+same and does not make the machine, the cache or the neighbours the same. A
+difference is a difference, and calling it a regression is a judgement you or a
+threshold makes.
 `,
 	"concepts/subsetting.md": `---
 title: Subsetting
@@ -3756,7 +4045,7 @@ Related: [goldens](/docs/concepts/goldens), [masking](/docs/concepts/masking),
 title: Verdicts
 description: The six answers a run can give, which of them fail the check, and how to change that.
 sidebar:
-  order: 17
+  order: 18
 ---
 
 Every run ends in one word. Six are possible, and only one of them fails the
@@ -4093,7 +4382,7 @@ Related: [masking](/docs/concepts/masking), [goldens](/docs/concepts/goldens).
 title: Workloads
 description: A saved selection out of your manifest, run through the command that names it, with the exact command that reproduces the result.
 sidebar:
-  order: 15
+  order: 16
 ---
 
 A workload is a saved selection out of your manifest plus the knobs the command
@@ -4117,7 +4406,7 @@ af workload promote   <report.json> --only --persona --seed --against
 af workload compare   <baseline.json> <candidate.json>
 ` + "`" + "`" + "`" + `
 
-## Four kinds, and they stay four
+## Five kinds, and they stay separate
 
 | Kind | Runs through | Measures |
 |---|---|---|
@@ -4125,12 +4414,20 @@ af workload compare   <baseline.json> <candidate.json>
 | ` + "`" + `http_scenario` + "`" + ` | ` + "`" + `af load scenario` + "`" + ` | a declared journey with waits, sessions and assertions. An order, no browser. |
 | ` + "`" + `browser_workflow` + "`" + ` | ` + "`" + `af test` + "`" + ` | declared workflows driven through a real browser. Steps and a verdict, no request rate. |
 | ` + "`" + `exploration` + "`" + ` | ` + "`" + `af explore` + "`" + ` | a seeded wander towards a goal. Findings rather than a pass. |
+| ` + "`" + `sql_workload` + "`" + ` | ` + "`" + `af load sql` + "`" + ` | clients on their own connections running transactions against the database. Throughput and statement latency, no application. |
 
 There is no shared representation underneath them and there is not going to be
 one. A mix has no order, a journey has no browser, a workflow has no request
-rate, and an exploration has no pass. A single type that all four compiled into
-would have to be the union of what none of them share, and every reader of it
-would then have to ask which fields are real for the run in front of them.
+rate, an exploration has no pass, and a SQL workload never touches the
+application. A single type that all of them compiled into would have to be the
+union of what none of them share, and every reader of it would then have to ask
+which fields are real for the run in front of them.
+
+The fifth is the clearest case for that rule rather than an exception to it.
+The first four all go over HTTP, so each of them measures the application with
+the database somewhere inside the number. [A SQL
+workload](/docs/concepts/sql-workloads) measures the database, which is a
+different thing to know and not a fifth flavour of the same one.
 
 ## The result carries the command that reproduces it
 
@@ -4163,17 +4460,20 @@ author wrote, and nothing in the result would say so.
 The rule is exactly that, with nothing added: a knob is refused when, and only
 when, the command this kind runs has no flag for it.
 
-| Knob | ` + "`" + `observed_load` + "`" + ` | ` + "`" + `http_scenario` + "`" + ` | ` + "`" + `browser_workflow` + "`" + ` | ` + "`" + `exploration` + "`" + ` |
-|---|---|---|---|---|
-| ` + "`" + `--select` + "`" + ` | refused | required | optional, empty means all | required |
-| ` + "`" + `--duration` + "`" + ` | yes | refused | refused | refused |
-| ` + "`" + `--scale` + "`" + ` | yes | refused | refused | refused |
-| ` + "`" + `--seed` + "`" + ` | yes, a number | yes, a number | refused | yes, free text |
-| ` + "`" + `--concurrency` + "`" + ` | refused | yes | refused | refused |
+| Knob | ` + "`" + `observed_load` + "`" + ` | ` + "`" + `http_scenario` + "`" + ` | ` + "`" + `browser_workflow` + "`" + ` | ` + "`" + `exploration` + "`" + ` | ` + "`" + `sql_workload` + "`" + ` |
+|---|---|---|---|---|---|
+| ` + "`" + `--select` + "`" + ` | refused | required | optional, empty means all | required | optional, empty means all |
+| ` + "`" + `--duration` + "`" + ` | yes | refused | refused | refused | yes |
+| ` + "`" + `--scale` + "`" + ` | yes | refused | refused | refused | refused |
+| ` + "`" + `--seed` + "`" + ` | yes, a number | yes, a number | refused | yes, free text | yes, a number |
+| ` + "`" + `--concurrency` + "`" + ` | refused | yes | refused | refused | yes, as a client count |
 
 An empty selection is refused for ` + "`" + `http_scenario` + "`" + ` and ` + "`" + `exploration` + "`" + `, because
 those commands would then run everything the manifest declares, and a manifest
-that gains a scenario would silently change what a saved workload runs.
+that gains a scenario would silently change what a saved workload runs. It is
+allowed for ` + "`" + `sql_workload` + "`" + ` for the opposite reason: the transactions of one mix
+are weighted against each other inside one run rather than being separate runs,
+so running all of them is the ordinary request rather than a different one.
 
 ## What the exit code means
 
@@ -17374,6 +17674,7 @@ Subcommands:
 - [` + "`" + `af load run` + "`" + `](#af-load-run) Run the full load profile.
 - [` + "`" + `af load scenario` + "`" + `](#af-load-scenario) Run the declared journeys against the environment.
 - [` + "`" + `af load smoke` + "`" + `](#af-load-smoke) Send a short burst, to check the environment answers under any load at all.
+- [` + "`" + `af load sql` + "`" + `](#af-load-sql) Run a concurrent SQL workload against the branch's database.
 
 ### ` + "`" + `af load run` + "`" + `
 
@@ -17445,6 +17746,54 @@ af load smoke
 | ` + "`" + `--duration` + "`" + ` | ` + "`" + `10s` + "`" + ` | How long to send for. |
 | ` + "`" + `--scale` + "`" + ` | ` + "`" + `0.1` + "`" + ` | Multiplier on production's rate. |
 | ` + "`" + `--seed` + "`" + ` | ` + "`" + `1` + "`" + ` | Makes two runs send the same sequence. |
+
+### ` + "`" + `af load sql` + "`" + `
+
+Run a concurrent SQL workload against the branch's database.
+
+Clients, each on its own connection, running whole transactions against the
+database directly rather than through the application.
+
+Everything else this engine sends goes over HTTP, so the number it reports is
+the application's latency with the database somewhere inside it. That is the
+right measurement for an application change and the wrong one for a database
+change. Somebody changing an index, a lock, a storage parameter or a query
+wants transactions per second and statement latency, and can only reach them
+through whatever the application happens to do on a route they can reach.
+
+The statements come from a document in the repository, or from
+pg_stat_statements on the branch, which is the traffic that really ran weighted
+by how often it ran. A derived mix cannot recover the values, because the
+statistics normalise them away, so it asks the server for the parameter types
+and generates values of those types. It refuses a write unless the manifest
+allows one, and every run reports the rows its statements actually touched, so
+a reader can tell a fast query from a query that found nothing.
+
+The run reports how many of its own backends the server had inside a
+transaction at one instant, read from pg_stat_activity while it was going. N
+clients are not N concurrent sessions and that number is the evidence rather
+than the claim.
+
+` + "`" + "`" + "`" + `
+af load sql [flags]
+` + "`" + "`" + "`" + `
+
+` + "`" + "`" + "`" + `
+# Clients on their own connections, running transactions against the database.
+af load sql
+af load sql --concurrency 16 --duration 2m --think-time 20ms
+af load sql --only 'read one order' --transactions 500
+` + "`" + "`" + "`" + `
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| ` + "`" + `--branch` + "`" + ` | - | Branch to run against, defaulting to the checked out one. |
+| ` + "`" + `--concurrency` + "`" + ` | ` + "`" + `8` + "`" + ` | How many clients run at once, each on its own connection. |
+| ` + "`" + `--duration` + "`" + ` | ` + "`" + `1m0s` + "`" + ` | How long to run for. |
+| ` + "`" + `--only` + "`" + ` | - | Run only these transactions, by name. Repeat the flag for several. |
+| ` + "`" + `--seed` + "`" + ` | ` + "`" + `1` + "`" + ` | Makes two runs execute the same sequence. |
+| ` + "`" + `--think-time` + "`" + ` | ` + "`" + `0s` + "`" + ` | How long a client waits between transactions. |
+| ` + "`" + `--transactions` + "`" + ` | ` + "`" + `0` + "`" + ` | How many transactions each client runs, instead of a duration. |
 
 ### ` + "`" + `af login` + "`" + `
 
@@ -21052,6 +21401,78 @@ The p95_increase threshold proved nothing: {detail}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/load](/docs/concepts/load) |
 
+### AF-LOD-017
+
+The SQL workload could not be run: {detail}
+
+**What to do.** Bring the environment up with 'af up', then check the load.sql section of the manifest and the workload document it names.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `3` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/sql-workloads](/docs/concepts/sql-workloads) |
+
+### AF-LOD-018
+
+The SQL workload's clients could not all connect: {detail}
+
+**What to do.** Lower load.sql.clients, or raise max_connections on the database. A run at a concurrency nobody chose measures nothing, so this refuses rather than running with fewer.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `5` + "`" + ` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [concepts/sql-workloads](/docs/concepts/sql-workloads) |
+
+### AF-LOD-019
+
+The statement statistics could not be read: {detail}
+
+**What to do.** A derived mix needs pg_stat_statements. Start the database with -c shared_preload_libraries=pg_stat_statements, or declare the workload with load.sql.source set to declared.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `3` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/sql-workloads](/docs/concepts/sql-workloads) |
+
+### AF-LOD-020
+
+No statement could be taken from the statistics: {detail}
+
+**What to do.** Send traffic at the environment first so the branch records what it ran, allow writes with load.sql.writes, or declare the workload instead.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `3` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/sql-workloads](/docs/concepts/sql-workloads) |
+
+### AF-LOD-021
+
+The SQL workload proved nothing: {detail}
+
+**What to do.** A run that committed no transaction has measured neither throughput nor latency. The errors above say why each attempt failed.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `3` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/sql-workloads](/docs/concepts/sql-workloads) |
+
+### AF-LOD-022
+
+{count} SQL workload thresholds were breached.
+
+**What to do.** Each one is listed above with what it measured. Fix the regression, or change what the manifest asks for.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `8` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/sql-workloads](/docs/concepts/sql-workloads) |
+
 ## Manifest
 
 ### AF-MAN-001
@@ -24113,6 +24534,7 @@ Traffic shaped like production, compared between the base branch and this one. R
 | ` + "`" + `scenarios` + "`" + ` | list of [Load scenario](#load-scenario) | no | Declared journeys run against the environment beside the mix. Each entry names a scenario document in the repository. Max items 50. |
 | ` + "`" + `source` + "`" + ` | ` + "`" + `none` + "`" + `, ` + "`" + `otel` + "`" + `, ` + "`" + `access_log` + "`" + ` | no | Where the endpoint mix comes from. An OpenTelemetry trace export or a combined format access log, both read from a file named in source_config.path. Defaults to ` + "`" + `none` + "`" + `. |
 | ` + "`" + `source_config` + "`" + ` | object | no | Adapter specific settings. Both sources take a path: the OTLP/JSON trace export, or the access log. Credentials come from the secrets subsystem. Max properties 20. |
+| ` + "`" + `sql` + "`" + ` | [SQL workload](#sql-workload) | no | A concurrent workload run directly against the branch's database, rather than through the application. |
 | ` + "`" + `thresholds` + "`" + ` | object | no | Deltas that fail the run. Applied to the difference against the base branch, never to absolute numbers. |
 | ` + "`" + `traffic` + "`" + ` | [Traffic](#traffic) | no | The committed record of what production actually serves, which is the denominator every route in a load run is measured against. |
 | ` + "`" + `unsafe_routes` + "`" + ` | list of string | no | Routes that mutate state destructively. They are included only against a fresh branch that is reset afterwards. Max items 500. |
@@ -24127,6 +24549,22 @@ One journey document and how hard to run it.
 | ` + "`" + `path` + "`" + ` | string | **yes** | The scenario document, relative to the repository root. Max length 512. |
 | ` + "`" + `sessions` + "`" + ` | integer | no | How many sessions walk the journey at once. Defaults to ` + "`" + `1` + "`" + `. Minimum 1, maximum 1000. |
 | ` + "`" + `start_after` + "`" + ` | string | no | Delay before this scenario starts, so one journey can burst while another is already running. Matches ` + "`" + `^[0-9]+(ms\|s\|m)$` + "`" + `. |
+
+## SQL workload
+
+A concurrent workload run directly against the branch's database, rather than through the application. N clients, each on its own connection, executing whole transactions, so a change to an index, a lock or a query is measured in transactions per second and statement latency rather than through whatever the application does on the route you can reach. Declaring the block is what turns it on: 'af load sql' runs it and nothing else does, so there is no enabled flag for a command to ignore.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| ` + "`" + `clients` + "`" + ` | integer | no | How many clients run at once, each on its own connection. The run refuses rather than running short handed if the server will not give it this many. Defaults to ` + "`" + `8` + "`" + `. Minimum 1, maximum 1000. |
+| ` + "`" + `duration` + "`" + ` | string | no | How long to run. Capped at fifteen minutes. Defaults to ` + "`" + `60s` + "`" + `. Matches ` + "`" + `^[0-9]+(s\|m)$` + "`" + `. |
+| ` + "`" + `max_statements` + "`" + ` | integer | no | How many statements a derived mix may hold. The tail of pg_stat_statements is one call apiece and taking it makes a mix that costs more to set up than to run. Defaults to ` + "`" + `20` + "`" + `. Minimum 1, maximum 200. |
+| ` + "`" + `script` + "`" + ` | string | no | The workload document, relative to the repository root. Required under source declared and refused under statement_statistics, where the server supplies the statements. Max length 512. |
+| ` + "`" + `source` + "`" + ` | ` + "`" + `declared` + "`" + `, ` + "`" + `statement_statistics` + "`" + ` | no | Where the statement mix comes from. declared reads the document named by script. statement_statistics reads pg_stat_statements on the branch, so the mix is the traffic that really ran, weighted by how often it ran. Defaults to ` + "`" + `declared` + "`" + `. |
+| ` + "`" + `think_time` + "`" + ` | string | no | How long a client waits between transactions. Zero measures the server at saturation; a real wait measures it at the concurrency an application actually holds. Defaults to ` + "`" + `0ms` + "`" + `. Matches ` + "`" + `^[0-9]+(ms\|s)$` + "`" + `. |
+| ` + "`" + `thresholds` + "`" + ` | object | no | What fails the run. Applied to this run's own measurements, never to an absolute throughput claim. |
+| ` + "`" + `transactions` + "`" + ` | integer | no | How many transactions each client runs, the way pgbench's -t does. Set it instead of a duration for a run whose size is the same on every machine. Minimum 1, maximum 1e+06. |
+| ` + "`" + `writes` + "`" + ` | boolean | no | Whether a derived mix may include statements that change data. Off by default, because pg_stat_statements normalises the values away and replaying a write would write values nobody chose. It does not apply to a declared workload, whose author wrote the values. Defaults to ` + "`" + `false` + "`" + `. |
 
 ## Migrations
 

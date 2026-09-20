@@ -332,7 +332,7 @@ func (m *meter) record(route string, ms float64, reason string) {
 func (m *meter) snapshot() Result {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	res := Result{Sent: m.sent, Overall: percentiles(m.all)}
+	res := Result{Sent: m.sent, Overall: Percentiles(m.all)}
 	if m.sent > 0 {
 		res.ErrorRate = float64(m.failed) / float64(m.sent)
 	}
@@ -349,7 +349,7 @@ func finish(m *meter, opts Options, started time.Time) *Result {
 		Baselines:  opts.Baselines,
 		TargetRate: opts.Shape.RequestsPerSecond * opts.Scale,
 		Sent:       m.sent, Duration: elapsed,
-		Overall: percentiles(m.all),
+		Overall: Percentiles(m.all),
 		Errors:  map[string]int{},
 	}
 	for k, v := range m.errors {
@@ -371,7 +371,7 @@ func finish(m *meter, opts Options, started time.Time) *Result {
 	for route, count := range m.counts {
 		rr := RouteResult{
 			Route: route, Sent: count, Errors: m.errsBy[route],
-			Latency: percentiles(m.samples[route]),
+			Latency: Percentiles(m.samples[route]),
 		}
 		if base := baselines[route]; base > 0 {
 			rr.BaselineP95Ms = base
@@ -394,8 +394,13 @@ func finish(m *meter, opts Options, started time.Time) *Result {
 	return res
 }
 
-// percentiles computes a distribution from samples.
-func percentiles(samples []float64) Latency {
+// Percentiles computes a distribution from samples.
+//
+// Exported so that a generator measuring something other than an HTTP request
+// reports its latency the same way this one does. The alternative is a second
+// implementation with a different rounding rule, and two percentiles in one
+// report that disagree by a millisecond are two numbers nobody trusts.
+func Percentiles(samples []float64) Latency {
 	if len(samples) == 0 {
 		return Latency{}
 	}

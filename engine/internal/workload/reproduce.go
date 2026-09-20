@@ -48,6 +48,13 @@ func (p *Plan) Argv() []string {
 	case BrowserWorkflow:
 		argv := []string{"af", "test", "--attempts", strconv.Itoa(p.Attempts)}
 		return appendOnly(argv, p.Select)
+	case SQLWorkload:
+		argv := []string{"af", "load", "sql",
+			"--duration", p.Duration.String(),
+			"--seed", strconv.FormatInt(p.SeedNumber, 10),
+			"--concurrency", strconv.Itoa(p.Concurrency),
+		}
+		return appendOnly(argv, p.Select)
 	case Exploration:
 		argv := []string{"af", "explore"}
 		if p.SeedText != "" {

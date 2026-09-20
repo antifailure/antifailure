@@ -71,6 +71,7 @@ const KINDS: { kind: WorkloadKind; fixture: string }[] = [
   { kind: 'http_scenario', fixture: 'http-scenario' },
   { kind: 'browser_workflow', fixture: 'browser-workflow' },
   { kind: 'exploration', fixture: 'exploration' },
+  { kind: 'sql_workload', fixture: 'sql-workload' },
 ]
 
 describe("a report an engine actually sent", () => {
@@ -260,6 +261,18 @@ describe("a report an engine actually sent", () => {
       steps: 'steps',
       goals: 'goals',
       goals_reached: 'goalsReached',
+      clients: 'clients',
+      transactions: 'transactions',
+      transactions_failed: 'transactionsFailed',
+      retries: 'retries',
+      deadlocks: 'deadlocks',
+      serialization_failures: 'serializationFailures',
+      statements_run: 'statementsRun',
+      statements_failed: 'statementsFailed',
+      rows_touched: 'rowsTouched',
+      tps: 'tps',
+      peak_open_transactions: 'peakOpenTransactions',
+      backends_seen: 'backendsSeen',
       findings: 'findings',
       duration_ms: 'durationMs',
       source: 'source',
@@ -319,6 +332,82 @@ describe("a report an engine actually sent", () => {
         `does not send, wearing the other hat, and a request count that decodes to ZERO is the ` +
         `exact shape this file was written for: it is present, it is wrong, and nothing says so.`,
     )
+  })
+
+  it('a SQL workload carries its throughput, its contention and what the server saw', () => {
+    const payload = wire('sql-workload')
+    assert.equal(sent(payload).transactions, 4212, 'the fixture is not the one this test is about')
+
+    const report = decodeReport('sql_workload', payload)
+    assert.equal(report.aggregate.transactions, 4212)
+    assert.equal(report.aggregate.transactionsFailed, 18)
+    assert.equal(report.aggregate.tps, 70.2)
+    assert.equal(report.aggregate.clients, 8)
+    // The three that separate a contended run from a broken one. A transaction
+    // retried into a commit is a success, and a decoder that folded these into
+    // the failure count would report a healthy application as failing.
+    assert.equal(report.aggregate.retries, 31)
+    assert.equal(report.aggregate.deadlocks, 22)
+    assert.equal(report.aggregate.serializationFailures, 9)
+    assert.equal(report.aggregate.statementsRun, 8424)
+    assert.equal(report.aggregate.statementsFailed, 18)
+    // The honesty column. Zero here would mean the statements matched nothing,
+    // and a decoder that dropped it would leave a reader unable to tell a fast
+    // query from one that found no rows.
+    assert.equal(report.aggregate.rowsTouched, 51907)
+    // What the SERVER reported, rather than the client count above it.
+    assert.equal(report.aggregate.peakOpenTransactions, 8)
+    assert.equal(report.aggregate.backendsSeen, 8)
+    // The percentiles are a transaction's latency here and they live in the
+    // same five columns, because a percentile is a percentile.
+    assert.equal(report.aggregate.p50Ms, 22.4)
+    assert.equal(report.aggregate.p95Ms, 96.3)
+    assert.equal(report.aggregate.maxMs, 744)
+    // A SQL workload sends no requests, so the request count is null rather
+    // than a statement count wearing its name.
+    assert.equal(report.aggregate.requests, null)
+    assert.equal(report.aggregate.sessions, null)
+    assert.equal(report.aggregate.workflows, null)
+    assert.deepEqual(report.skipped, { routes: 0, thresholds: 0, evidence: 0 })
+    // Each statement arrives as a route row keyed on the pair, which is what
+    // lets the same statement appear in two transactions without their
+    // percentiles being merged.
+    assert.equal(report.routes.length, 2)
+    assert.equal(report.routes[0]!.scenario, 'UPDATE orders SET status = $1 WHERE id = $2')
+  })
+
+  it('a SQL workload that committed nothing is not written as a fast one', () => {
+    // The shape the whole result design exists for, built by emptying the real
+    // fixture rather than by inventing a document: a run whose every
+    // transaction failed has a throughput of zero and a latency of zero, and
+    // every threshold in it passed over an empty measurement.
+    const payload = wire('sql-workload')
+    const result = { ...sent(payload), transactions: 0, tps: 0, p50_ms: 0, p95_ms: 0 }
+    const report = decodeReport('sql_workload', { ...payload, result })
+    assert.equal(report.aggregate.transactions, 0)
+    assert.equal(report.aggregate.tps, 0)
+    // Zero is stored, rather than being coalesced away or refusing the row.
+    // The row is what carries the eighteen failures and the twenty two
+    // deadlocks, which are the whole finding.
+    assert.equal(report.aggregate.transactionsFailed, 18)
+    assert.equal(report.aggregate.deadlocks, 22)
+  })
+
+  it('an unwatched SQL run reports no overlap rather than none', () => {
+    // Null and zero are different answers and this is the seam where they are
+    // most easily flattened. A run whose observer could not connect has to
+    // arrive as null: zero would say the clients never overlapped, which is a
+    // finding, and nobody having looked is not.
+    const payload = wire('sql-workload')
+    const unwatched = { ...sent(payload), peak_open_transactions: null, backends_seen: null }
+    const report = decodeReport('sql_workload', { ...payload, result: unwatched })
+    assert.equal(report.aggregate.peakOpenTransactions, null)
+    assert.equal(report.aggregate.backendsSeen, null)
+
+    const flat = { ...sent(payload), peak_open_transactions: 0, backends_seen: 0 }
+    const zeroed = decodeReport('sql_workload', { ...payload, result: flat })
+    assert.equal(zeroed.aggregate.peakOpenTransactions, 0)
+    assert.equal(zeroed.aggregate.backendsSeen, 0)
   })
 
   it('the fixtures are the real wire and not a document this suite invented', () => {

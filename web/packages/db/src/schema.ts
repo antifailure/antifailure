@@ -55,10 +55,11 @@ export const verdictValue = pgEnum('verdict_value', [
   'pass', 'fail', 'flaky', 'blocked', 'unverified',
 ])
 
-// Load definitions and runs. See migrations/0026_load_definitions_and_runs.sql for why these four
-// kinds stay four kinds, and why a run's state and its verdict are two columns.
+// Load definitions and runs. See migrations/0026_load_definitions_and_runs.sql for why a kind is an
+// enum rather than one shape everything compiles into, and why a run's state and its verdict are two
+// columns. 0048 added the fifth, which measures the database rather than the application.
 export const workloadKind = pgEnum('workload_kind', [
-  'observed_load', 'http_scenario', 'browser_workflow', 'exploration',
+  'observed_load', 'http_scenario', 'browser_workflow', 'exploration', 'sql_workload',
 ])
 export const workloadRunState = pgEnum('workload_run_state', [
   'requested', 'accepted', 'running',
@@ -1013,8 +1014,9 @@ export const organizationDeletionExports = pgTable('organization_deletion_export
 
 /** A named, versioned thing to run against an environment. See
  *  migrations/0026_load_definitions_and_runs.sql: the kind is on the definition because
- *  the four kinds measure materially different things, and there is no common
- *  intermediate representation behind them. */
+ *  the kinds measure materially different things, and there is no common
+ *  intermediate representation behind them. 0048 added the fifth, which measures
+ *  the database rather than the application. */
 export const workloads = pgTable('workloads', {
   id: uuid('id').primaryKey().defaultRandom(),
   orgId: uuid('org_id').notNull(),
@@ -1121,6 +1123,26 @@ export const workloadRunResults = pgTable('workload_run_results', {
   findings: integer('findings'),
   goals: integer('goals'),
   goalsReached: integer('goals_reached'),
+  /** A concurrent SQL workload, added by 0048. Three transaction counts rather
+   *  than two, because a transaction that deadlocked and committed on its
+   *  second attempt is a success whose run is contended. */
+  clients: integer('clients'),
+  transactions: integer('transactions'),
+  transactionsFailed: integer('transactions_failed'),
+  retries: integer('retries'),
+  deadlocks: integer('deadlocks'),
+  serializationFailures: integer('serialization_failures'),
+  statementsRun: integer('statements_run'),
+  statementsFailed: integer('statements_failed'),
+  /** How many rows the statements returned or changed. It says whether a
+   *  derived mix's generated parameters matched anything: a run that touched
+   *  nothing measured the cost of finding nothing. */
+  rowsTouched: bigint('rows_touched', { mode: 'number' }),
+  tps: doublePrecision('tps'),
+  /** What the server said about the run while it ran. Null means nobody
+   *  looked, which is a different answer from zero. */
+  peakOpenTransactions: integer('peak_open_transactions'),
+  backendsSeen: integer('backends_seen'),
   durationMs: doublePrecision('duration_ms'),
   source: text('source'),
   errorReasons: jsonb('error_reasons').notNull().default({}),

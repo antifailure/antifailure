@@ -355,4 +355,17 @@ Load runs against environments Antifailure made, and refuses anything else.
 This is a load generator with a production traffic shape pointed at it; the one
 thing it must never do is point at production.
 
-Related: [insights](/docs/concepts/insights), [scheduling](/docs/concepts/scheduling).
+## Everything on this page goes over HTTP
+
+Which is the right measurement for a change to a handler and the wrong one for
+a change to an index, a lock or a query. A mix, a scenario and a workflow all
+reach the database through the application, so the number each reports is the
+application's latency with the database somewhere inside it.
+
+[A SQL workload](/docs/concepts/sql-workloads) is the other half: clients on
+their own connections running whole transactions against the branch, reported
+as transactions per second and statement latency. It runs under `af load sql`
+and is configured under `load.sql`.
+
+Related: [SQL workloads](/docs/concepts/sql-workloads),
+[insights](/docs/concepts/insights), [scheduling](/docs/concepts/scheduling).

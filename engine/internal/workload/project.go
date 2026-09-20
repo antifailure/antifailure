@@ -14,6 +14,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/env"
 	"github.com/antifailure/antifailure/engine/internal/explore"
 	"github.com/antifailure/antifailure/engine/internal/load"
+	"github.com/antifailure/antifailure/engine/internal/sqlload"
 )
 
 // Projection turns what the engine measured into the flat rows a control plane
@@ -722,4 +723,232 @@ func digest(path string) (string, int64, bool) {
 		return "", 0, false
 	}
 	return hex.EncodeToString(h.Sum(nil)), size, true
+}
+
+// runSQLWorkload runs the concurrent SQL workload and judges it.
+//
+// The projection here reuses three shapes rather than inventing parallel ones,
+// and each reuse is the same argument. The five latency columns hold a
+// committed TRANSACTION's latency, because a transaction is this kind's unit
+// of work the way a request is the mix's, and a percentile is a percentile.
+// The route rows hold one statement each, keyed by (transaction, statement),
+// because that pair is exactly the identity RouteMetric already carries for
+// (scenario, route) and for the same reason: one statement in two transactions
+// cannot have its percentiles merged. And the threshold rows hold the same two
+// measures the manifest declares.
+//
+// What is NOT reused is Requests. A SQL workload sends no requests, and filling
+// a request count with a statement count is precisely the conflation the
+// manifest's own load.thresholds.query_count_increase was deprecated for: a
+// load run counts requests, not statements.
+func runSQLWorkload(ctx context.Context, opts Options, res *Result) {
+	p := opts.Plan
+	out, _, err := opts.Runner.SQLLoad(ctx, env.SQLLoadOptions{
+		Clients: p.Concurrency, Duration: p.Duration,
+		Seed: p.SeedNumber, Select: p.Select,
+	})
+	if out == nil {
+		settle(res, opts, orFailure(err), "", "")
+		return
+	}
+	nativeOf(res, out)
+	projectSQL(res, out)
+
+	meanIncrease, errorRate := opts.Runner.SQLThresholds()
+	res.Thresholds = sqlThresholds(out, meanIncrease, errorRate)
+
+	settle(res, opts, err, sqlVerdict(out, meanIncrease, res.Thresholds), sqlDetail(out, res.Thresholds))
+}
+
+func projectSQL(res *Result, out *sqlload.Result) {
+	m := &res.Measured
+	m.Clients = intp(out.Clients)
+	m.Transactions = intp(out.Transactions)
+	m.TransactionsFailed = intp(out.TransactionsFailed)
+	m.Retries = intp(out.Retries)
+	m.Deadlocks = intp(out.Deadlocks)
+	m.SerializationFailures = intp(out.SerializationFailures)
+	m.StatementsRun = intp(out.Statements)
+	m.StatementsFailed = intp(out.StatementsFailed)
+	m.RowsTouched = intp(int(out.Rows))
+	m.TPS = floatp(out.TPS)
+	m.ErrorRate = floatp(out.ErrorRate)
+	m.DurationMs = floatp(float64(out.Duration.Microseconds()) / 1000)
+	m.Source = out.Source
+	// Nil rather than zero when nobody looked, all the way out. The observer
+	// reports a pointer for exactly this reason and flattening it here would
+	// throw the distinction away one layer before the console.
+	m.PeakOpenTransactions = out.PeakOpenTransactions
+	m.BackendsSeen = out.BackendsSeen
+	if len(out.Errors) > 0 {
+		m.Errors = out.Errors
+	}
+	// What the mix would not take, in the field a console already renders as
+	// "these were not sent". A refused statement and a refused route are the
+	// same fact about the same decision.
+	m.RefusedRoutes = sqlRefusedNames(out.Refused)
+	setLatency(m, out.Overall)
+	res.Routes = sqlStatementMetrics(out)
+}
+
+// sqlStatementMetrics projects one row per statement, worst first.
+func sqlStatementMetrics(out *sqlload.Result) []RouteMetric {
+	// The baseline is per TRANSACTION, because pg_stat_statements reports a
+	// mean per statement and a derived transaction holds exactly one. A
+	// declared transaction holds several and the statistics have never seen
+	// any of them, so there is no baseline to attach and none is invented.
+	baseline := map[string]sqlload.Baseline{}
+	for _, tx := range out.PerTransaction {
+		baseline[tx.Name] = tx.Baselines
+	}
+
+	rows := make([]RouteMetric, 0, len(out.PerStatement))
+	for i, st := range out.PerStatement {
+		m := RouteMetric{
+			Scenario: st.Transaction,
+			Route:    st.Label,
+			Sent:     st.Executed,
+			Errors:   st.Errors,
+			P50Ms:    floatp(st.Latency.P50Ms),
+			P90Ms:    floatp(st.Latency.P90Ms),
+			P95Ms:    floatp(st.Latency.P95Ms),
+			P99Ms:    floatp(st.Latency.P99Ms),
+			MaxMs:    floatp(st.Latency.MaxMs),
+			Position: i,
+		}
+		// Both together or neither, the same rule the mix's routes follow. A
+		// zero standing in for "nothing to compare with" reads as no
+		// regression.
+		if b, ok := baseline[st.Transaction]; ok && b.Has {
+			m.BaselineP95Ms = floatp(b.MeanMs)
+			m.P95Increase = floatp(b.MeanIncrease)
+		}
+		rows = append(rows, m)
+	}
+	return rows
+}
+
+func sqlRefusedNames(refused []sqlload.Refused) []string {
+	out := make([]string, 0, len(refused))
+	for _, r := range refused {
+		out = append(out, r.Code+": "+r.Statement)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// sqlThresholds says what each manifest threshold measured, including the ones
+// it could not measure.
+//
+// A transaction with no baseline gets an unverified row rather than no row at
+// all, which is the decision mixThresholds already made about a route with no
+// baseline and for the same reason: a console that saw only breaches would
+// show a clean mean check over transactions nothing was ever compared against.
+// A declared workload carries no baselines at all, so that is every
+// transaction for anybody who wrote their own statements.
+func sqlThresholds(out *sqlload.Result, meanIncrease, errorRate float64) []ThresholdVerdict {
+	verdicts := []ThresholdVerdict{{
+		Name:      "error_rate",
+		Measure:   "error_rate",
+		Threshold: floatp(errorRate),
+		Observed:  floatp(out.ErrorRate),
+		Value:     passFail(!out.Unverified() && out.ErrorRate <= errorRate),
+		Position:  0,
+	}}
+	if out.Unverified() {
+		verdicts[0].Value = VerdictUnverified
+		verdicts[0].Observed = nil
+		verdicts[0].Detail = "no transaction committed, so there is nothing to measure"
+	}
+	for i, tx := range out.PerTransaction {
+		v := ThresholdVerdict{
+			Name:      "mean_increase",
+			Scope:     tx.Name,
+			Measure:   "mean_increase",
+			Threshold: floatp(meanIncrease),
+			Position:  i + 1,
+		}
+		switch {
+		case !tx.Baselines.Has:
+			v.Value = VerdictUnverified
+			v.Detail = "the mix carried no baseline for this transaction, so there is " +
+				"nothing to compare against"
+		case tx.Executed == 0:
+			v.Value = VerdictUnverified
+			v.Detail = "this transaction was never picked, so nothing was measured for it"
+		default:
+			v.Observed = floatp(tx.Baselines.MeanIncrease)
+			v.Value = passFail(tx.Baselines.MeanIncrease <= meanIncrease)
+		}
+		verdicts = append(verdicts, v)
+	}
+	return verdicts
+}
+
+// sqlVerdict is the run's one word answer.
+//
+// A run that committed nothing is unverified rather than passing, and that is
+// the single most important line in this function. Every threshold passes
+// trivially over an empty measurement, so a database that refused every
+// transaction would otherwise report zero breaches and read as clean, which is
+// the green over nothing this product exists to stop.
+func sqlVerdict(out *sqlload.Result, meanIncrease float64, verdicts []ThresholdVerdict) string {
+	if out.Unverified() {
+		return VerdictUnverified
+	}
+	if out.InertMeanIncrease(meanIncrease) {
+		// A threshold that was in force and measured nothing is not a pass
+		// either, for the reason af load run's inert p95 already exits non
+		// zero: a check that ran nothing and reported green is a check
+		// everybody believes is running.
+		return VerdictUnverified
+	}
+	// Read off the threshold rows this run produced rather than recomputed
+	// here. Two paths that decide the same thing are two places to disagree,
+	// and the rows are what a reader sees.
+	for _, v := range verdicts {
+		if v.Value == VerdictFail {
+			return VerdictFail
+		}
+	}
+	return VerdictPass
+}
+
+func sqlDetail(out *sqlload.Result, verdicts []ThresholdVerdict) string {
+	if out.Unverified() {
+		return out.UnverifiedDetail()
+	}
+	failed := 0
+	unverified := 0
+	for _, v := range verdicts {
+		switch v.Value {
+		case VerdictFail:
+			failed++
+		case VerdictUnverified:
+			unverified++
+		}
+	}
+	detail := fmt.Sprintf("%d transactions committed at %.1f a second, %d failed, %d retried",
+		out.Transactions, out.TPS, out.TransactionsFailed, out.Retries)
+	if failed > 0 {
+		detail += fmt.Sprintf(", %s exceeded", count(failed, "threshold"))
+	}
+	if unverified > 0 {
+		detail += fmt.Sprintf(", %s measured nothing", count(unverified, "check"))
+	}
+	if out.ClientsStopped > 0 {
+		detail += fmt.Sprintf(", %d of %d clients stopped early", out.ClientsStopped, out.Clients)
+	}
+	return detail
+}
+
+// count renders "1 threshold" and "3 thresholds".
+//
+// A local rather than a shared helper, because the one in the cli package is
+// the one a command prints with and this package must not import a command.
+func count(n int, noun string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, noun)
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }

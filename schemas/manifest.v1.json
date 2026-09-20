@@ -1704,6 +1704,9 @@
         },
         "traffic": {
           "$ref": "#/$defs/traffic"
+        },
+        "sql": {
+          "$ref": "#/$defs/load_sql"
         }
       }
     },
@@ -1739,6 +1742,85 @@
           "type": "string",
           "pattern": "^[0-9]+(ms|s|m)$",
           "description": "Delay before this scenario starts, so one journey can burst while another is already running."
+        }
+      }
+    },
+    "load_sql": {
+      "title": "SQL workload",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A concurrent workload run directly against the branch's database, rather than through the application. N clients, each on its own connection, executing whole transactions, so a change to an index, a lock or a query is measured in transactions per second and statement latency rather than through whatever the application does on the route you can reach. Declaring the block is what turns it on: 'af load sql' runs it and nothing else does, so there is no enabled flag for a command to ignore.",
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": [
+            "declared",
+            "statement_statistics"
+          ],
+          "default": "declared",
+          "description": "Where the statement mix comes from. declared reads the document named by script. statement_statistics reads pg_stat_statements on the branch, so the mix is the traffic that really ran, weighted by how often it ran."
+        },
+        "script": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "The workload document, relative to the repository root. Required under source declared and refused under statement_statistics, where the server supplies the statements."
+        },
+        "clients": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 8,
+          "description": "How many clients run at once, each on its own connection. The run refuses rather than running short handed if the server will not give it this many."
+        },
+        "duration": {
+          "type": "string",
+          "pattern": "^[0-9]+(s|m)$",
+          "default": "60s",
+          "description": "How long to run. Capped at fifteen minutes."
+        },
+        "transactions": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000,
+          "description": "How many transactions each client runs, the way pgbench's -t does. Set it instead of a duration for a run whose size is the same on every machine."
+        },
+        "think_time": {
+          "type": "string",
+          "pattern": "^[0-9]+(ms|s)$",
+          "default": "0ms",
+          "description": "How long a client waits between transactions. Zero measures the server at saturation; a real wait measures it at the concurrency an application actually holds."
+        },
+        "writes": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether a derived mix may include statements that change data. Off by default, because pg_stat_statements normalises the values away and replaying a write would write values nobody chose. It does not apply to a declared workload, whose author wrote the values."
+        },
+        "max_statements": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200,
+          "default": 20,
+          "description": "How many statements a derived mix may hold. The tail of pg_stat_statements is one call apiece and taking it makes a mix that costs more to set up than to run."
+        },
+        "thresholds": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "What fails the run. Applied to this run's own measurements, never to an absolute throughput claim.",
+          "properties": {
+            "mean_increase": {
+              "type": "number",
+              "minimum": 0,
+              "default": 0.25,
+              "description": "How much slower a transaction may get than the mean pg_stat_statements recorded for it, as a ratio. It needs a baseline, so it applies under source statement_statistics and the engine refuses it under declared, where a statement somebody wrote has never run before and nothing could compare it with."
+            },
+            "error_rate": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "default": 0.01,
+              "description": "The share of transaction attempts that may fail. Counted from the run's own attempts, so it needs no baseline and works under both sources. A deadlock that was retried into a success is not a failure and is counted separately."
+            }
+          }
         }
       }
     },

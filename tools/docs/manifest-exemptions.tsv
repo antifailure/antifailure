@@ -31,3 +31,4 @@ docs/src/content/docs/enterprise/custom-roles.md	roles	the custom roles policy f
 docs/src/content/docs/enterprise/custom-roles.md	groups	the same custom roles policy file. The named sets of repositories a grant can be scoped to.
 docs/src/content/docs/enterprise/custom-roles.md	grants	the same custom roles policy file. Each grant gives one member one custom role at one scope.
 docs/src/content/docs/enterprise/custom-roles.md	approvals	the same custom roles policy file. The page shows the section empty, because a file carrying an approval policy is refused whole.
+docs/src/content/docs/concepts/sql-workloads.md	sql_workload	a SQL workload document, not a manifest. The manifest names it under load.sql.script and the engine parses it with sqlload.ParseScript. It sits beside the scenario document exemptions above for the same reason: both are declarations the workload engine reads, and neither is a key the manifest has at any depth.

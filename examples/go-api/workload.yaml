@@ -1,0 +1,60 @@
+# A concurrent SQL workload, run against the branch by `af load sql`.
+#
+# The statements are the ones this API sends. What they are NOT is a benchmark:
+# a benchmark picks the queries that look good, and the point of rehearsing a
+# change to an index or a lock is to run the queries the application really
+# runs, in the proportions it really runs them.
+#
+# The ids come from the table. `query` runs once when the run starts and every
+# client draws from what it returned, so a read finds a row rather than proving
+# that an empty result is fast. Drawing them from a range instead would be the
+# difference between measuring the index and measuring the miss.
+#
+# The statements are sent to the server exactly as written and the values are
+# bound by the driver, so nothing here can become syntax and every one of these
+# can be pasted into psql.
+
+sql_workload: orders-api
+description: the reads this API serves, and the order it writes
+
+transactions:
+  # Eight times as often as anything else, because that is the shape of the
+  # traffic: one order is read far more than one is placed.
+  - transaction: read one order
+    weight: 8
+    statements:
+      - label: order by id
+        sql: SELECT id, customer_id, total_cents, placed_at FROM orders WHERE id = $1
+        params:
+          - query: SELECT id FROM orders
+
+  - transaction: a customer's orders
+    weight: 3
+    statements:
+      - label: the customer
+        sql: SELECT id, name, email FROM customers WHERE id = $1
+        params:
+          - query: SELECT id FROM customers
+      - label: their orders
+        sql: >
+          SELECT id, total_cents FROM orders WHERE customer_id = $1
+          ORDER BY placed_at DESC LIMIT 20
+        params:
+          - query: SELECT id FROM customers
+
+  # A write, and the reason it is in a transaction with the read above it: the
+  # lock held between the two is the thing worth rehearsing. A workload made of
+  # single statements cannot produce that, and cannot produce the deadlock two
+  # of them take in opposite orders either.
+  - transaction: place an order
+    weight: 1
+    statements:
+      - label: the customer exists
+        sql: SELECT id FROM customers WHERE id = $1 FOR SHARE
+        params:
+          - query: SELECT id FROM customers
+      - label: insert the order
+        sql: INSERT INTO orders (customer_id, total_cents) VALUES ($1, $2)
+        params:
+          - query: SELECT id FROM customers
+          - int: {min: 100, max: 50000}

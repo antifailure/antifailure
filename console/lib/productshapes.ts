@@ -177,6 +177,35 @@ export function metricsFor(result: Record<string, unknown> | null): Measurement[
     ];
   }
 
+  if (kind === "sql_workload") {
+    // Committed, failed and retried, rather than two of the three. A
+    // transaction that deadlocked and committed on its second attempt is a
+    // success whose run is contended, and an operator reading two counts sees
+    // a clean run.
+    //
+    // "Open at once" is what the SERVER reported while the run was going, and
+    // null there means nobody sampled pg_stat_activity rather than that the
+    // clients never overlapped. nullable keeps the two apart: a null prints as
+    // not measured, and a zero prints as zero.
+    return [
+      { label: "Transactions a second", value: nullable(n("tps"), (v) => `${rate(v)}/s`) },
+      { label: "Committed", value: n("transactions") },
+      { label: "Failed", value: n("transactions_failed") },
+      { label: "Retried", value: n("retries") },
+      { label: "Deadlocks", value: n("deadlocks") },
+      { label: "Serialization failures", value: n("serialization_failures") },
+      { label: "Clients", value: n("clients") },
+      { label: "Sessions on the server", value: n("backends_seen") },
+      { label: "Open at once", value: n("peak_open_transactions") },
+      { label: "Statements", value: n("statements_run") },
+      { label: "Rows touched", value: n("rows_touched") },
+      { label: "p50", value: nullable(n("p50_ms"), duration) },
+      { label: "p95", value: nullable(n("p95_ms"), duration) },
+      { label: "p99", value: nullable(n("p99_ms"), duration) },
+      { label: "Slowest", value: nullable(n("max_ms"), duration) },
+    ];
+  }
+
   return [];
 }
 

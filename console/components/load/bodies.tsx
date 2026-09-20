@@ -138,6 +138,37 @@ export function BodyView({ body, manifest = false }: { body: Body | null; manife
     );
   }
 
+  if (body.kind === "sql_workload") {
+    return (
+      <Facts>
+        <Fact label="Transactions">
+          <Selection names={body.select} noun={knobs.selects} />
+        </Fact>
+        <Fact label="Duration">
+          {body.durationSeconds === null ? (
+            <span className="text-muted">Not set, so af load sql runs for its own default</span>
+          ) : (
+            seconds(body.durationSeconds)
+          )}
+        </Fact>
+        <Fact label="Clients">
+          {body.concurrency === null ? (
+            <span className="text-muted">Not set, so the command's default of 8</span>
+          ) : (
+            count(body.concurrency)
+          )}
+        </Fact>
+        <Fact label="Seed">
+          {body.seed === null ? (
+            <span className="text-muted">Not set, so the command's default of 1</span>
+          ) : (
+            <code className="font-mono text-[12.5px]">{body.seed}</code>
+          )}
+        </Fact>
+      </Facts>
+    );
+  }
+
   if (body.kind === "exploration") {
     return (
       <Facts>
@@ -297,6 +328,14 @@ function draftOf(body: Body | null): Draft {
       return { ...EMPTY, select: body.select.join(", ") };
     case "exploration":
       return { ...EMPTY, select: body.select.join(", "), seed: body.seed ?? "" };
+    case "sql_workload":
+      return {
+        ...EMPTY,
+        select: body.select.join(", "),
+        duration: body.durationSeconds === null ? "" : String(body.durationSeconds),
+        seed: body.seed === null ? "" : String(body.seed),
+        concurrency: body.concurrency === null ? "" : String(body.concurrency),
+      };
   }
 }
 
@@ -402,7 +441,31 @@ export function useBodyDraft(kind: Kind, initial: Body | null): BodyDraft {
     if (errors.select === undefined) {
       body = { kind, select: selected, manifestBlock: carried.manifestBlock, dropped: carried.dropped };
     }
+  } else if (kind === "sql_workload") {
+    // The bounds are the control plane's own, which are the schema's: fifteen
+    // minutes is the cap a workload document may declare and a thousand is the
+    // cap on clients. A form that accepted more would produce a version the
+    // control plane refuses at the moment somebody presses save.
+    const d = bounded(draft.duration, "The duration", 1, 900, true);
+    const seed = bounded(draft.seed, "The seed", 0, 2_147_483_647, true);
+    const c = bounded(draft.concurrency, "The client count", 1, 1000, true);
+    if ("error" in d) errors.duration = d.error;
+    if ("error" in seed) errors.seed = seed.error;
+    if ("error" in c) errors.concurrency = c.error;
+    if (
+      !("error" in d) &&
+      !("error" in seed) &&
+      !("error" in c) &&
+      errors.select === undefined
+    ) {
+      body = { kind, select: selected, durationSeconds: d.value, seed: seed.value, concurrency: c.value };
+    }
   } else {
+    // exploration, and the ONLY kind that reaches here. It used to be a bare
+    // else, so a kind added to the enum fell into it and was built with
+    // exploration's knobs: a string seed, no duration and no client count,
+    // silently. Naming the kinds above makes a new one a TypeScript error at
+    // the `body` assignment rather than a version that says the wrong thing.
     if (errors.select === undefined) {
       const seed = draft.seed.trim();
       if (seed.length > 200) errors.seed = "The seed has to be 200 characters or fewer.";

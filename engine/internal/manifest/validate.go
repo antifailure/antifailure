@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -1791,7 +1792,15 @@ func (v *validator) explore(m *schema.Manifest) {
 
 func (v *validator) load(m *schema.Manifest) {
 	l := m.Load
-	if l == nil || !l.Enabled {
+	if l == nil {
+		return
+	}
+	// Checked whether or not the block is enabled, because af load sql runs it
+	// either way, exactly as af load run runs the mix on a manifest whose
+	// load.enabled is false. A block checked only when enabled is a block whose
+	// errors arrive twenty minutes into somebody's first real run.
+	v.loadSQL(l)
+	if !l.Enabled {
 		return
 	}
 	d, err := ParseDuration(l.Duration)
@@ -1934,6 +1943,94 @@ func (v *validator) loadThresholds(l *schema.Load) {
 			"A load run counts requests, not statements. The check that compares statement "+
 				"counts against the base branch is insights.query_regression, and how much "+
 				"growth fails it is insights.regression_factor. Set it there and remove this.")
+	}
+}
+
+// loadSQL refuses a SQL workload that could not do what it says.
+//
+// Every refusal here is the same shape and it is the shape this repository
+// keeps arriving at: a knob that is accepted, defaulted, rendered in the
+// reference, and read by nothing under the settings its author chose. The
+// manifest's own history has two of them, load.thresholds.query_count_increase
+// and the p95_increase that can never fire under an access log, and both were
+// found after they shipped.
+func (v *validator) loadSQL(l *schema.Load) {
+	q := l.SQL
+	if q == nil {
+		return
+	}
+
+	switch q.Source {
+	case "", schema.SQLDeclared, schema.SQLStatementStatistics:
+	default:
+		v.add("load.sql.source",
+			fmt.Sprintf("There is no SQL workload source called %q.", q.Source),
+			"The sources are declared, which reads the document named by load.sql.script, and "+
+				"statement_statistics, which reads pg_stat_statements on the branch.")
+		return
+	}
+
+	derived := q.Source == schema.SQLStatementStatistics
+	if !derived && strings.TrimSpace(q.Script) == "" {
+		v.add("load.sql.script",
+			"The SQL workload source is declared and no script is named.",
+			"Set load.sql.script to the workload document, or set load.sql.source to "+
+				"statement_statistics so the statements come from what the branch actually ran.")
+	}
+	if derived && strings.TrimSpace(q.Script) != "" {
+		v.add("load.sql.script",
+			"The SQL workload source is statement_statistics and a script is named.",
+			"The server supplies the statements under that source, so the document would never "+
+				"be read. Remove the script, or set load.sql.source to declared.")
+	}
+
+	if q.Duration != "" {
+		d, err := ParseDuration(q.Duration)
+		switch {
+		case err != nil:
+			v.add("load.sql.duration",
+				fmt.Sprintf("The SQL workload duration %q is not a duration.", q.Duration), "")
+		case d > 15*time.Minute:
+			v.add("load.sql.duration",
+				fmt.Sprintf("The SQL workload duration %s is above the fifteen minute cap.", q.Duration),
+				"A workload is a comparison, not a soak test. Lower it, or raise load.sql.clients instead.")
+		}
+	}
+	if q.ThinkTime != "" {
+		if _, err := ParseDuration(q.ThinkTime); err != nil {
+			v.add("load.sql.think_time",
+				fmt.Sprintf("The SQL workload think time %q is not a duration.", q.ThinkTime), "")
+		}
+	}
+
+	// The three knobs that belong to one source and are read by nothing under
+	// the other. Refused only when the author wrote them, because the
+	// normalizer sets two of them on every manifest and refusing its own
+	// default would make the declared source unusable rather than honest.
+	if !derived {
+		if q.Writes && declaredAt(v.doc, "load.sql.writes") {
+			v.add("load.sql.writes",
+				"The SQL workload source is declared and writes is set.",
+				"writes decides whether a mix DERIVED from pg_stat_statements may replay a "+
+					"statement whose values were normalised away. A declared workload runs the "+
+					"statements its author wrote, writes included, so this is read by nothing here.")
+		}
+		if q.MaxStatements > 0 && declaredAt(v.doc, "load.sql.max_statements") {
+			v.add("load.sql.max_statements",
+				"The SQL workload source is declared and max_statements is set.",
+				"max_statements caps how many statements are taken FROM pg_stat_statements. A "+
+					"declared workload holds exactly the transactions its document declares, so "+
+					"this is read by nothing here.")
+		}
+		if q.Thresholds != nil && q.Thresholds.MeanIncrease > 0 &&
+			declaredAt(v.doc, "load.sql.thresholds.mean_increase") {
+			v.add("load.sql.thresholds.mean_increase",
+				"The SQL workload source is declared and mean_increase is set.",
+				"The threshold divides a measured mean by the mean pg_stat_statements recorded "+
+					"for that statement, and a statement somebody wrote has never run, so it "+
+					"arrives with no baseline and the threshold can never fire. Set "+
+					"load.sql.source to statement_statistics, or judge the run on error_rate.")
+		}
 	}
 }
 

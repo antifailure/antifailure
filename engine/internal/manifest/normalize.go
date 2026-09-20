@@ -48,9 +48,18 @@ const (
 	DefaultExploreSlowMs = 3000
 	DefaultLoadScale     = 0.05
 	DefaultLoadDuration  = "2m"
-	DefaultRegressionFac = 1.5
-	DefaultRegressionMS  = 5
-	DefaultLargeTable    = 100000
+	// The SQL workload's own defaults. Eight clients, because one client
+	// measures latency and never measures contention, and eight is enough to
+	// make two statements meet on a row without needing a large machine to run
+	// it on. A minute, because that is long enough for a percentile to mean
+	// something and short enough for a pull request check.
+	DefaultSQLClients       = 8
+	DefaultSQLDuration      = "60s"
+	DefaultSQLThinkTime     = "0ms"
+	DefaultSQLMaxStatements = 20
+	DefaultRegressionFac    = 1.5
+	DefaultRegressionMS     = 5
+	DefaultLargeTable       = 100000
 	// DefaultOracleFailOn is the lowest severity that fails af oracle.
 	//
 	// critical rather than any difference. A pull request exists to change
@@ -642,6 +651,7 @@ func normalizeLoad(m *schema.Manifest) {
 	for i, r := range l.UnsafeRoutes {
 		l.UnsafeRoutes[i] = normalizeRoute(r)
 	}
+	normalizeLoadSQL(l)
 	if t := l.Traffic; t != nil {
 		if c, ok := confine(t.Profile); ok && c != "" {
 			t.Profile = c
@@ -711,6 +721,55 @@ func normalizePolicy(m *schema.Manifest) {
 // carrying a space is not a method and stays whole, which is what it did
 // before and what a strange entry should keep doing rather than becoming a
 // second guess.
+// normalizeLoadSQL fills the SQL workload's defaults.
+//
+// Absent block, nothing to fill. A manifest with no load.sql has not asked for
+// a SQL workload, and inventing one here would put a block in every explain
+// output for a feature nobody turned on.
+func normalizeLoadSQL(l *schema.Load) {
+	q := l.SQL
+	if q == nil {
+		return
+	}
+	if q.Source == "" {
+		q.Source = schema.SQLDeclared
+	}
+	if q.Clients == 0 {
+		q.Clients = DefaultSQLClients
+	}
+	if q.Duration == "" && q.Transactions == 0 {
+		// Only when neither is set. A workload that says how many
+		// transactions each client runs and nothing about time is a complete
+		// declaration, and filling in a duration beside it would silently cap
+		// a run its author sized in transactions.
+		q.Duration = DefaultSQLDuration
+	}
+	if q.ThinkTime == "" {
+		q.ThinkTime = DefaultSQLThinkTime
+	}
+	if q.MaxStatements == 0 {
+		q.MaxStatements = DefaultSQLMaxStatements
+	}
+	if c, ok := confine(q.Script); ok && c != "" {
+		q.Script = c
+	}
+	if q.Thresholds == nil {
+		q.Thresholds = &schema.LoadSQLThresholds{}
+	}
+	// Only under the source that carries a baseline, which is the same
+	// decision load.thresholds.p95_increase makes six lines up and for the
+	// same reason. mean_increase divides a measured mean by the mean
+	// pg_stat_statements recorded for that statement, and a declared statement
+	// has never run before, so under declared the default would be a threshold
+	// the report lists and nothing can ever be measured against.
+	if q.Thresholds.MeanIncrease == 0 && q.Source == schema.SQLStatementStatistics {
+		q.Thresholds.MeanIncrease = 0.25
+	}
+	if q.Thresholds.ErrorRate == 0 {
+		q.Thresholds.ErrorRate = 0.01
+	}
+}
+
 func normalizeRoute(r string) string {
 	r = strings.TrimSpace(r)
 	if method, rest, ok := strings.Cut(r, " "); ok && isHTTPMethod(method) {

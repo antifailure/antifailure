@@ -2,7 +2,7 @@
 title: Security checks
 description: How Antifailure routes security check families at exactly what a change touched, and the boundary every finding respects.
 sidebar:
-  order: 18
+  order: 19
 ---
 
 A security check is an ordinary finding in a new namespace. It rehearses the

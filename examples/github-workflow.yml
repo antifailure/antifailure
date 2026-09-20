@@ -14,12 +14,12 @@ on:
   # the branch an environment is on. Delete it if you do not use one.
   workflow_dispatch:
     inputs:
-      command: { type: choice, default: up, options: [up, down, agents, load, scenario, explore], description: "Which part to run" }
+      command: { type: choice, default: up, options: [up, down, agents, load, scenario, explore, sql], description: "Which part to run" }
       workflows: { description: "Comma separated names out of the manifest. Empty means all of them." }
       duration: { description: "How long to send load for, as a Go duration such as 60s" }
       scale: { description: "Multiplier on production's rate" }
       seed: { description: "Makes two runs do the same thing" }
-      concurrency: { description: "Ceiling on requests in flight" }
+      concurrency: { description: "Ceiling on requests in flight, or the client count for sql" }
       run_id: { description: "Leave it empty. The engine asks." }
 
 permissions:
