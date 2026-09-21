@@ -1401,8 +1401,6 @@ func TestSchemaConstraintReport(t *testing.T) {
 // max_statements and thresholds.mean_increase instead. Without that split the
 // base manifest is refused by this feature's own three cross field rules,
 // which is the #315 failure exactly.
-const wantConstraints = 782
-
 // Then 755. The three keys that say what the Postgres a golden is built in
 // actually is: database.image, which declares a type and a maxLength;
 // database.extensions and database.preload_libraries, each of which declares a
@@ -1429,6 +1427,50 @@ const wantConstraints = 782
 // reported red having measured NOTHING. That is the #315 failure exactly, and
 // it is the second time this file has caught it, which is the argument for the
 // base being asserted before the verdicts are.
+//
+// Then 772, which is neither branch's number: the SQL workload above and the
+// surface below landed in parallel and each measured 743 plus its own, so the
+// figure was recounted from the schema rather than added. A workflow gained
+// `surface`, naming all five the product knows
+// rather than only the two this build drives, so that a manifest asking for a
+// surface with no driver is refused BY NAME instead of read as a typo. Two
+// constraints, its type and its enum, both ENFORCED: the decoder refuses a
+// non-string and the validator refuses a value that is not a surface, a
+// surface this build cannot drive, and `terminal` written in the wrong list,
+// each with its own sentence. The generator fills the field with the first
+// enum value, which is `web`, so no base is refused and no tuning override is
+// needed.
+// Then 809. The infrastructure section, which says where the infrastructure
+// as code lives. The block's own type, additionalProperties and its one
+// required field, then on the stacks list the type, minItems, maxItems and
+// uniqueItems, and on a stack the type, additionalProperties and two required
+// fields, the type and enum on source, the type and both lengths on path, the
+// type, maxLength and pattern on workspace, and the type, maxItems and
+// uniqueItems on var_files with the type and both lengths on its items.
+//
+// This one needed NO tuning entry at all, which is worth saying because every
+// feature above it needed several: the generator's first string candidate
+// satisfies every field here, and the enum has one member so its first value
+// is the only value.
+//
+// The number is what the gate counted on this tree after the rebase across
+// the surface enum landing, never 784 plus anything: two features measured
+// their own delta against different totals tonight and both happened to be
+// right, which is exactly why adding feels safe and is not.
+//
+// The shape cost three more constraints than the flat one this section was
+// built as first, where source, workspace and var_files sat over a list of
+// paths. That shape needed a cross field rule to hold it together, a workspace
+// may be given only beside exactly one path, and per stack there is no such
+// rule: three constraints for one less thing anybody has to know. The flat
+// version's own note is worth keeping for the reason it gave, because it
+// applies to whatever is added next: that rule fired only ABOVE one path, on
+// purpose, because a rule that fired at one would have made the all fields
+// base manifest impossible to build. That is the #315 failure from the other
+// direction, not a value the fixture cannot invent but a fixture the rule
+// cannot permit, and it is the thing to check before adding any cross field
+// rule to a section the generator fills.
+const wantConstraints = 809
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and

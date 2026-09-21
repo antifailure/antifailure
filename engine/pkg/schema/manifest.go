@@ -39,6 +39,7 @@ type Manifest struct {
 	Load              *Load              `json:"load,omitempty" yaml:"load,omitempty"`
 	Policy            *Policy            `json:"policy,omitempty" yaml:"policy,omitempty"`
 	Runtime           *Runtime           `json:"runtime,omitempty" yaml:"runtime,omitempty"`
+	Infrastructure    *Infrastructure    `json:"infrastructure,omitempty" yaml:"infrastructure,omitempty"`
 	GitHub            *GitHub            `json:"github,omitempty" yaml:"github,omitempty"`
 	Security          *Security          `json:"security,omitempty" yaml:"security,omitempty"`
 }
@@ -679,12 +680,87 @@ type Workflow struct {
 	// workflow instead of drawing one from the diversity mix. Independent of
 	// Persona, the account the workflow signs in as (WHO). Read only when
 	// diversity is enabled; empty means the mix assigns one from the seed.
-	Personality string   `json:"personality,omitempty" yaml:"personality,omitempty"`
+	Personality string `json:"personality,omitempty" yaml:"personality,omitempty"`
+	// Surface is what this workflow drives. Empty is filled in as SurfaceWeb
+	// by normalisation, so everything downstream reads a value rather than
+	// deciding what an absence means.
+	Surface     Surface  `json:"surface,omitempty" yaml:"surface,omitempty"`
 	StartPath   string   `json:"start_path,omitempty" yaml:"start_path,omitempty"`
 	Independent bool     `json:"independent,omitempty" yaml:"independent,omitempty"`
 	Budget      *Budget  `json:"budget,omitempty" yaml:"budget,omitempty"`
 	Expect      []string `json:"expect,omitempty" yaml:"expect,omitempty"`
 	Tags        []string `json:"tags,omitempty" yaml:"tags,omitempty"`
+}
+
+// Surface is what a workflow drives.
+//
+// NOT ChangeRule.Surface, which says what a changed FILE is. This says what a
+// workflow DRIVES, and the two words landed in one schema from opposite ends.
+// The note is here because the collision is the kind a reader resolves wrongly
+// once and then carries.
+type Surface string
+
+// The five surfaces the product knows. Every one of them may be written in a
+// manifest, including the ones a given build has no driver for, because a
+// refusal that names the surface is worth more than a schema saying the value
+// is unknown. Which of them a build can actually drive is DriveableSurfaces.
+const (
+	// SurfaceWeb is a browser, driven through its accessibility tree.
+	SurfaceWeb Surface = "web"
+	// SurfaceTerminal is a command line program. Written in
+	// TerminalWorkflows rather than in Workflows, because it needs a program
+	// to run where a browser workflow needs a persona to sign in as.
+	SurfaceTerminal Surface = "terminal"
+	// SurfaceDesktop is a native or Electron application.
+	SurfaceDesktop Surface = "desktop"
+	// SurfaceIOS is an iOS application.
+	SurfaceIOS Surface = "ios"
+	// SurfaceAndroid is an Android application.
+	SurfaceAndroid Surface = "android"
+)
+
+// Surfaces is every surface a manifest may name, in the order the reference
+// lists them.
+var Surfaces = []Surface{SurfaceWeb, SurfaceTerminal, SurfaceDesktop, SurfaceIOS, SurfaceAndroid}
+
+// DriveableSurfaces is the subset THIS BUILD carries a driver for.
+//
+// It is deliberately a different list from Surfaces, and the gap between them
+// is the whole point: a manifest may name a surface this build cannot drive,
+// and the engine refuses it by name against this list rather than against the
+// schema. A lane that finishes a driver adds its surface here and flips its
+// entry in the runner's registry, and TestTheDriveableSurfacesMatchTheRunnersRegistry
+// fails if it does only one of the two.
+var DriveableSurfaces = []Surface{SurfaceWeb, SurfaceTerminal, SurfaceDesktop, SurfaceIOS}
+
+// CanDrive reports whether this build has a driver for a surface.
+func CanDrive(s Surface) bool {
+	for _, d := range DriveableSurfaces {
+		if d == s {
+			return true
+		}
+	}
+	return false
+}
+
+// IsSurface reports whether a value names a surface the product knows at all,
+// driveable or not.
+func IsSurface(s Surface) bool {
+	for _, known := range Surfaces {
+		if known == s {
+			return true
+		}
+	}
+	return false
+}
+
+// SurfaceNames renders a list of surfaces for a message a person reads.
+func SurfaceNames(surfaces []Surface) []string {
+	out := make([]string, 0, len(surfaces))
+	for _, s := range surfaces {
+		out = append(out, string(s))
+	}
+	return out
 }
 
 // TerminalWorkflow is one thing the agents do at a command line.
@@ -1535,6 +1611,72 @@ const (
 	ForkLabel  ForkPolicy = "label"
 	ForkAlways ForkPolicy = "always"
 )
+
+// InfraSource names the tool that declares one stack of an application's
+// infrastructure.
+//
+// A closed vocabulary, on the same reasoning LoadSource states a few hundred
+// lines up: a value the schema accepts and nothing can read is worse than a
+// value that is not offered, because the first looks like a configured feature
+// and behaves like a missing one. It carries exactly the tools a reader exists
+// for, and a new member lands in the same commit as the reader it names rather
+// than being reserved ahead of one.
+//
+// OpenTofu is deliberately not a second member. It writes the same language
+// and is read by the same reader, so a second spelling would be two names for
+// one behaviour and a manifest could then disagree with itself about which
+// one it meant.
+type InfraSource string
+
+// InfraTerraform is Terraform, and OpenTofu, which is the same language.
+const InfraTerraform InfraSource = "terraform"
+
+// Infrastructure says where this application's infrastructure as code lives.
+//
+// It is the only section of the manifest that describes PRODUCTION rather than
+// the copy. Everything else here says what to build; this says what the thing
+// being copied is declared to be, which is what makes a comparison possible at
+// all. Nothing in it changes what an environment builds or runs.
+//
+// The section is absent from most manifests, and its absence is reported
+// rather than assumed: a copy nobody compared against its own infrastructure
+// has not been shown to reproduce it.
+type Infrastructure struct {
+	// Stacks are the directories that declare production, one entry each.
+	Stacks []InfraStack `json:"stacks" yaml:"stacks"`
+}
+
+// InfraStack is one directory that declares part of production, and how it is
+// read.
+//
+// WHY EVERY KEY IS ON THE STACK AND NOT ON THE LIST, because the first draft
+// of this had source, workspace and var_files one level up and it was wrong
+// twice over. A workspace is selected inside ONE root module and a variable
+// file is passed to ONE invocation, so either of them beside three directories
+// is a statement nobody can act on; that shape needed a cross field refusal
+// whose existence was a symptom rather than a rule, and the first person it
+// refuses is the one with the most infrastructure. And a real repository
+// declares its cloud in one tool and its workloads in another, so a single
+// source for the whole list cannot describe the ordinary case either. Per
+// stack, every key means exactly one thing and there is no rule left to write.
+type InfraStack struct {
+	// Source is the tool that declares this stack.
+	Source InfraSource `json:"source" yaml:"source"`
+	// Path is the stack's directory, relative to the repository root.
+	Path string `json:"path" yaml:"path"`
+	// Workspace is which workspace holds production, for a stack that
+	// separates its environments that way.
+	//
+	// Read rather than selected. Nothing here runs Terraform, and the name is
+	// what lets an expression mentioning terraform.workspace resolve to a
+	// value instead of being reported as unreadable.
+	Workspace string `json:"workspace,omitempty" yaml:"workspace,omitempty"`
+	// VarFiles are the variable files that describe production, in the order
+	// they would be passed. They are what turns a variable with no default
+	// from a value decided outside the configuration into one that can be
+	// read here.
+	VarFiles []string `json:"var_files,omitempty" yaml:"var_files,omitempty"`
+}
 
 // GitHub configures the pull request integration.
 type GitHub struct {

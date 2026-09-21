@@ -268,3 +268,142 @@ func TestExplain_NamesTheTerminalWorkflowsAndHowTheyAreDriven(t *testing.T) {
 	// are in this output, and the manifest above wrote one down.
 	require.NotContains(t, out, "—")
 }
+
+// The surface a workflow drives, and the two refusals that keep the set
+// honest.
+//
+// THE DEFECT THESE EXIST FOR is the one this lane was created to fix,
+// recreated one surface over. A driver can be finished, registered and
+// correct, and still be unreachable because no manifest can name the surface
+// it drives. So the manifest names every surface the product knows, including
+// the ones this build cannot drive, and the engine refuses those BY NAME
+// against what the build actually carries.
+
+func TestParse_DefaultsAWorkflowToTheBrowser(t *testing.T) {
+	t.Parallel()
+	m := mustParse(t, withPersonas+`workflows:
+  - name: checkout
+    description: Buy one item and see the order confirmed on the screen.
+    persona: alice
+    expect: ["The order is confirmed."]
+`)
+	require.Equal(t, schema.SurfaceWeb, m.Workflows[0].Surface,
+		"a workflow that named no surface was left empty, so every reader downstream has to decide what an absence means")
+}
+
+func TestParse_AcceptsTheSurfaceThisBuildDrives(t *testing.T) {
+	t.Parallel()
+	m := mustParse(t, withPersonas+`workflows:
+  - name: checkout
+    surface: web
+    description: Buy one item and see the order confirmed on the screen.
+    persona: alice
+    expect: ["The order is confirmed."]
+`)
+	require.Equal(t, schema.SurfaceWeb, m.Workflows[0].Surface)
+}
+
+// A surface the product knows and this build cannot drive. It is refused, and
+// the refusal names the surfaces the build has rather than the ones the schema
+// allows, because those are different lists and only one of them can help.
+func TestParse_RefusesASurfaceThisBuildHasNoDriverFor(t *testing.T) {
+	t.Parallel()
+	// android only, since #508 built the iOS driver and DriveableSurfaces now
+	// carries SurfaceIOS. Kept as a loop rather than collapsed to one case: the
+	// next surface to be finished is one entry to move, and the entry that
+	// moves is the evidence the sentence below has to change with it.
+	for _, surface := range []string{"android"} {
+		_, err := parse(t, withPersonas+`workflows:
+  - name: checkout
+    surface: `+surface+`
+    description: Buy one item and see the order confirmed on the screen.
+    persona: alice
+    expect: ["The order is confirmed."]
+`)
+		msg := messages(problems(t, err))
+		require.Containsf(t, msg, "this build has no driver for it",
+			"surface %q was not refused as undriveable", surface)
+		require.Containsf(t, msg, surface, "the refusal for %q does not name it", surface)
+		require.Containsf(t, msg, "This build drives: web, terminal, desktop, ios.",
+			"the refusal for %q does not say what this build can drive", surface)
+	}
+}
+
+// And a value that is not a surface at all gets a different sentence, because
+// a typo and an unbuilt driver are different facts and the remedy differs.
+func TestParse_RefusesAValueThatIsNotASurfaceAtAll(t *testing.T) {
+	t.Parallel()
+	_, err := parse(t, withPersonas+`workflows:
+  - name: checkout
+    surface: telepathy
+    description: Buy one item and see the order confirmed on the screen.
+    persona: alice
+    expect: ["The order is confirmed."]
+`)
+	msg := messages(problems(t, err))
+	require.Contains(t, msg, "surface")
+	require.NotContains(t, msg, "this build has no driver for it",
+		"a value that is not a surface was reported as an unbuilt driver, which tells somebody to wait for a release that is never coming")
+}
+
+// terminal is in the enum so that writing it here is answered with where it
+// belongs rather than with a list it is missing from, which reads like a typo.
+func TestParse_RefusesTerminalOnABrowserWorkflowAndSaysWhereItGoes(t *testing.T) {
+	t.Parallel()
+	_, err := parse(t, withPersonas+`workflows:
+  - name: deploy
+    surface: terminal
+    description: Run the deploy command and confirm it reports what it applied.
+    persona: alice
+    expect: ["Applied"]
+`)
+	msg := messages(problems(t, err))
+	require.Contains(t, msg, "sets surface to terminal")
+	require.Contains(t, msg, "terminal_workflows")
+	require.NotContains(t, msg, "this build has no driver for it",
+		"terminal was reported as undriveable, and this build drives it")
+}
+
+// The runner dispatches ONE driver per run and hands it the whole workflow
+// list, so a manifest whose workflows disagree has no single answer to give
+// it. Refused here rather than left to the runner, which would drive them all
+// as whichever surface won and fail for a reason nothing could name.
+func TestParse_RefusesWorkflowsThatDriveDifferentSurfaces(t *testing.T) {
+	t.Parallel()
+	_, err := parse(t, withPersonas+`workflows:
+  - name: checkout
+    surface: web
+    description: Buy one item and see the order confirmed on the screen.
+    persona: alice
+    expect: ["The order is confirmed."]
+  - name: preferences
+    surface: desktop
+    description: Open the preferences window and change the default currency.
+    persona: alice
+    expect: ["The default currency is euros."]
+`)
+	msg := messages(problems(t, err))
+	require.Contains(t, msg, "One run drives one surface")
+	// Both sides named, so a reader does not have to find the other one.
+	require.Contains(t, msg, `"preferences"`)
+	require.Contains(t, msg, `"checkout"`)
+}
+
+// Two workflows on the SAME surface are the ordinary case and must not be
+// caught by the rule above.
+func TestParse_AcceptsSeveralWorkflowsOnOneSurface(t *testing.T) {
+	t.Parallel()
+	m := mustParse(t, withPersonas+`workflows:
+  - name: checkout
+    surface: desktop
+    description: Buy one item and see the order confirmed on the screen.
+    persona: alice
+    expect: ["The order is confirmed."]
+  - name: preferences
+    surface: desktop
+    description: Open the preferences window and change the default currency.
+    persona: alice
+    expect: ["The default currency is euros."]
+`)
+	require.Len(t, m.Workflows, 2)
+}

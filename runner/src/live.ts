@@ -26,9 +26,10 @@
 
 import { connect, type Socket } from 'node:net';
 
-/** The surfaces a run can drive. web, terminal, ios and android are live;
- *  desktop is declared here so the wire shape is stable before its driver
- *  exists. */
+/** The surfaces a run can drive. web, terminal, desktop and ios are live;
+ *  android is declared here so the wire shape is stable before its driver has
+ *  driven anything, and so a manifest naming it is refused by name rather than
+ *  read as a typo. */
 export type Surface = 'web' | 'terminal' | 'desktop' | 'ios' | 'android';
 
 /** Which agent is which, from a watcher's point of view. One workflow running

@@ -29,6 +29,14 @@ test('the registry knows every surface and which are available', () => {
   // android is implemented and UNPROVEN: no run has driven it, so it is
   // refused however complete its code looks.
   assert.equal(driverFor('android').available, false);
+  // Every surface the type allows has a row. A surface in the union and not in
+  // the registry is one driverFor answers undefined for, and assertAvailable
+  // would refuse it with "unknown surface" rather than with the sentence
+  // saying what building it takes.
+  for (const surface of surfaces()) {
+    assert.ok(driverFor(surface), `no registry row for ${surface}`);
+    assert.ok(driverFor(surface).summary.length > 0, `no summary for ${surface}`);
+  }
 });
 
 test('assertAvailable passes a built surface and refuses a scaffolded one loudly', () => {

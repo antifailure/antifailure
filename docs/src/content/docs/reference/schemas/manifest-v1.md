@@ -22,6 +22,7 @@ This page is generated from `schemas/manifest.v1.json`. Edit the schema, then ru
 | `explore` | [Explore](#explore) | no | Agents that pursue a goal with no declared workflow, discover the paths an application offers, and report where it costs somebody effort without failing. |
 | `fidelity` | [Fidelity](#fidelity) | no | The component inventory: what the environment reproduces, what stands in for something, and what it could not reproduce at all. |
 | `github` | [GitHub](#github) | no | How Antifailure appears on a pull request: what runs it, whether it comments, what it does with forks, and when it tears the environment down. |
+| `infrastructure` | [Infrastructure](#infrastructure) | no | Where this application's infrastructure as code lives. |
 | `insights` | [Insights](#insights) | no | The Postgres native checks that turn a preview environment into a database review. |
 | `invariants` | list of [Invariant](#invariant) | no | Read only statements that must hold after every workflow. They are the assertions a test cannot make from the outside: no orphaned rows, no negative balances, no subscription without a customer. Max items 100. |
 | `load` | [Load](#load) | no | Traffic shaped like production, compared between the base branch and this one. |
@@ -290,6 +291,25 @@ The masked, verified copy every environment branches from.
 | `schedule` | string | no | Cron expression for automatic refreshes, with an optional CRON_TZ prefix. A refresh that would overlap a running one is skipped with an event rather than queued. Max length 128. |
 | `storage` | `local`, `azure_blob`, `s3`, `gcs` | no | Where dumps and attestations live. Defaults to `local`. |
 | `storage_url` | string | no | Container or bucket URL for a remote store. Credentials come from the secrets subsystem, never from this URL. Max length 1024. |
+
+## Infrastructure
+
+Where this application's infrastructure as code lives. Nothing here changes what the environment builds. It names the stacks that declare production, so that a copy can be compared against what production is declared to be rather than against what somebody remembers it being. A manifest that leaves this section out is never measured against its infrastructure, and the report says so rather than passing that dimension quietly.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `stacks` | list of [Infrastructure stack](#infrastructure-stack) | **yes** | The stacks that declare production, one entry each. A stack is a directory that is deployed on its own, so a repository with a stack per concern names one entry for each, and a repository that declares its cloud in one tool and its workloads in another names one entry per tool. Min items 1, max items 50. |
+
+## Infrastructure stack
+
+One directory that declares part of production, and how it is read. Every key belongs to this directory alone, which is why the workspace and the variable files sit here rather than beside the list: both are arguments to a single stack, and one of either spread across several would be a statement nobody could act on.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `path` | string | **yes** | The stack's directory, relative to the repository root. It must exist, must be a directory, and must hold at least one file the named source can read, because a directory that is there and a stack that is there are different facts and a mistyped deep path usually satisfies the first. For terraform that is a .tf file or any .json, the second because a fully resolved plan is the best input there is and a stack may hold one and no configuration at all. Min length 1, max length 512. |
+| `source` | `terraform` | **yes** | Which tool declares this stack. The list carries exactly the tools a reader exists for, because a source accepted here that nothing can read would look like a configured feature and behave like a missing one. OpenTofu writes the same language and is read by the same reader, so terraform is the value for both. |
+| `var_files` | list of string | no | The variable files that describe production, relative to the repository root, in the order they would be passed. Every entry must exist. They are what turns a variable with no default from a value decided outside the configuration into one that can be read here. Max items 20. |
+| `workspace` | string | no | Which workspace holds production, for a stack that separates its environments that way. It is read rather than selected: nothing here runs Terraform, and the name is what lets an expression mentioning terraform.workspace resolve to a value instead of being reported as unreadable. Max length 128, matches `^[A-Za-z0-9_-]+$`. |
 
 ## Insights
 
@@ -629,5 +649,6 @@ One thing the agents do, written as a goal rather than a script. The runner deci
 | `personality` | string | no | Pin one personality to this workflow rather than drawing from the diversity mix. One of the built in ids: explorer, fast_actor, cautious_analyst, goal_oriented, distracted, skeptic, text_oriented, visual_follower, keyboard_user, edge_case. This is the HOW the agent behaves and is independent of persona, the WHO it signs in as. Absent means the personality is assigned from the mix by the seed, which is the usual case. Read only when diversity is enabled. Max length 40, matches `^[a-z0-9]([a-z0-9_-]{0,38}[a-z0-9])?$`. |
 | `personas` | list of string | no | The personas this workflow signs in as, in order, in one browser, for a person who holds more than one session at once: an operator who is also a customer, an account with a second sign-in surface. Each is signed in through its own strategy and the sessions accumulate; the last one named is the identity the workflow acts as. Mutually exclusive with persona. Min items 1, max items 5. |
 | `start_path` | string | no | Where to begin. Defaults to the application root. Defaults to `/`. Max length 512. |
+| `surface` | `web`, `terminal`, `desktop`, `ios`, `android` | no | What this workflow drives. Defaults to `web`, which is a browser.  Every surface the product knows is named here, including the ones a given build cannot drive yet, and that is the same decision `runtime.provider` documents. A build registers the drivers it carries, so a manifest naming a surface this build has no driver for is refused BY NAME, against the surfaces that build actually has, which tells a person far more than a schema saying the value is unknown. The refusal happens twice on purpose: the engine says it at validation, so the answer is immediate, and the runner says it again before it drives anything, so a surface nothing drove can never come back green.  Write `terminal` in `terminal_workflows` rather than here. A terminal workflow needs a program to run where this one needs a persona to sign in as, so the two do not share an entry; naming it here is refused with that sentence rather than treated as a typo.  This is not `change.rules[].surface`, which says what a changed FILE is. This says what a workflow DRIVES. Defaults to `web`. |
 | `tags` | list of string | no | Labels for the person reading the manifest, and nothing else. The engine does not read them: no command selects workflows by tag and no report prints one, so grouping workflows here groups them for a reader and not for a run. Name the workflows with --only to run a subset. This key had no description at all until somebody counted the fields nothing reads, which is how a label and a broken promise came to look alike. Max items 20. |
 

@@ -50,6 +50,7 @@ func validate(m *schema.Manifest, doc *yaml.Node, root string) []Problem {
 	v.insights(m)
 	v.fidelity(m)
 	v.runtime(m)
+	v.infrastructure(m)
 	v.change(m)
 	v.github(m)
 	v.security(m)
@@ -98,6 +99,23 @@ func (v *validator) pathExists(p string) bool {
 	}
 	_, err := os.Stat(filepath.Join(v.root, filepath.FromSlash(p)))
 	return err == nil
+}
+
+// dirIsAFile reports that a repository relative path exists and is not a
+// directory.
+//
+// Written as the positive of the wrong answer rather than as "is a directory",
+// so that the three states stay distinct: absent is pathExists' business and
+// carries its own message, present and a directory is fine, and present and a
+// file is the one case this names. With no root, which the schema example
+// tests use, nothing is a file, for the same reason pathExists treats
+// everything as present: there is no tree to ask.
+func (v *validator) dirIsAFile(p string) bool {
+	if v.root == "" || p == "" {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(v.root, filepath.FromSlash(p)))
+	return err == nil && !info.IsDir()
 }
 
 func (v *validator) services(m *schema.Manifest) {
@@ -1435,6 +1453,10 @@ func (v *validator) workflows(m *schema.Manifest) {
 		personas[p.Name] = true
 	}
 	names := map[string]bool{}
+	// The surface the first workflow named, and which workflow that was, so a
+	// disagreement can name both sides rather than only the second one.
+	var first schema.Surface
+	var firstName string
 	for i := range m.Workflows {
 		w := &m.Workflows[i]
 		base := fmt.Sprintf("workflows[%d]", i)
@@ -1442,6 +1464,49 @@ func (v *validator) workflows(m *schema.Manifest) {
 			v.add(base+".name", fmt.Sprintf("Two workflows are both named %q.", w.Name), "")
 		}
 		names[w.Name] = true
+
+		// The surface this workflow drives, refused here rather than only in
+		// the runner. Two gates at two layers, and neither is redundant: this
+		// one gives a person an answer at validation time and names what this
+		// build can actually drive, and the runner's assertAvailable is the
+		// backstop that makes a green run impossible for a surface nothing
+		// drove. A run has to get past both.
+		switch {
+		case w.Surface == schema.SurfaceTerminal:
+			// Named rather than lumped in with an unknown value, because
+			// somebody writing this has understood the product correctly and
+			// only written it in the wrong list.
+			v.add(base+".surface",
+				fmt.Sprintf("Workflow %q sets surface to terminal.", w.Name),
+				"Write a terminal workflow in terminal_workflows instead. It needs a program to run where this one needs a persona to sign in as, so the two do not share an entry.")
+		case !schema.IsSurface(w.Surface):
+			v.add(base+".surface",
+				fmt.Sprintf("Workflow %q drives %q, which is not a surface.", w.Name, w.Surface),
+				"The surfaces are: "+strings.Join(schema.SurfaceNames(schema.Surfaces), ", ")+".")
+		case !schema.CanDrive(w.Surface):
+			// The surface is real and this build has no driver for it. That is
+			// a different fact from a typo and it gets a different sentence,
+			// because the manifest is allowed to name a surface the product
+			// knows before a build can drive it.
+			v.add(base+".surface",
+				fmt.Sprintf("Workflow %q drives %q, and this build has no driver for it.", w.Name, w.Surface),
+				"This build drives: "+strings.Join(schema.SurfaceNames(schema.DriveableSurfaces), ", ")+".")
+		}
+
+		// The runner dispatches ONE driver per run and hands it the whole
+		// workflow list, so a manifest whose workflows drive different
+		// surfaces has no single answer to give it. Refused here rather than
+		// left to the runner, because the runner would silently drive them all
+		// as whichever surface won, and a workflow driven on the wrong surface
+		// fails for a reason nothing in the report could name.
+		if first != "" && w.Surface != "" && w.Surface != first {
+			v.add(base+".surface",
+				fmt.Sprintf("Workflow %q drives %q and %q drives %q.", w.Name, w.Surface, firstName, first),
+				"One run drives one surface, because the runner starts one driver for the whole list. Put them in separate manifests, or run them as separate checks.")
+		}
+		if first == "" && w.Surface != "" {
+			first, firstName = w.Surface, w.Name
+		}
 
 		if w.Persona == "" {
 			v.add(base+".persona",
@@ -2083,6 +2148,250 @@ var changeSurfaces = map[string]bool{
 // that fail safe would never fire again. Somebody would write it to quiet the
 // report, and the report would go quiet for the right reason and the wrong
 // one at once.
+// infrastructure checks the section that says where the infrastructure as
+// code lives.
+//
+// It is the only section that describes production rather than the copy, and
+// that is what shapes every refusal below. A path here is not a build input:
+// nothing is compiled from it and no container is started by it, so a wrong
+// one produces no error anywhere downstream. It produces a comparison against
+// a directory that is not there, which reads as "your copy reproduces nothing"
+// rather than as "you pointed at the wrong place". So the mistakes are caught
+// here, where the line number is, rather than left to a report that cannot
+// tell the two apart.
+//
+// The bounds the schema declares are enforced by boundsPass and are not
+// repeated here. What this adds is the four things a JSON Schema cannot say:
+// that a path is inside this repository, that it is there and is a directory,
+// that the directory actually holds something the named source can read, and
+// that two stacks do not name the same place.
+func (v *validator) infrastructure(m *schema.Manifest) {
+	in := m.Infrastructure
+	if in == nil {
+		return
+	}
+
+	// Guarded on the key being WRITTEN. The schema makes stacks required and
+	// boundsPass enforces that at the section, so an omitted key already has a
+	// sentence; speaking again about the same omission would report one
+	// mistake twice, which is what boundsPass' spoken set exists to prevent
+	// one level down. What is left here is the key that is present and says
+	// nothing.
+	if len(in.Stacks) == 0 {
+		if declaredAt(v.doc, "infrastructure.stacks") {
+			v.add("infrastructure.stacks",
+				"The infrastructure section names no stack, so it says where nothing is.",
+				"Name the directory that is deployed on its own, such as infra/terraform.")
+		}
+		return
+	}
+
+	seen := map[string]int{}
+	for i, st := range in.Stacks {
+		base := fmt.Sprintf("infrastructure.stacks[%d]", i)
+		v.infraSource(base, st)
+		v.infraStackPath(base, st, seen, i)
+		v.infraVarFiles(base, st)
+	}
+}
+
+// infraSource checks that a stack names a tool this engine has a reader for.
+func (v *validator) infraSource(base string, st schema.InfraStack) {
+	switch {
+	case strings.TrimSpace(string(st.Source)) == "":
+		if declaredAt(v.doc, base+".source") {
+			v.add(base+".source",
+				"This stack does not say what declares it.",
+				"Write source: terraform, which is the only one this engine reads.")
+		}
+	case !knownInfraSource(st.Source):
+		v.add(base+".source",
+			fmt.Sprintf("%q is not an infrastructure source this engine can read.", string(st.Source)),
+			"terraform is the only value, and it covers OpenTofu, which writes the same language.")
+	}
+}
+
+// infraStackPath checks one stack's directory, and records it so that a second
+// stack naming the same place is refused.
+func (v *validator) infraStackPath(base string, st schema.InfraStack, seen map[string]int, i int) {
+	at := base + ".path"
+	p := strings.TrimSpace(st.Path)
+	switch {
+	case p == "":
+		if declaredAt(v.doc, at) {
+			v.add(at, "This stack's path is empty.",
+				"Give it the directory that is deployed on its own, relative to the repository root.")
+		}
+		return
+	case strings.HasPrefix(p, "/"):
+		v.add(at, fmt.Sprintf("The stack path %q is an absolute path.", st.Path),
+			"Paths here are relative to the repository root, because the machine that reads them is not this one.")
+		return
+	case hasParentSegment(p):
+		v.add(at, fmt.Sprintf("The stack path %q leaves the repository.", st.Path),
+			"Paths here are relative to the repository root and stay inside it.")
+		return
+	case !v.pathExists(p):
+		v.add(at, fmt.Sprintf("The stack path %q is not in this repository.", st.Path),
+			"Check the spelling. Nothing downstream will report this: a path that is not there is read as production having nothing in it.")
+		return
+	case v.dirIsAFile(p):
+		v.add(at, fmt.Sprintf("The stack path %q is a file, and a stack is a directory.", st.Path),
+			"Name the directory that holds the files, not one of the files in it.")
+		return
+	}
+
+	// The directory is there and holds nothing this source can read. Separate
+	// from "not in this repository" because a mistyped path deep in a tree
+	// usually lands on a directory that DOES exist, the parent or a sibling,
+	// and an existence check says yes to it. "There is a directory here" and
+	// "there is a stack here" are different facts.
+	if what, empty := v.infraStackIsEmpty(p, st.Source); empty {
+		v.add(at,
+			fmt.Sprintf("The stack path %q holds no %s.", st.Path, what),
+			"The directory is there and there is nothing in it for this source to read, which is what a mistyped path one level out looks like.")
+		return
+	}
+
+	if prev, dup := seen[p]; dup {
+		v.add(at,
+			fmt.Sprintf("The stack path %q is already named at infrastructure.stacks[%d].", st.Path, prev),
+			"Reading the same place twice measures it twice and says nothing more. Remove one, or point this entry at the other stack.")
+		return
+	}
+	seen[p] = i
+}
+
+// infraVarFiles checks the variable files one stack names.
+func (v *validator) infraVarFiles(base string, st schema.InfraStack) {
+	seen := map[string]int{}
+	for j, f := range st.VarFiles {
+		at := fmt.Sprintf("%s.var_files[%d]", base, j)
+		p := strings.TrimSpace(f)
+		switch {
+		case p == "":
+			v.add(at, fmt.Sprintf("The variable file at position %d is empty.", j),
+				"Remove the entry, or give it a path relative to the repository root.")
+			continue
+		case strings.HasPrefix(p, "/"):
+			v.add(at, fmt.Sprintf("The variable file %q is an absolute path.", f),
+				"Paths here are relative to the repository root, because the machine that reads them is not this one.")
+			continue
+		case hasParentSegment(p):
+			v.add(at, fmt.Sprintf("The variable file %q leaves the repository.", f),
+				"Paths here are relative to the repository root and stay inside it.")
+			continue
+		case !v.pathExists(p):
+			v.add(at, fmt.Sprintf("The variable file %q is not in this repository.", f),
+				"Check the spelling. A variable file that is not there is the difference between reading production's own numbers and reading the module's defaults.")
+			continue
+		}
+		if prev, dup := seen[p]; dup {
+			// At the LIST rather than at the entry, because the schema
+			// declares uniqueItems there and boundsPass enforces it at that
+			// same path, so a message here suppresses the generic one and the
+			// reader sees one sentence about one mistake.
+			v.add(base+".var_files",
+				fmt.Sprintf("The variable file %q is named twice, at positions %d and %d.", f, prev, j),
+				"Remove one. Passing the same file twice changes nothing.")
+			continue
+		}
+		seen[p] = j
+	}
+}
+
+// knownInfraSource reports whether the engine has a reader for a source.
+//
+// Written from the constant rather than from the schema's enum, because the
+// enum is what a manifest is checked against and this is what the engine can
+// actually do, and the two agreeing is the thing worth being able to break.
+func knownInfraSource(s schema.InfraSource) bool {
+	return s == schema.InfraTerraform
+}
+
+// infraStackIsEmpty reports whether a directory holds nothing the named source
+// can read, and what it was looking for.
+//
+// One level deep and no deeper, deliberately. A root module's own files are in
+// its own directory; a .tf file three levels down belongs to a module it
+// calls, and accepting a directory because something nested under it has
+// Terraform in it would accept the repository root for every repository that
+// has any.
+//
+// With no root, which the schema example tests use, nothing is empty, for the
+// same reason pathExists treats everything as present: there is no tree to
+// ask. An unreadable directory is not empty either. It is a permission
+// problem rather than a manifest problem, and refusing somebody's manifest
+// over it would send them to fix the wrong file.
+func (v *validator) infraStackIsEmpty(p string, source schema.InfraSource) (string, bool) {
+	suffixes, what := infraSourceFiles(source)
+	if v.root == "" || len(suffixes) == 0 {
+		return "", false
+	}
+	entries, err := os.ReadDir(filepath.Join(v.root, filepath.FromSlash(p)))
+	if err != nil {
+		return "", false
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		for _, suffix := range suffixes {
+			if strings.HasSuffix(e.Name(), suffix) {
+				return "", false
+			}
+		}
+	}
+	return what, true
+}
+
+// infraSourceFiles names the file suffixes a source reads, and the phrase used
+// when a directory has none of them.
+//
+// A source with no entry here is never reported empty rather than always
+// reported empty, so a source whose reader lands before this list is updated
+// costs a check rather than refusing every manifest that names it. That is the
+// direction this whole function errs in, deliberately: a check here that
+// refuses a directory the reader would have read blocks correct work, while
+// one that accepts a directory the reader finds nothing in costs a reader one
+// honest empty answer.
+//
+// WHY TERRAFORM ACCEPTS A BARE .json AND NOT ONLY .tf. The reader's primary
+// input is the output of `terraform show -json`, which is the fully resolved
+// form and the one that leaves nothing unreadable, so a stack directory may
+// legitimately hold a plan and no configuration at all: a CI job that writes
+// one beside the configuration, or a directory somebody keeps a captured plan
+// in on purpose. A .tf only rule would refuse exactly the input that produces
+// the best answer.
+//
+// Telling a plan from a state file somebody renamed, or from an unrelated
+// .json, needs the top level keys, and that is the reader's job rather than
+// this one's: it refuses a state file by content and records what it did. So
+// this asks the cheap question it can answer honestly, "is there anything here
+// this source could read", and leaves "what is it" to the thing that opens it.
+// .tf.json is a generated configuration and is covered by the same suffix.
+func infraSourceFiles(source schema.InfraSource) ([]string, string) {
+	if source == schema.InfraTerraform {
+		return []string{".tf", ".json"}, "Terraform file or plan"
+	}
+	return nil, ""
+}
+
+// hasParentSegment reports whether a slash separated path contains a segment
+// that climbs out of the tree.
+//
+// Segment by segment rather than by substring, because a directory legitimately
+// named "..data", which is what Kubernetes calls a projected volume's current
+// revision, contains the two characters and climbs nowhere.
+func hasParentSegment(p string) bool {
+	for _, seg := range strings.Split(filepath.ToSlash(p), "/") {
+		if seg == ".." {
+			return true
+		}
+	}
+	return false
+}
+
 func (v *validator) change(m *schema.Manifest) {
 	c := m.Change
 	if c == nil {
