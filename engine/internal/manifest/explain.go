@@ -359,20 +359,21 @@ func Explain(m *schema.Manifest, width int) string {
 	// measurement and carries its reason.
 	if in := m.Infrastructure; in != nil {
 		b.WriteString("\nInfrastructure\n")
-		fmt.Fprintf(&b, "  declared by  %s\n", value(string(in.Source), 15, width))
-		for _, p := range in.Paths {
-			fmt.Fprintf(&b, "  root module  %s\n", value(p, 15, width))
+		for _, st := range in.Stacks {
+			fmt.Fprintf(&b, "  stack        %s\n",
+				value(fmt.Sprintf("%s, declared by %s", st.Path, st.Source), 15, width))
+			// Both printed under every stack, and printed as "none" rather
+			// than omitted when empty. Which workspace and which variable
+			// files production is read through is the difference between
+			// reading production's own numbers and reading a module's
+			// defaults, and a page that showed the second only when somebody
+			// had already thought of it would hide exactly the case worth
+			// catching.
+			fmt.Fprintf(&b, "  %-*s workspace %s\n", 15, "",
+				value(orNone(st.Workspace, "none, so the default workspace"), 26, width))
+			fmt.Fprintf(&b, "  %-*s var files %s\n", 15, "",
+				value(orNone(strings.Join(st.VarFiles, ", "), "none, so the stack's own defaults"), 26, width))
 		}
-		// Both printed unconditionally once the section exists, and printed as
-		// "none" rather than omitted when empty. Which workspace and which
-		// variable files production is read through is the difference between
-		// comparing against production and comparing against a module's
-		// defaults, and a page that showed the second only when somebody had
-		// already thought of it would hide exactly the case worth catching.
-		fmt.Fprintf(&b, "  workspace    %s\n",
-			value(orNone(in.Workspace, "none, so the default workspace"), 15, width))
-		fmt.Fprintf(&b, "  var files    %s\n",
-			value(orNone(strings.Join(in.VarFiles, ", "), "none, so the module's own defaults"), 15, width))
 	}
 
 	// Printed only when the block is there, because the oracle is the one

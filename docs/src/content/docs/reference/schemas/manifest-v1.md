@@ -294,14 +294,22 @@ The masked, verified copy every environment branches from.
 
 ## Infrastructure
 
-Where this application's infrastructure as code lives. Nothing here changes what the environment builds. It names the root modules that declare production, so that a copy can be compared against what production is declared to be rather than against what somebody remembers it being. A manifest that leaves this section out is never measured against its infrastructure, and the report says so rather than passing that dimension quietly.
+Where this application's infrastructure as code lives. Nothing here changes what the environment builds. It names the stacks that declare production, so that a copy can be compared against what production is declared to be rather than against what somebody remembers it being. A manifest that leaves this section out is never measured against its infrastructure, and the report says so rather than passing that dimension quietly.
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `paths` | list of string | **yes** | The root module directories, relative to the repository root. A root module is a directory that is planned and applied on its own, so a repository with a stack per concern names one entry for each. Every entry must exist in the repository and must be a directory. Min items 1, max items 50. |
-| `source` | `terraform` | **yes** | Which tool declares the infrastructure. There is one value because there is one reader, and a source accepted here that nothing can read would look like a configured feature and behave like a missing one. OpenTofu writes the same language and is read by the same reader, so terraform is the value for both. |
-| `var_files` | list of string | no | The variable files that describe production, relative to the repository root, in the order they would be passed. Every entry must exist. Like the workspace it may only be given alongside a single root module, because a variable file is an argument to one. Max items 20. |
-| `workspace` | string | no | Which workspace holds production, for a repository that separates its environments that way. It may only be given alongside a single root module, because a workspace is selected inside one root module and one name spread across several is a statement nobody can act on. Max length 128, matches `^[A-Za-z0-9_-]+$`. |
+| `stacks` | list of [Infrastructure stack](#infrastructure-stack) | **yes** | The stacks that declare production, one entry each. A stack is a directory that is deployed on its own, so a repository with a stack per concern names one entry for each, and a repository that declares its cloud in one tool and its workloads in another names one entry per tool. Min items 1, max items 50. |
+
+## Infrastructure stack
+
+One directory that declares part of production, and how it is read. Every key belongs to this directory alone, which is why the workspace and the variable files sit here rather than beside the list: both are arguments to a single stack, and one of either spread across several would be a statement nobody could act on.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `path` | string | **yes** | The stack's directory, relative to the repository root. It must exist, must be a directory, and must hold at least one file the named source can read, because a directory that is there and a stack that is there are different facts and a mistyped deep path usually satisfies the first. Min length 1, max length 512. |
+| `source` | `terraform` | **yes** | Which tool declares this stack. The list carries exactly the tools a reader exists for, because a source accepted here that nothing can read would look like a configured feature and behave like a missing one. OpenTofu writes the same language and is read by the same reader, so terraform is the value for both. |
+| `var_files` | list of string | no | The variable files that describe production, relative to the repository root, in the order they would be passed. Every entry must exist. They are what turns a variable with no default from a value decided outside the configuration into one that can be read here. Max items 20. |
+| `workspace` | string | no | Which workspace holds production, for a stack that separates its environments that way. It is read rather than selected: nothing here runs Terraform, and the name is what lets an expression mentioning terraform.workspace resolve to a value instead of being reported as unreadable. Max length 128, matches `^[A-Za-z0-9_-]+$`. |
 
 ## Insights
 

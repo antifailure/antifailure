@@ -2162,110 +2162,200 @@ var changeSurfaces = map[string]bool{
 //
 // The bounds the schema declares are enforced by boundsPass and are not
 // repeated here. What this adds is the four things a JSON Schema cannot say:
-// that a path is inside this repository, that it is there, that it is a
-// directory rather than a file, and that a workspace or a variable file has
-// exactly one root module to belong to.
+// that a path is inside this repository, that it is there and is a directory,
+// that the directory actually holds something the named source can read, and
+// that two stacks do not name the same place.
 func (v *validator) infrastructure(m *schema.Manifest) {
 	in := m.Infrastructure
 	if in == nil {
 		return
 	}
 
-	// Guarded on the key being WRITTEN, both here and for paths below. The
-	// schema makes both required and boundsPass enforces that at the section,
-	// so an omitted key already has a sentence; speaking again about the same
-	// omission would report one mistake twice, which is the thing boundsPass'
-	// spoken set exists to prevent one level down. What is left for these two
-	// is the key that is present and says nothing.
-	switch {
-	case strings.TrimSpace(string(in.Source)) == "":
-		if declaredAt(v.doc, "infrastructure.source") {
-			v.add("infrastructure.source",
-				"The infrastructure section does not say what declares the infrastructure.",
-				"Write source: terraform, which is the only one this engine reads.")
+	// Guarded on the key being WRITTEN. The schema makes stacks required and
+	// boundsPass enforces that at the section, so an omitted key already has a
+	// sentence; speaking again about the same omission would report one
+	// mistake twice, which is what boundsPass' spoken set exists to prevent
+	// one level down. What is left here is the key that is present and says
+	// nothing.
+	if len(in.Stacks) == 0 {
+		if declaredAt(v.doc, "infrastructure.stacks") {
+			v.add("infrastructure.stacks",
+				"The infrastructure section names no stack, so it says where nothing is.",
+				"Name the directory that is deployed on its own, such as infra/terraform.")
 		}
-	case in.Source != schema.InfraTerraform:
-		v.add("infrastructure.source",
-			fmt.Sprintf("%q is not an infrastructure source this engine can read.", string(in.Source)),
-			"terraform is the only value, and it covers OpenTofu, which writes the same language.")
+		return
 	}
 
-	if len(in.Paths) == 0 && declaredAt(v.doc, "infrastructure.paths") {
-		v.add("infrastructure.paths",
-			"The infrastructure section names no root module, so it says where nothing is.",
-			"Name the directory that is planned and applied on its own, such as infra/terraform.")
-	}
-	v.infraPaths("infrastructure.paths", in.Paths, "root module", true)
-	v.infraPaths("infrastructure.var_files", in.VarFiles, "variable file", false)
-
-	// A workspace and a variable file are both arguments to ONE root module: a
-	// workspace is selected inside one, and a variable file is passed to one.
-	// With several named there is no way to say which, and picking the first
-	// would be an engine deciding something its user did not. Refused only
-	// above one, so that a section naming none is told about its paths rather
-	// than about a key that is not the mistake.
-	if len(in.Paths) > 1 {
-		if in.Workspace != "" {
-			v.add("infrastructure.workspace",
-				fmt.Sprintf("The workspace %q is given beside %d root modules, and a workspace belongs to one.",
-					in.Workspace, len(in.Paths)),
-				"A workspace is selected inside a single root module. Name one path here, or drop the workspace.")
-		}
-		if len(in.VarFiles) > 0 {
-			v.add("infrastructure.var_files",
-				fmt.Sprintf("Variable files are given beside %d root modules, and a variable file is passed to one.",
-					len(in.Paths)),
-				"Name one path here, or drop the variable files.")
-		}
+	seen := map[string]int{}
+	for i, st := range in.Stacks {
+		base := fmt.Sprintf("infrastructure.stacks[%d]", i)
+		v.infraSource(base, st)
+		v.infraStackPath(base, st, seen, i)
+		v.infraVarFiles(base, st)
 	}
 }
 
-// infraPaths checks a list of repository relative paths the infrastructure
-// section names.
-//
-// what names the thing in the message, because "root module" and "variable
-// file" are what the reader wrote rather than the field name, and dir says
-// whether the entry has to be a directory.
-//
-// The duplicate check reports at the LIST rather than at the entry, which is
-// deliberate: the schema declares uniqueItems on both lists and boundsPass
-// enforces it at that same path, so a message here at the list suppresses the
-// generic one and the reader sees the specific sentence once instead of two
-// sentences about one mistake.
-func (v *validator) infraPaths(base string, paths []string, what string, dir bool) {
+// infraSource checks that a stack names a tool this engine has a reader for.
+func (v *validator) infraSource(base string, st schema.InfraStack) {
+	switch {
+	case strings.TrimSpace(string(st.Source)) == "":
+		if declaredAt(v.doc, base+".source") {
+			v.add(base+".source",
+				"This stack does not say what declares it.",
+				"Write source: terraform, which is the only one this engine reads.")
+		}
+	case !knownInfraSource(st.Source):
+		v.add(base+".source",
+			fmt.Sprintf("%q is not an infrastructure source this engine can read.", string(st.Source)),
+			"terraform is the only value, and it covers OpenTofu, which writes the same language.")
+	}
+}
+
+// infraStackPath checks one stack's directory, and records it so that a second
+// stack naming the same place is refused.
+func (v *validator) infraStackPath(base string, st schema.InfraStack, seen map[string]int, i int) {
+	at := base + ".path"
+	p := strings.TrimSpace(st.Path)
+	switch {
+	case p == "":
+		if declaredAt(v.doc, at) {
+			v.add(at, "This stack's path is empty.",
+				"Give it the directory that is deployed on its own, relative to the repository root.")
+		}
+		return
+	case strings.HasPrefix(p, "/"):
+		v.add(at, fmt.Sprintf("The stack path %q is an absolute path.", st.Path),
+			"Paths here are relative to the repository root, because the machine that reads them is not this one.")
+		return
+	case hasParentSegment(p):
+		v.add(at, fmt.Sprintf("The stack path %q leaves the repository.", st.Path),
+			"Paths here are relative to the repository root and stay inside it.")
+		return
+	case !v.pathExists(p):
+		v.add(at, fmt.Sprintf("The stack path %q is not in this repository.", st.Path),
+			"Check the spelling. Nothing downstream will report this: a path that is not there is read as production having nothing in it.")
+		return
+	case v.dirIsAFile(p):
+		v.add(at, fmt.Sprintf("The stack path %q is a file, and a stack is a directory.", st.Path),
+			"Name the directory that holds the files, not one of the files in it.")
+		return
+	}
+
+	// The directory is there and holds nothing this source can read. Separate
+	// from "not in this repository" because a mistyped path deep in a tree
+	// usually lands on a directory that DOES exist, the parent or a sibling,
+	// and an existence check says yes to it. "There is a directory here" and
+	// "there is a stack here" are different facts.
+	if what, empty := v.infraStackIsEmpty(p, st.Source); empty {
+		v.add(at,
+			fmt.Sprintf("The stack path %q holds no %s.", st.Path, what),
+			"The directory is there and there is nothing in it for this source to read, which is what a mistyped path one level out looks like.")
+		return
+	}
+
+	if prev, dup := seen[p]; dup {
+		v.add(at,
+			fmt.Sprintf("The stack path %q is already named at infrastructure.stacks[%d].", st.Path, prev),
+			"Reading the same place twice measures it twice and says nothing more. Remove one, or point this entry at the other stack.")
+		return
+	}
+	seen[p] = i
+}
+
+// infraVarFiles checks the variable files one stack names.
+func (v *validator) infraVarFiles(base string, st schema.InfraStack) {
 	seen := map[string]int{}
-	for i, p := range paths {
-		at := fmt.Sprintf("%s[%d]", base, i)
-		trimmed := strings.TrimSpace(p)
+	for j, f := range st.VarFiles {
+		at := fmt.Sprintf("%s.var_files[%d]", base, j)
+		p := strings.TrimSpace(f)
 		switch {
-		case trimmed == "":
-			v.add(at, fmt.Sprintf("The %s at position %d is empty.", what, i),
+		case p == "":
+			v.add(at, fmt.Sprintf("The variable file at position %d is empty.", j),
 				"Remove the entry, or give it a path relative to the repository root.")
 			continue
-		case strings.HasPrefix(trimmed, "/"):
-			v.add(at, fmt.Sprintf("The %s %q is an absolute path.", what, p),
+		case strings.HasPrefix(p, "/"):
+			v.add(at, fmt.Sprintf("The variable file %q is an absolute path.", f),
 				"Paths here are relative to the repository root, because the machine that reads them is not this one.")
 			continue
-		case hasParentSegment(trimmed):
-			v.add(at, fmt.Sprintf("The %s %q leaves the repository.", what, p),
+		case hasParentSegment(p):
+			v.add(at, fmt.Sprintf("The variable file %q leaves the repository.", f),
 				"Paths here are relative to the repository root and stay inside it.")
 			continue
-		case !v.pathExists(trimmed):
-			v.add(at, fmt.Sprintf("The %s %q is not in this repository.", what, p),
-				"Check the spelling. Nothing downstream will report this: a path that is not there is read as production having nothing in it.")
-			continue
-		case dir && v.dirIsAFile(trimmed):
-			v.add(at, fmt.Sprintf("The %s %q is a file, and a root module is a directory.", what, p),
-				"Name the directory that holds the files, not one of the files in it.")
+		case !v.pathExists(p):
+			v.add(at, fmt.Sprintf("The variable file %q is not in this repository.", f),
+				"Check the spelling. A variable file that is not there is the difference between reading production's own numbers and reading the module's defaults.")
 			continue
 		}
-		if prev, dup := seen[trimmed]; dup {
-			v.add(base, fmt.Sprintf("The %s %q is named twice, at positions %d and %d.", what, p, prev, i),
-				"Remove one. Reading the same place twice measures it twice and says nothing more.")
+		if prev, dup := seen[p]; dup {
+			// At the LIST rather than at the entry, because the schema
+			// declares uniqueItems there and boundsPass enforces it at that
+			// same path, so a message here suppresses the generic one and the
+			// reader sees one sentence about one mistake.
+			v.add(base+".var_files",
+				fmt.Sprintf("The variable file %q is named twice, at positions %d and %d.", f, prev, j),
+				"Remove one. Passing the same file twice changes nothing.")
 			continue
 		}
-		seen[trimmed] = i
+		seen[p] = j
 	}
+}
+
+// knownInfraSource reports whether the engine has a reader for a source.
+//
+// Written from the constant rather than from the schema's enum, because the
+// enum is what a manifest is checked against and this is what the engine can
+// actually do, and the two agreeing is the thing worth being able to break.
+func knownInfraSource(s schema.InfraSource) bool {
+	return s == schema.InfraTerraform
+}
+
+// infraStackIsEmpty reports whether a directory holds nothing the named source
+// can read, and what it was looking for.
+//
+// One level deep and no deeper, deliberately. A root module's own files are in
+// its own directory; a .tf file three levels down belongs to a module it
+// calls, and accepting a directory because something nested under it has
+// Terraform in it would accept the repository root for every repository that
+// has any.
+//
+// With no root, which the schema example tests use, nothing is empty, for the
+// same reason pathExists treats everything as present: there is no tree to
+// ask. An unreadable directory is not empty either. It is a permission
+// problem rather than a manifest problem, and refusing somebody's manifest
+// over it would send them to fix the wrong file.
+func (v *validator) infraStackIsEmpty(p string, source schema.InfraSource) (string, bool) {
+	suffixes, what := infraSourceFiles(source)
+	if v.root == "" || len(suffixes) == 0 {
+		return "", false
+	}
+	entries, err := os.ReadDir(filepath.Join(v.root, filepath.FromSlash(p)))
+	if err != nil {
+		return "", false
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		for _, suffix := range suffixes {
+			if strings.HasSuffix(e.Name(), suffix) {
+				return "", false
+			}
+		}
+	}
+	return what, true
+}
+
+// infraSourceFiles names the file suffixes a source reads, and the phrase used
+// when a directory has none of them.
+//
+// A source with no entry here is never reported empty rather than always
+// reported empty, so a source whose reader lands before this list is updated
+// costs a check rather than refusing every manifest that names it.
+func infraSourceFiles(source schema.InfraSource) ([]string, string) {
+	if source == schema.InfraTerraform {
+		return []string{".tf", ".tf.json"}, "Terraform file"
+	}
+	return nil, ""
 }
 
 // hasParentSegment reports whether a slash separated path contains a segment

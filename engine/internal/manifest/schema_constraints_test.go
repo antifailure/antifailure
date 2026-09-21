@@ -1442,6 +1442,32 @@ const wantConstraints = 784
 // each with its own sentence. The generator fills the field with the first
 // enum value, which is `web`, so no base is refused and no tuning override is
 // needed.
+// Then 795. The infrastructure section, which says where the infrastructure
+// as code lives. The block's own type, additionalProperties and its one
+// required field, then on the stacks list the type, minItems, maxItems and
+// uniqueItems, and on a stack the type, additionalProperties and two required
+// fields, the type and enum on source, the type and both lengths on path, the
+// type, maxLength and pattern on workspace, and the type, maxItems and
+// uniqueItems on var_files with the type and both lengths on its items.
+//
+// This one needed NO tuning entry at all, which is worth saying because every
+// feature above it needed several: the generator's first string candidate
+// satisfies every field here, and the enum has one member so its first value
+// is the only value.
+//
+// The shape cost three more constraints than the flat one this section was
+// built as first, where source, workspace and var_files sat over a list of
+// paths. That shape needed a cross field rule to hold it together, a workspace
+// may be given only beside exactly one path, and per stack there is no such
+// rule: three constraints for one less thing anybody has to know. The flat
+// version's own note is worth keeping for the reason it gave, because it
+// applies to whatever is added next: that rule fired only ABOVE one path, on
+// purpose, because a rule that fired at one would have made the all fields
+// base manifest impossible to build. That is the #315 failure from the other
+// direction, not a value the fixture cannot invent but a fixture the rule
+// cannot permit, and it is the thing to check before adding any cross field
+// rule to a section the generator fills.
+const wantConstraints = 784
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and

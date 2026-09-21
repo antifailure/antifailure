@@ -56,8 +56,9 @@ func TestInitInfrastructure_TheSectionReachesTheWrittenManifest(t *testing.T) {
 	written := string(body)
 
 	require.Contains(t, written, "infrastructure:")
+	require.Contains(t, written, "stacks:")
 	require.Contains(t, written, "source: terraform")
-	require.Contains(t, written, "- infra/terraform")
+	require.Contains(t, written, "path: infra/terraform")
 	// The module the stack calls is a building block, not a root module, and
 	// naming it would point the comparison at a library. Asserted on the file
 	// rather than on the draft, because this is the artifact somebody commits.
@@ -76,9 +77,12 @@ func TestInitInfrastructure_TheSummarySaysWhatWasLeftBlank(t *testing.T) {
 	// The half that was left out on purpose. Without this sentence the two
 	// empty keys read as a feature nobody finished rather than as a decision,
 	// and the reader has no reason to fill them in.
-	require.Contains(t, got.stdout, "infrastructure.workspace")
-	require.Contains(t, got.stdout, "which variable "+
-		"file describes production")
+	// Asserted as two short phrases rather than one sentence, because the
+	// summary hard wraps to the terminal width and a Contains over a wrapped
+	// line fails on a newline the page put there rather than on the sentence
+	// being wrong.
+	require.Contains(t, got.stdout, "var_files are empty")
+	require.Contains(t, got.stdout, "describes production")
 }
 
 func TestInitInfrastructure_ARepositoryWithNoTerraformPrintsNoneOfIt(t *testing.T) {
@@ -134,9 +138,7 @@ func TestInitInfrastructure_TheWrittenManifestExplainsTheSection(t *testing.T) {
 	got := runCLI(t, dir, nil, "explain")
 	require.Equal(t, 0, got.code, got.stderr)
 	require.Contains(t, got.stdout, "Infrastructure")
-	require.Contains(t, got.stdout, "declared by")
-	require.Contains(t, got.stdout, "root module")
-	require.Contains(t, got.stdout, "infra/terraform")
+	require.Contains(t, got.stdout, "infra/terraform, declared by terraform")
 	require.Contains(t, got.stdout, "none, so the default workspace")
-	require.Contains(t, got.stdout, "none, so the module's own defaults")
+	require.Contains(t, got.stdout, "none, so the stack's own defaults")
 }
