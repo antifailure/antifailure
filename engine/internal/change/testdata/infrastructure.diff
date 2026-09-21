@@ -1,0 +1,40 @@
+diff --git a/infra/ecs.tf b/infra/ecs.tf
+index 1a2b3c4..5d6e7f8 100644
+--- a/infra/ecs.tf
++++ b/infra/ecs.tf
+@@ -11,2 +11,3 @@ resource "aws_ecs_service" "api" {
+-  desired_count = 2
++  desired_count = 6
++  health_check_grace_period_seconds = 30
+diff --git a/infra/main.tf b/infra/main.tf
+index 2b3c4d5..6e7f8a9 100644
+--- a/infra/main.tf
++++ b/infra/main.tf
+@@ -4,0 +5,3 @@ provider "aws" {
++locals {
++  environment_name = "production"
++}
+diff --git a/infra/rds.tf b/infra/rds.tf
+index 3c4d5e6..7f8a9b0 100644
+--- a/infra/rds.tf
++++ b/infra/rds.tf
+@@ -6,2 +6,8 @@ resource "aws_db_instance" "primary" {
+-  engine_version = "15.4"
++  engine_version = "16.1"
++}
++
++resource "aws_db_parameter_group" "primary" {
++  parameter {
++    name  = "lock_timeout"
++    value = "5000"
++  }
+diff --git a/infra/security.tf b/infra/security.tf
+index 4d5e6f7..8a9b0c1 100644
+--- a/infra/security.tf
++++ b/infra/security.tf
+@@ -2,0 +3,5 @@ resource "aws_security_group" "api" {
++resource "aws_security_group_rule" "outbound_payments" {
++  type        = "egress"
++  cidr_blocks = ["0.0.0.0/0"]
++  to_port     = 443
++}

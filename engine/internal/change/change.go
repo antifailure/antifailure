@@ -126,6 +126,24 @@ const (
 	SurfaceDocs Surface = "docs"
 	// SurfaceEgress marks an outbound host found in an added line.
 	SurfaceEgress Surface = "egress"
+	// SurfaceDatabaseConfig marks a database engine version or a Postgres
+	// server parameter found in an added line of an infrastructure file. It is
+	// a content surface, like egress: it is a fact about a LINE and it sits
+	// beside the infrastructure classification of the file rather than
+	// replacing it.
+	//
+	// It exists because "infrastructure changed" and "the version the
+	// migrations are rehearsed against changed" are not the same sentence, and
+	// only the second one names a check.
+	SurfaceDatabaseConfig Surface = "database_config"
+	// SurfaceCapacity marks a capacity declaration found in an added line of
+	// an infrastructure file: a replica count, an instance size, an
+	// autoscaling bound, a storage allocation.
+	SurfaceCapacity Surface = "capacity"
+	// SurfaceNetworkRule marks a firewall, security group or network policy
+	// rule found in an added line of an infrastructure file: what the
+	// application is allowed to reach, and what may reach it.
+	SurfaceNetworkRule Surface = "network_rule"
 	// SurfaceAuth is a change to who may do what: authentication and
 	// authorization middleware, route guards, session and token handling, the
 	// organisation policy package, the entitlement catalogue, licence gating
@@ -488,9 +506,17 @@ func (p *Profile) Gaps() []Selection {
 //
 // This table is the claim the whole package makes, so it is written once,
 // here, rather than spread through the renderers. Read it as: a file of this
-// kind changed, and these are the checks that will actually touch it. A
-// surface with no checks is not an oversight; it is this product saying it
-// does not exercise that, which the blind spots then say out loud.
+// kind changed, and these are the checks that will actually touch it.
+//
+// A surface belongs HERE or in exercisesNothing, never in neither and never in
+// both, and an entry here may not be empty. That rule is the whole reason the
+// two tables exist instead of one map where nil meant "covers nothing": plan
+// walks coverage[f.Surface], a missing key contributes nothing and says
+// nothing, and a surface that silently stopped selecting anything would read
+// in every report exactly like a surface this product had decided not to
+// exercise. Deciding to exercise nothing is now something a person writes down
+// with a reason attached, and coverage_internal_test.go refuses a surface that
+// is in neither table, in both, or here with an empty list.
 var coverage = map[Surface][]Check{
 	SurfaceSchema:     {CheckEnvironment, CheckMigration, CheckInvariants, CheckLoad},
 	SurfaceCode:       {CheckEnvironment, CheckWorkflows, CheckLoad},
@@ -517,13 +543,91 @@ var coverage = map[Surface][]Check{
 	// from a diff, which the blind spots say.
 	SurfaceService: {CheckEnvironment, CheckWorkflows},
 
-	// Deliberately empty. The environment is built from the manifest and not
-	// from your Terraform, this product does not run your test suite, and
-	// nothing here reads your pull request template.
-	SurfaceInfrastructure: nil,
-	SurfacePipeline:       nil,
-	SurfaceTest:           nil,
-	SurfaceDocs:           nil,
+	// Infrastructure as code selected NOTHING until this table said otherwise,
+	// grouped with prose, your test suite and your continuous integration
+	// config under one sentence: the environment is built from
+	// antifailure.yaml rather than from your Terraform.
+	//
+	// That sentence is true and it is not a reason for zero. Read the fail
+	// safe at the top of this file: a path wrongly treated as inert skips work
+	// that should have happened and nobody finds out, a path wrongly treated
+	// as unknown costs a run that was not needed and is visible in the report,
+	// and only one of the two is discoverable. Prose, a test suite and a
+	// workflow file do not run in production. Your infrastructure as code
+	// does. It was the one of the four that is not inert, and it sat in the
+	// bucket for the three that are, which meant an infrastructure only pull
+	// request selected no check, wrote environment=false to GITHUB_OUTPUT, and
+	// skipped the run entirely through action.yml's own gate.
+	//
+	// What these two checks claim, exactly, because the claim is narrower than
+	// "we rehearsed your Terraform" and the blind spots repeat the difference
+	// on every run: nothing here applies infrastructure as code. The
+	// environment is what STANDS IN for the runtime this change describes, and
+	// these are the checks that bring that runtime up and drive the
+	// application inside it. The sharper sentences come from the content
+	// surfaces below, which read what the added lines actually say.
+	SurfaceInfrastructure: {CheckEnvironment, CheckWorkflows},
+
+	// The three content surfaces an infrastructure file's added lines produce,
+	// each naming the mechanism that makes its claim true rather than the
+	// category it belongs to.
+	//
+	// A database engine version or a server parameter selects the migration
+	// rehearsal, because the rehearsal is the thing that applies this change's
+	// migrations to a Postgres and measures what they lock and for how long,
+	// and the version and those parameters are what decide that.
+	SurfaceDatabaseConfig: {CheckEnvironment, CheckMigration},
+	// A replica count, an instance size or an autoscaling bound selects load,
+	// because load is the check that puts production shaped traffic through
+	// the thing being resized.
+	SurfaceCapacity: {CheckEnvironment, CheckLoad},
+	// A firewall or security group rule selects egress, because the egress
+	// check is where every outbound request meets a policy and gets a
+	// decision.
+	SurfaceNetworkRule: {CheckEnvironment, CheckEgress},
+}
+
+// inert is one surface this product deliberately does not exercise, with the
+// words the report counts it in and the reason it prints.
+//
+// The reason lives here rather than in blindSpots so that "this surface
+// exercises nothing" is one fact with one author. A surface listed here and a
+// surface listed in coverage are the only two states there are.
+type inert struct {
+	// one and many are the noun the blind spot counts the files in.
+	one, many string
+	// why is the sentence that follows the count.
+	why string
+}
+
+// exercisesNothing names the surfaces nothing in a run reads, each with the
+// reason the report gives for it. Empty is not a value here: a surface with no
+// reason is a surface nobody decided about.
+var exercisesNothing = map[Surface]inert{
+	SurfacePipeline: {
+		one: "continuous integration file", many: "continuous integration files",
+		why: "Nothing in a run reads continuous integration configuration.",
+	},
+	SurfaceTest: {
+		one: "file in your own test suite", many: "files in your own test suite",
+		why: "This product does not run your test suite; it runs the workflows the manifest declares.",
+	},
+	SurfaceDocs: {
+		one: "file of prose", many: "files of prose",
+		why: "Nothing in a run reads prose, so a change to documentation selects no check.",
+	},
+}
+
+// inertSurfaces is exercisesNothing in a fixed order, so that a report over the
+// same diff is byte identical every time. Map iteration order is not, and a
+// report that shuffles cannot be diffed against the last one.
+func inertSurfaces() []Surface {
+	out := make([]Surface, 0, len(exercisesNothing))
+	for s := range exercisesNothing {
+		out = append(out, s)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
 }
 
 // plan turns the facts into one entry per check.
@@ -687,27 +791,40 @@ func blindSpots(p *Profile, files []File, m *schema.Manifest) []string {
 	case cut == 1:
 		out = append(out, "One file adds more than "+strconv.Itoa(MaxAddedLines)+
 			" lines and only the first "+strconv.Itoa(MaxAddedLines)+
-			" were read, so an outbound host named below that is not reported.")
+			" were read, so an outbound host or an infrastructure declaration named below that is not reported.")
 	case cut > 1:
 		out = append(out, strconv.Itoa(cut)+" files each add more than "+strconv.Itoa(MaxAddedLines)+
 			" lines and only the first "+strconv.Itoa(MaxAddedLines)+
-			" of each were read, so an outbound host named below that is not reported.")
+			" of each were read, so an outbound host or an infrastructure declaration named below that is not reported.")
 	}
 
 	if counts[SurfaceSchema] > 0 {
 		out = append(out, "Columns this migration adds do not exist in the golden yet, so nothing has checked whether they will need a masking rule once they carry production data. The masking check reads the golden, not the diff.")
 	}
+	// The limit that survives this change and has to be repeated on every run
+	// that touches infrastructure, because the checks above it now say yes and
+	// a reader could take that for more than it is. Nothing applies your
+	// Terraform. The environment stands in for the runtime this change
+	// describes, and standing in for it is not the same as being it.
 	if n := counts[SurfaceInfrastructure]; n > 0 {
 		out = append(out, plural(n, "infrastructure file", "infrastructure files")+
-			" changed. The environment is built from antifailure.yaml rather than from your infrastructure as code, so no run applies or checks what changed there.")
+			" changed. Nothing in a run applies infrastructure as code: the environment is built from "+
+			"antifailure.yaml, so the checks above exercise the application in an environment that stands in "+
+			"for what this change describes, and not the change itself. What the added lines say about the "+
+			"database, the capacity and the network is read, and every conclusion drawn from one is above.")
 	}
-	if n := counts[SurfacePipeline]; n > 0 {
-		out = append(out, plural(n, "continuous integration file", "continuous integration files")+
-			" changed. Nothing in a run reads continuous integration configuration.")
-	}
-	if n := counts[SurfaceTest]; n > 0 {
-		out = append(out, plural(n, "file in your own test suite", "files in your own test suite")+
-			" changed. This product does not run your test suite; it runs the workflows the manifest declares.")
+
+	// The surfaces that exercise nothing, counted from the one table that
+	// decides it. Written as a loop rather than as a sentence each, so that
+	// moving a surface into or out of coverage cannot leave a paragraph behind
+	// that says the opposite.
+	for _, s := range inertSurfaces() {
+		n := counts[s]
+		if n == 0 {
+			continue
+		}
+		spec := exercisesNothing[s]
+		out = append(out, plural(n, spec.one, spec.many)+" changed. "+spec.why)
 	}
 
 	// Two services claiming the same file is the manifest saying both are
