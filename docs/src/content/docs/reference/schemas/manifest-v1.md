@@ -28,6 +28,7 @@ This page is generated from `schemas/manifest.v1.json`. Edit the schema, then ru
 | `insights` | [Insights](#insights) | no | The Postgres native checks that turn a preview environment into a database review. |
 | `invariants` | list of [Invariant](#invariant) | no | Read only statements that must hold after every workflow. They are the assertions a test cannot make from the outside: no orphaned rows, no negative balances, no subscription without a customer. Max items 100. |
 | `load` | [Load](#load) | no | Traffic shaped like production, sent at an environment. |
+| `mobile` | [Mobile application](#mobile-application) | no | Which application the workflows that drive a phone are driven in: every workflow with `surface: ios`. |
 | `name` | string | no | A short name for this application, used in environment hostnames and in the control plane. Defaults to the repository directory name. Max length 40, matches `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`. |
 | `oracle` | [Oracle](#oracle) | no | Deploy a baseline version alongside the candidate, send both the same requests, and report every difference in what came back and in what ended up in the database. |
 | `personas` | list of [Persona](#persona) | no | The accounts agents log in as. Each is created or reconciled in the golden by the authentication adapter, so a persona is a real user of the application rather than a bypass. Max items 50. |
@@ -446,6 +447,18 @@ Where the project's own SQL migrations live, for a project whose migrate command
 | `dir` | string | **yes** | Directory of .sql files, relative to the repository root, applied in filename order. A directory of numbered files such as 0042_add_index.sql is also recognised without this key when no tool is; declaring it removes the guess. Max length 512. |
 | `format` | `sql` | no | How the files are read. Only sql exists. Defaults to `sql`. |
 | `table` | string | no | The ledger table the project's runner records applied files in, so the rehearsal computes the pending set the way the runner would: a file is applied when its name, its stem or its leading number appears in the table's name, version, filename or migration column. Unset, schema_migrations and migrations are tried. Max length 128, matches `^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$`. |
+
+## Mobile application
+
+Which application the workflows that drive a phone are driven in: every workflow with `surface: ios`. Declared once rather than per workflow, because a manifest describes one product.
+
+Required by a manifest that names a phone surface at all, and refused by one that does not. Without it the run would reach the runner and be refused there, after an environment had been built, because the runner cannot tell which of the applications on a device is the one under test.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `app` | string | no | The built application to install before it is driven: a `.app` built for the simulator on iOS, or an `.apk` on Android. Relative paths are resolved against the directory holding the manifest, because the runner is started from somewhere the manifest never mentions. Leave it out to drive an application already installed on the device. Min length 1, max length 512. |
+| `device` | string | no | Which device to drive: a simulator's identifier, as `xcrun simctl list devices available` prints it, or a device's serial on Android. Leave it out to use the booted one, or the newest one available. Min length 1, max length 128. |
+| `id` | string | **yes** | The application's identifier: its bundle identifier on iOS, such as `com.example.ledger`, or its package name on Android. The one thing that cannot be guessed, so the one thing required. Min length 1, max length 255. |
 
 ## Oracle
 

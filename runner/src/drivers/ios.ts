@@ -48,6 +48,15 @@ export interface IOSTarget {
    *  installed, which is what a run against a preloaded device does. */
   readonly app?: string;
   readonly bundleId: string;
+  /** environment is what the application is launched with, on every launch.
+   *
+   *  AF_BASE_URL travels here: the address of the environment this run is
+   *  rehearsing, for the reason the terminal and desktop drivers carry it. A
+   *  phone client of a service has to be told which service to talk to, and
+   *  one that is not can only reach its own configured backend, which under a
+   *  rehearsal is either nothing or production. Absent launches the app as it
+   *  was, which is what a run with no environment behind it should do. */
+  readonly environment?: Readonly<Record<string, string>>;
   /** How long WebDriverAgent may take to come up. The FIRST session on a
    *  machine builds it with xcodebuild, which takes minutes; later sessions
    *  reuse the build and take seconds. The default here is generous for that
@@ -56,6 +65,20 @@ export interface IOSTarget {
 }
 
 const DEFAULT_WDA_TIMEOUT_MS = 480_000;
+
+/** iosTargetFor is the target a phone run drives, built from the job's mobile
+ *  block and the run's own address. One place, so the address cannot be
+ *  forgotten by a second caller building a target of its own. */
+export function iosTargetFor(
+  udid: string, app: { readonly id: string; readonly app?: string }, baseURL?: string,
+): IOSTarget {
+  return {
+    udid,
+    bundleId: app.id,
+    ...(app.app ? { app: app.app } : {}),
+    ...(baseURL ? { environment: { AF_BASE_URL: baseURL } } : {}),
+  };
+}
 
 /** iosPlatform is everything the shared mobile loop needs for iOS. */
 export function iosPlatform(target: IOSTarget): MobilePlatform {
@@ -114,7 +137,18 @@ export function iosPlatform(target: IOSTarget): MobilePlatform {
       // second workflow in the same run would otherwise inherit the first
       // one's screen. XCUITest spells the argument `bundleId`.
       await session.execute('mobile: terminateApp', [{ bundleId: target.bundleId }]);
-      await session.execute('mobile: activateApp', [{ bundleId: target.bundleId }]);
+      // LAUNCH with the environment, not activate, when there is one to give.
+      // Activating an application that was just terminated starts it with no
+      // environment at all, and this runs before every workflow, so an address
+      // set anywhere else, a session capability included, would be discarded
+      // here each time. XCUITest's launchApp takes `environment` by that name.
+      if (target.environment && Object.keys(target.environment).length > 0) {
+        await session.execute('mobile: launchApp', [
+          { bundleId: target.bundleId, environment: { ...target.environment } },
+        ]);
+      } else {
+        await session.execute('mobile: activateApp', [{ bundleId: target.bundleId }]);
+      }
     },
   };
 }

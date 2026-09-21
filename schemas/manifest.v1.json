@@ -72,6 +72,9 @@
     "desktop": {
       "$ref": "#/$defs/desktop_application"
     },
+    "mobile": {
+      "$ref": "#/$defs/mobile_application"
+    },
     "invariants": {
       "type": "array",
       "maxItems": 100,
@@ -2628,6 +2631,35 @@
           "minLength": 1,
           "maxLength": 128,
           "description": "What macOS calls the running application, when that is not the bundle's own name. Only for `macos`, and refused on `electron`, which is launched directly and never looked up.\n\nIt exists because opening a bundle returns before the application is ready, so the process still has to be found by name, and the two names are not always the same: Visual Studio Code.app runs as Code. Defaults to the bundle's name without .app, which is right for most applications."
+        }
+      }
+    },
+    "mobile_application": {
+      "title": "Mobile application",
+      "description": "Which application the workflows that drive a phone are driven in: every workflow with `surface: ios`. Declared once rather than per workflow, because a manifest describes one product.\n\nRequired by a manifest that names a phone surface at all, and refused by one that does not. Without it the run would reach the runner and be refused there, after an environment had been built, because the runner cannot tell which of the applications on a device is the one under test.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "description": "The application's identifier: its bundle identifier on iOS, such as `com.example.ledger`, or its package name on Android. The one thing that cannot be guessed, so the one thing required."
+        },
+        "app": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "description": "The built application to install before it is driven: a `.app` built for the simulator on iOS, or an `.apk` on Android. Relative paths are resolved against the directory holding the manifest, because the runner is started from somewhere the manifest never mentions. Leave it out to drive an application already installed on the device."
+        },
+        "device": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "Which device to drive: a simulator's identifier, as `xcrun simctl list devices available` prints it, or a device's serial on Android. Leave it out to use the booted one, or the newest one available."
         }
       }
     },

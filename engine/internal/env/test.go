@@ -178,6 +178,11 @@ type jobDocument struct {
 	// there is no default the way there is a default address. Absent for
 	// every run whose workflows drive a browser, which is most runs.
 	Desktop *desktopAppDoc `json:"desktop,omitempty"`
+	// Mobile is the application a phone run drives, under the names the
+	// runner's MobileDoc reads. Absent for every run that drives no phone.
+	// Until it existed the runner refused every iOS run, because it requires
+	// the application's identifier and nothing here could carry one.
+	Mobile *mobileAppDoc `json:"mobile,omitempty"`
 	// Diversity is the resolved per-agent personality plan. Absent means one
 	// neutral agent per workflow, today's behavior. The engine resolves it so
 	// the runner stays a mechanism that consumes a fixed plan rather than
@@ -258,6 +263,14 @@ type desktopAppDoc struct {
 	Args           []string `json:"args,omitempty"`
 	BundlePath     string   `json:"bundlePath,omitempty"`
 	Name           string   `json:"name,omitempty"`
+}
+
+// mobileAppDoc is the application a phone run drives, in the shape the
+// runner's MobileDoc reads.
+type mobileAppDoc struct {
+	ID     string `json:"id"`
+	App    string `json:"app,omitempty"`
+	Device string `json:"device,omitempty"`
 }
 
 // accessProbeDoc is one declared object the runner reaches as each persona. The
@@ -377,6 +390,7 @@ func (o *Orchestrator) Test(ctx context.Context, opts TestOptions) (*TestReport,
 		Workflows: workflows, Personas: o.personaDocs(provisioned),
 		Terminal: terminals, Surface: surfaceFor(workflows, terminals),
 		Desktop:   o.desktopApp(workflows),
+		Mobile:    o.mobileApp(workflows),
 		Diversity: divPtr,
 		WorkDir:   o.opts.Root, Attempts: opts.Attempts, Headless: !opts.Headed,
 		LiveSocket: opts.LiveSocket,
@@ -613,13 +627,35 @@ type runnerJob struct {
 	// run. Built by desktopApp from the workflows this run will actually
 	// drive, so a --only that selects no desktop workflow sends no
 	// application and the runner is never asked to launch one for nothing.
-	Desktop   *desktopAppDoc
+	Desktop *desktopAppDoc
+	// Mobile is the application a phone run drives, nil for every other run,
+	// built by mobileApp for the reason Desktop is built by desktopApp.
+	Mobile    *mobileAppDoc
 	Personas  []personaDoc
 	Diversity *personality.Resolved
 	Attempts  int
 	Headless  bool
 	// LiveSocket is the watcher's socket path, empty when nobody is watching.
 	LiveSocket string
+}
+
+// documentFor is the job document a runnerJob becomes, and the one place that
+// mapping is written. It was a literal inside driveRunner, which meant the only
+// way to learn whether a field made it onto the wire was to run the runner, and
+// so no test ever asked: a field added to runnerJob and forgotten here reaches
+// the runner as nothing, silently, which is the phone surface's defect again.
+func documentFor(job runnerJob, self string) jobDocument {
+	return jobDocument{
+		BaseURL: job.BaseURL, Artifacts: job.Artifacts,
+		Workflows: job.Workflows, Personas: job.Personas,
+		Terminal: job.Terminal, Surface: job.Surface,
+		Desktop:   job.Desktop,
+		Mobile:    job.Mobile,
+		Diversity: job.Diversity,
+		AF:        self, WorkDir: job.WorkDir,
+		Attempts: job.Attempts, Headless: job.Headless,
+		Live: job.LiveSocket,
+	}
 }
 
 // driveRunner writes the job document, runs the runner, and reads its verdict.
@@ -642,16 +678,7 @@ func (o *Orchestrator) driveRunner(ctx context.Context, job runnerJob) (*TestRep
 	// is still one place that decides how the runner is started and what a
 	// runner that writes nothing means. This landed as a second copy of that
 	// code, which is the drift its comment was written to prevent.
-	stdout, err := o.invokeRunner(ctx, job.Runner, jobDocument{
-		BaseURL: job.BaseURL, Artifacts: job.Artifacts,
-		Workflows: job.Workflows, Personas: job.Personas,
-		Terminal: job.Terminal, Surface: job.Surface,
-		Desktop:   job.Desktop,
-		Diversity: job.Diversity,
-		AF:        self, WorkDir: job.WorkDir,
-		Attempts: job.Attempts, Headless: job.Headless,
-		Live: job.LiveSocket,
-	})
+	stdout, err := o.invokeRunner(ctx, job.Runner, documentFor(job, self))
 	if err != nil {
 		return nil, err
 	}
@@ -854,6 +881,37 @@ func (o *Orchestrator) desktopApp(workflows []workflowDoc) *desktopAppDoc {
 		}
 	}
 	return &desktopAppDoc{Kind: app.Kind, Args: app.Args, ExecutablePath: resolved}
+}
+
+// mobileApp is the application a phone run drives, or nil when none of the
+// workflows this run will actually drive is on a phone. Built from the same
+// filtered list desktopApp is, so a --only that selects no phone workflow
+// sends no application. A relative App is resolved against the project root
+// before it is sent, for the reason desktopApp gives: the runner is started
+// from somewhere the manifest never mentions.
+func (o *Orchestrator) mobileApp(workflows []workflowDoc) *mobileAppDoc {
+	app := o.opts.Manifest.Mobile
+	if app == nil {
+		return nil
+	}
+	drives := false
+	for _, w := range workflows {
+		if w.surface == string(schema.SurfaceIOS) || w.surface == string(schema.SurfaceAndroid) {
+			drives = true
+			break
+		}
+	}
+	if !drives {
+		return nil
+	}
+	doc := &mobileAppDoc{ID: app.ID, Device: app.Device}
+	if app.App != "" {
+		doc.App = app.App
+		if !filepath.IsAbs(doc.App) {
+			doc.App = filepath.Join(o.opts.Root, doc.App)
+		}
+	}
+	return doc
 }
 
 // surfaceFor is which surface the runner is told this run drives, which is

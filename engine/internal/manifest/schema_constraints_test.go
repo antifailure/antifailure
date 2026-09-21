@@ -733,7 +733,8 @@ const defaultTuning = `{
         "load.sql.script",
         "services[].env[].from",
         "services[].env[].sandbox",
-        "services[].env[].scope"
+        "services[].env[].scope",
+        "mobile"
       ],
       "append": {
         "services": [
@@ -802,7 +803,8 @@ const defaultTuning = `{
         "load.sql.writes",
         "load.sql.max_statements",
         "load.sql.thresholds.mean_increase",
-        "services[].env[].value"
+        "services[].env[].value",
+        "mobile"
       ]
     },
     {
@@ -862,7 +864,8 @@ const defaultTuning = `{
         "load.sql.script",
         "services[].env[].from",
         "services[].env[].sandbox",
-        "services[].env[].scope"
+        "services[].env[].scope",
+        "mobile"
       ],
       "append": {
         "services": [
@@ -875,7 +878,7 @@ const defaultTuning = `{
     },
     {
       "name": "emulate",
-      "why": "the third side of the egress mode pair: a rule answered by an emulator inside the environment, which is the only mode that may carry an emulator and may carry neither a credential nor a rate limit",
+      "why": "the third side of the egress mode pair: a rule answered by an emulator inside the environment, which is the only mode that may carry an emulator and may carry neither a credential nor a rate limit. It is also the phone base: one manifest drives one surface, and a declared application that no workflow drives is refused in both directions, so the desktop block and the mobile block can never both be accepted in one document. This base drives ios and prunes desktop, and every other base prunes mobile, so each block is measured where it is driven",
       "overrides": {
         "database.provider": "docker",
         "chaos.faults[].kind": "container_kill",
@@ -903,7 +906,7 @@ const defaultTuning = `{
         "workflows[].personality": "skeptic",
         "terminal_workflows[].name": "deploy-plan",
         "desktop.kind": "macos",
-        "workflows[].surface": "desktop",
+        "workflows[].surface": "ios",
         "terminal_workflows[].expect[]": "\"Applied 3 changes\"",
         "terminal_workflows[].input[]": "y",
         "security.access.objects[].route": "/api/orders/{id}",
@@ -933,7 +936,8 @@ const defaultTuning = `{
         "load.sql.script",
         "services[].env[].from",
         "services[].env[].sandbox",
-        "services[].env[].scope"
+        "services[].env[].scope",
+        "desktop"
       ],
       "append": {
         "services": [
@@ -1597,7 +1601,23 @@ func TestSchemaConstraintReport(t *testing.T) {
 // constant carries. A method that agrees with the gate whenever the gate is
 // available, and is unavailable when it is not, is not a method, so the gate is
 // the source and the other two are the check on it.
-const wantConstraints = 888
+//
+// Then 900. The `mobile` block: which application a workflow driving a phone
+// is driven in. The desktop block's shape, one surface over, and it closes the
+// same defect, which had shipped for iOS: the surface was accepted, the driver
+// selected, and the runner refused every run for want of an identifier no
+// manifest had a field for. Its own type and additionalProperties, the one
+// required key, and the type and both lengths on each of id, app and device.
+//
+// ONE TUNING CHANGE, and it is the cross field kind again rather than a
+// weakening. One manifest drives one surface, and a declared application no
+// workflow drives is refused for both blocks, so a document holding both the
+// desktop block and the mobile block can never be accepted. The emulate base
+// now drives ios and prunes desktop, and the other three prune mobile, so each
+// block is measured in a base that drives it. Desktop is still measured in the
+// source base, where it always was. Read from this gate's own failure message
+// on this tree, not added to 888.
+const wantConstraints = 900
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and
