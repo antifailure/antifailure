@@ -179,11 +179,38 @@ export function filledOf(node: AxNode, parent: AxNode | undefined): boolean {
   return !!node.value;
 }
 
+/** plannerType is the role under the name the PLANNER knows it by.
+ *
+ *  Added when the iOS surface arrived, and it is a correctness fix rather than
+ *  a tidy up. workflow.ts decides whether a field is chosen or typed into from
+ *  one set, CHOSEN_TYPES, and that set is exactly {checkbox, radio}. A role of
+ *  `switch` is therefore not recognised as chosen, so the planner reaches a
+ *  toggle with `fill` and tries to TYPE INTO IT, which throws, and the
+ *  workflow blocks in front of a control a person would simply have tapped.
+ *
+ *  It matters more on a phone than on a desktop, which is why it surfaced
+ *  there: XCUIElementTypeSwitch is how UIKit spells the ordinary on/off
+ *  control and it is everywhere in a settings screen, while a macOS window
+ *  more often carries a checkbox.
+ *
+ *  Translated here rather than by widening workflow.ts, because CHOSEN_TYPES
+ *  is the browser's vocabulary, where an input is type="checkbox" and there is
+ *  no such thing as a switch. `filled` is unaffected: CHOSEN_ROLES already
+ *  counts a switch as chosen, so its answered state was always read from
+ *  `checked`.
+ */
+function plannerType(role: string): string {
+  return role === 'switch' ? 'checkbox' : role;
+}
+
 /** snapshotFrom turns an accessibility tree into the Snapshot the planner
  *  already consumes, so a desktop or mobile run reaches the same planner, the
  *  same judgement and the same report as a browser run.
  */
-export function snapshotFrom(root: AxNode, at: AxLocation): Snapshot {
+export function snapshotFrom(
+  root: AxNode, at: AxLocation, options: AxOptions = {},
+): Snapshot {
+  const maxName = options.maxNameLength ?? MAX_NAME;
   const fields: {
     name: string; type: string; filled: boolean; required: boolean;
   }[] = [];
@@ -205,12 +232,21 @@ export function snapshotFrom(root: AxNode, at: AxLocation): Snapshot {
         // something an agent, and a person using a screen reader, cannot
         // reach.
         unnamed++;
-      } else if (name.length <= MAX_NAME) {
+      } else if (name.length > maxName) {
+        // TOO LONG TO BE A LABEL, AND STILL COUNTED. Falling through both
+        // branches, which is what this used to do, makes the element vanish:
+        // absent from `controls`, absent from `fields`, and absent from
+        // `unnamed` too, so the snapshot reports no problem at all about a
+        // control nobody can reach. That count is exactly what `unnamed`
+        // exists to record, and a silent drop is the one outcome nobody can
+        // notice.
+        unnamed++;
+      } else {
         if (FIELD_ROLES.has(role)) {
           if (!fields.some((f) => f.name === name)) {
             fields.push({
               name,
-              type: role,
+              type: plannerType(role),
               filled: filledOf(node, parent),
               required: node.required === true,
             });
@@ -272,6 +308,25 @@ export function snapshotFrom(root: AxNode, at: AxLocation): Snapshot {
     unnamed,
     text: words.join('\n'),
   };
+}
+
+/** Per surface tuning for snapshotFrom. */
+export interface AxOptions {
+  /** The longest accessible name still treated as a label.
+   *
+   *  Defaults to MAX_NAME, which mirrors runner/src/browser.ts and is right
+   *  for a web page and a desktop window, where a long announced string is
+   *  usually a paragraph that happened to carry a role.
+   *
+   *  It is WRONG as a universal rule, and mobile is where that shows. A
+   *  VoiceOver or TalkBack label is written as a sentence on purpose, because
+   *  it is read aloud: "Add this item to your basket and continue shopping for
+   *  more items" is 65 characters and is an ordinary button. Measured against
+   *  a real iOS tree at the default, that button produced controls 0 and
+   *  unnamed 0, so a perfectly reachable control disappeared and the snapshot
+   *  said nothing was wrong. The mobile drivers raise it rather than every
+   *  surface quietly inheriting a web assumption. */
+  readonly maxNameLength?: number;
 }
 
 /** What kind of element an action is looking for. A fill and a check both

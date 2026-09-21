@@ -19,11 +19,14 @@ import { socketSink, decode, type LiveEvent } from '../src/live.ts';
 import type { WorkflowResult } from '../src/execute.ts';
 
 test('the registry knows every surface and which are available', () => {
-  assert.deepEqual([...surfaces()].sort(), ['desktop', 'ios', 'terminal', 'web']);
+  assert.deepEqual([...surfaces()].sort(), ['android', 'desktop', 'ios', 'terminal', 'web']);
   assert.equal(driverFor('web').available, true);
   assert.equal(driverFor('terminal').available, true);
   assert.equal(driverFor('desktop').available, true);
-  assert.equal(driverFor('ios').available, false);
+  assert.equal(driverFor('ios').available, true);
+  // android is implemented and UNPROVEN: no run has driven it, so it is
+  // refused however complete its code looks.
+  assert.equal(driverFor('android').available, false);
 });
 
 test('assertAvailable passes a built surface and refuses a scaffolded one loudly', () => {
@@ -31,9 +34,10 @@ test('assertAvailable passes a built surface and refuses a scaffolded one loudly
   assertAvailable('web');
   assertAvailable('terminal');
   assertAvailable('desktop');
-  // Scaffolded surfaces throw, so a run that targets them fails rather than
-  // returning a green verdict that tested nothing.
-  for (const surface of ['ios'] as Surface[]) {
+  assertAvailable('ios');
+  // A surface nobody has driven throws, so a run that targets it fails rather
+  // than returning a green verdict that tested nothing.
+  for (const surface of ['android'] as Surface[]) {
     assert.throws(() => assertAvailable(surface), (err: unknown) => {
       assert.ok(err instanceof NotImplementedError);
       assert.equal((err as NotImplementedError).surface, surface);
@@ -43,8 +47,12 @@ test('assertAvailable passes a built surface and refuses a scaffolded one loudly
 });
 
 test('the scaffolded driver throws rather than silently passing', () => {
+  // ios.drive() is kept so the scaffolded shape stays uniform, and it refuses
+  // rather than returning an empty result: the real entry is iosPlatform()
+  // with runMobile(), and anything reaching drive() has taken a path that
+  // would otherwise report a green run that drove nothing.
+  assert.equal(ios.ios.available, true);
   assert.throws(() => ios.drive(), NotImplementedError);
-  assert.equal(ios.ios.available, false);
 });
 
 test('runTerminal passes when the output shows what was expected', async () => {
