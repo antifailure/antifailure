@@ -1,6 +1,11 @@
 package cli
 
-import "github.com/antifailure/antifailure/engine/internal/report"
+import (
+	"bytes"
+
+	"github.com/antifailure/antifailure/engine/internal/env"
+	"github.com/antifailure/antifailure/engine/internal/report"
+)
 
 // The one door this package opens for its own tests, and no wider.
 //
@@ -12,3 +17,11 @@ import "github.com/antifailure/antifailure/engine/internal/report"
 // the split this whole feature rests on.
 
 func GateErrorForTest(f report.Finding) error { return gateError(f) }
+
+// PrintChaosForTest renders a run the way the terminal gets it, so a test reads
+// the lines a person reads rather than the helpers that compose them.
+func PrintChaosForTest(run *env.ChaosRun) string {
+	var buf bytes.Buffer
+	printChaos(&Env{Out: NewOutput(&buf, &buf)}, run)
+	return buf.String()
+}

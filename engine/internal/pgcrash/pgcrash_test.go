@@ -310,3 +310,35 @@ func seq(lo, hi int64) []int64 {
 	}
 	return out
 }
+
+// TestJudge_ChecksumsOffOnlyWhenTheControlFileWasRead holds the checksums
+// warning to what pg_controldata actually said. A control file that could not
+// be parsed keeps its raw output and a zero checksum version, and reading that
+// zero as "off" printed a fact nobody had read beside the finding saying the
+// file was unreadable.
+func TestJudge_ChecksumsOffOnlyWhenTheControlFileWasRead(t *testing.T) {
+	rules := func(r pgcrash.Result) []string {
+		var out []string
+		for _, p := range r.Unverified {
+			out = append(out, p.Rule)
+		}
+		return out
+	}
+
+	read, err := pgcrash.ParseControl(controlOut)
+	require.NoError(t, err)
+	off := pgcrash.Result{Before: read, After: read, Relations: pgcrash.Relations{Checked: true, Agreed: true}}
+	pgcrash.JudgeForTest(&off, nil, nil)
+	require.Contains(t, rules(off), pgcrash.RuleChecksumsOff,
+		"a control file that says checksum version 0 did not raise the warning")
+
+	garbled := "pg_controldata: some output this parser cannot read\n"
+	_, parseErr := pgcrash.ParseControl(garbled)
+	require.Error(t, parseErr)
+	unread := pgcrash.Result{Before: read, After: pgcrash.Control{Raw: garbled},
+		Relations: pgcrash.Relations{Checked: true, Agreed: true}}
+	pgcrash.JudgeForTest(&unread, nil, parseErr)
+	require.NotContains(t, rules(unread), pgcrash.RuleChecksumsOff,
+		"a control file that could not be read was reported as checksums off")
+	require.Contains(t, rules(unread), pgcrash.RuleControlUnreadable)
+}

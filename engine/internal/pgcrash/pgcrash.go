@@ -536,7 +536,11 @@ func (r *Result) judge(opts Options, beforeErr, afterErr error, warmCommits int)
 		})
 	}
 
-	if r.After.Raw != "" && !r.After.ChecksumsEnabled() {
+	// afterErr and not a non empty Raw, because a control file that could not
+	// be PARSED still carries its raw output and a zero checksum version, and
+	// reading that zero as "checksums are off" told the reader a fact nobody
+	// had read, beside the finding saying the file could not be read.
+	if afterErr == nil && !r.After.ChecksumsEnabled() {
 		r.Unverified = append(r.Unverified, Problem{
 			Rule:  RuleChecksumsOff,
 			Title: "Data page checksums are off on this cluster",
