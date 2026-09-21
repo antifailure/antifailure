@@ -497,6 +497,13 @@ const (
 	// {address} within {timeout}, so the environment was torn down:
 	// {detail}
 	AFRUN049 Code = "AF-RUN-049"
+	// The manifest declares no service called {service}, so there is no
+	// output by that name to show. The services it declares are
+	// {declared}.
+	AFRUN050 Code = "AF-RUN-050"
+	// {service} is {what}, not a service, so it writes no output that 'af
+	// logs' can show.
+	AFRUN051 Code = "AF-RUN-051"
 
 	// Scheduling
 	// No runtime satisfies the placement requirement {requirement}.
@@ -2229,6 +2236,24 @@ var catalog = map[Code]Entry{
 		Docs:      "guides/local-runtime",
 		Retryable: true,
 		ExitCode:  ExitFailure,
+	},
+	AFRUN050: {
+		Code:      AFRUN050,
+		Area:      "RUN",
+		Message:   "The manifest declares no service called {service}, so there is no output by that name to show. The services it declares are {declared}.",
+		NextStep:  "Name one of those, or run 'af logs' with no name to read every service.",
+		Docs:      "reference/manifest",
+		Retryable: false,
+		ExitCode:  ExitUsage,
+	},
+	AFRUN051: {
+		Code:      AFRUN051,
+		Area:      "RUN",
+		Message:   "{service} is {what}, not a service, so it writes no output that 'af logs' can show.",
+		NextStep:  "What the services saw of it, a refused connection or a failed migration, is in their own output. Run 'af logs' with no name to read every service: {declared}.",
+		Docs:      "reference/manifest",
+		Retryable: false,
+		ExitCode:  ExitUsage,
 	},
 	AFSCH001: {
 		Code:      AFSCH001,

@@ -844,5 +844,27 @@ func (f *orchestratorFactory) readLogs(
 	if err != nil {
 		return nil, false, err
 	}
-	return lines, true, nil
+	return lines, logsObserved(ctx, lines, o.Status), nil
+}
+
+// logsObserved says whether an answer from Logs is an observation.
+//
+// Zero lines from an environment that is not running are not "the services
+// wrote nothing": the runtime answers both with the same empty list. So the
+// empty case asks whether anything is running, and reports nothing running as
+// unavailable with no error, which is the case logsUnavailableReason already
+// had a sentence for and nothing produced. A status that could not be read
+// leaves the empty answer as it was rather than inventing either one.
+func logsObserved(
+	ctx context.Context, lines []provider.LogLine,
+	status func(context.Context) (*env.Result, error),
+) bool {
+	if len(lines) > 0 {
+		return true
+	}
+	res, err := status(ctx)
+	if err != nil {
+		return true
+	}
+	return res != nil && len(res.Services) > 0
 }
