@@ -63,10 +63,68 @@ const emulatorBody = "AF-EMULATOR-ANSWERED-ListBucketResult"
 // joins the inner network and nothing else, deliberately, so it has no route
 // out and cannot fetch a package. A stand-in that needed the network to start
 // would be testing the opposite of the containment this mode promises.
-var emulatorCommand = []string{"/bin/sh", "-c", fmt.Sprintf(
-	"while true; do printf 'HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n"+
-		"Content-Length: %d\r\nConnection: close\r\n\r\n%s' | nc -l -p %d; done",
-	len(emulatorBody), emulatorBody, emulatorPort)}
+var emulatorCommand = []string{"/bin/sh", "-c", emulatorShell("")}
+
+// emulatorShell is the stand-in server, and it READS THE REQUEST BEFORE IT
+// ANSWERS. That is not politeness, it is the difference between a fixture and a
+// trap, and both halves of this shape were measured rather than reasoned.
+//
+// WHAT IT REPLACES, and why that was a trap. The old fixture was
+// `printf '<response>' | nc -l`, which writes the whole answer THE MOMENT IT
+// ACCEPTS, before a request exists. Go's transport starts readLoop inside
+// dialConn and only afterwards hands the connection its request, so there is a
+// window in which readLoop peeks while numExpectedResponses is zero. An origin
+// that has already spoken is caught in it: readLoopPeekFailLocked logs
+// "Unsolicited response received on idle HTTP channel" and closes with an error
+// shouldRetryRequest REFUSES to retry, so the proxy turns a correct 200 into a
+// 502 for the application. Had the origin merely closed, the error would be
+// errServerClosedIdle, which IS retried, and nobody would ever have seen it.
+//
+// It was not theoretical: it failed on MAIN on 2026-09-16 (run 35047245806,
+// never re-run), on prep-release-v153, and on a pull request whose diff cannot
+// reach this package. The evidence that it was never a readiness race is that
+// the ALREADY LISTENING arm failed the same way in 0.83 seconds, and that arm
+// has no race to lose. Reproduced outside this repository with no Docker: 9600
+// requests against an origin that speaks first gave 16 failures carrying the
+// exact CI log line; 8000 against one that reads the request first gave ZERO.
+//
+// WHY A HANDLER FILE AND A LOOP, rather than the two shapes that look simpler.
+// The constraints are real: alpine's busybox has no httpd applet, and an
+// emulator joins the inner network only, so it cannot fetch a package. Of the
+// shapes busybox does offer, both were measured in a real alpine:3.20 container
+// and only this one has both properties:
+//
+//	while true; do nc -l -e handler; done   reads the request first, and
+//	                                        re-arms in 25 to 46 ms
+//	nc -lk -e handler                       stays bound, but its handler never
+//	                                        sees the socket, so it speaks first
+//	                                        and reproduces the defect above
+//	handler < fifo | nc -l > fifo           reads first, but the FIFO opens
+//	                                        serialise the loop and widen the
+//	                                        unbound window enough that the
+//	                                        application is REFUSED instead
+//
+// The middle one is why this is not `-lk`, and the last one is not a guess: it
+// was written, run against real containers, and both arms failed with
+// "connect: connection refused".
+//
+// ONE HAZARD IS NARROWED, NOT CLOSED, and is named rather than left to be
+// found. busybox nc serves one connection and exits, so the loop re-execs it
+// and the port is unbound in between. The readiness probe's own dial consumes
+// an accept, so the application's first call lands after a re-arm. Measured at
+// 25 to 46 milliseconds, against an engine that starts a container between the
+// two, which is why this is a narrow window rather than the previous shape's
+// reliable failure. Closing it entirely needs a listener busybox does not have.
+func emulatorShell(prefix string) string {
+	return fmt.Sprintf(`%scat > /h.sh <<'EOS'
+#!/bin/sh
+while read -r line; do [ ${#line} -le 1 ] && break; done
+printf 'HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s'
+EOS
+chmod +x /h.sh
+while true; do nc -l -p %d -e /h.sh; done
+`, prefix, len(emulatorBody), emulatorBody, emulatorPort)
+}
 
 // theApplication is the unmodified application, built once.
 //

@@ -51,10 +51,8 @@ const emulatorBindDelay = 20 * time.Second
 // running and the alias resolves the whole time. That is the real window: DNS
 // answers, the container is up, and the port is closed.
 func delayedEmulatorCommand(d time.Duration) []string {
-	return []string{"/bin/sh", "-c", fmt.Sprintf(
-		"sleep %d; while true; do printf 'HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n"+
-			"Content-Length: %d\r\nConnection: close\r\n\r\n%s' | nc -l -p %d; done",
-		int(d.Seconds()), len(emulatorBody), emulatorBody, emulatorPort)}
+	return []string{"/bin/sh", "-c",
+		emulatorShell(fmt.Sprintf("sleep %d; ", int(d.Seconds())))}
 }
 
 // transcript collects the engine's progress lines in the order they were
