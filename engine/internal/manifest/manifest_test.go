@@ -857,6 +857,16 @@ diversity:
   personalities:
     - id: skeptic
     - id: explorer
+chaos:
+  enabled: true
+  crash_recovery:
+    writers: 4
+    commits_before_fault: 500
+  faults:
+    - name: postgres-crash
+      kind: process_kill
+      target: database
+      process: "postgres: checkpointer"
 `)
 	// Compared with the line breaks collapsed, because what is being asserted
 	// is what the page SAYS, not where the renderer happened to wrap it. A
@@ -886,6 +896,13 @@ diversity:
 		// how many personality varied agents run and which personalities.
 		"Diversity", "3 per workflow", "aggressive_diversity mix", "high variance",
 		"skeptic, explorer",
+		// The chaos block, when enabled, is the one part of the effective
+		// configuration that says something will be BROKEN, so a reader has
+		// to be able to see what and how hard from the page that explains
+		// what the run will do.
+		"Chaos", "postgres-crash process_kill on database",
+		"matching postgres: checkpointer",
+		"crash recovery 4 writers, 500 commits before a fault",
 	} {
 		require.Contains(t, out, want, "Explain must mention %q", want)
 	}

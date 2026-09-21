@@ -55,6 +55,7 @@ func validate(m *schema.Manifest, doc *yaml.Node, root string) []Problem {
 	v.change(m)
 	v.github(m)
 	v.security(m)
+	v.chaos(m)
 
 	// Last, so that a hand written message wins wherever both would speak.
 	v.boundsPass()
@@ -3392,4 +3393,128 @@ func streamModeRefusal(mode schema.Mode) string {
 		return "Sandbox has to find the credential in the request before it can replace it, and forwarding without replacing would send the application's own credential to the real provider. Use block or allow for this host."
 	}
 	return ""
+}
+
+// chaos refuses a fault that could not be run as written.
+//
+// The bounds the schema declares are enforced for free by boundsPass, so what
+// is here is only what a bound cannot say: a parameter that belongs to one
+// kind and was given to another, a service that this manifest does not
+// declare, a duration that does not parse, and the two combinations that would
+// produce a fault which cannot be aimed at anything.
+//
+// A fault whose parameters are wrong is refused here, where the author is
+// looking at the file, rather than at the moment it is injected into a running
+// environment. The engine refuses it there too, because a fault reaches that
+// package from a flag as well as from a manifest, and the parameter that is
+// wrong is the same parameter either way.
+func (v *validator) chaos(m *schema.Manifest) {
+	if m.Chaos == nil {
+		return
+	}
+	services := map[string]bool{}
+	for _, s := range m.Services {
+		services[s.Name] = true
+	}
+	seen := map[string]int{}
+	for i := range m.Chaos.Faults {
+		f := &m.Chaos.Faults[i]
+		base := fmt.Sprintf("chaos.faults[%d]", i)
+
+		if n, ok := seen[f.Name]; ok {
+			v.add(base+".name",
+				fmt.Sprintf("Two faults are both called %q.", f.Name),
+				fmt.Sprintf("Rename one. A report names a finding by its fault, and two faults with one name make a finding "+
+					"that could have come from either; the first is at chaos.faults[%d].", n))
+		} else if f.Name != "" {
+			seen[f.Name] = i
+		}
+
+		switch f.Target {
+		case schema.FaultTargetService:
+			switch {
+			case strings.TrimSpace(f.Service) == "":
+				v.add(base+".service",
+					"A fault targets a service and names none.",
+					"Name one of the services this manifest declares, or set target to database.")
+			case !services[f.Service]:
+				v.add(base+".service",
+					fmt.Sprintf("The fault targets the service %q, which this manifest does not declare.", f.Service),
+					"Name a service from the services block. A fault can only reach a container this environment created.")
+			}
+		default:
+			if strings.TrimSpace(f.Service) != "" {
+				v.add(base+".service",
+					fmt.Sprintf("The fault names the service %q and its target is %s.", f.Service, f.Target),
+					"Set target to service, or remove the service name.")
+			}
+		}
+
+		if f.Kind == schema.FaultProcessKill {
+			if strings.TrimSpace(f.Process) == "" {
+				v.add(base+".process",
+					"A process_kill fault names no process.",
+					"Give a substring of the command line to match, for example \"postgres: checkpointer\". "+
+						"Killing an unnamed process would kill whichever one happened to be listed first.")
+			}
+		} else if strings.TrimSpace(f.Process) != "" {
+			v.add(base+".process",
+				fmt.Sprintf("The fault names a process and its kind is %s, which kills no process.", f.Kind),
+				"Remove the process, or set kind to process_kill.")
+		}
+
+		if f.Kind != schema.FaultDiskFill {
+			if f.HeadroomBytes != 0 {
+				v.add(base+".headroom_bytes",
+					fmt.Sprintf("The fault states headroom and its kind is %s, which fills nothing.", f.Kind),
+					"Remove headroom_bytes, or set kind to disk_fill.")
+			}
+			if f.MaxFillBytes != 0 {
+				v.add(base+".max_fill_bytes",
+					fmt.Sprintf("The fault states a fill cap and its kind is %s, which fills nothing.", f.Kind),
+					"Remove max_fill_bytes, or set kind to disk_fill.")
+			}
+		} else if f.HeadroomBytes != 0 && f.MaxFillBytes != 0 && f.HeadroomBytes >= f.MaxFillBytes {
+			v.add(base+".max_fill_bytes",
+				fmt.Sprintf("The fill cap of %d bytes is not more than the %d bytes of headroom.",
+					f.MaxFillBytes, f.HeadroomBytes),
+				"Raise max_fill_bytes above headroom_bytes. A cap at or below the headroom refuses every fill it is asked for.")
+		}
+
+		v.faultDuration(base+".after", f.After)
+		v.faultDuration(base+".hold", f.Hold)
+	}
+
+	if cr := m.Chaos.CrashRecovery; cr != nil {
+		v.faultDuration("chaos.crash_recovery.recovery_timeout", cr.RecoveryTimeout)
+	}
+
+	if m.Chaos.Enabled && len(m.Chaos.Faults) == 0 {
+		v.add("chaos.faults",
+			"Chaos is enabled and no faults are declared.",
+			"Declare a fault, or set enabled to false. A chaos block that injects nothing reports a recovery nobody caused.")
+	}
+}
+
+// faultDuration refuses a duration the engine could not read.
+//
+// The schema's pattern already refuses most of these, and this catches the one
+// it cannot: a value that matches the pattern and overflows, which would
+// otherwise reach the engine as a negative wait.
+func (v *validator) faultDuration(path, value string) {
+	if strings.TrimSpace(value) == "" {
+		return
+	}
+	d, err := time.ParseDuration(value)
+	if err != nil {
+		v.add(path,
+			fmt.Sprintf("%q is not a duration.", value),
+			"Write it as a number and a unit, for example 5s or 500ms.")
+		return
+	}
+	if d < 0 {
+		v.add(path,
+			fmt.Sprintf("%q is a negative duration.", value),
+			"Give a duration of zero or more.")
+	}
 }

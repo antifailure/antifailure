@@ -86,6 +86,20 @@ type Policy struct {
 	// level, the same way every load finding carries LoadRegression.
 	Review Level
 
+	// ChaosFailure is what a fault's recovery being wrong does to the check: a
+	// lost acknowledged commit, a phantom row, a replay that stopped short of
+	// what the client saw flushed, a heap and an index that no longer agree.
+	// Every one of those findings carries this one level, the way every load
+	// finding carries LoadRegression.
+	ChaosFailure Level
+	// ChaosUnverified is what a fault run that could not establish its claim
+	// does: nothing crashed, the log carries no replay, the control file could
+	// not be read, amcheck is not installed. It is a separate level because
+	// a finding that says "this is wrong" and one that says "I could not look"
+	// have to be able to carry different weight, and collapsing them is how a
+	// project learns to ignore both.
+	ChaosUnverified Level
+
 	// Security is the resolved level for each security policy key, keyed by the
 	// full "security.<family>.<rule>" name.
 	//
@@ -125,6 +139,15 @@ func Configure(in *schema.Policy) Policy {
 		// Advisory by default: an LLM review must not fail a build on its own
 		// account, so a project raises this deliberately when it trusts it.
 		Review: LevelWarn,
+		// Fail by default, and it is the only key besides the four above that
+		// is. A commit that returned success and is not there after recovery is
+		// not a matter of a project's appetite for risk, so the default is not
+		// the advisory one every other new key gets.
+		ChaosFailure: LevelFail,
+		// Warn by default. Not being able to establish a recovery is a real
+		// fact that somebody has to see, and it is not evidence that the change
+		// under rehearsal broke anything.
+		ChaosUnverified: LevelWarn,
 	}
 	if in == nil {
 		return p
@@ -153,6 +176,8 @@ func Configure(in *schema.Policy) Policy {
 	set(&p.Cleanup, in.Cleanup)
 	set(&p.WorkflowsUnverified, in.WorkflowsUnverified)
 	set(&p.Review, in.Review)
+	set(&p.ChaosFailure, in.ChaosFailure)
+	set(&p.ChaosUnverified, in.ChaosUnverified)
 
 	// The security overrides. Each is a "security.<family>.<rule>" key mapped to
 	// a level. A value the manifest validator already refused never reaches

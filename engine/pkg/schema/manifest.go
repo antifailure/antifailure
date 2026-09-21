@@ -48,6 +48,7 @@ type Manifest struct {
 	Infrastructure *Infrastructure     `json:"infrastructure,omitempty" yaml:"infrastructure,omitempty"`
 	GitHub         *GitHub             `json:"github,omitempty" yaml:"github,omitempty"`
 	Security       *Security           `json:"security,omitempty" yaml:"security,omitempty"`
+	Chaos          *Chaos              `json:"chaos,omitempty" yaml:"chaos,omitempty"`
 }
 
 // ServiceKind is what a service is.
@@ -1568,6 +1569,17 @@ type Policy struct {
 	// not block a merge on a model's say-so; raise it to fail once the project
 	// trusts it.
 	Review PolicyLevel `json:"review,omitempty" yaml:"review,omitempty"`
+	// ChaosFailure is a fault whose recovery was wrong: a lost acknowledged
+	// commit, a phantom row, a replay that stopped short, a heap and an index
+	// that disagree. It defaults to fail rather than warn, unlike almost
+	// everything else here, because a commit that returned success and is not
+	// there is not a matter of a project's appetite.
+	ChaosFailure PolicyLevel `json:"chaos_failure,omitempty" yaml:"chaos_failure,omitempty"`
+	// ChaosUnverified is a fault run that could not establish what it set out
+	// to: nothing crashed, the log carries no replay, the control file could
+	// not be read, amcheck is absent. A separate key from ChaosFailure because
+	// "I checked and it is wrong" and "I could not check" are different facts.
+	ChaosUnverified PolicyLevel `json:"chaos_unverified,omitempty" yaml:"chaos_unverified,omitempty"`
 	// Security maps each dynamic security check key, "security.<family>.<rule>"
 	// such as security.authz.idor, to what a finding on it does to the check.
 	//
@@ -1777,4 +1789,77 @@ type GitHub struct {
 	Comment    *bool      `json:"comment,omitempty" yaml:"comment,omitempty"`
 	ForkPolicy ForkPolicy `json:"fork_policy,omitempty" yaml:"fork_policy,omitempty"`
 	TeardownOn []string   `json:"teardown_on,omitempty" yaml:"teardown_on,omitempty"`
+}
+
+// FaultKind is what a fault does to its target.
+type FaultKind string
+
+const (
+	FaultProcessKill      FaultKind = "process_kill"
+	FaultContainerKill    FaultKind = "container_kill"
+	FaultContainerStop    FaultKind = "container_stop"
+	FaultContainerPause   FaultKind = "container_pause"
+	FaultNetworkPartition FaultKind = "network_partition"
+	FaultReadOnlyData     FaultKind = "read_only_data"
+	FaultDiskFill         FaultKind = "disk_fill"
+)
+
+// FaultTarget is which container in the environment a fault is aimed at.
+type FaultTarget string
+
+const (
+	FaultTargetDatabase FaultTarget = "database"
+	FaultTargetService  FaultTarget = "service"
+)
+
+// Chaos declares the faults a rehearsal may inject and the recovery it proves
+// afterwards.
+type Chaos struct {
+	// Enabled is whether anything is broken on purpose. Off is the behavior of
+	// a manifest with no chaos block at all.
+	Enabled bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	// Faults are injected in the order they are written, one at a time, each
+	// undone before the next begins.
+	Faults []Fault `json:"faults,omitempty" yaml:"faults,omitempty"`
+	// CrashRecovery is the durability proof run around a fault aimed at the
+	// database.
+	CrashRecovery *CrashRecovery `json:"crash_recovery,omitempty" yaml:"crash_recovery,omitempty"`
+}
+
+// Fault is one failure injected into one container.
+type Fault struct {
+	// Name is what a report calls this fault.
+	Name string `json:"name" yaml:"name"`
+	// Kind is what is done.
+	Kind FaultKind `json:"kind" yaml:"kind"`
+	// Target is which container, and Service names it when Target is service.
+	Target  FaultTarget `json:"target,omitempty" yaml:"target,omitempty"`
+	Service string      `json:"service,omitempty" yaml:"service,omitempty"`
+	// Process is the substring of a command line process_kill matches.
+	Process string `json:"process,omitempty" yaml:"process,omitempty"`
+	// After is how long the workload runs before this fault is injected, and
+	// Hold is how long the fault stays in place before it is undone.
+	After string `json:"after,omitempty" yaml:"after,omitempty"`
+	Hold  string `json:"hold,omitempty" yaml:"hold,omitempty"`
+	// HeadroomBytes is how little room disk_fill leaves free, and
+	// MaxFillBytes is the most it will write whatever the filesystem says.
+	HeadroomBytes int64 `json:"headroom_bytes,omitempty" yaml:"headroom_bytes,omitempty"`
+	MaxFillBytes  int64 `json:"max_fill_bytes,omitempty" yaml:"max_fill_bytes,omitempty"`
+}
+
+// CrashRecovery is the durability proof run around a fault.
+type CrashRecovery struct {
+	// Enabled is whether the proof runs. It is a pointer because its default
+	// is true, so "absent" and "explicitly false" have to be different values.
+	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	// Writers is how many connections commit at once.
+	Writers int `json:"writers,omitempty" yaml:"writers,omitempty"`
+	// CommitsBeforeFault is how many commits must be acknowledged before a
+	// fault is injected.
+	CommitsBeforeFault int `json:"commits_before_fault,omitempty" yaml:"commits_before_fault,omitempty"`
+	// SynchronousCommit is what the writers set the setting to, or empty to
+	// leave the database's own value alone.
+	SynchronousCommit string `json:"synchronous_commit,omitempty" yaml:"synchronous_commit,omitempty"`
+	// RecoveryTimeout is how long the database has to answer a query again.
+	RecoveryTimeout string `json:"recovery_timeout,omitempty" yaml:"recovery_timeout,omitempty"`
 }

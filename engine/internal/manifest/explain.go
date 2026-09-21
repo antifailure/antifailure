@@ -484,7 +484,34 @@ func Explain(m *schema.Manifest, width int) string {
 			b.WriteString("  seed         the run id, echoed into the report\n")
 		}
 	}
+
+	if m.Chaos != nil && m.Chaos.Enabled {
+		b.WriteString("\nChaos\n")
+		for _, f := range m.Chaos.Faults {
+			fmt.Fprintf(&b, "  %-24s %s on %s, after %s, held %s\n",
+				f.Name, f.Kind, faultTarget(f), f.After, f.Hold)
+			if f.Process != "" {
+				fmt.Fprintf(&b, "  %-24s matching %s\n", "", value(f.Process, 27, width))
+			}
+		}
+		if cr := m.Chaos.CrashRecovery; cr != nil && cr.Enabled != nil && *cr.Enabled {
+			fmt.Fprintf(&b, "  %-24s %d writers, %d commits before a fault, %s to come back\n",
+				"crash recovery", cr.Writers, cr.CommitsBeforeFault, cr.RecoveryTimeout)
+			if cr.SynchronousCommit != "" {
+				fmt.Fprintf(&b, "  %-24s synchronous_commit %s\n", "", cr.SynchronousCommit)
+			}
+		}
+	}
 	return b.String()
+}
+
+// faultTarget names the container a fault is aimed at, the way a report names
+// it.
+func faultTarget(f schema.Fault) string {
+	if f.Target == schema.FaultTargetService {
+		return "service " + f.Service
+	}
+	return string(f.Target)
 }
 
 // diversityPersonalities names the selected personalities, or the whole built

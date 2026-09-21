@@ -97,6 +97,55 @@ af change --diff pr.patch
 | `--head` | - | Ref to measure, defaulting to HEAD. |
 | `-w`, `--write` | - | Write the report section here as markdown. |
 
+### `af chaos`
+
+Break this environment on purpose and prove the recovery.
+
+Injects the faults the manifest's chaos block declares into the running
+environment, one at a time, and reads what the system did about each one.
+
+The faults are real. A process is killed with SIGKILL, a container is stopped,
+a container is frozen, a container is detached from the network, a data
+directory is made read only. Nothing is simulated, and nothing is aimed
+anywhere but at the containers this environment created: a target is resolved
+from the labels the runtime stamped at create time, the ownership is proved
+again from the daemon at the instant of the act, and the egress sidecar is
+refused whatever a fault asks for, because a fault that can stop the thing
+deciding where the environment may connect is a way out rather than an outage.
+
+Around a fault aimed at the database, the durability proof runs. Concurrent
+writers commit into a schema of the engine's own while the fault lands, and
+afterwards every commit the client was told was committed must still be there
+and nothing may be there that no client ever wrote. That needs a record the
+database cannot provide, because the claim is about what the database SAID,
+and the write ahead log is then read for the evidence that it actually
+replayed: the position recovery started from, against the one the control file
+named before the crash, and the position it reached, against the last flush a
+writer saw.
+
+Anything that could not be established is reported as unverified rather than as
+a pass. A fault that was applied and changed nothing is refused, because every
+assertion after it would be measuring a system that never broke.
+
+```
+af chaos [flags]
+```
+
+```
+# Inject the manifest's faults and prove what the recovery did.
+af chaos
+
+# Against a branch other than the checked out one.
+af chaos --branch fix-the-outbox
+
+# The whole result, including the acknowledged commit ledger.
+af chaos -o json
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--branch` | - | Branch to break, defaulting to the checked out one. |
+
 ### `af ci`
 
 Bring an environment up, run everything, write a report, tear it down.

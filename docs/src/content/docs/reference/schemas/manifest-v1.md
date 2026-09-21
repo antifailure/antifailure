@@ -15,6 +15,7 @@ This page is generated from `schemas/manifest.v1.json`. Edit the schema, then ru
 | --- | --- | --- | --- |
 | `auth` | [auth](#auth) | no | How personas come to exist. |
 | `change` | [Change](#change) | no | How a pull request's diff is classified. |
+| `chaos` | [Chaos](#chaos) | no | Faults a rehearsal may inject into the environment, and the recovery it proves afterwards. |
 | `database` | [Database](#database) | no | Where the environment's Postgres comes from, and how the production copy is made safe before anyone can branch from it. |
 | `datastores` | list of [Datastore](#datastore) | no | Every store the environment holds, and what is done about each one's contents. The database: block above normalizes into the entry named primary, so a manifest that declares only database: already has this list and does not have to write it. A stance is declared rather than defaulted, because an empty ClickHouse nobody chose looks exactly like an empty ClickHouse somebody decided on. Max items 25. |
 | `desktop` | [Desktop application](#desktop-application) | no | Which application the desktop workflows drive, declared once because a manifest describes one product. |
@@ -126,6 +127,28 @@ One path pattern and what the paths it matches are. It says what a file IS, neve
 | `note` | string | no | The sentence the report prints for this rule, replacing the default one that restates the pattern. Max length 200. |
 | `path` | string | **yes** | A glob against the repository relative path. A single star does not cross a slash and a double star does. A pattern that matches everything is refused, because it would defeat the rule that an unrecognised path selects every check. Min length 1, max length 256. |
 | `surface` | `schema`, `code`, `asset`, `build`, `dependency`, `config`, `infrastructure`, `pipeline`, `test`, `docs` | **yes** | What the matched paths are. Surfaces the engine assigns from the manifest itself, such as a service or the masking rules file, cannot be set here. |
+
+## Chaos
+
+Faults a rehearsal may inject into the environment, and the recovery it proves afterwards. Off by default: absent, or present with enabled false, runs exactly as before and injects nothing. A fault reaches the containers this environment created and nothing else, which the engine enforces by the labels the runtime stamped at create time rather than by the name a fault names, and the egress sidecar is refused whatever a fault asks for, because a fault that can stop the thing deciding what the environment may reach is a way out rather than an outage. Every fault carries an undo that runs even when the run fails, and a fault that was applied and changed nothing is refused rather than reported as survived, because every assertion after it would be measuring a system that never broke.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `crash_recovery` | [Crash recovery](#crash-recovery) | no | The durability proof run around a fault: concurrent writers commit to a schema of the engine's own while the fault lands, and afterwards every commit the client was told was committed must still be there and nothing may be there that no client ever wrote. |
+| `enabled` | boolean | no | Whether faults are injected. Off is today's behavior: the environment is built, tested and torn down with nothing broken on purpose. Defaults to `false`. |
+| `faults` | list of [Fault](#fault) | no | The faults to inject, in the order they are written. Each one is applied, held for its own duration, and then undone before the next begins, so a report says which fault a finding came from rather than which combination. Max items 20. |
+
+## Crash recovery
+
+The durability proof run around a fault: concurrent writers commit to a schema of the engine's own while the fault lands, and afterwards every commit the client was told was committed must still be there and nothing may be there that no client ever wrote. It is the part that needs a record the database cannot provide, because the claim is about what the database SAID and not about what it holds. The write ahead log is then read for evidence that it actually replayed, from the position the control file named to past the last flush a writer saw, and the heap is checked against its index. Anything that could not be established, an unreadable control file, a log with no replay in it, a missing amcheck extension, is reported as unverified and never as a pass.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `commits_before_fault` | integer | no | How many commits must be acknowledged before a fault is injected. Commits rather than seconds, because a second on a loaded machine can be a second in which nothing committed, and a crash with nothing to lose passes every durability assertion by having none. Defaults to `200`. Minimum 1, maximum 1e+06. |
+| `enabled` | boolean | no | Whether the durability proof runs around each fault aimed at the database. On by default when the chaos block is on, because a fault injected into a database with nothing measuring the result is an outage nobody learned anything from. Defaults to `true`. |
+| `recovery_timeout` | string | no | How long the database has to answer a query again after the fault. A database that never came back has not passed a recovery check and has not failed one either, so the timeout is reported as its own outcome. Defaults to `2m`. Matches `^[0-9]+(s\|m)$`. |
+| `synchronous_commit` | `on`, `off`, `local`, `remote_write`, `remote_apply` | no | What the writers set synchronous_commit to, or absent to leave the database's own value alone. It is here because it is the one knob that makes the durability check falsifiable: with it off Postgres acknowledges a commit before the write ahead log record has left shared memory, so a crash loses acknowledged commits by design and the check reports them. Setting it to off in a manifest therefore asks for a run that is EXPECTED to report lost commits, and a project that has not decided to do that should leave it out. |
+| `writers` | integer | no | How many connections commit at once. More than one by default: a crash under a serial workload exercises none of the concurrency recovery has to get right. Defaults to `8`. Minimum 1, maximum 64. |
 
 ## Database
 
@@ -261,6 +284,22 @@ Agents that pursue a goal with no declared workflow, discover the paths an appli
 | --- | --- | --- | --- |
 | `enabled` | boolean | no | Defaults to `false`. |
 | `goals` | list of [Goal](#goal) | no | One thing an exploratory agent tries to achieve. Max items 50. |
+
+## Fault
+
+One failure injected into one container. The name is what a report calls it, the kind is what is done, and the target is what it is done to.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `after` | string | no | How long the workload runs before this fault is injected. It is a floor rather than the whole wait: the engine also waits for real acknowledged commits, because a fault injected into a database that has committed nothing yet has nothing to lose and passes every durability check by having none to make. Defaults to `5s`. Matches `^[0-9]+(ms\|s\|m)$`. |
+| `headroom_bytes` | integer | no | How little room disk_fill leaves free. A filesystem filled to exactly zero leaves no space to write the file that empties it, so this is required and bounded rather than defaulted to nothing. Defaults to `1.6777216e+07`. Minimum 1.048576e+06, maximum 1.073741824e+09. |
+| `hold` | string | no | How long the fault stays in place before it is undone. A fault with no undo, such as a killed process, ignores this and the value says how long the run waits before reading the result. Defaults to `3s`. Matches `^[0-9]+(ms\|s\|m)$`. |
+| `kind` | `process_kill`, `container_kill`, `container_stop`, `container_pause`, `network_partition`, `read_only_data`, `disk_fill` | **yes** | What is done. process_kill sends SIGKILL to one process inside the container and leaves the container running, which is the real database crash: the postmaster discards shared memory and replays its write ahead log. container_kill sends SIGKILL to the container's main process, so the container stops and is started again, which is the node that went away. container_stop sends SIGTERM and then SIGKILL, which is a clean shutdown and deliberately does NO recovery, so it is the contrast that shows a recovery check is looking. container_pause freezes every process with the cgroup freezer, killing nothing and closing no connection, which is the stall. network_partition detaches the container from the environment's network and attaches it again with the same aliases. read_only_data removes write permission from the data directory, so a write meets a real errno. disk_fill fills the filesystem holding the data directory, and is refused unless that filesystem is a mount of its own. |
+| `max_fill_bytes` | integer | no | The most disk_fill will write, whatever the filesystem reports free. A cap that is never reached costs nothing, and a missing cap is bounded only by the machine. Defaults to `1.073741824e+09`. Minimum 1.048576e+06, maximum 1.073741824e+10. |
+| `name` | string | **yes** | What a report calls this fault. Lower case, so the name reads the same in a table, a log line and a finding. Min length 1, max length 100, matches `^[a-z0-9][a-z0-9-]*$`. |
+| `process` | string | no | The substring of a command line process_kill matches, required for that kind and refused for every other. A pattern that matches nothing is refused rather than reported as a fault that was survived. For a crash of the database itself, 'postgres: checkpointer' is a process the postmaster always supervises. Max length 200. |
+| `service` | string | no | The service to aim at, required when target is service and refused otherwise. It must be a service this manifest declares. Max length 63. |
+| `target` | `database`, `service` | no | Which container in this environment. database is the branch this environment is running on, and service names one of the services above through service:. The sidecar and the emulators are not targets and naming one is refused. Defaults to `database`. |
 
 ## Fidelity
 
@@ -485,6 +524,8 @@ What each class of finding does to the pull request check. A finding at 'fail' f
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
+| `chaos_failure` | `ignore`, `warn`, `fail` | no | A fault whose recovery was wrong: a transaction the client was told was committed that is gone after recovery, a row present that no client ever wrote, a replay that stopped short of what the client saw flushed, or a heap and an index that no longer agree. It defaults to fail, unlike almost everything else here, because none of those is a matter of taste: a commit that returned success and is not there is a durability failure whatever the project's appetite. Defaults to `fail`. |
+| `chaos_unverified` | `ignore`, `warn`, `fail` | no | A fault run that could not establish what it set out to: it was declared as a crash and nothing crashed, the write ahead log carries no replay, the control file could not be read, or the amcheck extension is not installed so a damaged index would not have been seen. It is a separate key from chaos_failure because a check that found a problem and a check that could not look are different facts, and reporting the second as the first is how a project learns to ignore both. Defaults to `warn`. |
 | `cleanup` | `ignore`, `warn`, `fail` | no | Teardown left a resource behind. The journal remembers what is left, so 'af down' can finish the job. Defaults to `fail`. |
 | `egress_surprise` | `ignore`, `warn`, `fail` | no | The environment tried to reach a host the manifest does not mention. The request was refused either way; this decides whether the attempt stops the merge. Defaults to `fail`. |
 | `load_regression` | `ignore`, `warn`, `fail` | no | A load threshold from the load block being exceeded. Defaults to `warn`. |

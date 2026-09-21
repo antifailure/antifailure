@@ -245,6 +245,21 @@ func gateError(f report.Finding) error {
 		// denial (exit 6). The exit is read from the security package rather
 		// than switched on here, so a new key inherits the right code from its
 		// shape and the gate cannot disagree with the key the family declared.
+		// A chaos finding routes by what it means rather than by its level,
+		// because the level is a policy choice and the two codes are two
+		// different facts. A lost commit, a phantom row or a replay that
+		// stopped short is a verification failure: the rehearsal exercised the
+		// system and the system was wrong. A run that could not establish its
+		// claim is a policy denial: nothing was proved either way, and a check
+		// that reported that as a verification failure would be claiming to
+		// have found something it never looked at.
+		if strings.HasPrefix(f.Rule, chaosPrefix) {
+			code := aferrors.AFCHS008
+			if unverifiedRule(f.Rule) {
+				code = aferrors.AFCHS009
+			}
+			return aferrors.Coded(code, "fault", f.Where, "detail", f.Title)
+		}
 		if strings.HasPrefix(f.Rule, security.Prefix()) {
 			code := aferrors.AFDSC002
 			if security.ExitFor(report.PolicyKey(f.Rule)) == report.ExitVerification {

@@ -582,6 +582,14 @@ var knownKeys = []string{
 	// already above.
 	"access", "objects", "route", "object_class", "canary", "canary_kind",
 	"owner", "tenant", "user",
+	// The chaos block: the faults a rehearsal may inject and the durability
+	// proof run around one. enabled, name, kind, target, service and process
+	// are already above, and so is timeout; the rest are only ever written
+	// here, and a typo of one of them deserves the same suggestion as a typo
+	// anywhere else.
+	"chaos", "faults", "crash_recovery", "after", "hold", "process",
+	"headroom_bytes", "max_fill_bytes", "writers", "commits_before_fault",
+	"synchronous_commit", "recovery_timeout", "chaos_failure", "chaos_unverified",
 }
 
 func editDistance(a, b string) int {

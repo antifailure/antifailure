@@ -1483,3 +1483,76 @@ errors:
     docs: concepts/security
     retryable: false
     exit_code: 6
+
+  # Fault injection and crash recovery.
+  #
+  # The codes split along one line that matters more here than anywhere else
+  # in this catalog: whether the engine BROKE something and read the result,
+  # or could not break it at all. A recovery check that passes because the
+  # fault never landed is the exact instrument this repository keeps finding
+  # in itself, so "the fault was refused", "the fault was injected and
+  # changed nothing" and "the fault landed and recovery was wrong" are three
+  # codes and never one.
+  - code: AF-CHS-001
+    area: CHS
+    message: "A fault names the target {target}, which this environment does not have: {detail}"
+    next_step: "Name a target the environment is running. 'af status' lists them, and 'af chaos list' lists the ones a fault may reach."
+    docs: guides/chaos
+    retryable: false
+    exit_code: 3
+  - code: AF-CHS-002
+    area: CHS
+    message: "The fault kind {kind} cannot be run as written: {detail}"
+    next_step: "Correct the fault in the manifest's chaos block. The reference page lists each kind and the parameters it requires."
+    docs: guides/chaos
+    retryable: false
+    exit_code: 3
+  - code: AF-CHS-003
+    area: CHS
+    message: "The fault {fault} could not be injected into {target}: {detail}"
+    next_step: "Read what the container said. A fault that could not be injected has measured nothing, so the run reports that rather than a recovery."
+    docs: guides/chaos
+    retryable: true
+    exit_code: 5
+  - code: AF-CHS-004
+    area: CHS
+    message: "The fault {fault} was applied to {target} and changed nothing: {detail}"
+    next_step: "A fault that changes nothing makes every recovery check that follows it meaningless, so it is refused rather than reported as survived. Fix the fault, or the environment it is aimed at."
+    docs: guides/chaos
+    retryable: false
+    exit_code: 7
+  - code: AF-CHS-005
+    area: CHS
+    message: "The fault {fault} is refused because its effect would reach past {target}: {detail}"
+    next_step: "A fault may only affect the environment that declared it. Narrow the fault, or give the target the dedicated volume the fault needs."
+    docs: guides/chaos
+    retryable: false
+    exit_code: 3
+  - code: AF-CHS-006
+    area: CHS
+    message: "The database did not come back within {timeout} after the fault {fault}: {detail}"
+    next_step: "Read the database's own log for how far recovery reached. A database that never came back has not passed a recovery check and has not failed one either."
+    docs: guides/chaos
+    retryable: false
+    exit_code: 7
+  - code: AF-CHS-007
+    area: CHS
+    message: "Faults are not available on the {provider} runtime."
+    next_step: "Run the chaos suite against the local runtime, which is the one whose containers this engine can reach."
+    docs: guides/chaos
+    retryable: false
+    exit_code: 3
+  - code: AF-CHS-008
+    area: CHS
+    message: "Recovery after {fault} lost data the client was told was committed: {detail}"
+    next_step: "Open the finding for how many acknowledged commits are missing. This is a durability failure in the database or its configuration, not in the rehearsal."
+    docs: guides/chaos
+    retryable: false
+    exit_code: 7
+  - code: AF-CHS-009
+    area: CHS
+    message: "The chaos suite could not establish what it set out to check after {fault}: {detail}"
+    next_step: "An unverified recovery is not a passed one. Read what could not be measured and fix that before trusting the result."
+    docs: guides/chaos
+    retryable: false
+    exit_code: 6

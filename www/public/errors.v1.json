@@ -278,6 +278,105 @@
       "planned": false
     },
     {
+      "code": "AF-CHS-001",
+      "area": "CHS",
+      "areaName": "Fault injection and crash recovery",
+      "message": "A fault names the target {target}, which this environment does not have: {detail}",
+      "resolution": "Name a target the environment is running. 'af status' lists them, and 'af chaos list' lists the ones a fault may reach.",
+      "docs": "https://antifailure.dev/docs/guides/chaos",
+      "retryable": false,
+      "exitCode": 3,
+      "planned": false
+    },
+    {
+      "code": "AF-CHS-002",
+      "area": "CHS",
+      "areaName": "Fault injection and crash recovery",
+      "message": "The fault kind {kind} cannot be run as written: {detail}",
+      "resolution": "Correct the fault in the manifest's chaos block. The reference page lists each kind and the parameters it requires.",
+      "docs": "https://antifailure.dev/docs/guides/chaos",
+      "retryable": false,
+      "exitCode": 3,
+      "planned": false
+    },
+    {
+      "code": "AF-CHS-003",
+      "area": "CHS",
+      "areaName": "Fault injection and crash recovery",
+      "message": "The fault {fault} could not be injected into {target}: {detail}",
+      "resolution": "Read what the container said. A fault that could not be injected has measured nothing, so the run reports that rather than a recovery.",
+      "docs": "https://antifailure.dev/docs/guides/chaos",
+      "retryable": true,
+      "exitCode": 5,
+      "planned": false
+    },
+    {
+      "code": "AF-CHS-004",
+      "area": "CHS",
+      "areaName": "Fault injection and crash recovery",
+      "message": "The fault {fault} was applied to {target} and changed nothing: {detail}",
+      "resolution": "A fault that changes nothing makes every recovery check that follows it meaningless, so it is refused rather than reported as survived. Fix the fault, or the environment it is aimed at.",
+      "docs": "https://antifailure.dev/docs/guides/chaos",
+      "retryable": false,
+      "exitCode": 7,
+      "planned": false
+    },
+    {
+      "code": "AF-CHS-005",
+      "area": "CHS",
+      "areaName": "Fault injection and crash recovery",
+      "message": "The fault {fault} is refused because its effect would reach past {target}: {detail}",
+      "resolution": "A fault may only affect the environment that declared it. Narrow the fault, or give the target the dedicated volume the fault needs.",
+      "docs": "https://antifailure.dev/docs/guides/chaos",
+      "retryable": false,
+      "exitCode": 3,
+      "planned": false
+    },
+    {
+      "code": "AF-CHS-006",
+      "area": "CHS",
+      "areaName": "Fault injection and crash recovery",
+      "message": "The database did not come back within {timeout} after the fault {fault}: {detail}",
+      "resolution": "Read the database's own log for how far recovery reached. A database that never came back has not passed a recovery check and has not failed one either.",
+      "docs": "https://antifailure.dev/docs/guides/chaos",
+      "retryable": false,
+      "exitCode": 7,
+      "planned": false
+    },
+    {
+      "code": "AF-CHS-007",
+      "area": "CHS",
+      "areaName": "Fault injection and crash recovery",
+      "message": "Faults are not available on the {provider} runtime.",
+      "resolution": "Run the chaos suite against the local runtime, which is the one whose containers this engine can reach.",
+      "docs": "https://antifailure.dev/docs/guides/chaos",
+      "retryable": false,
+      "exitCode": 3,
+      "planned": false
+    },
+    {
+      "code": "AF-CHS-008",
+      "area": "CHS",
+      "areaName": "Fault injection and crash recovery",
+      "message": "Recovery after {fault} lost data the client was told was committed: {detail}",
+      "resolution": "Open the finding for how many acknowledged commits are missing. This is a durability failure in the database or its configuration, not in the rehearsal.",
+      "docs": "https://antifailure.dev/docs/guides/chaos",
+      "retryable": false,
+      "exitCode": 7,
+      "planned": false
+    },
+    {
+      "code": "AF-CHS-009",
+      "area": "CHS",
+      "areaName": "Fault injection and crash recovery",
+      "message": "The chaos suite could not establish what it set out to check after {fault}: {detail}",
+      "resolution": "An unverified recovery is not a passed one. Read what could not be measured and fix that before trusting the result.",
+      "docs": "https://antifailure.dev/docs/guides/chaos",
+      "retryable": false,
+      "exitCode": 6,
+      "planned": false
+    },
+    {
       "code": "AF-CP-003",
       "area": "CP",
       "areaName": "Control plane",

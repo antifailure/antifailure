@@ -68,6 +68,32 @@ const (
 	// context {context}.
 	AFBLD012 Code = "AF-BLD-012"
 
+	// Fault injection and crash recovery
+	// A fault names the target {target}, which this environment does not
+	// have: {detail}
+	AFCHS001 Code = "AF-CHS-001"
+	// The fault kind {kind} cannot be run as written: {detail}
+	AFCHS002 Code = "AF-CHS-002"
+	// The fault {fault} could not be injected into {target}: {detail}
+	AFCHS003 Code = "AF-CHS-003"
+	// The fault {fault} was applied to {target} and changed nothing:
+	// {detail}
+	AFCHS004 Code = "AF-CHS-004"
+	// The fault {fault} is refused because its effect would reach past
+	// {target}: {detail}
+	AFCHS005 Code = "AF-CHS-005"
+	// The database did not come back within {timeout} after the fault
+	// {fault}: {detail}
+	AFCHS006 Code = "AF-CHS-006"
+	// Faults are not available on the {provider} runtime.
+	AFCHS007 Code = "AF-CHS-007"
+	// Recovery after {fault} lost data the client was told was committed:
+	// {detail}
+	AFCHS008 Code = "AF-CHS-008"
+	// The chaos suite could not establish what it set out to check after
+	// {fault}: {detail}
+	AFCHS009 Code = "AF-CHS-009"
+
 	// Control plane
 	// The control plane at {url} could not be reached.
 	AFCP001 Code = "AF-CP-001"
@@ -751,6 +777,87 @@ var catalog = map[Code]Entry{
 		Docs:      "guides/build",
 		Retryable: false,
 		ExitCode:  ExitAuth,
+	},
+	AFCHS001: {
+		Code:      AFCHS001,
+		Area:      "CHS",
+		Message:   "A fault names the target {target}, which this environment does not have: {detail}",
+		NextStep:  "Name a target the environment is running. 'af status' lists them, and 'af chaos list' lists the ones a fault may reach.",
+		Docs:      "guides/chaos",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFCHS002: {
+		Code:      AFCHS002,
+		Area:      "CHS",
+		Message:   "The fault kind {kind} cannot be run as written: {detail}",
+		NextStep:  "Correct the fault in the manifest's chaos block. The reference page lists each kind and the parameters it requires.",
+		Docs:      "guides/chaos",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFCHS003: {
+		Code:      AFCHS003,
+		Area:      "CHS",
+		Message:   "The fault {fault} could not be injected into {target}: {detail}",
+		NextStep:  "Read what the container said. A fault that could not be injected has measured nothing, so the run reports that rather than a recovery.",
+		Docs:      "guides/chaos",
+		Retryable: true,
+		ExitCode:  ExitProvider,
+	},
+	AFCHS004: {
+		Code:      AFCHS004,
+		Area:      "CHS",
+		Message:   "The fault {fault} was applied to {target} and changed nothing: {detail}",
+		NextStep:  "A fault that changes nothing makes every recovery check that follows it meaningless, so it is refused rather than reported as survived. Fix the fault, or the environment it is aimed at.",
+		Docs:      "guides/chaos",
+		Retryable: false,
+		ExitCode:  ExitVerification,
+	},
+	AFCHS005: {
+		Code:      AFCHS005,
+		Area:      "CHS",
+		Message:   "The fault {fault} is refused because its effect would reach past {target}: {detail}",
+		NextStep:  "A fault may only affect the environment that declared it. Narrow the fault, or give the target the dedicated volume the fault needs.",
+		Docs:      "guides/chaos",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFCHS006: {
+		Code:      AFCHS006,
+		Area:      "CHS",
+		Message:   "The database did not come back within {timeout} after the fault {fault}: {detail}",
+		NextStep:  "Read the database's own log for how far recovery reached. A database that never came back has not passed a recovery check and has not failed one either.",
+		Docs:      "guides/chaos",
+		Retryable: false,
+		ExitCode:  ExitVerification,
+	},
+	AFCHS007: {
+		Code:      AFCHS007,
+		Area:      "CHS",
+		Message:   "Faults are not available on the {provider} runtime.",
+		NextStep:  "Run the chaos suite against the local runtime, which is the one whose containers this engine can reach.",
+		Docs:      "guides/chaos",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFCHS008: {
+		Code:      AFCHS008,
+		Area:      "CHS",
+		Message:   "Recovery after {fault} lost data the client was told was committed: {detail}",
+		NextStep:  "Open the finding for how many acknowledged commits are missing. This is a durability failure in the database or its configuration, not in the rehearsal.",
+		Docs:      "guides/chaos",
+		Retryable: false,
+		ExitCode:  ExitVerification,
+	},
+	AFCHS009: {
+		Code:      AFCHS009,
+		Area:      "CHS",
+		Message:   "The chaos suite could not establish what it set out to check after {fault}: {detail}",
+		NextStep:  "An unverified recovery is not a passed one. Read what could not be measured and fix that before trusting the result.",
+		Docs:      "guides/chaos",
+		Retryable: false,
+		ExitCode:  ExitPolicyDenied,
 	},
 	AFCP001: {
 		Code:      AFCP001,
