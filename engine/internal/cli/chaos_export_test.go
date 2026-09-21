@@ -2,17 +2,13 @@ package cli
 
 import "github.com/antifailure/antifailure/engine/internal/report"
 
-// The three doors this package opens for its own tests, and no wider.
+// The one door this package opens for its own tests, and no wider.
 //
-// holds, unverifiedRule and gateError are unexported because nothing outside
-// the command should be deciding what a finding means. A test still has to be
-// able to hold the classification against the set of rules pgcrash declares,
-// because that is the pairing that rots: a rule added on one side and
-// classified on neither takes the default, and the default is the wrong answer
-// for a rule that means "I could not look".
-
-func UnverifiedRuleForTest(rule string) bool { return unverifiedRule(rule) }
-
-func HoldsForTest(findings []report.Finding) (held, verified bool) { return holds(findings) }
+// gateError is unexported because nothing outside the command should be
+// choosing the exit code a finding carries. The classification that decides
+// what a chaos finding MEANS used to be behind two more doors here and now
+// lives in engine/internal/gate, where the MCP server can read the same answer:
+// a copy of it inside that package would have been a second implementation of
+// the split this whole feature rests on.
 
 func GateErrorForTest(f report.Finding) error { return gateError(f) }

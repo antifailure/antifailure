@@ -484,6 +484,22 @@ export const MCP_TOOLS: readonly McpToolFact[] = [
     servedBy: 'engine/internal/mcp/tools_sqlload.go:newRunSQLWorkloadTool',
   },
   {
+    name: 'inject_declared_faults',
+    does:
+      'Injects the faults the manifest\'s chaos block declares into the environment running for ' +
+      'this branch, one at a time, each undone before the next begins, and reads what the system ' +
+      'did about each one. Around a fault aimed at the database the durability proof runs, so ' +
+      'every commit the client was told was committed must still be there and nothing may be ' +
+      'there that no client ever wrote.',
+    refuses:
+      'Its arguments name no fault, kind, target, service, signal, hold, branch or container, and ' +
+      'there is no field that turns the durability proof off or makes a fault gentler; the ' +
+      'manifest decides all of it, the faults are aimed only at containers this environment ' +
+      'created, the egress sidecar is refused whatever a fault asks for, and an unknown field is ' +
+      'refused rather than ignored.',
+    servedBy: 'engine/internal/mcp/tools_chaos.go:newInjectFaultsTool',
+  },
+  {
     name: 'search_documentation',
     does:
       'Search the 92 pages this build ships and return the few lines that answer the question, ' +

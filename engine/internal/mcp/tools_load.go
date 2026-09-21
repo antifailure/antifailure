@@ -361,6 +361,13 @@ func runLoadTest(
 // server, so the evaluator cannot be shared until it is lifted into
 // engine/internal/gate the way the migration one already was. The DECISION is
 // shared, because both sides call Breaches and both read the same policy level.
+//
+// A SECOND capability has now taken that route. The chaos run's held and
+// verified split was decided by two unexported functions in the same package
+// and for the same reason could not be read from here; it is gate.ChaosHolds
+// now, with three callers reading one answer. So the route this comment
+// recommends is worn rather than theoretical, and this evaluator is the one
+// that has not walked it yet.
 func loadFindings(out loadOutcome, p report.Policy) []report.Finding {
 	if out.Mix == nil || p.LoadRegression == report.LevelIgnore {
 		return nil

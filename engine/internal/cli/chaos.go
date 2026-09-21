@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/antifailure/antifailure/engine/internal/env"
+	"github.com/antifailure/antifailure/engine/internal/gate"
 	"github.com/antifailure/antifailure/engine/internal/report"
 )
 
@@ -69,8 +70,11 @@ assertion after it would be measuring a system that never broke.`),
 				return nil
 			}
 
-			gate := report.Configure(m.Policy)
-			run, err := o.RunChaos(cmd.Context(), gate)
+			// Named policy rather than gate, because engine/internal/gate is
+			// the package that decides what the findings MEAN and the two
+			// cannot share a name in one function.
+			policy := report.Configure(m.Policy)
+			run, err := o.RunChaos(cmd.Context(), policy)
 			if err != nil {
 				return err
 			}
@@ -78,7 +82,7 @@ assertion after it would be measuring a system that never broke.`),
 				return nil
 			}
 
-			held, verified := holds(run.Findings)
+			held, verified := gate.ChaosHolds(run.Findings)
 			if e.Out.Format == FormatJSON {
 				if err := e.Out.JSON(ChaosJSON{
 					Held: held, Verified: verified, Faults: run.Report.Faults,
@@ -102,47 +106,6 @@ assertion after it would be measuring a system that never broke.`),
 	}
 	cmd.Flags().StringVar(&branch, "branch", "", "Branch to break, defaulting to the checked out one")
 	return cmd
-}
-
-// holds reads a run's findings for the two answers a caller needs.
-//
-// Two answers rather than one, and the second is not the negation of the
-// first. Held says nothing was found to be wrong. Verified says the run
-// established what it set out to. A run that is held and not verified has not
-// passed, it has not looked, and collapsing the two is the exact defect this
-// whole feature exists to catch in somebody else's system.
-func holds(findings []report.Finding) (held, verified bool) {
-	held, verified = true, true
-	for _, f := range findings {
-		if f.Level == report.LevelFail {
-			held = false
-		}
-		// Read from the rule and not from the level, deliberately. A project
-		// that set chaos_unverified to ignore has chosen not to be stopped by
-		// an unverified run; it has not thereby made the run verified, and the
-		// JSON says so either way.
-		if unverifiedRule(f.Rule) {
-			verified = false
-		}
-	}
-	return held, verified
-}
-
-// unverifiedRule reports whether a rule means "I could not look" rather than
-// "I looked and it is wrong".
-//
-// A list rather than a level, because the level is a policy choice: a project
-// that raised chaos_unverified to fail has not thereby turned an unverified
-// run into a verified one.
-func unverifiedRule(rule string) bool {
-	switch rule {
-	case "chaos.recovery.no_crash", "chaos.recovery.no_replay",
-		"chaos.recovery.control_unreadable", "chaos.integrity.amcheck_unavailable",
-		"chaos.integrity.checksums_off", "chaos.durability.inconsistent_ledger",
-		env.RuleFaultRefused, env.RuleFaultNotUndone:
-		return true
-	}
-	return false
 }
 
 // printChaos renders a run for a terminal.
