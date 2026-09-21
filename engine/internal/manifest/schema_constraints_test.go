@@ -1503,7 +1503,7 @@ func TestSchemaConstraintReport(t *testing.T) {
 // previous recounts too. A method that gives the right answer whenever you
 // check it and no answer you can check is not evidence, which is why the
 // number above comes from the gate every time and not from a sum.
-// Then RECOUNT_ME. The infrastructure section, which says where the infrastructure
+// Then 840. The infrastructure section, which says where the infrastructure
 // as code lives. The block's own type, additionalProperties and its one
 // required field, then on the stacks list the type, minItems, maxItems and
 // uniqueItems, and on a stack the type, additionalProperties and two required
@@ -1516,10 +1516,13 @@ func TestSchemaConstraintReport(t *testing.T) {
 // satisfies every field here, and the enum has one member so its first value
 // is the only value.
 //
-// The number is what the gate counted on this tree after the rebase across
-// the surface enum landing, never 784 plus anything: two features measured
-// their own delta against different totals tonight and both happened to be
-// right, which is exactly why adding feels safe and is not.
+// The number is what the gate counted on THIS tree, read from its own failure
+// message, and it has now been read four times on four different bases as this
+// branch was rebased across the surface enum, the base branch comparison, the
+// desktop block and the emulator seeding: 792, 795, 809 and 840. Not one of
+// those was reached by adding anything to the one before it, and the last two
+// bases each carried two other lanes' keys. A branch that added its own delta
+// would have been wrong by the width of whatever landed while it waited.
 //
 // The shape cost three more constraints than the flat one this section was
 // built as first, where source, workspace and var_files sat over a list of
@@ -1533,7 +1536,7 @@ func TestSchemaConstraintReport(t *testing.T) {
 // direction, not a value the fixture cannot invent but a fixture the rule
 // cannot permit, and it is the thing to check before adding any cross field
 // rule to a section the generator fills.
-const wantConstraints = 809
+const wantConstraints = 840
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and
