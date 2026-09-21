@@ -161,6 +161,21 @@ func TestParse_RefusesAnInfrastructureSectionNamingNoRootModule(t *testing.T) {
 		"infrastructure.paths: The infrastructure section names no root module, so it says where nothing is.")
 }
 
+func TestParse_RefusesARootModuleEntryThatIsOnlyWhitespace(t *testing.T) {
+	t.Parallel()
+	// The schema's minLength catches an entry that is empty and cannot catch
+	// one that is three spaces: it is three characters long and it names
+	// nothing. Left alone it would be joined to the repository root and stat
+	// the root itself, so a manifest naming a blank line would report every
+	// resource in the tree as one root module's.
+	root := repoWith(t, "infra/")
+	msg := infraProblems(t, root, infraBase+`  source: terraform
+  paths:
+    - "   "
+`)
+	require.Contains(t, msg, "infrastructure.paths[0]: The root module at position 0 is empty.")
+}
+
 func TestParse_RefusesAnAbsoluteRootModulePath(t *testing.T) {
 	t.Parallel()
 	// The machine that reads this is not the machine it was written on. An
