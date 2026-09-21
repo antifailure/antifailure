@@ -236,13 +236,75 @@ const (
 // sharp on a steady provider and blunt on an erratic one, and the remedy is a
 // larger large size rather than a smaller allowance.
 func copyOnWriteAllowance(smallTimes []time.Duration) time.Duration {
-	sorted := append([]time.Duration(nil), smallTimes...)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
-	allowance := (sorted[1] - sorted[0]) * copyOnWriteSpreadFactor
+	allowance := minimaGap(smallTimes) * copyOnWriteSpreadFactor
 	if allowance < copyOnWriteNoiseFloor {
 		allowance = copyOnWriteNoiseFloor
 	}
 	return allowance
+}
+
+// minimaGap is the distance between an arm's best and second best reading.
+//
+// It is the direct evidence for how far that arm's MINIMUM could have landed
+// from its own floor, which is the quantity both the allowance above and the
+// resolution below are built from.
+func minimaGap(times []time.Duration) time.Duration {
+	sorted := append([]time.Duration(nil), times...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	return sorted[1] - sorted[0]
+}
+
+// copyOnWriteJitter is how far the minima themselves move on this run.
+//
+// The larger of the two arms governs, because a difference of two minima is no
+// better than its worse half.
+func copyOnWriteJitter(smallTimes, largeTimes []time.Duration) time.Duration {
+	j := minimaGap(smallTimes)
+	if g := minimaGap(largeTimes); g > j {
+		j = g
+	}
+	return j
+}
+
+// copyOnWriteResolution is whether this run could SEE the growth it reports.
+//
+// The verdict is a difference of two minima, and noise only ever makes a
+// sample slower, so each minimum is an overestimate of its own floor and the
+// difference inherits the error of both. A run can therefore only resolve a
+// growth LARGER than the distance the minima themselves move, and the larger
+// of the two arms governs because the difference is no better than its worse
+// half.
+//
+// This is printed rather than enforced, and the distinction is deliberate. A
+// run below 1.0 has not proved the provider innocent and has not caught it
+// either; it has failed to look, and the one thing it must not do is let a
+// reader mistake the second for the first. On 2026-09-21 three measurements of
+// the docker provider on a loaded machine read 0.76, 0.43 and 0.40, and the
+// numbers they produced fell on a curve smooth enough to be mistaken for a
+// result. The only reading above 1.0 was the one taken on a quiet CI runner,
+// at 1.52, and that is the run that refused. An instrument this sensitive to
+// the machine under it owes the reader that ratio on its own face rather than
+// leaving it to be reconstructed from the sample lists.
+//
+// The MAGNITUDE of the growth is what is compared, because a run can measure a
+// NEGATIVE growth and that is not a smaller version of a copy, it is noise
+// large enough to reorder the two arms. Observed on 2026-09-21 against a
+// provider that genuinely shares storage: small arm minimum 258ms, large arm
+// minimum 150ms, a growth of minus 108ms against 120ms of jitter. Asking
+// whether the number is bigger than the noise is the question; which side of
+// zero it fell on is a different one, and the sample lists above answer it.
+//
+// Zero jitter means two identical readings, which is a resolution nothing can
+// be divided by rather than a perfect one, so it reports zero and the sentence
+// beside it says the run could not tell.
+func copyOnWriteResolution(grown, jitter time.Duration) float64 {
+	if jitter <= 0 {
+		return 0
+	}
+	if grown < 0 {
+		grown = -grown
+	}
+	return float64(grown) / float64(jitter)
 }
 
 // ballastTable is the table the suite fills to make a golden large.
@@ -331,6 +393,22 @@ func (h *harness) copyOnWriteMatchesTheDeclaration(ctx context.Context) {
 	// could have refused is the shape of check this whole file exists against.
 	refusable := allowance.Seconds() / deltaGiB
 
+	// Whether this run could see the growth it is about to report. Computed
+	// from quantities already in hand, and printed beside the power figure
+	// because the two answer different questions: refusable is what this
+	// configuration could have caught, resolution is whether this particular
+	// run was steady enough to catch anything at all.
+	jitter := copyOnWriteJitter(smallTimes, largeTimes)
+	resolution := copyOnWriteResolution(grown, jitter)
+	seen := fmt.Sprintf("%.2fx the %s the minima themselves move", resolution,
+		jitter.Round(time.Millisecond))
+	if resolution < 1 {
+		seen += "\n" +
+			"  COULD NOT RESOLVE        the growth is smaller than the distance either minimum\n" +
+			"                           could have landed from its own floor, so this run did not\n" +
+			"                           measure the provider, it measured the machine"
+	}
+
 	// The measurement is logged whatever the verdict, because the number is
 	// the deliverable as much as the pass is, and because a failure nobody can
 	// see the readings behind is a failure nobody can act on.
@@ -341,13 +419,14 @@ func (h *harness) copyOnWriteMatchesTheDeclaration(ctx context.Context) {
 		"  extra data               %s\n"+
 		"  extra branch time        %s, allowance %s\n"+
 		"  marginal cost            %.2f seconds per GiB\n"+
-		"  this run could refuse    a copy slower than %.2f seconds per GiB, and nothing faster\n",
+		"  this run could refuse    a copy slower than %.2f seconds per GiB, and nothing faster\n"+
+		"  signal against jitter    %s\n",
 		h.p.Name(), caps.CopyOnWrite,
 		bytesText(smallBytes), durationsText(smallTimes), ts.Round(time.Millisecond),
 		bytesText(largeBytes), durationsText(largeTimes), tl.Round(time.Millisecond),
 		bytesText(delta),
 		grown.Round(time.Millisecond), allowance.Round(time.Millisecond),
-		marginal, refusable)
+		marginal, refusable, seen)
 
 	if caps.CopyOnWrite {
 		if grown > allowance {
