@@ -3,6 +3,7 @@ package manifest_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -436,4 +437,138 @@ func TestParse_AcceptsTheSameVariableFileInTwoDifferentStacks(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{"infra/shared.tfvars"}, m.Infrastructure.Stacks[0].VarFiles)
 	require.Equal(t, []string{"infra/shared.tfvars"}, m.Infrastructure.Stacks[1].VarFiles)
+}
+
+// What af explain prints for the section, which is the only place a reader can
+// confirm what they set.
+//
+// Asserted on the RENDERED lines rather than on the struct, because the defect
+// this catches is not a wrong value, it is a page that reads as two designs:
+// the facts under a stack have to hang at the same column the stack's own
+// value starts at, which is the column every other section of this page wraps
+// to. It was wrong first, by three characters, and it was invisible in the
+// format string and obvious the moment anybody looked at the output.
+
+func infraExplainManifest(t *testing.T, root string) *schema.Manifest {
+	t.Helper()
+	m, err := parseIn(t, root, infraBase+`  stacks:
+    - source: terraform
+      path: infra/network
+      workspace: production
+      var_files:
+        - infra/network/production.tfvars
+    - source: terraform
+      path: infra/data
+`)
+	require.NoError(t, err)
+	return m
+}
+
+func TestExplain_PrintsEveryStackAndWhatEachIsReadThrough(t *testing.T) {
+	t.Parallel()
+	root := repoWith(t,
+		"infra/network/main.tf", "infra/network/production.tfvars", "infra/data/main.tf")
+	out := manifest.Explain(infraExplainManifest(t, root), 100)
+
+	require.Contains(t, out, "\nInfrastructure\n")
+	require.Contains(t, out, "  stack        infra/network, declared by terraform\n")
+	require.Contains(t, out, "  workspace    production\n")
+	require.Contains(t, out, "  var files    infra/network/production.tfvars\n")
+	// The second stack names neither, and both lines are still printed. A page
+	// that showed them only when somebody had already thought of them would
+	// hide exactly the case worth catching, which is a stack being compared
+	// against a module's defaults rather than against production.
+	require.Contains(t, out, "  stack        infra/data, declared by terraform\n")
+	require.Contains(t, out, "  workspace    none, so the default workspace\n")
+	require.Contains(t, out, "  var files    none, so the stack's own defaults\n")
+	// A blank line between the two stacks, so three repeated facts read as
+	// two stacks rather than as one six line block.
+	require.Contains(t, out, "  var files    infra/network/production.tfvars\n\n  stack        infra/data")
+}
+
+func TestExplain_SaysNothingAboutInfrastructureWhenTheSectionIsAbsent(t *testing.T) {
+	t.Parallel()
+	// The direction that makes the section above worth printing. A heading
+	// under every manifest in the world reads as a missing feature rather than
+	// as a choice, and the place that has to report the absence is the
+	// fidelity report, where it is a measurement with a reason attached.
+	require.NotContains(t, manifest.Explain(mustParse(t, minimal), 100), "Infrastructure")
+}
+
+func TestExplain_WrapsTheInfrastructureSectionIntoANarrowTerminal(t *testing.T) {
+	t.Parallel()
+	// Forty columns, which is the width the rest of this renderer is written
+	// to survive.
+	//
+	// THE LIMIT, stated here rather than left for somebody to discover by
+	// writing a stricter test that fails. textwrap breaks between words and
+	// nothing can break inside one, so a single path longer than the terminal
+	// minus its gutter runs past the edge no matter what this section does.
+	// The services section has the same property for the same reason. What IS
+	// guaranteed, and what this holds, is that everything breakable breaks: a
+	// line may exceed the width only when one unbreakable token in it already
+	// would.
+	root := repoWith(t, "infra/terraform/main.tf", "infra/terraform/prod.tfvars")
+	m, err := parseIn(t, root, infraBase+`  stacks:
+    - source: terraform
+      path: infra/terraform
+      var_files: [infra/terraform/prod.tfvars]
+`)
+	require.NoError(t, err)
+
+	// The column the values start at, which is the gutter this page uses
+	// everywhere. A token longer than what is left of the terminal after it
+	// cannot be broken by anything, and that is the one excuse a line gets.
+	const valueColumn = 15
+
+	lines := infraSectionOf(t, manifest.Explain(m, 40))
+	wrapped := false
+	for _, line := range lines {
+		unbreakable := false
+		for _, tok := range strings.Fields(line) {
+			if valueColumn+len(tok) > 40 {
+				unbreakable = true
+			}
+		}
+		if unbreakable {
+			continue
+		}
+		require.LessOrEqual(t, len(line), 40,
+			"this line runs past a forty column terminal and every token in it would have fitted:\n%q", line)
+	}
+	// The section has to have WRAPPED something, or the loop above proved
+	// nothing: a section whose every line was already short passes it without
+	// the wrapping ever being exercised.
+	for _, line := range lines {
+		if strings.HasPrefix(line, strings.Repeat(" ", valueColumn)) {
+			wrapped = true
+		}
+	}
+	require.True(t, wrapped,
+		"nothing wrapped at forty columns, so this test did not measure the wrapping:\n%s",
+		strings.Join(lines, "\n"))
+}
+
+// infraSectionOf returns the lines of the Infrastructure section, and fails
+// when there is none, so that "I could not look" can never read as a pass.
+func infraSectionOf(t *testing.T, out string) []string {
+	t.Helper()
+	var lines []string
+	in := false
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "Infrastructure") {
+			in = true
+			continue
+		}
+		if in {
+			if line != "" && !strings.HasPrefix(line, " ") {
+				break
+			}
+			if line != "" {
+				lines = append(lines, line)
+			}
+		}
+	}
+	require.NotEmpty(t, lines, "the Infrastructure section was not printed at all:\n%s", out)
+	return lines
 }
