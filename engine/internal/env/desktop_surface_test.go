@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -364,4 +366,143 @@ func requireDesktop(t *testing.T, reason string) {
 func exists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// THE OTHER HALF OF `desktop.kind`, end to end against a real NATIVE macOS
+// application.
+//
+// WHY THIS EXISTS AS ITS OWN TEST. The Electron arm above proves the Chromium
+// path. `macos` is a second value a manifest may write, a second branch the
+// engine takes, and until this ran it was an enum member whose path no test
+// had ever reached: the schema offered it, the validator accepted it, the
+// document builder had a branch for it, and nothing had ever watched it drive
+// an application. That is the same dead shippable gap as a function with no
+// call sites, one enum member wide, and we were about to tell a customer we
+// support it.
+//
+// IT ALSO PROVES THE ONE THING ONLY THIS KIND CAN. The manifest below writes
+// NO `process`, so normalisation derives it from the bundle, and the runner
+// then FINDS the running application by that derived name. Until a native
+// application was really launched, that derivation had never had a live
+// subject: it could have produced any string at all and every test would still
+// have passed.
+//
+// What it needs, and what it says when it cannot have it: swiftc, which ships
+// with the Xcode command line tools; a macOS host; the Accessibility grant,
+// which a person gives in System Settings and nothing in software can; and an
+// unlocked screen, because macOS withholds every accessibility tree while the
+// screen is locked. Each is named in its own skip, and AF_REQUIRE_DESKTOP
+// turns every one of those skips into a failure.
+func TestTest_ARealNativeApplicationIsDrivenFromAManifestAndCounted(t *testing.T) {
+	runner := requireRunner(t)
+	if runtime.GOOS != "darwin" {
+		requireDesktop(t, "the native desktop surface is macOS only and this is "+runtime.GOOS+".")
+	}
+	if _, err := exec.LookPath("swiftc"); err != nil {
+		requireDesktop(t, "swiftc is not on PATH, so the native fixture cannot be built. "+
+			"It ships with the Xcode command line tools: xcode-select --install.")
+	}
+
+	build, err := filepath.Abs(filepath.Join(
+		"..", "..", "..", "runner", "test", "fixtures", "ledger-native", "build.sh"))
+	require.NoError(t, err)
+	if !exists(build) {
+		t.Fatal("the native fixture's build script is missing, so this proved nothing: " + build)
+	}
+
+	// A CLEAN START, GUARANTEED HERE rather than assumed, and this is not
+	// housekeeping. `open -a` ACTIVATES an application that is already running
+	// instead of launching a fresh one, so a leftover instance hands this run
+	// somebody else's screen. It cost a false pass while this test was being
+	// written: a drive whose own step list showed it never filled the email
+	// still signed in, because an instance left over from an earlier probe had
+	// that field filled already. The name is this fixture's own and nothing
+	// else on the machine answers to it.
+	quit := func() { _ = exec.Command("pkill", "-x", "AfLedger").Run() }
+	quit()
+	t.Cleanup(quit)
+
+	bundleDir := t.TempDir()
+	out, err := exec.Command(build, bundleDir).CombinedOutput()
+	require.NoErrorf(t, err, "the native fixture would not build: %s", out)
+	bundle := filepath.Join(bundleDir, "AfLedger.app")
+	require.True(t, exists(bundle), "the build script reported success and wrote no bundle")
+
+	drive := func(expect string) TestReport {
+		t.Helper()
+		root := t.TempDir()
+		// NO `process` KEY, deliberately. What the runner looks the
+		// application up by has to be the name normalisation derived from the
+		// bundle, or this test proves the derivation only in Go.
+		require.NoError(t, os.WriteFile(filepath.Join(root, "antifailure.yaml"), []byte(`version: 1
+name: ledger
+services:
+  - name: web
+    port: 3000
+personas:
+  - name: ada
+    email: ada@example.test
+desktop:
+  kind: macos
+  application: `+bundle+`
+workflows:
+  - name: sign-in
+    surface: desktop
+    persona: ada
+    description: Sign in to Ledger and confirm you land on the signed in screen.
+    expect: [`+expect+`]
+    budget:
+      steps: 12
+`), 0o644))
+
+		m, loadErr := manifest.Load(filepath.Join(root, "antifailure.yaml"))
+		require.NoError(t, loadErr)
+		require.Equal(t, "AfLedger", m.Desktop.Process,
+			"the process name was not derived from the bundle, so the runner would look for an application that does not answer to it")
+
+		o := orchestratorFor(t, root, m)
+		workflows := o.workflowDocs(nil)
+		app := o.desktopApp(workflows)
+		require.NotNil(t, app)
+		require.Equal(t, bundle, app.BundlePath)
+		require.Equal(t, "AfLedger", app.Name,
+			"the derived name did not reach the runner, which finds the application by it")
+
+		body, runErr := o.invokeRunner(context.Background(), runner, jobDocument{
+			BaseURL:   "http://127.0.0.1:45999",
+			Artifacts: filepath.Join(t.TempDir(), "artifacts"),
+			Workflows: workflows,
+			Desktop:   app,
+			Surface:   surfaceFor(workflows, nil),
+			WorkDir:   root,
+			Headless:  true,
+		})
+		require.NoError(t, runErr,
+			"the runner produced no report at all, which is what a document it cannot read looks like")
+		var rep TestReport
+		require.NoError(t, json.Unmarshal(body, &rep))
+		return rep
+	}
+
+	passed := drive(`"Welcome back"`)
+	require.Len(t, passed.Results, 1)
+	// A blocked result here is a host that could not be driven rather than an
+	// application that failed, and its detail says which: the Accessibility
+	// grant, or a screen that locked while this ran. Quoted rather than
+	// summarised, because those two are the only answers a person can act on.
+	require.Equalf(t, "pass", passed.Results[0].Outcome.Verdict,
+		"the native fixture did not sign in: %s", passed.Results[0].Outcome.Detail)
+	require.Equal(t, 1, passed.Passed)
+	require.False(t, passed.NothingVerified())
+	steps := strings.Join(passed.Results[0].Steps, " | ")
+	// Every control reached through its accessible name, which is the evidence
+	// that an application was really driven rather than a document parsed.
+	require.Contains(t, steps, "Fill Email address")
+	require.Contains(t, steps, "Choose I accept the terms")
+	require.Contains(t, steps, "Press Sign in")
+
+	failed := drive(`'"Your order has shipped."'`)
+	require.Equal(t, "fail", failed.Results[0].Outcome.Verdict, failed.Results[0].Outcome.Detail)
+	require.Equal(t, 1, failed.Failed)
+	require.True(t, failed.AnyFailed())
 }
