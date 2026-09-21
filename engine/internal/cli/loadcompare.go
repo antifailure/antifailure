@@ -312,15 +312,23 @@ func renderLoadComparison(
 	// comparison that printed only the run wide numbers would hide the single
 	// slow route inside an average, which is the whole reason routes are
 	// measured separately.
+	//
+	// The "can see" column is what this comparison could resolve on that
+	// route, printed on every row whatever the verdict, because the number is
+	// the deliverable as much as the direction is. A change of plus 585
+	// percent beside a resolution of plus 1024 percent is a reading nobody
+	// can mistake for a regression, and the same two numbers without the
+	// second one is exactly the pull request this column exists to prevent.
 	routes := [][]string{}
 	for _, r := range c.Routes {
 		routes = append(routes, []string{r.Route, numberOf(r.P95Baseline),
-			numberOf(r.P95Candidate), ratioOf(r.P95Ratio), r.Direction})
+			numberOf(r.P95Candidate), ratioOf(r.P95Ratio), movedOf(r),
+			resolutionOf(r.Resolution)})
 	}
 	if len(routes) > 0 {
 		e.Out.Println("")
 		e.Out.Table([]Column{{Title: "route"}, {Title: "base p95"}, {Title: "this build p95"},
-			{Title: "change"}, {Title: "moved"}}, routes)
+			{Title: "change"}, {Title: "moved"}, {Title: "can see"}}, routes)
 	}
 
 	breaches := workload.ComparisonBreaches(judged)
@@ -345,6 +353,23 @@ func renderLoadComparison(
 		e.Out.Printf("  %d declared %s could not be measured on both sides.\n",
 			unverified, plural2(unverified, "threshold", "thresholds"))
 	}
+	// The blind rows get their reasons in full, because "could not resolve"
+	// as a count is the kind of line a reader skims past on the way to the
+	// verdict, and the sentence beneath it is what says whether to send for
+	// longer or move to a quieter machine.
+	blind := []workload.ComparisonVerdict{}
+	for _, j := range judged {
+		if j.Unresolvable {
+			blind = append(blind, j)
+		}
+	}
+	if len(blind) > 0 {
+		e.Out.Println("")
+		e.Out.Println("What this run could not resolve:")
+		for _, b := range blind {
+			e.Out.Printf("  %s\n", e.Out.Wrap(b.Scope+": "+b.Detail, 2))
+		}
+	}
 
 	e.Out.Println("")
 	e.Out.Println("What this comparison cannot see:")
@@ -363,6 +388,32 @@ func verdictSymbol(verdict string) string {
 		return SymbolOK
 	}
 	return SymbolSkip
+}
+
+// movedOf is the direction, withheld when the run cannot support one.
+//
+// The identical build comparison printed "better" by up to 86 percent on one
+// sample and "worse" by up to 586 on the next, for two commits differing by a
+// comment. The arrow was as wrong as the number, and it is the part a reader
+// acts on first. A difference smaller than the distance the number could have
+// moved on its own has no sign this run is entitled to claim.
+func movedOf(r workload.RouteDifference) string {
+	if r.P95Ratio == nil {
+		return r.Direction
+	}
+	if !r.Resolution.DirectionResolved(*r.P95Ratio) {
+		return "too close to say"
+	}
+	return r.Direction
+}
+
+// resolutionOf renders what a route could see, in the same units as the change
+// beside it so the two can be read against each other without arithmetic.
+func resolutionOf(res workload.RouteResolution) string {
+	if res.SmallestVisible == nil {
+		return "nothing"
+	}
+	return fmt.Sprintf("%.0f%%", *res.SmallestVisible*100)
 }
 
 // ratioOf renders a ratio as a signed percentage, which is how somebody reads

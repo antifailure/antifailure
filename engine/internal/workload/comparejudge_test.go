@@ -36,6 +36,13 @@ func route(name string, baseline, candidate *float64) workload.RouteDifference {
 	return workload.RouteDifference{
 		Route: name, InBaseline: baseline != nil, InCandidate: candidate != nil,
 		P95Baseline: baseline, P95Candidate: candidate,
+		// A route this run can see a one percent difference on. These tests
+		// are about what the JUDGE does with a difference, so they hand it a
+		// resolution generous enough to keep that question separate from
+		// whether the run could resolve anything, which compareresolution_test
+		// asks on its own. Without it every row here would be unverified for
+		// the other reason and these tests would stop testing the judge.
+		Resolution: workload.RouteResolution{SmallestVisible: p(0.01)},
 	}
 }
 

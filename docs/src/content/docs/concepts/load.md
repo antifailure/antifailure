@@ -440,6 +440,56 @@ comparison reliably catches large regressions. How small a regression it can
 catch depends on the hardware you run it on, and the only honest way to know
 yours is to measure it.
 
+### What a run can see, and when it refuses
+
+Before it judges anything, the comparison measures its own resolution, per
+route, from the run's own sample count and distribution. A percentile taken
+from n samples is an order statistic whose rank is itself random, so a p95 from
+twenty samples sits one slow request from the maximum and moves by the width of
+the whole tail. That distance is printed beside the difference:
+
+```
+  route          base p95  this build p95  change    moved             can see
+  GET /accounts  83.1      570             +585.9%   too close to say  1024%
+  GET /statements 237      309             +30.2%    too close to say  480%
+```
+
+A difference of plus 586 percent beside a resolution of plus 1024 is a reading
+nobody can mistake for a regression, and those two numbers came from comparing
+a branch against itself where the only change was a comment.
+
+The verdict follows from where your limit falls relative to that interval:
+
+| the interval around the difference | verdict |
+| --- | --- |
+| entirely above the limit | the limit was crossed |
+| entirely at or below the limit | the limit held |
+| the limit falls inside it | this run cannot tell, and says so |
+
+The third case is reported as unverified and exits non-zero. It is never a
+pass. A run that could not place your limit has not cleared it.
+
+This does not loosen your threshold. A limit is your declared tolerance for a
+real change, and widening it to silence a false alarm would hide real ones. A
+run that CAN see the difference still decides: a regression of 600 percent
+against a 100 percent limit, measured by a run whose resolution is 200 percent,
+is still a failure, because even the pessimistic end of that interval is above
+the limit.
+
+A direction is withheld on the same evidence. A change smaller than the
+distance the number could have moved on its own reads `too close to say`
+instead of better or worse.
+
+If a route refuses, the two things that fix it are more samples and a quieter
+machine. Send for longer, or raise the rate.
+
+One limit, stated rather than implied: this band is the sampling error a SINGLE
+run can see in itself. It does not include drift between the two runs on a busy
+host, which is larger. The two samples described above disagree with each other
+by more than the band around either of them. So treat it as a floor on the
+uncertainty and not the whole of it, which is the other reason to measure your
+own noise floor below.
+
 ### Measuring yours
 
 Point the comparison at a branch that changes nothing, and run it a few times.

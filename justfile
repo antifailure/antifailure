@@ -1106,6 +1106,13 @@ spell:
 
 # Prose style: the Google developer documentation style, plus the rule about
 # em dashes. `vale sync` fetches the style package named in .vale.ini.
+# Prose style, and the sync is not optional in a fresh checkout.
+#
+# `vale sync` downloads the Google style package into tools/docs/styles, which
+# is gitignored, so a NEW worktree has the configuration and none of the rules.
+# Running `vale` directly there fails with "style 'Google' does not exist on
+# StylesPath" and exit 1, which reads as a prose failure and is a missing
+# download. Always come through this recipe rather than calling vale by hand.
 vale:
     vale sync
     vale docs/src/content/docs examples README.md CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md

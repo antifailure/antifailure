@@ -61,6 +61,16 @@ type ComparisonVerdict struct {
 	Candidate *float64 `json:"candidate"`
 	Value     string   `json:"value"`
 	Detail    string   `json:"detail,omitempty"`
+	// Resolution is what the run could see, carried beside the verdict so
+	// that a pass and a "could not look" are never the same row.
+	Resolution RouteResolution `json:"resolution"`
+	// Unresolvable separates the two reasons a row can be unverified, and
+	// they are not the same fact. A route present on one side only has no
+	// counterpart to be compared with, which is a finding about the
+	// application. A threshold wider than the run's own resolution means the
+	// instrument was blind, which is a finding about the run, and it is the
+	// one that must never be flattened into a pass.
+	Unresolvable bool `json:"unresolvable,omitempty"`
 }
 
 // Judge evaluates the declared thresholds against a comparison.
@@ -191,10 +201,29 @@ func judgeRouteP95(c *Comparison, limit float64) []ComparisonVerdict {
 			v.Detail = "the base branch recorded a p95 of zero for this route, so a " +
 				"ratio against it is not a number"
 		default:
-			measured++
 			ratio := *r.P95Candidate/(*r.P95Baseline) - 1
 			v.Observed = floatp(ratio)
-			v.Value = passFail(ratio <= limit)
+			v.Resolution = r.Resolution
+			// Can this run see a difference of the size being asked about?
+			// Asked BEFORE the comparison against the limit, and about the
+			// LIMIT rather than about the observed number, because those are
+			// different questions and only one of them is answerable. "Is
+			// this route more than 60 percent slower" cannot be answered at
+			// all by a run whose p95 moves by 300 percent on its own, and the
+			// answer it was giving was a confident pass or a confident fail.
+			//
+			// A threshold this run can resolve makes the verdict beneath it
+			// meaningful in both directions: a pass means no difference of
+			// that size was there to see, and a fail means one was.
+			decided, ok := r.Resolution.Verdict(ratio, limit)
+			if !ok {
+				v.Value = VerdictUnverified
+				v.Unresolvable = true
+				v.Detail = unresolvableDetail(r, ratio, limit)
+				break
+			}
+			measured++
+			v.Value = decided
 			if v.Value == VerdictFail {
 				v.Detail = fmt.Sprintf(
 					"p95 went from %.3gms on the base branch to %.3gms on this one, "+
@@ -209,11 +238,59 @@ func judgeRouteP95(c *Comparison, limit float64) []ComparisonVerdict {
 			Name: "p95_increase", Measure: "p95_ms", Threshold: limit,
 			Value: VerdictUnverified,
 			Detail: "a per route latency limit was in force and not one route carried a " +
-				"measurement on both sides, so this threshold compared nothing",
+				"measurement it could be judged on, so this threshold compared nothing",
 		})
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].Scope < rows[j].Scope })
 	return rows
+}
+
+// unresolvableDetail says what the run could see and what was asked of it.
+//
+// The numbers rather than an adjective, because "could not resolve" on its own
+// tells somebody nothing about what to do next, and the two things that fix it
+// are a longer run and a quieter machine. The sample count is named because it
+// is the lever the reader actually has.
+func unresolvableDetail(r RouteDifference, observed, limit float64) string {
+	sent := 0
+	if r.SentBaseline != nil {
+		sent = *r.SentBaseline
+	}
+	if r.SentCandidate != nil && *r.SentCandidate < sent {
+		sent = *r.SentCandidate
+	}
+	if r.Resolution.SmallestVisible == nil {
+		return "this run cannot say how far this route's p95 could have landed from " +
+			"itself, so it cannot say whether a difference of " +
+			fmt.Sprintf("%.1f percent", limit*100) + " would have been visible: " +
+			r.Resolution.Detail
+	}
+	band := *r.Resolution.SmallestVisible
+	detail := fmt.Sprintf(
+		"the difference measured is %.1f percent give or take %.1f, so the true value "+
+			"lies anywhere between %.1f and %.1f percent and the limit of %.1f sits "+
+			"inside that: neither a pass nor a breach would have meant anything. The "+
+			"p95 here rests on %d requests and could have landed %.3gms either side of "+
+			"itself with nothing changing",
+		observed*100, band*100, (observed-band)*100, (observed+band)*100,
+		limit*100, sent, bandOf(r.Resolution))
+	if r.Resolution.TooFewSamples {
+		detail += ". " + r.Resolution.Detail
+	}
+	return detail + ". Send for longer, or on a quieter machine"
+}
+
+// bandOf is the wider of the two sides' half widths, which is the one a reader
+// should picture when asking how far the number could have moved.
+func bandOf(res RouteResolution) float64 {
+	worst := 0.0
+	if res.BandBaselineMs != nil {
+		worst = *res.BandBaselineMs
+	}
+	if res.BandCandidateMs != nil && *res.BandCandidateMs > worst {
+		worst = *res.BandCandidateMs
+	}
+	return worst
 }
 
 func routeScope(r RouteDifference) string {
@@ -233,7 +310,7 @@ func ComparisonOutcome(rows []ComparisonVerdict) string {
 	if len(rows) == 0 {
 		return VerdictUnverified
 	}
-	evaluated := false
+	evaluated, blind := false, false
 	for _, r := range rows {
 		if r.Value == VerdictFail {
 			return VerdictFail
@@ -241,8 +318,21 @@ func ComparisonOutcome(rows []ComparisonVerdict) string {
 		if r.Value == VerdictPass {
 			evaluated = true
 		}
+		if r.Unresolvable {
+			blind = true
+		}
 	}
-	if !evaluated {
+	// A threshold the run could not resolve outranks the ones it could. Three
+	// routes passing and four being invisible is not a pass with a footnote:
+	// the limit was in force over seven routes and the run answered for
+	// three, so reporting a pass tells somebody their change was checked
+	// against a tolerance that four routes were never held to.
+	//
+	// A failure still outranks both, above. A breach the run COULD resolve is
+	// a real breach whatever else went unseen, and burying it because a
+	// different route was too quiet would be the same defect pointed the
+	// other way.
+	if blind || !evaluated {
 		return VerdictUnverified
 	}
 	return VerdictPass

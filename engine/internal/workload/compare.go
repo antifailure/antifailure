@@ -111,6 +111,12 @@ type RouteDifference struct {
 	P95Delta        *float64 `json:"p95_delta"`
 	P95Ratio        *float64 `json:"p95_ratio"`
 	Direction       string   `json:"direction"`
+	// Resolution is whether this route's p95 comparison could see anything.
+	// Carried on the difference rather than computed by a reader, because a
+	// resolution somebody has to reconstruct from the sample counts is one
+	// nobody reconstructs, and this comparison spent a demo reporting
+	// confident verdicts on differences it could not resolve.
+	Resolution RouteResolution `json:"resolution"`
 }
 
 // ThresholdDifference is one assertion or threshold on both sides.
@@ -392,6 +398,7 @@ func routeDifferences(baseline, candidate *Result) []RouteDifference {
 				d.P95Ratio = &ratio
 			}
 			d.Direction = directionOf(delta, true)
+			d.Resolution = resolutionOf(base, cand)
 		}
 		out = append(out, d)
 	}
