@@ -72,9 +72,9 @@ func TestPrintChaos_ChecksumsOffSaysPagesWereNotChecked(t *testing.T) {
 		Rule: pgcrash.RuleChecksumsOff, Level: report.LevelWarn,
 		Title: "Data page checksums are off on this cluster",
 	}))
+	require.NotContains(t, out, pagesPass, "pages were claimed checked on a cluster with checksums off")
 	require.Contains(t, out, "      pages          not checked, because data checksums are off on this cluster "+
 		"and a torn page would read back as data\n")
-	require.NotContains(t, out, pagesPass, "pages were claimed checked on a cluster with checksums off")
 	require.Contains(t, out, pgcrash.RuleChecksumsOff, "the checksums warning is no longer printed")
 }
 
@@ -85,18 +85,18 @@ func TestPrintChaos_ChecksumsOffSaysPagesWereNotChecked(t *testing.T) {
 func TestPrintChaos_AmcheckThatCouldNotRunIsNotAPass(t *testing.T) {
 	const missing = "the amcheck extension is not available in this database: ERROR: extension \"amcheck\" is not available"
 	out := printed(t, crashRun("in production", true, missing))
+	require.NotContains(t, out, amcheckPassed, "an index amcheck never verified was printed as verified")
 	require.Contains(t, out, "      amcheck        "+missing+"\n",
 		"amcheck's reason for not verifying the index was not printed")
-	require.NotContains(t, out, amcheckPassed, "an index amcheck never verified was printed as verified")
 	require.Contains(t, out, "      pages          "+pagesPass+"\n",
 		"amcheck runs only after the heap was counted, so its absence says nothing against the pages")
 
 	out = printed(t, crashRun("in production", true, ""))
 	require.Contains(t, out, "      amcheck        did not run, because reading the writers' table back after the fault did not finish\n",
 		"an amcheck that never ran was printed as a blank, which reads as nothing wrong")
+	require.NotContains(t, out, pagesPass, "a read back that did not finish was printed as a page check")
 	require.Contains(t, out, "      pages          not checked, because reading the writers' table back after the fault did not finish\n",
-		"a read back that did not finish was printed as a page check")
-	require.NotContains(t, out, pagesPass)
+		"a read back that did not finish did not say why the pages were not checked")
 }
 
 // TestPrintChaos_AnUnreadControlFileIsNotChecksumsOff is the case a zero value
@@ -104,7 +104,7 @@ func TestPrintChaos_AmcheckThatCouldNotRunIsNotAPass(t *testing.T) {
 // report, and false is not "off".
 func TestPrintChaos_AnUnreadControlFileIsNotChecksumsOff(t *testing.T) {
 	out := printed(t, crashRun("", false, amcheckPassed))
+	require.NotContains(t, out, "data checksums are off", "an unread control file was reported as checksums off")
 	require.Contains(t, out, "      pages          not checked, because the control file could not be read after the fault, "+
 		"so whether data checksums are on is unknown\n")
-	require.NotContains(t, out, "data checksums are off", "an unread control file was reported as checksums off")
 }
