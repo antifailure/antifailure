@@ -47,18 +47,38 @@ func TestConformance(t *testing.T) {
 
 func requireDocker(t *testing.T) {
 	t.Helper()
+	asked.Add(1)
 	if os.Getenv("AF_SKIP_DOCKER") != "" {
+		skipped.Add(1)
 		t.Skip("skipped: AF_SKIP_DOCKER is set")
 	}
 	p, err := dockerdb.New(dockerdb.Options{Clock: clock.New()})
 	if err != nil {
+		skipped.Add(1)
 		t.Skipf("skipped: no Docker daemon is reachable: %v", err)
 	}
 	defer func() { _ = p.Close() }()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Ninety seconds, not ten. This is the probe that decides whether the
+	// whole database conformance suite runs, and ten seconds is shorter than a
+	// loaded daemon takes to answer. Measured on 2026-09-21 on a machine
+	// shared by several lanes: with 118 containers on the daemon this probe
+	// timed out at ten seconds six times in one session, while the daemon was
+	// still serving other work and answered normally within the minute either
+	// side. Every one of those runs skipped the entire suite and exited 0.
+	//
+	// A daemon that is genuinely absent still fails fast, because a refused
+	// connection is immediate rather than a timeout, so the larger budget
+	// costs nothing in the case it is meant to detect and buys the case that
+	// was being misread as that one. A guard whose budget is shorter than the
+	// thing it measures does not detect a missing daemon, it manufactures one.
+	//
+	// The sibling package engine/internal/runtime/local carries the same
+	// number for the same reason, measured separately at 250 containers.
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	if _, err := p.Inventory(ctx); err != nil {
+		skipped.Add(1)
 		t.Skipf("skipped: the Docker daemon did not respond: %v", err)
 	}
 }
