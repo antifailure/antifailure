@@ -255,7 +255,7 @@ func gateError(f report.Finding) error {
 		// have found something it never looked at.
 		if strings.HasPrefix(f.Rule, chaosPrefix) {
 			code := aferrors.AFCHS008
-			if unverifiedRule(f.Rule) {
+			if gate.ChaosUnverified(f.Rule) {
 				code = aferrors.AFCHS009
 			}
 			return aferrors.Coded(code, "fault", f.Where, "detail", f.Title)

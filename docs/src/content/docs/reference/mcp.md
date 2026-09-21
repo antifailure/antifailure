@@ -440,6 +440,47 @@ is about `load.thresholds` over HTTP routes, and `af load sql` exits non zero on
 a SQL breach regardless of it, so a tool that ranked one at that level would
 pass a run the command line fails.
 
+### `inject_declared_faults`
+
+Breaks the running environment on purpose and reads what the system did about
+it. This is `af chaos` on this surface.
+
+The faults are the ones the manifest's `chaos` block declares, injected one at a
+time, each undone before the next begins. They are real: a process is killed
+with `SIGKILL`, a container is stopped, frozen or detached from the network, a
+data directory is made read only. Nothing is aimed anywhere but at the
+containers this environment created, proved from the labels the runtime stamped
+at create time and proved again from the daemon at the instant of the act, and
+the egress sidecar is refused whatever a fault asks for: a fault that could stop
+the thing deciding where the environment may connect would be a way out rather
+than an outage.
+
+Around a fault aimed at the database, the durability proof runs. Writers commit
+into a schema of the engine's own while the fault lands, and afterwards every
+commit the client was told was committed must still be there and nothing may be
+there that no client ever wrote. The write ahead log is then read for the
+evidence that it replayed, which is a claim about what the database SAID and so
+cannot be answered by asking the database.
+
+There is no argument that chooses which faults run, aims one somewhere else,
+makes one gentler, or turns the durability proof off. The tool takes
+`project_id` and an optional `hypothesis` and nothing else, because a caller
+that could weaken a fault could make the check easier on itself.
+
+Every result carries **`held`** and **`verified`** separately, and the second is
+not the negation of the first. `held` says nothing was found to be wrong.
+`verified` says the run established what it set out to. A run that is held and
+not verified has **not** passed, it has not looked, and it is reported
+`INCONCLUSIVE`. A fault that was applied and changed nothing is refused rather
+than reported as survived, because every assertion after it would be measuring a
+system that never broke, and a fault that was injected and whose undo did not
+run is reported on its own, because the environment the next thing meets is
+still broken.
+
+A project that declares no `chaos` block, declares one that is off, declares one
+with no faults, or asks for a runtime other than the local one is
+`INCONCLUSIVE` rather than a pass over a proof that did not happen.
+
 ### `run_browser_workflows`
 
 Drives the manifest's declared workflows, the browser ones through a real

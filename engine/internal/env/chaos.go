@@ -9,6 +9,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/fault"
+	"github.com/antifailure/antifailure/engine/internal/gate"
 	"github.com/antifailure/antifailure/engine/internal/pgcrash"
 	"github.com/antifailure/antifailure/engine/internal/report"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
@@ -299,12 +300,17 @@ func ChaosFindings(f report.ChaosFault, proof *pgcrash.Result, gate report.Polic
 	return out
 }
 
-// The two rules this package owns, as opposed to the ones pgcrash owns. They
-// are about the fault rather than about the recovery: a fault that would not
-// go in, and a fault that would not come out.
+// The two rules this package RAISES, as opposed to the ones pgcrash owns. They
+// are about the fault rather than about the recovery: a fault that would not go
+// in, and a fault that would not come out.
+//
+// Aliases rather than literals. The classification that decides what a chaos
+// finding MEANS lives in engine/internal/gate, so that the command line and the
+// MCP server read one answer, and a rule name spelled once there and once here
+// is two strings that agree until somebody edits one.
 const (
-	RuleFaultRefused   = "chaos.fault.refused"
-	RuleFaultNotUndone = "chaos.fault.not_undone"
+	RuleFaultRefused   = gate.RuleFaultRefused
+	RuleFaultNotUndone = gate.RuleFaultNotUndone
 )
 
 // faultFrom turns a manifest fault into the one the injector runs.
