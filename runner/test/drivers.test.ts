@@ -271,6 +271,61 @@ test('runTerminal fails when the screen never shows what was expected', async ()
   });
   assert.equal(results[0]!.outcome.verdict, 'fail', results[0]!.outcome.detail);
   assert.equal(results[0]!.outcome.cause, 'expectation-not-met');
+  // THE DETAIL, which said "The screen showed a failure rather than what was
+  // expected" over this healthy menu. It names what was missing and ends on
+  // the screen the program finished on.
+  const detail = results[0]!.outcome.detail;
+  assert.ok(detail.startsWith('"Forty posts are live." was not found.'), detail);
+  assert.ok(!/showed a failure|shows an error/i.test(detail), `a failure was invented: ${detail}`);
+  assert.ok(/No error was showing\. Instead it showed: "Inbox Drafts Scheduled > Published Archived Eleven posts are live\."/.test(detail), detail);
+});
+
+test('runTerminal still says failure when the screen genuinely shows one', async () => {
+  const results = await runTerminal({
+    workflows: [{
+      name: 'broken-screen',
+      command: execPath,
+      args: ['-e', 'process.stdout.write("Loading posts\\nSomething went wrong. Try again.\\n")'],
+      screen: { rows: 8, cols: 50 },
+      expect: ['"Eleven posts are live."'],
+    }],
+  });
+  assert.equal(results[0]!.outcome.cause, 'expectation-not-met', results[0]!.outcome.detail);
+  assert.ok(results[0]!.outcome.detail.startsWith(
+    'The screen showed a failure rather than what was expected. It says: "Something went wrong."'),
+  results[0]!.outcome.detail);
+});
+
+test('runTerminal through a pipe names what was missing and invents no failure', async () => {
+  const results = await runTerminal({
+    workflows: [{
+      name: 'healthy-output',
+      command: execPath,
+      args: ['-e', 'process.stdout.write("3 posts published\\n")'],
+      expect: ['"4 posts published"'],
+    }],
+  });
+  assert.equal(results[0]!.outcome.verdict, 'fail', results[0]!.outcome.detail);
+  assert.equal(results[0]!.outcome.cause, 'expectation-not-met');
+  const detail = results[0]!.outcome.detail;
+  assert.ok(detail.startsWith('"4 posts published" was not found.'), detail);
+  assert.ok(!/showed a failure|shows an error/i.test(detail), `a failure was invented: ${detail}`);
+  assert.ok(detail.includes('No error was showing. Instead it showed: "3 posts published"'), detail);
+});
+
+test('runTerminal through a pipe still says failure when the output shows one', async () => {
+  const results = await runTerminal({
+    workflows: [{
+      name: 'broken-output',
+      command: execPath,
+      args: ['-e', 'process.stdout.write("Unable to connect to the database\\n")'],
+      expect: ['"4 posts published"'],
+    }],
+  });
+  assert.equal(results[0]!.outcome.cause, 'expectation-not-met', results[0]!.outcome.detail);
+  assert.ok(results[0]!.outcome.detail.startsWith(
+    'The output showed a failure rather than what was expected. It says: "Unable to connect to the database"'),
+  results[0]!.outcome.detail);
 });
 
 test('an arrow reaches a program in the cursor key mode it asked for', async () => {

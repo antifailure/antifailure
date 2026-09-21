@@ -423,6 +423,33 @@ test('runDesktop fails when the screen does not show what the workflow expected'
   // instrument can say no.
   assert.equal(results[0]!.outcome.verdict, 'fail');
   assert.equal(results[0]!.outcome.cause, 'expectation-not-met');
+  // And it says what was missing and what was there, without claiming an
+  // error nothing on this screen showed.
+  const detail = results[0]!.outcome.detail;
+  assert.ok(detail.startsWith('"Your order has shipped." was not found.'), detail);
+  assert.ok(!/shows an error|showed a failure/i.test(detail), `an error was invented: ${detail}`);
+  assert.ok(detail.includes('No error was showing. Instead it showed: "Sign in to Ledger"'), detail);
+});
+
+test('runDesktop still says error when the screen genuinely shows one', async () => {
+  const surface = scripted([
+    screen({ controls: ['Sign in'], submits: ['Sign in'], text: 'Sign in to Ledger' }),
+    screen({ text: 'Could not connect to the ledger service.' }),
+  ]);
+  const results = await runDesktop({
+    app: { kind: 'electron', executablePath: 'unused' },
+    open: async () => surface,
+    workflows: [{
+      name: 'a sign in the application broke',
+      description: 'Sign in.',
+      expect: ['"Your order has shipped."'],
+      maxSteps: 4,
+    }],
+  });
+  assert.equal(results[0]!.outcome.cause, 'expectation-not-met');
+  assert.ok(results[0]!.outcome.detail.includes(
+    'The page shows an error rather than what was expected. It says: "Could not connect to the ledger service."'),
+  results[0]!.outcome.detail);
 });
 
 test('runDesktop blocks, never fails, when the application could not be opened', async () => {

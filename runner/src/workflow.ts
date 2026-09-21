@@ -540,6 +540,51 @@ export function failureSentence(text: string): string | undefined {
   return whole ? text.slice(0, 297) : undefined;
 }
 
+/** notFound names the expectations that were not met, as one sentence.
+ *
+ * THE FAILURE THIS REPLACES. Every `expectation-not-met` was explained as the
+ * page, the screen or the output showing an error rather than what was
+ * expected, whether or not anything on it was an error. `judge` answers
+ * `unmet` for two different reasons: a failure banner, and a quoted string
+ * that is simply absent. The second is the common one, and it is exactly what
+ * a deliberately impossible expectation produces: an iOS journal showing every
+ * entry it should, and a terminal program drawing its whole healthy menu, were
+ * both reported as showing an error. A reader debugging a real failure went
+ * looking for an error that did not exist, when the useful facts were which
+ * expectation was missing and what was there instead.
+ *
+ * Only the expectations `judge` answered `unmet` for are named, because an
+ * unclear one is a different fact and a met one is not missing at all.
+ */
+export function notFound(expectations: readonly string[], text: string): string {
+  const missing = expectations.filter((e) => judge(e, text) === 'unmet');
+  const names = (missing.length > 0 ? missing : expectations).map(quoteExpectation);
+  if (names.length === 1) return `${names[0]} was not found.`;
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]} were not found.`;
+}
+
+/** observed says what was showing, for a miss where nothing was an error.
+ *
+ * The start of a page is its heading and the end of what a terminal program
+ * printed is where its answer is, so the caller says which end is the
+ * evidence. The sentence deliberately claims no error, because the caller only
+ * reaches it when `failureSentence` found none. */
+export function observed(text: string, from: 'start' | 'end'): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  if (!flat) return 'No error was showing, and nothing else was either.';
+  const cap = 160;
+  const cut = flat.length <= cap
+    ? flat
+    : from === 'start' ? flat.slice(0, cap - 3) + '...' : '...' + flat.slice(flat.length - cap + 3);
+  return `No error was showing. Instead it showed: "${cut}"`;
+}
+
+/** quoteExpectation renders an expectation the way its author wrote it, so a
+ *  quoted one keeps its own quotes rather than gaining escaped ones. */
+function quoteExpectation(expectation: string): string {
+  return verbatim(expectation) === undefined ? JSON.stringify(expectation) : expectation.trim();
+}
+
 /** An expectation asking for a string exactly, rather than for its sense.
  *
  * `"It is written down."`, quotes included. Anything between a leading and a
