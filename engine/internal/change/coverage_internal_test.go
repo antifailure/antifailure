@@ -435,43 +435,80 @@ func parseCoverageTable(body string) map[Surface]string {
 
 // declaredSurfaces reads every Surface typed constant out of this package's own
 // source and returns the values they are declared with.
+//
+// The directory is read and each file parsed separately rather than with
+// parser.ParseDir, which staticcheck refuses as deprecated (SA1019). The
+// replacement is deliberately NOT golang.org/x/tools/go/packages, which the
+// deprecation notice suggests: that loads and type checks a package graph,
+// which is a great deal of machinery and a new module dependency for a test
+// that wants the constant declarations in one directory, and a dependency in
+// the engine carries licence and notices consequences a test guard should not
+// be spending.
+//
+// The deprecation's own reason does not reach this use, which is why reading
+// the files directly is sufficient rather than a downgrade. ParseDir is
+// deprecated because it ignores BUILD TAGS when deciding which files belong to
+// a package. What is read here is the constant declarations in one package's
+// own directory, and no build tag changes which constants exist in that source
+// text. Losing tag awareness costs this nothing.
+//
+// What must not get weaker, and has not: the constants come from the SOURCE
+// rather than from a list written beside them, and being unable to look is a
+// FAILURE rather than silent agreement about an empty set. A directory that
+// yields no Go file, and a file that will not parse, both stop the test.
 func declaredSurfaces(t *testing.T) []Surface {
 	t.Helper()
-	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, ".", func(info os.FileInfo) bool {
-		return !strings.HasSuffix(info.Name(), "_test.go")
-	}, 0)
+
+	entries, err := os.ReadDir(".")
 	if err != nil {
-		t.Fatalf("could not read this package's own source: %v", err)
+		t.Fatalf("could not read this package's own directory, so no constant was read: %v", err)
+	}
+
+	fset := token.NewFileSet()
+	var parsed []*ast.File
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		file, parseErr := parser.ParseFile(fset, name, nil, 0)
+		if parseErr != nil {
+			t.Fatalf("could not parse %s, so the constants declared in it were not read: %v",
+				name, parseErr)
+		}
+		parsed = append(parsed, file)
+	}
+	if len(parsed) == 0 {
+		t.Fatal("no non test Go file was read out of this package's own directory. That is this " +
+			"test being unable to look, which has to stop it: agreeing about an empty set of " +
+			"surfaces would report that every surface is decided having read none of them")
 	}
 
 	var out []Surface
-	for _, pkg := range pkgs {
-		for _, file := range pkg.Files {
-			for _, decl := range file.Decls {
-				gen, ok := decl.(*ast.GenDecl)
-				if !ok || gen.Tok != token.CONST {
+	for _, file := range parsed {
+		for _, decl := range file.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok || gen.Tok != token.CONST {
+				continue
+			}
+			for _, spec := range gen.Specs {
+				value, ok := spec.(*ast.ValueSpec)
+				if !ok {
 					continue
 				}
-				for _, spec := range gen.Specs {
-					value, ok := spec.(*ast.ValueSpec)
-					if !ok {
-						continue
-					}
-					ident, ok := value.Type.(*ast.Ident)
-					if !ok || ident.Name != "Surface" || len(value.Values) != 1 {
-						continue
-					}
-					lit, ok := value.Values[0].(*ast.BasicLit)
-					if !ok || lit.Kind != token.STRING {
-						continue
-					}
-					unquoted, err := strconv.Unquote(lit.Value)
-					if err != nil {
-						t.Fatalf("a Surface constant has a value this reader could not unquote: %v", err)
-					}
-					out = append(out, Surface(unquoted))
+				ident, ok := value.Type.(*ast.Ident)
+				if !ok || ident.Name != "Surface" || len(value.Values) != 1 {
+					continue
 				}
+				lit, ok := value.Values[0].(*ast.BasicLit)
+				if !ok || lit.Kind != token.STRING {
+					continue
+				}
+				unquoted, unquoteErr := strconv.Unquote(lit.Value)
+				if unquoteErr != nil {
+					t.Fatalf("a Surface constant has a value this reader could not unquote: %v", unquoteErr)
+				}
+				out = append(out, Surface(unquoted))
 			}
 		}
 	}
