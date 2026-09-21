@@ -14,6 +14,82 @@ and the per change entries are what make it a wall. `just relnotes` refuses an
 unbalanced marker, a second region in one section, an empty region, and a
 section that omits all of itself.
 
+## v1.5.5
+
+Antifailure could rehearse a browser and nothing else. The surface abstraction
+named five, the drivers for four of them were written, and no manifest could
+ask for any of them: a job's surface was derived from whether it had browser
+workflows, so a terminal, desktop, iOS or Android workflow reached a runner
+that had already decided what it was driving. Every one of those drivers was
+finished code that nothing could reach. A manifest now names the surface on the
+workflow itself, the engine refuses one this build cannot drive by name and
+says what it can, and a test compares the Go list against the runner's own
+registry so a driver finished in one place and not the other fails the build
+instead of shipping a surface a manifest can ask for and nothing drives.
+
+For a database change the gap was the same shape one layer down. A golden was
+built from a stock Postgres image with a fixed set of preloaded libraries, so
+an extension the application depends on was not a limitation anybody could work
+around: the restore stopped at the first object that needed one. And masking
+addressed every row by `ctid`, which is a property of the heap rather than of
+Postgres, so a table stored by a custom access method was catalogued, planned
+and written to by a scheme that access method need not implement.
+
+<!-- relnotes:omit -->
+### Added
+
+A workflow names the surface it runs on, `web`, `terminal`, `desktop`, `ios` or
+`android`, and a manifest naming one this build cannot drive is refused with
+the list of what it can (#507, #509, #508, #514).
+
+A terminal workflow drives a real program through a real pseudo terminal, so a
+full screen program's rendered grid of cells is the tree its expectations are
+judged against (#507, #510).
+
+A desktop workflow drives a native macOS application through AXUIElement or an
+Electron application through Chromium's accessibility tree, with the planner,
+the expectations and the verdict a browser run uses (#509).
+
+An iOS workflow drives an application on the simulator through its own
+accessibility tree (#508).
+
+A golden is built from the image you name, with the extensions you declare
+created in it and the libraries you declare preloaded, so pgvector, TimescaleDB
+or a custom table access method survives into every branch. An image that lacks
+a declared extension, an image whose declared volume swallows the data
+directory, and an image running a different major than the manifest declares
+are each refused by name rather than publishing a golden that is quietly wrong
+(#515).
+
+A concurrent SQL workload runs the statements your application really issues,
+compiled from `pg_stat_statements` or declared outright, and reports
+transactions a second and per statement latency percentiles, so a change to an
+index can be measured directly rather than through the application (#513).
+
+### Fixed
+
+An expectation containing a separator could never be met. `total_cents`,
+`order_id`, `user-name`, `v1.2.3` and `application/json` had every character
+that was not a letter or a digit removed before the page was searched, so the
+matcher looked for a string no page contains. The expectation could not pass
+and could not fail, whatever the application did, and the run reported it as
+unclear (#516).
+
+Masking refused nothing when a table was stored outside the heap. The catalog
+reads `relam` now and refuses before anything is written, naming the table and
+the access method, and it refuses narrowly enough that a table masking would
+not rewrite still reaches the golden (#515).
+
+A SQL workload reported errors against a statement that never failed: an
+attempt cancelled by the run ending was counted as a statement failure while
+the run summary correctly counted none, so the table a person acts on
+contradicted the summary above it (#519).
+
+A driver's own module claimed it had been driven while the registry the engine
+reads said it had not. Nothing read the module, so the claim was invisible and
+one assertion away from being believed (#520).
+<!-- relnotes:end -->
+
 ## v1.5.4
 
 A pull request check said one workflow failed and linked to a console page that
