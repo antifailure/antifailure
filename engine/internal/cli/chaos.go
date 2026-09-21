@@ -145,8 +145,8 @@ func printChaos(e *Env, run *env.ChaosRun) {
 		e.Out.Printf("      commits        %d acknowledged, %d lost, %d phantom, %d in flight landed\n",
 			rec.Acknowledged, rec.Lost, rec.Phantom, rec.InFlightLanded)
 		e.Out.Printf("      relations      heap %d, index %d\n", rec.HeapRows, rec.IndexRows)
-		e.Out.Printf("      amcheck        %s\n", e.Out.Wrap(amcheckLine(rec), chaosValueIndent))
-		e.Out.Printf("      pages          %s\n", e.Out.Wrap(pagesLine(rec), chaosValueIndent))
+		e.Out.Printf("      amcheck        %s\n", e.Out.Wrap(rec.AmcheckSays(), chaosValueIndent))
+		e.Out.Printf("      pages          %s\n", e.Out.Wrap(rec.PagesSay(), chaosValueIndent))
 		e.Out.Printf("      unreachable    %dms\n", rec.DowntimeMs)
 	}
 
@@ -186,45 +186,6 @@ func replayLine(rec *report.ChaosRecovery) string {
 // chaosValueIndent is the column the values in a fault's block start at, so a
 // value long enough to wrap continues under itself rather than under the label.
 const chaosValueIndent = len("      pages          ")
-
-// amcheckLine is what the index verifier said, in its own words.
-//
-// Verbatim, because the proof already chose them: a pass is one fixed
-// sentence and anything else is the reason it could not say so, including
-// bt_index_check reporting a problem. Empty means the proof never got as far
-// as asking, and a blank there would read as a pass.
-func amcheckLine(rec *report.ChaosRecovery) string {
-	if rec.Amcheck == "" {
-		return "did not run, because reading the writers' table back after the fault did not finish"
-	}
-	return rec.Amcheck
-}
-
-// pagesLine says what this run established about torn pages, and only that.
-//
-// A page torn by the crash is only DETECTED when data checksums are on: with
-// them off Postgres reads it back as data. So the claim is made only when all
-// three hold. The control file was read after the fault, because a checksum
-// version that was never read is not a zero. Checksums are on. And the read
-// back finished, which is what a non empty amcheck answer means, because the
-// proof asks amcheck only after it has counted the heap by sequential scan and
-// a checksum failure there would have stopped it first. The claim covers the
-// writers' table and nothing else, since that is all the proof reads.
-//
-// Before this line existed the terminal printed nothing about pages when
-// checksums were on, only a warning when they were off, so a run where the
-// check ran and passed looked exactly like one where it never ran.
-func pagesLine(rec *report.ChaosRecovery) string {
-	switch {
-	case rec.StateAfter == "":
-		return "not checked, because the control file could not be read after the fault, so whether data checksums are on is unknown"
-	case !rec.ChecksumsOn:
-		return "not checked, because data checksums are off on this cluster and a torn page would read back as data"
-	case rec.Amcheck == "":
-		return "not checked, because reading the writers' table back after the fault did not finish"
-	}
-	return "the writers' table read back in full with data checksums on, and no page of it failed its checksum. No other table was read."
-}
 
 // chaosFailure is the error a failing run exits with.
 //

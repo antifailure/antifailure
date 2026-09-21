@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/antifailure/antifailure/engine/internal/pgcrash"
 	"github.com/antifailure/antifailure/engine/internal/report"
 )
 
@@ -20,7 +21,7 @@ func heldChaos() *report.Chaos {
 			RedoStart: "0/1950478", RedoEnd: "0/197AD88",
 			StateBefore: "in production", StateAfter: "in production",
 			Acknowledged: 897, Present: 902, Lost: 0, Phantom: 0, InFlightLanded: 5,
-			HeapRows: 902, IndexRows: 902, Amcheck: "the index verified",
+			HeapRows: 902, IndexRows: 902, Amcheck: pgcrash.AmcheckPassed,
 			ChecksumsOn: false, DowntimeMs: 9833, Verified: true,
 		},
 	}}}
@@ -41,7 +42,7 @@ func TestChaosSection_SaysWhatWasMeasuredAndNotOnlyThatItPassed(t *testing.T) {
 		"| Of those, missing after recovery | 0 |",
 		"| Rows present that no client wrote | 0 |",
 		"| Commits in flight at the crash that landed | 5 |",
-		"yes, 902 rows both ways",
+		"| Heap and index agree | yes, 902 rows both ways, and amcheck found every row in the index |",
 		"in production, then in production",
 	} {
 		require.Contains(t, out, want, "the chaos section must carry %q", want)
@@ -87,4 +88,68 @@ func TestChaosSection_IsAbsentWhenNoFaultWasDeclared(t *testing.T) {
 	// every project whether or not it asked for one.
 	out := report.Run{}.Markdown()
 	require.NotContains(t, strings.ToLower(out), "broken on purpose")
+}
+
+// withIntegrity is the held run with the page integrity facts the proof hands
+// the renderer replaced.
+func withIntegrity(checksumsOn bool, amcheck string) string {
+	c := heldChaos()
+	c.Faults[0].Recovery.ChecksumsOn = checksumsOn
+	c.Faults[0].Recovery.Amcheck = amcheck
+	return report.Run{Chaos: c}.Markdown()
+}
+
+const pagesPassRow = "| Torn pages in the writers' table | the writers' table read back in full with data checksums on, " +
+	"and no page of it failed its checksum. No other table was read. |"
+
+// TestChaosSection_APassingRunSaysWhatAmcheckAndThePagesEstablished is the
+// one case where the table may say yes, and it has to say what the yes rests
+// on: both counts, amcheck's verdict and the pages it read.
+func TestChaosSection_APassingRunSaysWhatAmcheckAndThePagesEstablished(t *testing.T) {
+	out := withIntegrity(true, pgcrash.AmcheckPassed)
+	require.Contains(t, out, "| Heap and index agree | yes, 902 rows both ways, and amcheck found every row in the index |")
+	require.Contains(t, out, pagesPassRow, "a run that read the table back with checksums on did not say so")
+}
+
+// TestChaosSection_AnAmcheckFailureIsNotAYes is the defect: the cell said yes
+// whenever amcheck had answered anything, so an index it reported a problem
+// in read as a clean one on the page a reviewer reads before merging.
+func TestChaosSection_AnAmcheckFailureIsNotAYes(t *testing.T) {
+	const problem = "bt_index_check reported a problem: ERROR: item order invariant violated for index \"commits_pkey\""
+	out := withIntegrity(true, problem)
+	require.NotContains(t, out, "| Heap and index agree | yes", "an index amcheck reported a problem in was called agreeing")
+	require.Contains(t, out, "| Heap and index agree | **not verified: both scans counted 902 rows, and amcheck said: "+
+		problem+"** |", "the reason amcheck gave was not quoted")
+}
+
+// TestChaosSection_AnAmcheckThatWasUnavailableIsNotAYes is the other way
+// amcheck can fail to vouch: the extension was not there. The table was still
+// read back in full before amcheck was asked, so the pages row stands.
+func TestChaosSection_AnAmcheckThatWasUnavailableIsNotAYes(t *testing.T) {
+	const missing = "the amcheck extension is not available in this database: ERROR: extension \"amcheck\" is not available"
+	out := withIntegrity(true, missing)
+	require.NotContains(t, out, "| Heap and index agree | yes", "an index amcheck never looked at was called agreeing")
+	require.Contains(t, out, "amcheck said: "+missing+"** |", "the reason amcheck gave was not quoted")
+	require.Contains(t, out, pagesPassRow, "amcheck runs only after the heap was counted, so its absence says nothing against the pages")
+}
+
+// TestChaosSection_AReadBackThatDidNotFinishClaimsNothing is the run whose
+// read back stopped, for instance at a page that failed its checksum. Neither
+// the counts nor the pages may be offered as a result.
+func TestChaosSection_AReadBackThatDidNotFinishClaimsNothing(t *testing.T) {
+	out := withIntegrity(true, "")
+	require.Contains(t, out, "| Heap and index agree | not checked, because reading the writers' table back after the fault did not finish |")
+	require.NotContains(t, out, pagesPassRow, "a read back that did not finish was reported as a page check")
+	require.Contains(t, out, "| Torn pages in the writers' table | not checked, because reading the writers' table back "+
+		"after the fault did not finish |")
+}
+
+// TestChaosSection_ChecksumsOffSaysPagesWereNotChecked holds the row against
+// borrowing amcheck's pass on a cluster that could not have seen a torn page.
+func TestChaosSection_ChecksumsOffSaysPagesWereNotChecked(t *testing.T) {
+	out := withIntegrity(false, pgcrash.AmcheckPassed)
+	require.NotContains(t, out, pagesPassRow, "pages were claimed checked on a cluster with checksums off")
+	require.Contains(t, out, "| Torn pages in the writers' table | not checked, because data checksums are off on this cluster "+
+		"and a torn page would read back as data |")
+	require.NotContains(t, out, "\u2014", "an em dash reached the pull request comment")
 }
