@@ -64,6 +64,21 @@ const (
 	// share it, which is how `af up` in one project branched another project's
 	// production data. This says whose it is.
 	LabelProvenance = "dev.antifailure.provenance"
+	// LabelPreload is the libraries a golden's Postgres was started with,
+	// beyond the statistics module every container here preloads, comma
+	// separated in the order they were given.
+	//
+	// On the image for the same reason LabelRules is, and it is load bearing
+	// rather than descriptive. A library like timescaledb or citus is loaded
+	// at server start, not created in a database, and a server that carries
+	// the extension's catalog entries and not its library refuses to start:
+	// "the extension must be loaded via shared_preload_libraries". A branch is
+	// a container started from the golden image by whatever manifest is in the
+	// tree at the time, so a manifest that has since stopped asking for the
+	// library would start a branch that cannot come up at all, from a golden
+	// that was perfectly good. Reading it back off the image is what makes the
+	// branch carry what the golden was built with.
+	LabelPreload = "dev.antifailure.preload"
 	// LabelService is the manifest service name a container runs.
 	LabelService = "dev.antifailure.service"
 	// LabelServiceKind is web, worker, or cron.

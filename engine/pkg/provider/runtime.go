@@ -162,6 +162,23 @@ type EnvSpec struct {
 	// up, and the whole point of this list is that somebody is about to
 	// believe their application was tested against S3.
 	Emulators []EmulatorSpec
+	// CloudResources are the cloud resources production's infrastructure as
+	// code declares, to be created inside those emulators before any service
+	// starts.
+	//
+	// An emulator comes up EMPTY, deliberately: every one of them is
+	// configured to keep nothing, because a twin that inherited the last
+	// twin's buckets would be reproducible only by accident. The consequence
+	// is that a bucket, a queue and a table that exist in production exist
+	// nowhere in the twin, so an application that reads its own bucket on
+	// startup meets an emulator that has none. This is what closes that, and
+	// it is on EnvSpec rather than inside the emulator declaration because it
+	// is a fact about one environment's production, where an emulator
+	// declaration is a fact about the build.
+	//
+	// Before any service, because the service is who the missing bucket is
+	// served to.
+	CloudResources []CloudResource
 	// ModelEnv carries a model key to the sidecar, for a rule in synth mode.
 	// It is passed as an environment variable rather than written into a
 	// file, so a key never lands on disk.
@@ -532,4 +549,35 @@ type LogLine struct {
 	Stream string
 	// Text is the line, already redacted.
 	Text string
+}
+
+// CloudResource is one cloud resource that production's infrastructure as code
+// declares, in the vocabulary the declaration itself uses.
+//
+// Type is the provider's own resource type, spelled as the infrastructure as
+// code spells it: aws_s3_bucket, google_pubsub_topic. Inventing a second
+// vocabulary here would mean a mapping nobody could check against the source,
+// and the source is the only thing that says what production has.
+//
+// Attributes are the declaration's own fields under its own keys, as strings,
+// because what is done with them is to put them into a request or to report
+// that they were not. A value that arrives as a number, a boolean or a list is
+// whatever the reader wrote it out as, and a reader that cannot render one
+// leaves it out, which is reported rather than assumed away.
+//
+// It lives here rather than in pkg/emulator because it is what two sides meet
+// at: whatever reads production's infrastructure as code fills it, and the
+// runtime that seeds the emulators consumes it. pkg/emulator cannot hold it,
+// since pkg/extension imports this package and pkg/emulator imports
+// pkg/extension, so a type here that named one there would be a cycle.
+type CloudResource struct {
+	Type       string            `json:"type"`
+	Name       string            `json:"name"`
+	Attributes map[string]string `json:"attributes,omitempty"`
+}
+
+// Attr reads one attribute, and reports whether the declaration carried it.
+func (c CloudResource) Attr(key string) (string, bool) {
+	v, ok := c.Attributes[key]
+	return v, ok
 }

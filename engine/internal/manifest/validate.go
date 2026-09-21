@@ -582,6 +582,34 @@ func (v *validator) database(m *schema.Manifest) {
 					"Xata console.")
 		}
 	}
+	// The image, the extensions and the preloaded libraries are the docker
+	// provider's, and only the docker provider's.
+	//
+	// Refused rather than ignored, which is the rule this repository learned
+	// from replicas, resources.cpu and resources.memory: a field the engine
+	// accepts and never reads is a field somebody writes, commits, and
+	// believes. Here the belief is specifically dangerous, because what they
+	// believe is that the golden carries PostGIS. A hosted provider's Postgres
+	// is the provider's to furnish: there is no container for this engine to
+	// choose an image for, no server it may load a library into, and asking it
+	// to create an extension would be this engine reaching into somebody's
+	// managed instance.
+	if d.Provider != "" && d.Provider != schema.DBDocker {
+		named := ""
+		switch {
+		case d.Image != "":
+			named = "database.image"
+		case len(d.Extensions) > 0:
+			named = "database.extensions"
+		case len(d.PreloadLibraries) > 0:
+			named = "database.preload_libraries"
+		}
+		if named != "" {
+			v.add(named,
+				fmt.Sprintf("%s configures the Postgres container the docker provider starts, and this manifest selects the %s provider.", named, d.Provider),
+				fmt.Sprintf("Remove %s, or set database.provider to docker. A hosted provider furnishes its own Postgres, so the extensions available in it are that service's to enable and not this engine's to install.", named))
+		}
+	}
 	if _, ok := confine(d.MaskingRules); !ok {
 		v.add("database.masking_rules",
 			fmt.Sprintf("The masking rules path %q resolves outside the repository.", d.MaskingRules), "")

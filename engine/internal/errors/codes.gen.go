@@ -182,6 +182,15 @@ const (
 	// The role {role} on {host} may not create databases, and {vendor}
 	// does not let you grant it.
 	AFDB037 Code = "AF-DB-037"
+	// The image {image} declares {volume} as a volume, and the golden's
+	// data directory {datadir} is inside it.
+	AFDB038 Code = "AF-DB-038"
+	// The image {image} runs Postgres {found} and database.version
+	// declares {declared}.
+	AFDB039 Code = "AF-DB-039"
+	// The extension {extension} named by database.extensions could not be
+	// created in the image {image}.
+	AFDB040 Code = "AF-DB-040"
 
 	// Detection
 	// No application could be detected in {path}.
@@ -895,7 +904,7 @@ var catalog = map[Code]Entry{
 		Code:      AFDB007,
 		Area:      "DB",
 		Message:   "The source database uses the extension {extension}, and the Postgres the golden is built in does not carry it.",
-		NextStep:  "Point database.provider at a service whose Postgres has {extension}, or drop the extension from the source schema. The docker provider builds a golden in the stock postgres image, which carries the contrib modules and nothing else, so PostGIS, pgvector, TimescaleDB and pg_cron are not there.",
+		NextStep:  "Set database.image to an image whose Postgres carries {extension}, such as pgvector/pgvector:pg17 or postgis/postgis:17-3.5, and add {extension} to database.extensions so it is created before the copy runs. An extension loaded at server start rather than created in a database, such as timescaledb, citus or pg_cron, also goes in database.preload_libraries. The stock postgres image the docker provider builds from otherwise carries the contrib modules and nothing else, which is why this is the default answer rather than the only one; a hosted provider whose Postgres already has {extension} is the other.",
 		Docs:      "concepts/goldens",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
@@ -1131,6 +1140,33 @@ var catalog = map[Code]Entry{
 		Message:   "The role {role} on {host} may not create databases, and {vendor} does not let you grant it.",
 		NextStep:  "On {vendor} the fix AF-DB-035 gives is not available: {reason}. Keep {vendor} as database.source_url_env, which needs read access only, and point {variable} at a Postgres you administer, which is where the goldens and the branches are made. The verdict was read from {citation}.",
 		Docs:      "providers/managed-postgres",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFDB038: {
+		Code:      AFDB038,
+		Area:      "DB",
+		Message:   "The image {image} declares {volume} as a volume, and the golden's data directory {datadir} is inside it.",
+		NextStep:  "A golden is the container's filesystem committed, and anything written under a declared volume is written to an anonymous volume instead, so this image would publish a golden holding no rows and report success. Use an image that does not declare a volume over that path, or rebuild yours without it.",
+		Docs:      "providers/databases",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFDB039: {
+		Code:      AFDB039,
+		Area:      "DB",
+		Message:   "The image {image} runs Postgres {found} and database.version declares {declared}.",
+		NextStep:  "Set database.version to {found}, or name an image built on {declared}. The two are checked rather than trusted because every branch of this golden would run a Postgres your application does not, and nothing later in the run would notice.",
+		Docs:      "providers/databases",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFDB040: {
+		Code:      AFDB040,
+		Area:      "DB",
+		Message:   "The extension {extension} named by database.extensions could not be created in the image {image}.",
+		NextStep:  "Name an image that carries {extension} and set database.image to it, or drop {extension} from database.extensions. An extension is files on the server's disk before it is anything in a database, so no amount of SQL adds one the image does not have: pgvector/pgvector, postgis/postgis and timescale/timescaledb are the published images for the common ones.",
+		Docs:      "providers/databases",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
 	},

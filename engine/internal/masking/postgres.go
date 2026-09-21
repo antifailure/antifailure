@@ -32,13 +32,48 @@ func (postgresDialect) Qualify(t Table) string { return t.Qualified() }
 // Placeholder is Postgres's own positional parameter.
 func (postgresDialect) Placeholder(n int) string { return fmt.Sprintf("$%d", n) }
 
-// Unaddressable is always empty for Postgres.
+// Unaddressable refuses a table Postgres does not store on the heap.
 //
-// Every table has a ctid, so every table can be rewritten one row at a time.
-// A table with no primary key cannot be RESUMED, which is a different fact and
-// the plan already says it: the chunk size is zero and the plan prints "in one
-// statement (no primary key to chunk on)".
-func (postgresDialect) Unaddressable(Table) string { return "" }
+// Every HEAP table has a ctid, so every heap table can be rewritten one row at
+// a time. A heap table with no primary key cannot be RESUMED, which is a
+// different fact and the plan already says it: the chunk size is zero and the
+// plan prints "in one statement (no primary key to chunk on)".
+//
+// This used to return empty for everything, and the sentence above was written
+// as though it were about Postgres rather than about the heap. A table created
+// `USING <am>` from an extension is still relkind 'r' and still a BASE TABLE in
+// information_schema, so it was catalogued, planned, and written to by both of
+// this dialect's addressing schemes, and neither of them is available on an
+// access method that does not implement them. Measured against citus columnar
+// on Postgres 17.2: `SELECT ctid::text FROM t` is refused outright with "UPDATE
+// and CTID scans not supported for ColumnarScan", and so is `UPDATE t SET ...
+// WHERE id = 2`, because that access method implements no UPDATE at all even
+// though it will happily accept a PRIMARY KEY on the column. So neither the
+// keyless path nor the keyed one survives, and which of the two an access
+// method supports is not a question the catalog can answer: pg_am records the
+// handler and nothing about what the handler implements.
+//
+// Refused rather than attempted, for the reason every other entry in
+// checkFeasible is: the executor would discover this partway through a table,
+// and a masking run that stops halfway leaves data neither real nor safe. The
+// refusal is narrow, because Assign only consults it for a column masking
+// would actually REWRITE: a table on a custom access method that is preserved,
+// or that holds nothing a rule matches, goes through untouched, which is what
+// lets a golden carry one at all.
+func (postgresDialect) Unaddressable(t Table) string {
+	// Empty is what a partitioned parent whose leaves are all heap reports,
+	// and what a Table built by hand rather than read from a catalog carries.
+	// Neither is a custom access method, and treating them as one would refuse
+	// every masking run in the second case.
+	if t.AccessMethod == "" || t.AccessMethod == heapAccessMethod {
+		return ""
+	}
+	return "this table is stored with the " + t.AccessMethod + " access method rather than " +
+		"the heap, and an access method need implement neither the ctid a keyless rewrite " +
+		"addresses a row by nor the UPDATE a keyed one runs, so masking cannot rewrite it a " +
+		"row at a time; give the column a rule that preserves it, or move the column out of " +
+		"a table this engine cannot rewrite"
+}
 
 // RowKey reads a row's address out of a chunk: every column of the primary key,
 // in key order, each rendered as text on the way out.

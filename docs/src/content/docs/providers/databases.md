@@ -30,6 +30,11 @@ database:
 | [`azurepg`](/docs/providers/azurepg) | A point in time restore of an Azure Database for PostgreSQL Flexible Server | Expected to grow with the database. The snapshot half is flat and the log replay half is not, so this provider does not claim copy on write. Never timed on Azure | A flexible server, a service principal, and the enterprise edition |
 | [`rds`](/docs/providers/rds) | An instance restored from a snapshot of an Amazon RDS for PostgreSQL instance | Grows with the database, because a restore hydrates a new volume with every byte. One live restore took 5 minutes 4 seconds at 20 GB | An RDS for PostgreSQL instance, an IAM role, and the enterprise edition |
 
+A schema is rarely only Postgres. What the golden's server carries, meaning
+PostGIS, pgvector, TimescaleDB, pg_cron, or a table stored in an access method
+that came out of an extension, is configured on the `docker` provider and
+described in [Extensions and custom storage](/docs/providers/extensions).
+
 `docker` is the default and needs nothing. Its branch time is flat, measured
 rather than assumed: the conformance suite branches an 8 MiB golden and a 512 MiB
 one and the daemon's storage driver shares the layers, so the two cost the same.

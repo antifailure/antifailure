@@ -183,3 +183,39 @@ be covered by something that is. A **Service Bus queue is not a Queue Storage
 queue**, and the **Cosmos DB Table API** is not Table Storage: it speaks the
 same protocol on `table.cosmos.azure.com` but its partitioning and throughput
 behaviour is what a Cosmos user is testing, and Azurite is not that.
+
+## Declared storage resources are not created in the twin, and a run says so
+
+`af up` creates the cloud resources production's infrastructure as code declares
+inside the emulators, before any service starts. It does not do that for Azure,
+and this is where a reader finds that out rather than from a twin that is
+quietly missing a container.
+
+Azurite validates the Shared Key signature on every request. A request to create
+a blob container, addressed the way an environment addresses one, is refused:
+
+```
+PUT /afprobe?restype=container
+Host: devstoreaccount1.blob.core.windows.net
+x-ms-version: 2021-08-06
+
+HTTP/1.1 403 Server failed to authenticate the request.
+x-ms-error-code: AuthorizationFailure
+```
+
+Signing needs the storage account's key, and the account credential an
+application receives is a substituted credential the manifest decides, so
+nothing in the engine holds one to sign with. LocalStack and both Google
+emulators answer an unsigned request, which is why those are seeded and this is
+not.
+
+So `azurerm_storage_container`, `azurerm_storage_queue` and
+`azurerm_storage_table` are reported as unmeasured, each carrying that reason,
+and the emulator itself is still started and still answers the application. The
+container the application expects is the thing that is missing, and a run names
+it.
+
+One trap is worth recording for whoever closes this. With production style
+addressing the account is in the hostname, and Azurite then refuses a path that
+also names the account, with a bare `400` and an empty body. The path is
+`/<container>` and not `/devstoreaccount1/<container>`.

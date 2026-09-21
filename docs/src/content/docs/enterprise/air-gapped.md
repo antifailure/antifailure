@@ -83,6 +83,7 @@ recorded with the site that made it.
 | the cloud credential path | AWS, GCP, Azure or Vault, for every secret store and every managed database provider |
 | the audit stream sink | your syslog receiver, your webhook endpoint, or the object store the audit stream is dropped into |
 | the runtime conformance suite | the internet, on purpose, which is why it is here |
+| the emulator seeding | the environment's own sidecar on loopback, to create the cloud resources production declares inside the emulators. Nothing outside this machine |
 | the container image pull | the registry the image reference names, which for the sidecar is `ghcr.io` unless `AF_PROXY_IMAGE` names your own |
 | the container image build | Docker Hub, for the sidecar's base image |
 

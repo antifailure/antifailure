@@ -11,9 +11,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execPath } from 'node:process';
 import {
-  driverFor, surfaces, assertAvailable, NotImplementedError, type Surface,
+  driverFor, surfaces, assertAvailable, NotImplementedError, type Surface, type SurfaceDriver,
 } from '../src/drivers/driver.ts';
 import * as ios from '../src/drivers/ios.ts';
+import * as android from '../src/drivers/android.ts';
+import * as desktop from '../src/drivers/desktop.ts';
 import { runTerminal } from '../src/drivers/terminal.ts';
 import { socketSink, decode, type LiveEvent } from '../src/live.ts';
 import type { WorkflowResult } from '../src/execute.ts';
@@ -43,6 +45,35 @@ test('assertAvailable passes a built surface and refuses a scaffolded one loudly
       assert.equal((err as NotImplementedError).surface, surface);
       return true;
     });
+  }
+});
+
+test('a driver module and the registry make the same claim about being driveable', () => {
+  // The registry in driver.ts is what driverFor and assertAvailable read, so a
+  // module whose own `available` disagrees with it is a claim nothing
+  // enforces: harmless while nothing reads the module, and a surface
+  // announcing itself as driven the moment anything does. android shipped in
+  // exactly that state, saying true in its module and false in the registry,
+  // with no run having ever driven it.
+  //
+  // Comparing the two is what makes the disagreement impossible rather than
+  // unlikely. The modules are named here rather than discovered, because a
+  // loop that found no modules would pass while checking nothing.
+  const modules: Record<string, SurfaceDriver> = {
+    ios: ios.ios,
+    android: android.android,
+    desktop: desktop.desktop,
+  };
+  assert.equal(Object.keys(modules).length, 3, 'a module was dropped from this comparison');
+  for (const [surface, module] of Object.entries(modules)) {
+    assert.equal(
+      module.available,
+      driverFor(surface as Surface).available,
+      `${surface}.ts and the registry in driver.ts disagree about whether it can be driven. ` +
+        'The registry is what the engine reads, so this module is the one that lies, and it ' +
+        'lies the moment anything reads it.',
+    );
+    assert.equal(module.surface, surface, `${surface}.ts declares a different surface`);
   }
 });
 

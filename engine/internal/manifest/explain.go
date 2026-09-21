@@ -130,6 +130,22 @@ func Explain(m *schema.Manifest, width int) string {
 	d := m.Database
 	b.WriteString("Database\n")
 	fmt.Fprintf(&b, "  provider     %s, Postgres %d\n", d.Provider, d.Version)
+	// Only when one is named. A line saying "the stock image" on every
+	// manifest would be noise, and the reason this line exists at all is that
+	// a named image decides what extensions the golden can carry, which is not
+	// otherwise visible anywhere in this output.
+	if d.Image != "" {
+		fmt.Fprintf(&b, "  image        %s\n", value(d.Image+
+			", so the golden carries whatever that image carries rather than the contrib modules", 15, width))
+	}
+	if len(d.Extensions) > 0 {
+		fmt.Fprintf(&b, "  extensions   %s\n", value(strings.Join(d.Extensions, ", ")+
+			", created in the golden before the source is copied into it", 15, width))
+	}
+	if len(d.PreloadLibraries) > 0 {
+		fmt.Fprintf(&b, "  preloaded    %s\n", value(strings.Join(d.PreloadLibraries, ", ")+
+			", added to pg_stat_statements in shared_preload_libraries and never replacing it", 15, width))
+	}
 	fmt.Fprintf(&b, "  injected as  %s\n", value(d.URLEnv, 15, width))
 	if d.SourceURLEnv != "" {
 		fmt.Fprintf(&b, "  source from  %s\n", value(

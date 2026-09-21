@@ -1325,6 +1325,9 @@ func (o *Orchestrator) newDatabaseProvider(ctx context.Context) (provider.Databa
 	case schema.DBDocker:
 		p, err := dockerdb.New(dockerdb.Options{
 			Version: databaseVersion(m), Clock: o.opts.Clock, Getenv: o.opts.Getenv,
+			Image:            databaseImage(m),
+			Extensions:       databaseExtensions(m),
+			PreloadLibraries: databasePreloadLibraries(m),
 		})
 		if err != nil {
 			return nil, err
@@ -1606,6 +1609,37 @@ func databaseVersion(m *schema.Manifest) int {
 		return m.Database.Version
 	}
 	return 17
+}
+
+// databaseImage is the container image the docker provider runs Postgres from.
+//
+// Empty means the stock image built from the declared major, which is what
+// every manifest written before this key existed means. It is read here rather
+// than defaulted in the provider so that the one place that knows the manifest
+// is the one place that reads it.
+func databaseImage(m *schema.Manifest) string {
+	if m == nil || m.Database == nil {
+		return ""
+	}
+	return m.Database.Image
+}
+
+// databaseExtensions is what the manifest asks to be created in the golden
+// before the source is copied into it.
+func databaseExtensions(m *schema.Manifest) []string {
+	if m == nil || m.Database == nil {
+		return nil
+	}
+	return m.Database.Extensions
+}
+
+// databasePreloadLibraries is what the manifest asks the postmaster to load at
+// server start, beyond the statistics module the provider always preloads.
+func databasePreloadLibraries(m *schema.Manifest) []string {
+	if m == nil || m.Database == nil {
+		return nil
+	}
+	return m.Database.PreloadLibraries
 }
 
 // extensions is the registry this orchestrator consults.

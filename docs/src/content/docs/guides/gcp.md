@@ -327,3 +327,36 @@ the image rather than from a page about installing it. Its second clause is
 worth knowing: using the CLI against a Google Cloud product is additionally
 governed by that product's own terms. Nothing here reaches a Google Cloud
 product, because the emulator has no route out.
+
+## The emulators start empty, and what fills them
+
+The storage emulator keeps its backend in memory and the Pub/Sub emulator keeps
+nothing across a run, so a bucket, a topic or a subscription that exists in
+production exists nowhere in the twin until something puts it there. `af up`
+creates the resources production's infrastructure as code declares, inside the
+emulators, before any service starts, and it sends those requests through the
+environment's own sidecar at the provider's own hostname, so what is exercised
+is the route the application has.
+
+| Resource type | What is created |
+| --- | --- |
+| `google_storage_bucket` | the bucket, and versioning when it is declared |
+| `google_pubsub_topic` | the topic |
+| `google_pubsub_subscription` | the subscription, its topic and its acknowledgement deadline |
+
+Nothing is called reproduced until it has been read back out of the emulator.
+
+### The bucket location is not reproduced, and that was measured
+
+A bucket created asking for `EUROPE-WEST1` comes back from the storage emulator
+as `US-CENTRAL1`, with a `200` and no warning. The emulator accepts the field
+and does not hold it. So the location is reported as unmeasured with that
+reason, rather than passed over: a twin whose bucket claimed a region it does
+not have is the kind of quiet difference this product exists to prevent, and the
+first thing tested against it would be a latency or a residency assumption the
+twin cannot support.
+
+The storage class, a lifecycle rule, uniform bucket level access and a customer
+managed encryption key are reported the same way, each with what the emulator
+actually does. A subscription's push configuration, dead letter policy and retry
+policy are reported too: an emulator with no route out cannot deliver to a URL.

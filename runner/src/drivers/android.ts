@@ -32,8 +32,13 @@ import type { Locator, WebDriverSession } from './webdriver.ts';
 const run = promisify(execFile);
 
 export const android: SurfaceDriver = {
+  // false because no run has driven an application with this code end to end,
+  // not because the code is missing. `available` is a claim that a driver HAS
+  // BEEN DRIVEN, and the registry in driver.ts says the same thing; a test
+  // compares the two, because this declaration disagreeing with the registry
+  // is a claim nothing enforces until something reads this one.
   surface: 'android',
-  available: true,
+  available: false,
   summary:
     'Drives an Android app on an emulator or a connected device through its view hierarchy, ' +
     'with Appium\'s UiAutomator2 driver. Needs an Android SDK and an Appium server with the ' +
