@@ -1305,7 +1305,7 @@
       "area": "MSK",
       "areaName": "Masking and verification",
       "message": "Masking could not run: {detail}",
-      "resolution": "Run 'af mask plan' to see what was decided for each column.",
+      "resolution": "The detail names what stopped it, column by column wherever masking had a schema to read, and each of those problems carries its own remedy: give the column a rule that preserves it, or change the table so masking can address a row in it. 'af mask plan' prints the same decisions for every column at once, and it reads the schema of a branch, so it has one to read only once 'af up' has made it.",
       "docs": "https://antifailure.dev/docs/concepts/masking",
       "retryable": false,
       "exitCode": 3,
