@@ -99,7 +99,7 @@ Platforms: darwin/amd64, darwin/arm64, linux/amd64, linux/arm64.
 - `go.yaml.in/yaml/v2` v2.4.4, Apache-2.0 AND MIT
 - `go.yaml.in/yaml/v3` v3.0.5, MIT
 - `golang.org/x/crypto` v0.57.0, BSD-3-Clause
-- `golang.org/x/net` v0.58.0, BSD-3-Clause
+- `golang.org/x/net` v0.59.0, BSD-3-Clause
 - `golang.org/x/oauth2` v0.36.0, BSD-3-Clause
 - `golang.org/x/sync` v0.23.0, BSD-3-Clause
 - `golang.org/x/sys` v0.48.0, BSD-3-Clause
@@ -116,10 +116,10 @@ Platforms: darwin/amd64, darwin/arm64, linux/amd64, linux/arm64.
 - `k8s.io/klog/v2` v2.140.0, Apache-2.0
 - `k8s.io/kube-openapi` v0.0.0-20260721132016-d427ff9ee9ad, Apache-2.0
 - `k8s.io/utils` v0.0.0-20260626114624-be93311217bd, Apache-2.0
-- `modernc.org/libc` v1.75.6, BSD-3-Clause AND MIT
+- `modernc.org/libc` v1.75.7, BSD-3-Clause AND MIT
 - `modernc.org/mathutil` v1.7.1, BSD-3-Clause
 - `modernc.org/memory` v1.12.1, BSD-3-Clause
-- `modernc.org/sqlite` v1.58.0, BSD-3-Clause AND LicenseRef-SQLite-public-domain AND MIT
+- `modernc.org/sqlite` v1.59.0, BSD-3-Clause AND LicenseRef-SQLite-public-domain AND MIT
 - `sigs.k8s.io/json` v0.0.0-20250730193827-2d320260d730, Apache-2.0 AND BSD-3-Clause
 - `sigs.k8s.io/randfill` v1.0.0, Apache-2.0
 - `sigs.k8s.io/structured-merge-diff/v6` v6.4.2, Apache-2.0
