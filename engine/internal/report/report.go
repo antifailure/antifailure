@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/antifailure/antifailure/engine/internal/explore"
+	"github.com/antifailure/antifailure/engine/internal/pgcrash"
 )
 
 // Run is everything one pull request check produced.
@@ -1129,6 +1130,52 @@ type ChaosRecovery struct {
 	Verified bool
 }
 
+// readBackUnfinished is why nothing after the counts was asked: the proof
+// consults amcheck only once both scans of the writers' table have returned,
+// so an empty answer means the read back stopped first.
+const readBackUnfinished = "reading the writers' table back after the fault did not finish"
+
+// AmcheckPassed reports whether amcheck verified the index. Only the one
+// sentence pgcrash records for a pass counts; every other answer is the reason
+// it could not say so, including bt_index_check reporting a problem.
+func (rec *ChaosRecovery) AmcheckPassed() bool { return rec.Amcheck == pgcrash.AmcheckPassed }
+
+// AmcheckSays is what the index verifier said, in its own words, or that it
+// was never asked. Empty would read as nothing wrong.
+func (rec *ChaosRecovery) AmcheckSays() string {
+	if rec.Amcheck == "" {
+		return "did not run, because " + readBackUnfinished
+	}
+	return rec.Amcheck
+}
+
+// PagesSay says what this run established about torn pages, and only that.
+//
+// One function for the terminal and the pull request comment, because the two
+// used to be written separately and drifted: the terminal learned to say this
+// while the comment said nothing, and the comment called a failed amcheck a
+// pass while the terminal quoted it.
+//
+// A page torn by the crash is only DETECTED when data checksums are on: with
+// them off Postgres reads it back as data. So the claim is made only when all
+// three hold. The control file was read after the fault, because a checksum
+// version that was never read is not a zero. Checksums are on. And the read
+// back finished, which is what a non empty amcheck answer means, because the
+// proof asks amcheck only after it has counted the heap by sequential scan and
+// a checksum failure there would have stopped it first. The claim covers the
+// writers' table and nothing else, since that is all the proof reads.
+func (rec *ChaosRecovery) PagesSay() string {
+	switch {
+	case rec.StateAfter == "":
+		return "not checked, because the control file could not be read after the fault, so whether data checksums are on is unknown"
+	case !rec.ChecksumsOn:
+		return "not checked, because data checksums are off on this cluster and a torn page would read back as data"
+	case rec.Amcheck == "":
+		return "not checked, because " + readBackUnfinished
+	}
+	return "the writers' table read back in full with data checksums on, and no page of it failed its checksum. No other table was read."
+}
+
 // chaosSection renders what the faults did.
 func (r Run) chaosSection() string {
 	c := r.Chaos
@@ -1168,6 +1215,7 @@ func (r Run) chaosSection() string {
 		fmt.Fprintf(&b, "| Rows present that no client wrote | %d |\n", rec.Phantom)
 		fmt.Fprintf(&b, "| Commits in flight at the crash that landed | %d |\n", rec.InFlightLanded)
 		fmt.Fprintf(&b, "| Heap and index agree | %s |\n", agreeCell(rec))
+		fmt.Fprintf(&b, "| Torn pages in the writers' table | %s |\n", rec.PagesSay())
 		fmt.Fprintf(&b, "| Cluster state, before and after | %s, then %s |\n",
 			orUnknown(rec.StateBefore), orUnknown(rec.StateAfter))
 		fmt.Fprintf(&b, "| The database was unreachable for | %s |\n", millis(rec.DowntimeMs))
@@ -1195,15 +1243,25 @@ func replayCell(rec *ChaosRecovery) string {
 	return fmt.Sprintf("yes, from %s to %s", oneLine(rec.RedoStart), oneLine(rec.RedoEnd))
 }
 
-// agreeCell says whether the two independent counts matched.
+// agreeCell says whether the two independent counts matched, and whether
+// amcheck vouched for the index.
+//
+// "yes" only when amcheck PASSED. It used to be "yes" whenever amcheck had
+// answered anything at all, so an index amcheck could not verify, and one it
+// reported a problem in, read as a clean one on the page a reviewer reads
+// before merging. A count mismatch stays bold whatever amcheck said, because
+// two scans disagreeing is corruption on its own.
 func agreeCell(rec *ChaosRecovery) string {
-	if rec.Amcheck == "" {
-		return "not checked"
-	}
-	if rec.HeapRows != rec.IndexRows {
+	switch {
+	case rec.Amcheck == "":
+		return "not checked, because " + readBackUnfinished
+	case rec.HeapRows != rec.IndexRows:
 		return fmt.Sprintf("**no: the heap counted %d and the index counted %d**", rec.HeapRows, rec.IndexRows)
+	case !rec.AmcheckPassed():
+		return fmt.Sprintf("**not verified: both scans counted %d rows, and amcheck said: %s**",
+			rec.HeapRows, oneLine(rec.Amcheck))
 	}
-	return fmt.Sprintf("yes, %d rows both ways", rec.HeapRows)
+	return fmt.Sprintf("yes, %d rows both ways, and amcheck found every row in the index", rec.HeapRows)
 }
 
 // orUnknown is a cluster state, or a word for not having read one.

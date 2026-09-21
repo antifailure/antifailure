@@ -72,7 +72,7 @@ func checkRelations(ctx context.Context, opts Options) Relations {
 	// amcheck returning anything other than the word it prints on success
 	// means it was not asked, which is an unverified run rather than a clean
 	// one. Checked stays false and Why carries what happened.
-	if rel.Amcheck != amcheckPassed {
+	if rel.Amcheck != AmcheckPassed {
 		return Relations{HeapRows: rel.HeapRows, IndexRows: rel.IndexRows, Amcheck: rel.Amcheck,
 			Why: "amcheck could not verify the index: " + rel.Amcheck}
 	}
@@ -81,9 +81,11 @@ func checkRelations(ctx context.Context, opts Options) Relations {
 	return rel
 }
 
-// amcheckPassed is what this package records when bt_index_check returned
-// without raising.
-const amcheckPassed = "the index verified, with every heap tuple present in it"
+// AmcheckPassed is what this package records when bt_index_check returned
+// without raising. Exported because it is the ONLY value of Relations.Amcheck
+// that is a pass, and a renderer that treats any non empty answer as one
+// shows "bt_index_check reported a problem" as a clean index.
+const AmcheckPassed = "the index verified, with every heap tuple present in it"
 
 // amcheck asks amcheck to verify the table's primary key index against its
 // heap.
@@ -110,7 +112,7 @@ func amcheck(ctx context.Context, conn *pgx.Conn, wl WorkloadOptions) string {
 	if _, err := conn.Exec(ctx, fmt.Sprintf("SELECT bt_index_check(%s::regclass, true)", pgLiteral(index))); err != nil {
 		return "bt_index_check reported a problem: " + err.Error()
 	}
-	return amcheckPassed
+	return AmcheckPassed
 }
 
 // pgLiteral quotes a value as a SQL string literal.
