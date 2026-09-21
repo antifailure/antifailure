@@ -22818,7 +22818,7 @@ Verification found data matching {detector} in {table}.{column}.
 
 Masking could not run: {detail}
 
-**What to do.** Run 'af mask plan' to see what was decided for each column.
+**What to do.** The detail names what stopped it, column by column wherever masking had a schema to read, and each of those problems carries its own remedy: give the column a rule that preserves it, or change the table so masking can address a row in it. 'af mask plan' prints the same decisions for every column at once, and it reads the schema of a branch, so it has one to read only once 'af up' has made it.
 
 | | |
 | --- | --- |
