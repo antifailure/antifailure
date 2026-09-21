@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -8,6 +9,7 @@ import (
 
 	"github.com/antifailure/antifailure/engine/internal/env"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
+	"github.com/antifailure/antifailure/engine/pkg/provider"
 )
 
 // LogLineJSON is one line of service output.
@@ -38,53 +40,66 @@ this is the command people paste into issues.`),
 			if err != nil {
 				return err
 			}
-			lines, err := o.Logs(cmd.Context(), service, tail)
-			if err != nil {
-				return err
-			}
-
-			if env.Out.Format == FormatJSON {
-				docs := make([]LogLineJSON, 0, len(lines))
-				for _, l := range lines {
-					docs = append(docs, LogLineJSON{Service: l.Service, Text: l.Text})
-				}
-				return env.Out.JSON(docs)
-			}
-			if len(lines) == 0 {
-				// Only asked when there is nothing to show, because it is the
-				// only case where the answer changes what is printed.
-				res, statusErr := o.Status(cmd.Context())
-				emptyLogs(env.Out, service, res, statusErr)
-				return nil
-			}
-
-			// The service name is printed only when there is more than one, so
-			// reading one service's output is not a column of the same word.
-			names := map[string]bool{}
-			for _, l := range lines {
-				names[l.Service] = true
-			}
-			width := 0
-			if len(names) > 1 {
-				for n := range names {
-					if len(n) > width {
-						width = len(n)
-					}
-				}
-			}
-			for _, l := range lines {
-				if width == 0 {
-					env.Out.Printf("%s\n", l.Text)
-					continue
-				}
-				env.Out.Printf("%s  %s\n", env.Out.S(StyleDim, pad(l.Service, width)), l.Text)
-			}
-			return nil
+			return showLogs(cmd.Context(), env.Out, o, service, tail)
 		},
 	}
 	cmd.Flags().IntVar(&tail, "tail", 200, "How many lines to show per service")
 	cmd.Flags().StringVar(&branch, "branch", "", "Branch to read, defaulting to the checked out one")
 	return cmd
+}
+
+// logSource is what af logs reads from. The orchestrator in the command, and a
+// fake in the tests, so the decision about what an empty answer means is
+// exercised through the same function the command runs.
+type logSource interface {
+	Logs(ctx context.Context, service string, tail int) ([]provider.LogLine, error)
+	Status(ctx context.Context) (*env.Result, error)
+}
+
+// showLogs reads and prints one answer to af logs.
+func showLogs(ctx context.Context, out *Output, src logSource, service string, tail int) error {
+	lines, err := src.Logs(ctx, service, tail)
+	if err != nil {
+		return err
+	}
+
+	if out.Format == FormatJSON {
+		docs := make([]LogLineJSON, 0, len(lines))
+		for _, l := range lines {
+			docs = append(docs, LogLineJSON{Service: l.Service, Text: l.Text})
+		}
+		return out.JSON(docs)
+	}
+	if len(lines) == 0 {
+		// Only asked when there is nothing to show, because it is the
+		// only case where the answer changes what is printed.
+		res, statusErr := src.Status(ctx)
+		emptyLogs(out, service, res, statusErr)
+		return nil
+	}
+
+	// The service name is printed only when there is more than one, so
+	// reading one service's output is not a column of the same word.
+	names := map[string]bool{}
+	for _, l := range lines {
+		names[l.Service] = true
+	}
+	width := 0
+	if len(names) > 1 {
+		for n := range names {
+			if len(n) > width {
+				width = len(n)
+			}
+		}
+	}
+	for _, l := range lines {
+		if width == 0 {
+			out.Printf("%s\n", l.Text)
+			continue
+		}
+		out.Printf("%s  %s\n", out.S(StyleDim, pad(l.Service, width)), l.Text)
+	}
+	return nil
 }
 
 // emptyLogs says why there is no output, and offers a remedy only when running
