@@ -243,7 +243,7 @@ func chaosMetrics(run *env.ChaosRun) []Metric {
 	zero := 0.0
 	injected, undone, refused, leftInPlace := 0, 0, 0, 0
 	var acknowledged, lost, phantom, inFlight, proofs int
-	var downtime int64
+	var longestOutage int64
 	for _, f := range run.Report.Faults {
 		switch {
 		case f.Error != "":
@@ -265,7 +265,9 @@ func chaosMetrics(run *env.ChaosRun) []Metric {
 		lost += f.Recovery.Lost
 		phantom += f.Recovery.Phantom
 		inFlight += f.Recovery.InFlightLanded
-		downtime += f.Recovery.DowntimeMs
+		if f.Recovery.DowntimeMs > longestOutage {
+			longestOutage = f.Recovery.DowntimeMs
+		}
 	}
 
 	metrics := []Metric{
@@ -302,7 +304,20 @@ func chaosMetrics(run *env.ChaosRun) []Metric {
 			Threshold: &zero, Breached: phantom > 0,
 		},
 		Metric{Name: "commits_in_flight_that_landed", Value: float64(inFlight), Unit: "commits"},
-		Metric{Name: "database_unreachable", Value: float64(downtime), Unit: "ms"},
+		// The LONGEST single outage, never the sum of them.
+		//
+		// The faults run one at a time and each is undone before the next
+		// begins, so their outages are separate events. Adding them produces a
+		// number that is arithmetically true and describes an outage that never
+		// happened: 4000 reads as one four second gap when it was two gaps of
+		// two seconds, and those are different facts about a system. It is the
+		// same defect as reporting zero commits lost for a proof that never
+		// ran, which this file is careful not to do, and it was found in review
+		// by lane-chaos rather than by any test here.
+		//
+		// A caller that wants the total can add the per fault numbers, which
+		// the detail carries. A caller handed a total cannot recover the parts.
+		Metric{Name: "longest_database_outage", Value: float64(longestOutage), Unit: "ms"},
 	)
 }
 

@@ -25035,6 +25035,14 @@ A project that declares no ` + "`" + `chaos` + "`" + ` block, declares one that 
 with no faults, or asks for a runtime other than the local one is
 ` + "`" + `INCONCLUSIVE` + "`" + ` rather than a pass over a proof that did not happen.
 
+The outage figure is the **longest single** one, never the sum. The faults run
+one at a time and each is undone before the next begins, so their outages are
+separate events, and adding them would describe an outage that never happened:
+4000 reads as one four second gap when it was two gaps of two seconds. The per
+fault numbers are in the detail, so a caller that wants a total can add them.
+The commit counts beside it ARE summed, because a commit lost under either
+fault is a commit lost.
+
 ### ` + "`" + `run_browser_workflows` + "`" + `
 
 Drives the manifest's declared workflows, the browser ones through a real

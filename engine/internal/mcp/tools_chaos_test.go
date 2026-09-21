@@ -251,8 +251,58 @@ func TestChaosMetrics_CarryWhatTheDatabasePromisedAndWhatItKept(t *testing.T) {
 	require.Equal(t, 5000.0, values["commits_acknowledged"])
 	require.Equal(t, 0.0, values["commits_lost"])
 	require.False(t, breached["commits_lost"])
-	require.Equal(t, 1800.0, values["database_unreachable"])
+	require.Equal(t, 1800.0, values["longest_database_outage"])
 	require.Equal(t, 1.0, values["durability_proofs_run"])
+
+	// Two faults, two separate outages. The faults run one at a time and each
+	// is undone before the next begins, so adding them describes an outage that
+	// never happened: 2600 would read as one gap when it was 1800 and then 800.
+	// Reported by lane-chaos in review, and it is the same defect as a zero in
+	// a field nobody measured, which this file is careful about elsewhere.
+	two := chaosRun()
+	// The FIRST fault carries numbers too. Without that, summing and taking
+	// the last value give the same answer and the mutation that replaces one
+	// with the other survives: a fixture where every other element is zero
+	// cannot tell an accumulator from an assignment.
+	two.Report.Faults[0].Recovery.Lost = 1
+	two.Report.Faults[0].Recovery.Phantom = 1
+	second := report.ChaosFault{
+		Name: "stop the database", Injected: true, Undone: true,
+		Recovery: &report.ChaosRecovery{
+			Verified: true, DowntimeMs: 800, Acknowledged: 10,
+			Lost: 3, Phantom: 2, InFlightLanded: 4,
+		},
+	}
+	two.Report.Faults = append(two.Report.Faults, second)
+	twoValues, _ := metricsByName(chaosMetrics(two))
+	require.Equal(t, 1800.0, twoValues["longest_database_outage"],
+		"the longest single outage, never the sum of two that never overlapped")
+	require.Equal(t, 2.0, twoValues["durability_proofs_run"])
+	// The counts ARE summed, and that is correct: a commit lost under the
+	// first fault and one lost under the second are two commits lost, which is
+	// a real quantity. A duration is not a count.
+	require.Equal(t, 5010.0, twoValues["commits_acknowledged"])
+	require.Equal(t, 4.0, twoValues["commits_lost"], "a commit lost under either fault is a commit lost")
+	require.Equal(t, 3.0, twoValues["rows_phantom"])
+	require.Equal(t, 7.0, twoValues["commits_in_flight_that_landed"])
+
+	// And the longest is read from whichever fault carries it, not from the
+	// first or the last.
+	later := chaosRun()
+	later.Report.Faults[0].Recovery.DowntimeMs = 300
+	later.Report.Faults = append(later.Report.Faults, second)
+	laterValues, _ := metricsByName(chaosMetrics(later))
+	require.Equal(t, 800.0, laterValues["longest_database_outage"])
+
+	// The SUMMARY aggregates the same counts in its own function, and a
+	// mutation there survived until this assertion existed: it was only ever
+	// read on a one fault run, where summing and taking the last value are the
+	// same. The same coverage gap that hid the summed downtime.
+	summary := chaosSummary(two, false, true, report.VerdictFail, "")
+	require.Contains(t, summary, "Across 2 durability proofs")
+	require.Contains(t, summary, "5010 commits were acknowledged")
+	require.Contains(t, summary, "4 of them are gone")
+	require.Contains(t, summary, "3 rows are present that no client wrote")
 
 	// A lost commit and a phantom row are the two that decide whether the
 	// database kept its word, and both breach a limit of zero.
