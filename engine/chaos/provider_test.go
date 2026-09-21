@@ -126,6 +126,15 @@ func refreshGolden(t *testing.T, p *dockerdb.Provider, rules string) provider.Go
 	return provider.GoldenVersion{}
 }
 
+// A branch interrupted part way through is either gone or in the inventory.
+//
+// RUNNING THIS ONE ALONE EXITS 1 EVEN WHEN IT PASSES, and that is this
+// package's roster working rather than a failure. `go test -run` leaves every
+// other scenario unrun, the roster in main_test.go exists precisely so a
+// package that proved less than `ok` implies says so, and it therefore fails
+// the package. The verdict for this scenario is its own `--- PASS` line, never
+// the exit code. Twelve consecutive runs of it read exit 1 while passing, and
+// reading the exit code would have inverted every one of them.
 func TestABranchInterruptedPartWayThroughIsEitherGoneOrInTheInventory(t *testing.T) {
 	scenario(t)
 	p := newDockerProvider(t)
@@ -142,8 +151,52 @@ func TestABranchInterruptedPartWayThroughIsEitherGoneOrInTheInventory(t *testing
 	defer cancel()
 
 	const envID = "chaosinterrupted01"
+	// The cleanup ASSERTS rather than discards, and that is the whole of this
+	// change. It does not fix a leak and must not be read as having fixed one.
+	//
+	// On 2026-09-21 CI reported `af-db-chaosinterrupted01` surviving this
+	// scenario, from #537's engine job at the step that looks for what a run
+	// left behind. It is INTERMITTENT: the same code passed that step on other
+	// runs, and a passing run is not evidence of absence, only evidence that
+	// that run was luckier or quieter. Twelve local runs at two load levels,
+	// six between load 6 and 10 and six between load 27 and 59, leaked nothing
+	// and all twelve took the same third branch below, so neither the branch
+	// that succeeds despite the interruption nor the branch that leaves
+	// something reported ran even once. Load is not the variable that reaches
+	// the case CI hit.
+	//
+	// With the error thrown away, a Destroy that FAILED was indistinguishable
+	// from one that worked, so the scenario passed and the leak surfaced
+	// somewhere else entirely: as a red on the next lane's pull request, at a
+	// step with no reason to name chaos. The fact that would have identified
+	// the cause was produced here and discarded here.
+	//
+	// The two mechanisms that survive the reading, for whoever gets the next
+	// occurrence with this assertion in place:
+	//
+	//   A. Provider.remove treats a daemon error containing "already in
+	//      progress" as success. That is a removal that has STARTED, not one
+	//      that has finished, so Destroy returns nil and the leak detector can
+	//      snapshot the daemon mid flight. It would leak on a busy host and not
+	//      on a quiet one, which is the signature, and it lives in production
+	//      code rather than in anything this test asserts.
+	//   B. Provider.Branch's ContainerCreate cancelled after the daemon made
+	//      the container but before the response arrived leaves no identifier
+	//      for the rollback to use. Timing argues against it: the cancel below
+	//      fires at 1500ms and waitReady polls for far longer, so the code is
+	//      almost certainly past create, with a container that carries its
+	//      labels and is reachable by the deterministic name.
+	//
+	// A failure here distinguishes them. Under A, Destroy returns nil and this
+	// assertion still passes while the container outlives the process, so a
+	// green here with a red leak detector is evidence FOR A. Under a Destroy
+	// that genuinely cannot remove it, this fails and names the error.
 	t.Cleanup(func() {
-		_ = p.Destroy(context.Background(), provider.Branch{EnvID: envID})
+		// context.Background rather than the test's, because a test that has
+		// already failed or timed out must still clean up after itself.
+		require.NoError(t, p.Destroy(context.Background(), provider.Branch{EnvID: envID}),
+			"the interrupted branch could not be destroyed, so whatever it left is now "+
+				"somebody else's leak detector failure on an unrelated pull request")
 	})
 
 	// Long enough that the provider is past its entry check and into creating
