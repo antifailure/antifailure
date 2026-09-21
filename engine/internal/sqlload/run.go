@@ -572,7 +572,25 @@ func executeOnce(ctx context.Context, c clock.Clock, conn *pgx.Conn, tx Transact
 		started := c.Now()
 		tag, err := dbTx.Exec(ctx, st.SQL, args...)
 		if err != nil {
-			m.statementFailed(tx.Name, st.Label)
+			// The run ending is not the statement failing, and the check is
+			// here because runTransaction already makes exactly this decision
+			// one level up: a transaction interrupted by the caller or by the
+			// duration running out is not counted as a failed transaction.
+			// Only the statement layer counted it anyway, and the two
+			// disagreeing is worse than either answer on its own.
+			//
+			// Measured against a real database rather than reasoned about. A
+			// ten second declared run of a healthy read mix committed 5416
+			// transactions, reported 0 failed and 0 retried, and printed 5
+			// errors against a read that had just run 3640 times and returned
+			// a row every time: the five clients that were mid statement when
+			// the duration expired. A reader given that table goes looking for
+			// a query that never failed, and the summary line above it says
+			// nothing is wrong, so the table is the only thing they have to go
+			// on and it is the thing that is lying.
+			if ctx.Err() == nil {
+				m.statementFailed(tx.Name, st.Label)
+			}
 			// Rolled back on a context the caller cannot cancel, so a
 			// transaction that failed at the moment the run was stopped still
 			// releases its locks rather than leaving them for the server to
