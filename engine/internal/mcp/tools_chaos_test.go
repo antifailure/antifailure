@@ -272,6 +272,55 @@ func TestChaosMetrics_AFaultThatWouldNotGoInAndOneThatWouldNotComeOut(t *testing
 	require.False(t, cleanBreached["faults_left_in_place"])
 }
 
+func TestChaosSummary_ARefusalAsUnsafeDoesNotDiscreditTheProofAfterIt(t *testing.T) {
+	t.Parallel()
+	// The run that was filmed: a disk fill refused as unsafe, then a crash
+	// proof that held. The summary said a refused fault means nothing measured
+	// after it says anything, which tells a model to throw the proof away.
+	run := chaosRun()
+	run.Report.Faults = append([]report.ChaosFault{{
+		Name: "fill-the-data-volume", Kind: "disk_fill", Target: "database",
+		Error: "AF-CHS-005: it shares a filesystem with its parent", Refused: true,
+	}}, run.Report.Faults...)
+
+	got := chaosSummary(run, true, false, report.VerdictUnverified, "")
+	require.NotContains(t, got, "nothing measured after it",
+		"a refusal that touched nothing still discredits the faults that ran after it")
+	require.Contains(t, got, "refused as unsafe before touching anything")
+	require.Contains(t, got, "changed nothing the other faults measured")
+	require.Contains(t, got, "2 declared faults: 1 injected and undone, 1 refused.")
+
+	// The case the old sentence was written for keeps it, or the split above
+	// would pass by deleting the sentence everywhere.
+	failed := chaosRun()
+	failed.Report.Faults = append(failed.Report.Faults,
+		report.ChaosFault{Name: "freeze the api", Error: "AF-CHS-003: no such container"})
+	require.Contains(t, chaosSummary(failed, true, false, report.VerdictUnverified, ""),
+		"nothing measured after it says anything")
+}
+
+func TestChaosMetrics_AnUndoThatFailedIsLeftInPlaceNotRefused(t *testing.T) {
+	t.Parallel()
+	// An undo that failed carries an Error, and counting Error first called a
+	// fault still applied to the environment "refused", the opposite fact.
+	run := chaosRun()
+	run.Report.Faults = append(run.Report.Faults, report.ChaosFault{
+		Name: "stop the queue", Injected: true, Undone: false,
+		Error: "AF-CHS-003: the undo could not start the container",
+	})
+	values, breached := metricsByName(chaosMetrics(run))
+	require.Equal(t, 0.0, values["faults_refused"],
+		"a fault that went in and did not come out was counted as one that never went in")
+	require.Equal(t, 1.0, values["faults_left_in_place"])
+	require.True(t, breached["faults_left_in_place"])
+	require.Equal(t, 2.0, values["faults_injected"])
+
+	summary := chaosSummary(run, true, false, report.VerdictUnverified, "")
+	require.Contains(t, summary, "1 injected and undone, 0 refused.",
+		"the summary counted a fault still applied as injected and undone, or as refused")
+	require.Contains(t, summary, "still broken")
+}
+
 func TestChaosMetrics_CarryWhatTheDatabasePromisedAndWhatItKept(t *testing.T) {
 	t.Parallel()
 	run := chaosRun()

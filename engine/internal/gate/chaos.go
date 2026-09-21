@@ -14,7 +14,7 @@ import "github.com/antifailure/antifailure/engine/internal/report"
 // model believed. The package comment above already says so about the migration
 // evaluator, which made the same move for the same reason.
 //
-// The two rule names are here rather than in engine/internal/env for the same
+// The rule names are here rather than in engine/internal/env for the same
 // reason the classification is: they are the vocabulary the classification is
 // written in, and a name that lives beside its only producer is a name the
 // reader of a finding has to import the producer to recognise. env aliases
@@ -23,6 +23,13 @@ const (
 	// RuleFaultRefused is a fault that would not go in. Nothing measured after
 	// it means anything, because the system under test never broke.
 	RuleFaultRefused = "chaos.fault.refused"
+	// RuleFaultUnsafe is a fault the injector turned down BEFORE it acted,
+	// because its effect would have reached past this environment. What it was
+	// declared to establish was not established, which is why it is a rule the
+	// run could not look at. Nothing else in the run is touched by it, which
+	// is why it is not RuleFaultRefused: that rule's sentence invalidates what
+	// came after, and a refusal leaves the environment exactly as it was.
+	RuleFaultUnsafe = "chaos.fault.unsafe"
 	// RuleFaultNotUndone is a fault that would not come out. The environment
 	// is still broken, so whatever ran next was measured against it.
 	RuleFaultNotUndone = "chaos.fault.not_undone"
@@ -47,7 +54,7 @@ func ChaosUnverified(rule string) bool {
 	case "chaos.recovery.no_crash", "chaos.recovery.no_replay",
 		"chaos.recovery.control_unreadable", "chaos.integrity.amcheck_unavailable",
 		"chaos.integrity.checksums_off", "chaos.durability.inconsistent_ledger",
-		RuleFaultRefused, RuleFaultNotUndone:
+		RuleFaultRefused, RuleFaultUnsafe, RuleFaultNotUndone:
 		return true
 	}
 	return false

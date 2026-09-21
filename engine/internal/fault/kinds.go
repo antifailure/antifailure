@@ -246,8 +246,14 @@ func (i *Injector) readOnlyData(ctx context.Context, c Container, f Fault) (stri
 		_ = undo(context.WithoutCancel(ctx))
 		return "", nil, codedExec(f, c, err.Error())
 	} else if !refused {
+		// AF-CHS-004, not AF-CHS-005. The mode WAS changed and then put back,
+		// so this fault acted and changed nothing, which is exactly what 004
+		// says. 005 means refused BEFORE acting because the effect would reach
+		// past the target, and a reader of a chaos run relies on that code
+		// meaning one thing: it is what tells a refusal that left the
+		// environment untouched from a fault that went in.
 		_ = undo(context.WithoutCancel(ctx))
-		return "", nil, aferrors.Coded(aferrors.AFCHS005,
+		return "", nil, aferrors.Coded(aferrors.AFCHS004,
 			"fault", f.Name, "target", name(c), "path", dir,
 			"detail", "a write into it by its owner "+owner+" still succeeds after the mode was changed to "+
 				strings.TrimSpace(after)+", so this fault would change nothing. A directory owned by root cannot be "+

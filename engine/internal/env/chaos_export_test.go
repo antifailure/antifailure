@@ -22,3 +22,7 @@ func WantsCrashProofForTest(f schema.Fault, cr *schema.CrashRecovery) bool {
 }
 
 func RecoveryOfForTest(res pgcrash.Result) *report.ChaosRecovery { return recoveryOf(res) }
+
+// RefusedAsUnsafeForTest is the one decision that sorts a refusal from a
+// failure, and it is only reachable through a live injector otherwise.
+func RefusedAsUnsafeForTest(err error) bool { return refusedAsUnsafe(err) }

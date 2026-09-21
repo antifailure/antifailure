@@ -46,9 +46,10 @@ func TestEveryChaosRuleIsClassifiedAsFoundOrNotLookedAt(t *testing.T) {
 		require.Equalf(t, couldNotLook[rule], gate.ChaosUnverified(rule),
 			"the gate classifies %q differently from this test", rule)
 	}
-	// The two rules the env package owns are about the fault rather than the
-	// recovery, and both mean the run could not look.
-	for _, rule := range []string{env.RuleFaultRefused, env.RuleFaultNotUndone} {
+	// The three rules the env package owns are about the fault rather than
+	// the recovery, and all three mean the run could not look at what that
+	// fault was declared to establish.
+	for _, rule := range []string{env.RuleFaultRefused, env.RuleFaultUnsafe, env.RuleFaultNotUndone} {
 		require.Truef(t, gate.ChaosUnverified(rule), "%q is not classified", rule)
 	}
 }

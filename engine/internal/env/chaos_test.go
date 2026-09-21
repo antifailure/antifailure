@@ -1,12 +1,14 @@
 package env_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/env"
+	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/fault"
 	"github.com/antifailure/antifailure/engine/internal/pgcrash"
 	"github.com/antifailure/antifailure/engine/internal/report"
@@ -67,6 +69,106 @@ func TestChaosFindings_AFaultThatWouldNotGoInIsNotAPass(t *testing.T) {
 	require.Contains(t, got[0].Detail, "Nothing measured after it means anything")
 	require.Contains(t, got[0].Detail, "no process in the container matches",
 		"the finding does not carry what the container said, so a reader cannot fix it")
+}
+
+func TestChaosFindings_AFaultRefusedAsUnsafeDoesNotReachPastItself(t *testing.T) {
+	// Filmed live: a disk fill refused as unsafe, then a crash proof that ran
+	// AFTER it and proved every acknowledged commit survived, then a finding
+	// telling the reader that nothing measured after the refusal meant
+	// anything. The refusal is decided before the fault acts, so it touched
+	// nothing, and the one thing its finding must not do is discredit the
+	// faults that ran against the environment it left alone.
+	const said = "AF-CHS-005: The fault fill-the-data-volume is refused because its effect " +
+		"would reach past af-db-ledger: it shares a filesystem with its parent"
+	got := env.ChaosFindings(
+		report.ChaosFault{Name: "fill-the-data-volume", Error: said, Refused: true},
+		nil, gate(),
+	)
+	require.Len(t, got, 1)
+	require.Equal(t, env.RuleFaultUnsafe, got[0].Rule,
+		"a refusal was reported under the rule whose sentence invalidates what came after it")
+	require.NotContains(t, got[0].Detail, "Nothing measured after it means anything",
+		"the finding still tells a reader the rest of the run is worthless")
+	require.Contains(t, got[0].Detail, "changed nothing the other faults in this run measured",
+		"the finding does not say the other faults' results stand, which is the fact a reader needs")
+	require.Contains(t, got[0].Detail, "was not established",
+		"the finding no longer says the declared claim went unestablished, so it reads as a pass")
+	require.Contains(t, got[0].Detail, "shares a filesystem with its parent",
+		"the finding does not carry the refusal, so a reader cannot see what to change")
+	// Still unverified, on purpose: the manifest declared a claim and it was
+	// not established. Lowering this is reporting that as nothing to see.
+	require.Equal(t, report.LevelWarn, got[0].Level)
+}
+
+func TestChaosFindings_AnUndoThatFailedIsLeftInPlaceNotRefused(t *testing.T) {
+	// An undo that fails puts its error in Error, the same field a fault that
+	// never went in uses. Reading Error first reported this fault, which is
+	// STILL APPLIED to the environment, as one that "was not applied", and the
+	// finding that says to tear the environment down never fired.
+	got := env.ChaosFindings(
+		report.ChaosFault{
+			Name: "node-down", Injected: true, Undone: false,
+			Error: "AF-CHS-003: the undo could not start the container",
+		},
+		nil, gate(),
+	)
+	require.Len(t, got, 1)
+	require.Equal(t, env.RuleFaultNotUndone, got[0].Rule,
+		"a fault still applied to the environment was reported as one that never went in")
+	require.Contains(t, got[0].Detail, "its undo failed")
+	require.Contains(t, got[0].Detail, "could not start the container",
+		"the finding dropped why the undo failed")
+	require.NotContains(t, got[0].Detail, "was not applied")
+}
+
+func TestChaosFindings_TheErrorEndsItsSentenceBeforeTheNextOneStarts(t *testing.T) {
+	// Filmed on the centrepiece frame: "...every other container on this
+	// machine with it It was turned down by the guard". The catalog's
+	// messages carry no closing punctuation and every branch below joins a
+	// sentence onto one, so each is checked with an error that ends bare, the
+	// shape the real one has, and with one that already ends a sentence, so
+	// the fix cannot double the full stop.
+	const bare = "AF-CHS-005: filling it would fill every other container on this machine with it"
+	const done = "AF-CHS-003: the daemon said no."
+	cases := []struct {
+		name  string
+		fault report.ChaosFault
+		next  string
+	}{
+		{"refused as unsafe", report.ChaosFault{Name: "f", Refused: true}, " It was turned down"},
+		{"could not be injected", report.ChaosFault{Name: "f"}, " Nothing measured after it"},
+	}
+	for _, tc := range cases {
+		for _, said := range []string{bare, done} {
+			f := tc.fault
+			f.Error = said
+			got := env.ChaosFindings(f, nil, gate())
+			require.Len(t, got, 1, tc.name)
+			stem := strings.TrimSuffix(said, ".")
+			require.Contains(t, got[0].Detail, stem+"."+tc.next,
+				"%s: the error runs straight on into the next sentence", tc.name)
+			require.NotContains(t, got[0].Detail, "..", "%s: the full stop was doubled", tc.name)
+		}
+	}
+	// And the one that ends on the error, which a reader sees last.
+	got := env.ChaosFindings(report.ChaosFault{Name: "f", Injected: true, Error: bare}, nil, gate())
+	require.True(t, strings.HasSuffix(got[0].Detail, "with it."), "the left in place detail ends mid sentence: %q", got[0].Detail)
+}
+
+func TestRefusedAsUnsafe_ReadsTheCodeNotTheSentence(t *testing.T) {
+	// The injector's refusal, wrapped the way the injector wraps it, is a
+	// refusal. A failure to inject, which also mentions refusing in plenty of
+	// daemon messages, is not. Keyed on the catalog code so rewording either
+	// sentence cannot move a fault across the line.
+	refusal := aferrors.WithOp(aferrors.Coded(aferrors.AFCHS005,
+		"fault", "fill", "target", "db", "detail", "it shares a filesystem"), "inject")
+	require.True(t, env.RefusedAsUnsafeForTest(refusal))
+
+	failure := aferrors.Coded(aferrors.AFCHS003,
+		"fault", "fill", "target", "db", "detail", "connection refused")
+	require.False(t, env.RefusedAsUnsafeForTest(failure),
+		"a fault that tried to go in and failed was read as one refused before it acted")
+	require.False(t, env.RefusedAsUnsafeForTest(nil))
 }
 
 func TestChaosFindings_AFaultLeftInPlaceIsReported(t *testing.T) {

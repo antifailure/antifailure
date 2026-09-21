@@ -245,11 +245,14 @@ func chaosMetrics(run *env.ChaosRun) []Metric {
 	var acknowledged, lost, phantom, inFlight, proofs int
 	var longestOutage int64
 	for _, f := range run.Report.Faults {
+		// Injected first. A fault whose undo failed carries an Error too, and
+		// counting Error first called a fault still applied to the environment
+		// "refused", which is the opposite fact.
 		switch {
-		case f.Error != "":
-			refused++
 		case f.Injected:
 			injected++
+		case f.Error != "":
+			refused++
 		}
 		if f.Undone {
 			undone++
@@ -274,9 +277,11 @@ func chaosMetrics(run *env.ChaosRun) []Metric {
 		{Name: "faults_declared", Value: float64(len(run.Report.Faults)), Unit: "faults"},
 		{Name: "faults_injected", Value: float64(injected), Unit: "faults"},
 		{Name: "faults_undone", Value: float64(undone), Unit: "faults"},
-		// Reported always, including as zero. A fault that would not go in
-		// means everything measured after it was measured on a system that
-		// never broke, and the injected count alone cannot show it.
+		// Reported always, including as zero. A fault that did not go in is
+		// a declared claim that was not established, and the injected count
+		// alone cannot show it. It is NOT a statement about the other faults:
+		// one refused as unsafe never touched the environment, so what the
+		// others measured stands. The summary says which kind it was.
 		{
 			Name: "faults_refused", Value: float64(refused), Unit: "faults",
 			Threshold: &zero, Breached: refused > 0,
@@ -495,22 +500,32 @@ func chaosSummary(
 	if run.Report.Skipped != "" {
 		fmt.Fprintf(&b, "No fault was injected: %s. ", neutralize(run.Report.Skipped, 200))
 	} else {
-		injected, refused, leftInPlace := 0, 0, 0
+		injected, unsafe, failed, leftInPlace := 0, 0, 0, 0
 		for _, f := range run.Report.Faults {
 			switch {
-			case f.Error != "":
-				refused++
-			case f.Injected:
+			case f.Injected && f.Undone:
 				injected++
-			}
-			if f.Injected && !f.Undone {
+			case f.Injected:
 				leftInPlace++
+			case f.Refused:
+				unsafe++
+			case f.Error != "":
+				failed++
 			}
 		}
 		fmt.Fprintf(&b, "%d declared %s: %d injected and undone, %d refused. ",
 			len(run.Report.Faults), plural(len(run.Report.Faults), "fault", "faults"),
-			injected, refused)
-		if refused > 0 {
+			injected, unsafe+failed)
+		// Two different sentences for two different facts. A refusal as
+		// unsafe is decided before the fault acts, so the environment was
+		// never touched and the other faults' results stand; saying otherwise
+		// told a model to discard a durability proof that ran after it.
+		if unsafe > 0 {
+			fmt.Fprintf(&b, "%d %s refused as unsafe before touching anything, so what it was "+
+				"declared to establish was not established, and it changed nothing the other faults "+
+				"measured. ", unsafe, plural(unsafe, "fault was", "faults were"))
+		}
+		if failed > 0 {
 			b.WriteString("A fault that would not go in means nothing measured after it " +
 				"says anything, because the system never broke. ")
 		}
