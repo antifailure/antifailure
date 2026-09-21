@@ -106,6 +106,83 @@ test('a page with no status yet (nothing has navigated) falls through to the tex
   assert.equal(result.cause, 'page-unreadable');
 });
 
+// The report's table cell, and the reason this number is written down here.
+//
+// `oneLine` in engine/internal/report/report.go caps a workflow row's detail at
+// 120 characters and appends an ellipsis. Everything past it reaches nobody:
+// the full text survives only on the `Got:` line inside a collapsed details
+// block, which is where somebody looks once they already suspect something.
+// This is the runner's half of that contract, and report_test.go's
+// TestMarkdown_ACellCapKeepsALeadingQuotedName is the engine's half, which
+// pins the number so this one cannot be written against a cap that moved.
+const CELL = 120;
+
+/** The planner's sentence, which used to lead the detail and is 183 characters
+ *  on its own, so nothing behind it survived the cell. */
+const STUCK = 'Nothing on this page moves the workflow forward. It offers nothing at all. '
+  + 'The runner not knowing what to press is not evidence about the application, '
+  + 'so it is not counted against it.';
+
+const readablePage: Snapshot = {
+  url: 'http://127.0.0.1:46000/orders', title: 'orders', fields: [], controls: [],
+  submits: [], unnamed: 0, status: 200, text: '[]',
+};
+
+// THE FAILURE THIS CLOSES. An expectation that could never match any page was
+// named at character 295 of a 489 character detail, behind a cap of 120, so the
+// sentence that said which expectation was at fault existed for nobody reading
+// the row. Worse, the sentence that DID lead said nothing on this page moves
+// the workflow forward, about a page that may be showing exactly what was asked
+// for, which points the reader at their application when the fault is in their
+// manifest.
+test('an expectation that could never match is named inside the report cell, not behind it', () => {
+  const result = finalJudgement(
+    { name: 'w', description: 'd', expect: ['is it up'] }, readablePage, STUCK, []);
+  assert.equal(result.cause, 'page-unreadable');
+  assert.ok(
+    result.detail.slice(0, CELL).includes('"is it up"'),
+    `the cell does not name the expectation: ${result.detail.slice(0, CELL)}`,
+  );
+});
+
+// The quoted name leads the sentence rather than closing it, and this is the
+// case that decides that. A sentence that leads and then truncates before
+// naming which expectation tells somebody there is a problem and not what it
+// is, which is worse than the folded version it replaces.
+test('a long expectation still survives the cell whole', () => {
+  const long = 'is it not that this was as it was before and was it not that this is as it is';
+  assert.ok(long.length > 70, 'the case has to be long enough to be at risk');
+  const result = finalJudgement(
+    { name: 'w', description: 'd', expect: [long] }, readablePage, STUCK, []);
+  assert.ok(
+    result.detail.slice(0, CELL).includes(`"${long}"`),
+    `the cell carries only part of the expectation: ${result.detail.slice(0, CELL)}`,
+  );
+});
+
+// Only an expectation that could NEVER be met earns the front of the cell. One
+// that simply was not met is a different fact, and leading with this sentence
+// on every unverified workflow would change every report in the product.
+test('a workflow whose expectations are all matchable still leads with the planner', () => {
+  const result = finalJudgement(
+    { name: 'w', description: 'd', expect: ['total_cents'] }, readablePage, STUCK, []);
+  assert.equal(result.cause, 'page-unreadable');
+  assert.ok(result.detail.startsWith(STUCK), `the detail was rewritten: ${result.detail}`);
+  assert.ok(!result.detail.includes('could never match any page'));
+});
+
+// Leading in the cell must not take anything away from where the text already
+// correctly appears. The details block prints the whole detail, so everything
+// the folded version said is still said.
+test('leading in the cell keeps the rest of the sentence for the details block', () => {
+  const result = finalJudgement(
+    { name: 'w', description: 'd', expect: ['is it up'] }, readablePage, STUCK, []);
+  assert.ok(result.detail.includes('no word this can look for'), result.detail);
+  assert.ok(result.detail.includes('Quote a string to require it exactly'), result.detail);
+  assert.ok(result.detail.includes(STUCK), 'the planner\'s own sentence is still there');
+  assert.ok(result.detail.includes('nothing confirms it either'), result.detail);
+});
+
 test('a budget detail names the budget, how far in, the attempt and the last step', () => {
   // The next question about a workflow that ran out of time is whether it was
   // stuck or merely slow, and the last step taken is what answers it.

@@ -103,6 +103,44 @@ func TestMarkdown_ATableCellStaysACell(t *testing.T) {
 	}
 }
 
+// The engine's half of a contract the runner writes against.
+//
+// oneLine caps a workflow row at 120 characters, so a detail that names the
+// thing at fault after that names it to nobody: the full text survives only on
+// the Got line inside the folded details block. The runner leads its detail
+// with the quoted expectation for exactly that reason, and
+// runner/test/execute.test.ts holds the other half.
+//
+// This pins the number. A cap that moved would leave the runner writing against
+// a width that no longer exists, and nothing else in either tree would notice:
+// the row would still render, the build would still pass, and the sentence
+// would quietly stop arriving. The long name is the case that matters, because
+// a cap that keeps a short name and eats a long one is a diagnostic that works
+// in the test and fails on the report somebody actually gets.
+func TestMarkdown_ACellCapKeepsALeadingQuotedName(t *testing.T) {
+	t.Parallel()
+	const name = `"is it not that this was as it was before and was it not that this is as it is"`
+	body := run(report.Workflow{
+		Name: "read-own-orders", Verdict: "unverified",
+		Detail: name + " could never match any page, so this workflow can neither pass nor fail. " +
+			"It carries no word this can look for. Quote a string to require it exactly, or write " +
+			"words of three letters or more. Nothing on this page moves the workflow forward.",
+	}).Markdown()
+
+	var row string
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "| `read-own-orders`") {
+			row = line
+		}
+	}
+	require.NotEmpty(t, row, "the workflow row is missing entirely")
+	require.Contains(t, row, name,
+		"the cell cap ate the expectation the detail exists to name: %s", row)
+	// And the cap is still doing its job, so this is not passing because the
+	// cell stopped truncating at all.
+	require.Contains(t, row, "…", "the cell no longer truncates, so this proves nothing: %s", row)
+}
+
 func TestMarkdown_ReportsUnverifiedMasking(t *testing.T) {
 	t.Parallel()
 	r := run(report.Workflow{Name: "a", Verdict: "pass"})
