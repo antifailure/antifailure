@@ -2121,7 +2121,7 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 512,
-          "description": "The stack's directory, relative to the repository root. It must exist, must be a directory, and must hold at least one file the named source can read, because a directory that is there and a stack that is there are different facts and a mistyped deep path usually satisfies the first."
+          "description": "The stack's directory, relative to the repository root. It must exist, must be a directory, and must hold at least one file the named source can read, because a directory that is there and a stack that is there are different facts and a mistyped deep path usually satisfies the first. For terraform that is a .tf file or any .json, the second because a fully resolved plan is the best input there is and a stack may hold one and no configuration at all."
         },
         "workspace": {
           "type": "string",

@@ -773,14 +773,27 @@ and four modules under it names one. The modules a stack calls are building
 blocks, and naming them here points the comparison at a library rather than at
 the thing built from it.
 
-**A directory that exists and holds no Terraform is refused.** Mistyping the
-last segment of a deep path usually lands on a directory that is really there,
-because the parent and its siblings are real, so an existence check alone says
-yes. "There is a directory here" and "there is a stack here" are different
-facts. Terraform counts `.tf` and `.tf.json`, and only in the directory itself:
-a `.tf` file three levels down belongs to a module the stack calls, and
-accepting a parent because something nested under it has Terraform in it would
-accept the repository root of every repository that has any.
+**A directory that exists and holds nothing the source can read is refused.**
+Mistyping the last segment of a deep path usually lands on a directory that is
+really there, because the parent and its siblings are real, so an existence
+check alone says yes. "There is a directory here" and "there is a stack here"
+are different facts.
+
+It looks only in the directory itself: a `.tf` file three levels down belongs to
+a module the stack calls, and accepting a parent because something nested under
+it has Terraform in it would accept the repository root of every repository that
+has any.
+
+For `terraform` it counts `.tf` and any `.json`. The second is deliberate and
+generous. The reader's best input is the output of `terraform show -json`, which
+is the fully resolved form, so a stack directory may legitimately hold a plan
+and no configuration at all, and a `.tf` only rule would refuse exactly the
+input that produces the best answer. Telling a plan from a state file somebody
+renamed needs the file's own contents, which is the reader's job rather than
+this check's, so a directory holding an unrelated JSON file is accepted here and
+the reader reports honestly that it found nothing in it. That is the direction
+to be wrong in: accepting a directory the reader finds nothing in costs one
+empty answer, and refusing one it would have read blocks correct work.
 
 **The list of sources carries exactly the tools a reader exists for.** A value
 the manifest accepted and nothing could read would look like a configured

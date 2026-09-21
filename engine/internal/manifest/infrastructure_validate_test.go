@@ -295,8 +295,46 @@ func TestParse_RefusesAStackDirectoryThatHoldsNoTerraform(t *testing.T) {
       path: infra/terraform/stacks
 `)
 	require.Contains(t, msg,
-		`infrastructure.stacks[0].path: The stack path "infra/terraform/stacks" holds no Terraform file.`)
+		`infrastructure.stacks[0].path: The stack path "infra/terraform/stacks" holds no Terraform file or plan.`)
 	require.Contains(t, msg, "what a mistyped path one level out looks like")
+}
+
+func TestParse_AcceptsAStackThatHoldsOnlyAPlan(t *testing.T) {
+	t.Parallel()
+	// The input that produces the BEST answer, and the one a .tf only rule
+	// would have refused. The reader's primary input is the output of
+	// `terraform show -json`, which is the fully resolved form: nothing in it
+	// is a variable with no default or an expression only a run can settle. A
+	// stack directory may hold one and no HCL at all, from a CI job that
+	// writes it beside the configuration or from somebody keeping a captured
+	// plan on purpose, and refusing that would block the case this feature is
+	// most useful on.
+	root := repoWith(t, "infra/captured/plan.json")
+	m, err := parseIn(t, root, infraBase+`  stacks:
+    - source: terraform
+      path: infra/captured
+`)
+	require.NoError(t, err)
+	require.Equal(t, "infra/captured", m.Infrastructure.Stacks[0].Path)
+}
+
+func TestParse_DoesNotTryToTellAPlanFromAnyOtherJSON(t *testing.T) {
+	t.Parallel()
+	// The limit, asserted so nobody reads the rule above as more than it is.
+	// Telling a plan from a state file somebody renamed needs the top level
+	// keys, and this check does not open anything: it answers "is there
+	// something here this source could read" and leaves "what is it" to the
+	// reader, which refuses a state file by content and records what it did.
+	// So a directory holding an unrelated JSON file is accepted here, and that
+	// is the deliberate direction to be wrong in: accepting one the reader
+	// finds nothing in costs one honest empty answer, refusing one it would
+	// have read blocks correct work.
+	root := repoWith(t, "infra/notastack/tsconfig.json")
+	_, err := parseIn(t, root, infraBase+`  stacks:
+    - source: terraform
+      path: infra/notastack
+`)
+	require.NoError(t, err)
 }
 
 func TestParse_AcceptsAStackDeclaredInJSON(t *testing.T) {
@@ -327,7 +365,7 @@ func TestParse_LooksOnlyAtTheStackDirectoryItselfForTerraform(t *testing.T) {
     - source: terraform
       path: infra
 `)
-	require.Contains(t, msg, `infrastructure.stacks[0].path: The stack path "infra" holds no Terraform file.`)
+	require.Contains(t, msg, `infrastructure.stacks[0].path: The stack path "infra" holds no Terraform file or plan.`)
 }
 
 func TestParse_RefusesTwoStacksNamingTheSamePath(t *testing.T) {
