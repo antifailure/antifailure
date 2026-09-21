@@ -98,6 +98,34 @@ func TestInjectFaults_TheSchemaRefusesAFieldThatWouldWeakenTheRun(t *testing.T) 
 	}
 }
 
+func TestInjectFaults_TheSchemaCarriesExactlyThreeProperties(t *testing.T) {
+	t.Parallel()
+	// By EQUALITY rather than by a list of refusals. The test beside this one
+	// names fourteen fields that must not be accepted, and it can only catch
+	// the names somebody thought of; this catches a property added next year
+	// under a name nobody imagined. Reported by lane-chaos, whose own table
+	// had it and mine did not.
+	tool := newInjectFaultsTool(chaosProject(), nil, nil)
+	names := make([]string, 0, len(tool.Input.Properties))
+	for name := range tool.Input.Properties {
+		names = append(names, name)
+	}
+	require.ElementsMatch(t,
+		[]string{"project_id", "idempotency_key", "hypothesis"}, names,
+		"a property was added to the one tool whose whole promise is that a caller "+
+			"cannot make the check easier on itself")
+}
+
+func TestInjectFaults_TheHypothesisIsBoundedByThePublishedSchema(t *testing.T) {
+	t.Parallel()
+	// Driven through the validator rather than read off the struct, because a
+	// bound that is published and not enforced is worse than no bound.
+	fault := chaosArgs(t, `{"project_id":"p","hypothesis":"`+strings.Repeat("a", 2001)+`"}`)
+	require.NotNil(t, fault, "a 2001 character hypothesis must be refused")
+	require.Nil(t, chaosArgs(t, `{"project_id":"p","hypothesis":"`+strings.Repeat("a", 2000)+`"}`),
+		"and 2000 must be accepted, or the bound is not the one published")
+}
+
 func TestInjectFaults_TheSchemaAcceptsWhatItIsFor(t *testing.T) {
 	t.Parallel()
 	// The refusals above are worth nothing unless the tool still accepts what
@@ -340,6 +368,11 @@ func TestDescribeChaos_KeepsHeldAndVerifiedApartAllTheWayOut(t *testing.T) {
 
 	summary := chaosSummary(run, true, false, report.VerdictUnverified, "")
 	require.Contains(t, summary, "held is true and verified is false")
+	// And the other direction, so a summary that collapsed the two cannot
+	// pass by printing the inconclusive sentence always.
+	clean := chaosSummary(chaosRun(), true, true, report.VerdictPass, "")
+	require.NotContains(t, clean, "held is true and verified is false")
+	require.Contains(t, clean, "proved what it set out to")
 }
 
 func TestDescribeChaos_CarriesTheEvidenceBehindTheClaim(t *testing.T) {
@@ -358,6 +391,47 @@ func TestDescribeChaos_CarriesTheEvidenceBehindTheClaim(t *testing.T) {
 	require.Equal(t, "0/1A2B3C0", rec.RedoStart)
 	require.Equal(t, 5000, rec.Acknowledged)
 	require.True(t, rec.ChecksumsOn, "a run with checksums off would not have detected a torn page")
+}
+
+func TestDescribeChaos_AProofThatDidNotRunCarriesNothingRatherThanZeros(t *testing.T) {
+	t.Parallel()
+	// An empty recovery document renders as crashed false, replayed false,
+	// zero lost, which reads as a proof that ran and found nothing rather than
+	// a proof that never ran. It is the same distinction as reporting no
+	// commit numbers instead of zero lost, one layer down, and lane-chaos had
+	// a cell for it where I had none.
+	run := chaosRun()
+	run.Report.Faults[0].Recovery = nil
+
+	doc := describeChaos(run, true, false)
+	require.Nil(t, doc.Faults[0].Recovery,
+		"a proof that never ran must be absent, never an empty document of zeros")
+
+	rendered, err := json.Marshal(doc)
+	require.NoError(t, err)
+	require.NotContains(t, string(rendered), `"crashed"`,
+		"an absent proof must not render a single one of its fields")
+
+	// The liveness arm: an implementation that dropped the recovery entirely
+	// would pass everything above.
+	require.NotNil(t, describeChaos(chaosRun(), true, true).Faults[0].Recovery)
+}
+
+func TestDescribeChaos_AFaultLeftInPlaceIsNamedAndACleanRunSaysNothing(t *testing.T) {
+	t.Parallel()
+	// The note has to be about THIS fault rather than printed for every run,
+	// so the clean arm is the half that matters: without it a note emitted
+	// unconditionally passes the first assertion.
+	left := chaosRun()
+	left.Report.Faults = append(left.Report.Faults,
+		report.ChaosFault{Name: "stop the queue", Injected: true, Undone: false})
+
+	notes := strings.Join(describeChaos(left, true, true).Notes, " ")
+	require.Contains(t, notes, "still broken")
+	require.Contains(t, notes, "measured against a broken system")
+
+	require.Empty(t, describeChaos(chaosRun(), true, true).Notes,
+		"a run in which every fault was undone has nothing to warn about")
 }
 
 func TestDescribeChaos_AFaultThatWasRefusedKeepsItsReason(t *testing.T) {
