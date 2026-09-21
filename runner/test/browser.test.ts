@@ -1032,6 +1032,34 @@ function reopening(url: string): Planner {
   return { next: async () => ({ kind: 'goto', url, why: 'again' }) };
 }
 
+/** firstFailsThenStalls sends the first attempt back to the page that fails and
+ *  the retry to the one that never answers.
+ *
+ * It counts ATTEMPTS, off the transcript it is handed: `history` is declared
+ * inside attemptOnce, so it is empty on the first decision of every attempt and
+ * only then. Counting its own calls instead would have been correct at a step
+ * budget of one and silently wrong at two, where the first attempt would reach
+ * the stalling page itself and burn the whole budget. Measured, rather than
+ * reasoned about: at maxSteps 2 that is exactly what happens, one attempt,
+ * budget-exhausted at 12.0s. A test whose correctness depends on a number
+ * declared somewhere else is the shape this whole change exists to remove, so
+ * it does not depend on one.
+ */
+function firstFailsThenStalls(baseURL: string): Planner {
+  let attempt = 0;
+  return {
+    next: async (_workflow, _snapshot, history) => {
+      if (history.length === 0) attempt++;
+      const first = attempt === 1;
+      return {
+        kind: 'goto',
+        url: first ? `${baseURL}/` : `${baseURL}/slow`,
+        why: first ? 'again, at the page that fails' : 'again, at the page that never answers',
+      };
+    },
+  };
+}
+
 /** runSteps drives a workflow with a declared step budget through the planner
  *  above and returns the result and how many steps it actually took. */
 async function runSteps(
@@ -1136,22 +1164,55 @@ test('ordering 2, run for real: a step budget is retried, and spent on every att
 });
 
 test('ordering 5, run for real: a real failure, then the time budget running out on the retry, is a failure', { timeout: 120_000 }, async () => {
-  // The first attempt's three requests are answered with HTTP 500, which is
-  // the application failing. Every later request waits eight seconds, so the
-  // retry is still waiting when the six second budget runs out. The failure
-  // the first attempt saw must not be hidden by the budget on the second.
-  let served = 0;
-  const server = createServer((_req, res) => {
-    served++;
-    if (served <= 3) {
-      res.writeHead(500, { 'content-type': 'text/html' });
-      res.end('<html><body><h1>Internal error</h1></body></html>');
+  // The application fails on the first attempt and the retry runs out of time.
+  // The failure the first attempt saw must not be hidden by the budget on the
+  // second.
+  //
+  // THE FLAKE THIS REPLACES. Both halves of it were the test racing itself
+  // rather than the code being wrong, and it red a pull request whose change
+  // could not have caused it.
+  //
+  // The server used to answer its first THREE requests with 500 and stall
+  // everything after, so which attempt met the stall depended on how many
+  // navigations the runner happened to make. Nothing declared that number and
+  // nothing checked it. It answers by PATH now: `/` always fails at once,
+  // `/slow` never answers at all, and the planner asks for `/slow` only on its
+  // second call, which is the retry. Nothing counts anything, so no change to
+  // how the runner navigates can hand the stall to the wrong attempt.
+  //
+  // The second half is the clock, and it is why the budget is 12s rather than
+  // the 6s it was. The time budget is SHARED across attempts: execute.ts
+  // computes one deadline before the loop, and the browser launch sits inside
+  // it, so every second the first attempt spends is a second the retry does not
+  // have. The first attempt has to FINISH inside the budget or it reports
+  // budget-exhausted, the causes below read ['budget-exhausted'] alone, and the
+  // failure lands on whoever pushed rather than on the host that was busy.
+  //
+  // Measured rather than guessed, at load average 38 on a laptop: the first
+  // attempt costs 1.69s, 1.93s and 2.63s across three runs. Against 6s that is
+  // 2.3x headroom at worst, and 2.3x is not headroom, it is a coin that lands
+  // the right way most of the time. It came up the other way twice in one
+  // night, once under the full suite here and once for another branch at load
+  // average 87. Against 12s the same work has 4.6x, and the first attempt would
+  // have to run more than four times slower than its worst measured value
+  // before the verdict moves.
+  //
+  // The step budget of one is deliberate but it is NOT where the margin comes
+  // from. It costs the first attempt two navigations instead of three, and the
+  // browser launch dominates that difference; it is set to one because the
+  // planner below decides per attempt, and the smaller number is a small bonus
+  // rather than the fix. The budget is the fix.
+  const asked: string[] = [];
+  const server = createServer((req, res) => {
+    asked.push(req.url ?? '');
+    if (req.url?.startsWith('/slow')) {
+      // Never answered, and never on a timer. A response that eventually
+      // arrives is a second clock to race, and the budget is the only clock
+      // this test is about. The socket is destroyed by closeAllConnections.
       return;
     }
-    setTimeout(() => {
-      res.writeHead(200, { 'content-type': 'text/html' });
-      res.end('<html><body><h1>Welcome</h1></body></html>');
-    }, 8_000);
+    res.writeHead(500, { 'content-type': 'text/html' });
+    res.end('<html><body><h1>Internal error</h1></body></html>');
   });
   const baseURL = await new Promise<string>((resolve) => {
     server.listen(0, '127.0.0.1', () => {
@@ -1164,15 +1225,29 @@ test('ordering 5, run for real: a real failure, then the time budget running out
       baseURL, artifacts: mkdtempSync(join(tmpdir(), 'af-ordering-5-')), attempts: 2,
       workflows: [{
         name: 'fail-then-slow', description: 'Reopen the page until the budget ends.',
-        expect: ['The invoice was downloaded.'], maxSteps: 2, maxMs: 6_000,
+        expect: ['The invoice was downloaded.'], maxSteps: 1, maxMs: 12_000,
       }],
       personas: nobody,
-      planner: reopening(`${baseURL}/`),
+      planner: firstFailsThenStalls(baseURL),
     });
     const causes = result!.outcome.attempts.map((a) => a.cause);
     assert.deepEqual(causes, ['application-error', 'budget-exhausted'], JSON.stringify(result!.outcome, null, 2));
     assert.equal(result!.outcome.verdict, 'fail');
     assert.equal(result!.outcome.cause, 'application-error');
+    // Both arms fired, proven rather than assumed. The two verdicts above are
+    // also what a run that never reached the stalling page at all would
+    // produce if the budget happened to end somewhere convenient, and this is
+    // the difference between the test having done its work and having got the
+    // right answer for the wrong reason.
+    assert.equal(asked[0], '/', `the first attempt did not open the failing page: ${asked.join(' ')}`);
+    assert.deepEqual(
+      asked.filter((u) => u === '/slow'), ['/slow'],
+      `the stalling page was not reached exactly once: ${asked.join(' ')}`,
+    );
+    assert.deepEqual(
+      [...new Set(asked.slice(0, -1))], ['/'],
+      `something before the retry's last move reached a page other than the failing one: ${asked.join(' ')}`,
+    );
   } finally {
     server.closeAllConnections();
     server.close();
