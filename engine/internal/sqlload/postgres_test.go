@@ -291,13 +291,32 @@ func TestTheClientsReallyHoldSeparateSessionsAndOverlapInsideTheServer(t *testin
 		"the observer never sampled, so this run proves nothing: %s", res.ObserverNote)
 	require.Equal(t, 8, *res.BackendsSeen,
 		"eight clients have to be eight distinct backends in pg_stat_activity")
-	require.NotNil(t, res.PeakActiveBackends)
-	require.GreaterOrEqual(t, *res.PeakActiveBackends, 2,
-		"the clients never had two statements in the server at once, so nothing concurrent was rehearsed")
+	// The overlap is asserted on how many backends were INSIDE A TRANSACTION,
+	// never on how many were executing, and the difference is the whole point
+	// of this block.
+	//
+	// Executing means state='active' at the instant of a sample, which for a
+	// millisecond read against a local server is a sliver of each client's
+	// time. Measured here rather than assumed: eight runs of exactly these
+	// options reported a peak of 1, 2, 2, 2, 3, 3, 3 and 3 backends executing,
+	// while the peak inside a transaction was 7 or 8 in every one of the
+	// eight. A live `af load sql` at 540 transactions a second reported 8 of 8
+	// inside a transaction and 1 executing. So an assertion that two were
+	// executing at once fails about one run in eight for a reason that has
+	// nothing to do with whether the clients overlapped, and a flaky red is
+	// how people learn to re-run a job until it goes green.
+	//
+	// Being inside a transaction spans the whole BEGIN to COMMIT, which is
+	// what overlap actually means here, and it has lost none of the ability to
+	// say no: clients sharing one connection would report 1, and that is the
+	// failure this test exists to catch.
+	require.NotNil(t, res.PeakActiveBackends,
+		"the executing count is still measured and reported, it is just not the overlap claim")
 	require.NotNil(t, res.PeakOpenTransactions)
 	require.GreaterOrEqual(t, *res.PeakOpenTransactions, 6,
 		"with eight clients and no think time, most of them have to be inside a transaction "+
-			"at any instant: a lower number means they were queueing behind something")
+			"at any instant: a lower number means they were queueing behind something, "+
+			"and 1 would mean they shared a session rather than holding eight")
 	require.GreaterOrEqual(t, *res.PeakOpenTransactions, *res.PeakActiveBackends,
 		"a backend executing a statement is by definition inside a transaction")
 	require.Empty(t, res.ObserverNote)
@@ -518,6 +537,57 @@ func TestCancellationEndsTheRunAndKeepsWhatItAlreadyMeasured(t *testing.T) {
 	require.Empty(t, res.Errors,
 		"a cancelled run of a healthy workload recorded database errors")
 	require.Zero(t, res.ClientsStopped)
+}
+
+// TestAStatementStoppedByTheRunEndingIsNotCountedAsAFailedStatement is the
+// statement level half of the test above, and it is here because the two
+// levels disagreed in a real run.
+//
+// The transaction above has always refused to count a cancelled attempt. The
+// STATEMENT inside it counted one anyway, so a healthy ten second run against
+// a real database committed 5416 transactions, reported 0 failed and 0
+// retried, and still printed 5 errors against a read that had run 3640 times
+// and returned a row every time. Those five were the clients that happened to
+// be inside a statement when the duration expired. The summary said nothing
+// was wrong and the table said a query had failed, and the table is the one a
+// reader acts on.
+//
+// Deterministic rather than hopeful, which is the whole reason for the sleep.
+// Cancelling a fast mix and trusting that something was in flight would pass
+// on a quiet machine and fail on a busy one. Every client here is provably
+// inside a statement when the run ends, because the statement takes a hundred
+// times the run's duration.
+func TestAStatementStoppedByTheRunEndingIsNotCountedAsAFailedStatement(t *testing.T) {
+	url, _ := database(t)
+	mix, _, err := sqlload.ParseScript([]byte(`
+sql_workload: a statement that outlives the run
+transactions:
+  - transaction: wait
+    statements:
+      - {label: sleep, sql: "SELECT pg_sleep(30)"}
+`))
+	require.NoError(t, err)
+
+	res, err := sqlload.Run(context.Background(), sqlload.Options{
+		URL: url, Mix: mix, Clients: 2, Duration: 300 * time.Millisecond,
+		Seed: 1, Clock: clock.New(),
+	})
+	require.NoError(t, err, "the duration running out is the run finishing, not the run failing")
+	require.NotNil(t, res)
+
+	// Nothing committed, because nothing could: the point is what the run says
+	// about the statements it interrupted, not what it measured.
+	require.Zero(t, res.Transactions)
+	require.Zero(t, res.StatementsFailed,
+		"the run counted its own deadline as failed statements: %v", res.Errors)
+	for _, st := range res.PerStatement {
+		require.Zero(t, st.Errors,
+			"%q reported %d errors for statements the run itself stopped",
+			st.Label, st.Errors)
+	}
+	// And the two levels agree, which is the property that was missing.
+	require.Zero(t, res.TransactionsFailed)
+	require.Empty(t, res.Errors)
 }
 
 // TestTheTransactionSequenceIsTheSameEvenWhenOneRunLosesMoreRaces.
