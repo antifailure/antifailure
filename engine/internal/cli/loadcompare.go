@@ -59,6 +59,8 @@ func newLoadCompareCommand(e *Env) *cobra.Command {
 	var scale float64
 	var seed int64
 	var keep bool
+	var rounds int
+	var warmup time.Duration
 	cmd := &cobra.Command{
 		Use:   "compare",
 		Short: "Run the same traffic against the base branch too, and report what moved",
@@ -75,13 +77,20 @@ when you want to know whether a route is slower than the fleet. This one
 measures this build against the last one, which is the right question when you
 want to know whether your change made it slower.
 
-What it cannot control is printed with every report rather than left implied.
-The two runs are sequential, because two environments sending traffic at once
-on one host would contend with each other and measure that instead. The seed
-makes the request sequence identical; it does not make the machine, the
-neighbours on the host or the time of day identical. A difference is a
-difference, and a threshold under load.comparison.thresholds is what turns one
-into a verdict.
+Each side is first sent the mix for a warm-up that is thrown away, so an
+environment brought up for the comparison is not measured answering from cold
+caches. Then each side is sent the mix in rounds, in the order base, this
+build, this build, base, this build, base, base, this build, with the same
+seed for both sides in each round. A host that warms or cools across the
+comparison therefore lands on both sides equally, where a single pass of each
+put it on whichever side went second.
+
+What it still cannot control is printed with every report rather than left
+implied. The rounds are sequential, because two environments sending traffic
+at once on one host would contend with each other and measure that instead.
+Interleaving cancels a steady drift and not a neighbour that spikes during one
+round. A difference is a difference, and a threshold under
+load.comparison.thresholds is what turns one into a verdict.
 
 The base environment is torn down unless --keep says otherwise. The
 environment for this build is left running whether or not this brought it up.`),
@@ -121,6 +130,11 @@ af load compare --seed 7 --keep`),
 				Baseline: cfg.Baseline,
 				BaseRef:  orDefaultString(baseRef, cfg.BaseRef),
 				Duration: duration, Scale: scale, Seed: seed, Keep: keep,
+				Rounds: rounds, Warmup: warmup,
+				// Typed and zero is "none"; untyped is "the default". The two
+				// cannot share a value, so the flag's having been set is what
+				// tells them apart.
+				NoWarmup: cmd.Flags().Changed("warmup") && warmup <= 0,
 				Progress: func(line string) { e.Out.Printf("  %s\n", line) },
 			})
 			if errors.Is(err, env.ErrLoadBaselineSameCommit) {
@@ -218,6 +232,12 @@ af load compare --seed 7 --keep`),
 		"Fraction of production's arrival rate to send at each side, overriding the manifest")
 	cmd.Flags().Int64Var(&seed, "seed", 0,
 		"Seed for the request sequence. The same seed is used on both sides")
+	cmd.Flags().IntVar(&rounds, "rounds", 0, fmt.Sprintf(
+		"Interleaved rounds per side, %d when not set. 1 measures each side once, base first",
+		env.DefaultCompareRounds))
+	cmd.Flags().DurationVar(&warmup, "warmup", 0, fmt.Sprintf(
+		"Mix sent at each side and discarded before measuring, %s when not set. 0s sends none",
+		env.DefaultCompareWarmup))
 	cmd.Flags().BoolVar(&keep, "keep", false,
 		"Leave the base environment up, for looking at a difference")
 	// --report rather than --output, for the reason af oracle and af ci both
