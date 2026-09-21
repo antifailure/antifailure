@@ -30,16 +30,19 @@ func TestInfra_DraftsTheRootModuleAndNotTheModulesItCalls(t *testing.T) {
 		"package.json": infraWeb,
 		"infra/main.tf": `
 module "network" {
-  source = "./modules/network"
+  source = "./network"
   cidr   = "10.0.0.0/16"
 }
 
 module "database" {
-  source = "./modules/database"
+  source = "./database"
 }
 `,
-		"infra/modules/network/main.tf":  `resource "aws_vpc" "this" {}`,
-		"infra/modules/database/main.tf": `resource "aws_db_instance" "this" {}`,
+		// Deliberately NOT under a directory called modules. The convention
+		// has its own test, and if these sat under one there would be two
+		// reasons to exclude them and no way to tell which one worked.
+		"infra/network/main.tf":  `resource "aws_vpc" "this" {}`,
+		"infra/database/main.tf": `resource "aws_db_instance" "this" {}`,
 	}
 	res := run(t, "shopfront", files)
 
@@ -124,13 +127,19 @@ module "subnets" {
 	require.Contains(t, notes[0], "is called as a module by another")
 }
 
-func TestInfra_DoesNotTreatARegistryModuleSourceAsADirectory(t *testing.T) {
+func TestInfra_DraftsARootModuleThatCallsPublishedModules(t *testing.T) {
 	t.Parallel()
-	// The falsification arm for the local source rule. A module pulled from
-	// the registry or from Git is not a directory in this repository, and a
-	// scan that treated every source string as a path would take the root
-	// module out of its own answer the moment the root called a published
-	// module, which is most root modules in the world.
+	// Most root modules in the world call something from the registry or from
+	// Git. What this holds is that calling a module never excludes the CALLER:
+	// a scan that marked the calling directory rather than the callee would
+	// empty the section on the most ordinary repository there is.
+	//
+	// It deliberately does not claim to prove that a registry address is told
+	// apart from a local path. It cannot, and saying so here is the point: a
+	// callee that does not exist excludes no directory, so the end to end
+	// answer is the same either way. That distinction is made inside
+	// localModuleTargets and is asserted there, in infra_internal_test.go,
+	// which is the only place it is visible.
 	files := map[string]string{
 		"package.json": infraWeb,
 		"infra/main.tf": `
@@ -145,6 +154,7 @@ module "vpc" {
 `,
 	}
 	res := run(t, "shopfront", files)
+	require.NotNil(t, res.Draft.Infrastructure)
 	require.Equal(t, []string{"infra"}, res.Draft.Infrastructure.Paths)
 }
 
