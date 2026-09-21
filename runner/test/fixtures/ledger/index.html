@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ledger</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<!--
+  THE ACCESSIBLE NAMES IN THIS FILE ARE AN INTERFACE, not labels.
+
+  runner/test/desktop.test.ts drives this application by them: "Email address",
+  "Password", "I accept the terms", "Sign in" and "Forgot your password" are
+  what the driver looks for in the accessibility tree, and the acknowledgment
+  being really `required` is what makes the planner willing to tick it.
+  Renaming any of them is a change to the test in the same commit, and both
+  arms are re run, or the driver stops reading the application it was proven
+  against.
+
+  Which is the point rather than an inconvenience. Everything that makes this
+  readable to a screen reader is what makes it drivable, so the accessibility
+  here is load bearing: every control has a name, every field has a real label
+  bound to it, the refusal is announced through aria-describedby rather than
+  by turning a border red, and the signed in confirmation is a live region so
+  it is read out when it arrives instead of appearing silently.
+-->
+<div class="window">
+
+  <!-- The signed out ledger. Real rows, real figures, inert on purpose. -->
+  <aside class="ledger" aria-label="Recent entries">
+    <div class="drag"></div>
+    <h2>Recent entries</h2>
+    <ul class="entries locked" id="entries">
+      <li class="entry"><span class="what">Refund, order 4471</span><span class="amount credit"><span class="figure">+120.00</span><span class="mask" aria-label="Hidden until you sign in">••••</span></span></li>
+      <li class="entry"><span class="what">Hosting, September</span><span class="amount"><span class="figure">-84.20</span><span class="mask" aria-label="Hidden until you sign in">••••</span></span></li>
+      <li class="entry"><span class="what">Invoice 0231, paid</span><span class="amount credit"><span class="figure">+940.00</span><span class="mask" aria-label="Hidden until you sign in">••••</span></span></li>
+      <li class="entry"><span class="what">Card fees</span><span class="amount"><span class="figure">-12.60</span><span class="mask" aria-label="Hidden until you sign in">••••</span></span></li>
+      <li class="entry"><span class="what">Invoice 0230, paid</span><span class="amount credit"><span class="figure">+310.00</span><span class="mask" aria-label="Hidden until you sign in">••••</span></span></li>
+      <li class="entry"><span class="what">Stationery</span><span class="amount"><span class="figure">-46.15</span><span class="mask" aria-label="Hidden until you sign in">••••</span></span></li>
+    </ul>
+    <p class="ledger-note" id="ledger-note">Figures are hidden until you sign in.</p>
+  </aside>
+
+  <main class="pane">
+    <div class="drag"></div>
+    <div class="form-wrap">
+
+      <!-- Signed out. -->
+      <div id="signed-out">
+        <h1>Sign in to Ledger</h1>
+        <p class="lead">Your books for Bellweather Press, up to date as of this morning.</p>
+
+        <!-- The form level refusal. Marked as an alert so it is announced,
+             and carrying a character mark so the meaning does not rest on
+             the colour alone. -->
+        <div class="notice" id="notice" role="alert">
+          <span class="mark" aria-hidden="true">!</span>
+          <span id="notice-text"></span>
+        </div>
+
+        <form id="signin" novalidate>
+          <div class="field" id="field-email">
+            <label for="email">Email address</label>
+            <input id="email" name="email" type="email" required autocomplete="username"
+                   placeholder="you@bellweather.press"
+                   aria-describedby="email-error">
+            <p class="field-error" id="email-error">Enter the address your account is under.</p>
+          </div>
+
+          <div class="field" id="field-password">
+            <label for="password">Password</label>
+            <input id="password" name="password" type="password" required
+                   autocomplete="current-password"
+                   aria-describedby="password-error">
+            <p class="field-error" id="password-error">Enter your password.</p>
+          </div>
+
+          <div class="consent">
+            <input id="terms" name="terms" type="checkbox" required>
+            <label for="terms">I accept the terms</label>
+          </div>
+
+          <div class="actions">
+            <!-- A real disabled control with a real reason stated beside it,
+                 rather than the enabled one at half opacity. -->
+            <button type="button" class="secondary" id="guest" disabled
+                    aria-describedby="guest-note">Continue as guest</button>
+            <button type="submit" class="primary" id="go">Sign in</button>
+          </div>
+          <!-- The reason belongs to the control it is about. It was wired to
+               the terms checkbox, so a screen reader announced "I accept the
+               terms, Guest access is off for this workspace", which is two
+               unrelated facts in one sentence. A tab walk with real key
+               presses is what found it; reading the markup did not. -->
+          <p class="disabled-reason" id="guest-note">Guest access is off for this workspace.</p>
+        </form>
+
+        <p class="helper"><a href="#" id="forgot">Forgot your password</a></p>
+      </div>
+
+      <!-- Signed in. A live region so the confirmation is announced rather
+           than merely drawn. -->
+      <div class="signed-in" id="signed-in" role="status" aria-live="polite">
+        <!-- The heading carries "Welcome back", which is what the driver's
+             expectation is judged against, so the line under it must add
+             something rather than say it again. A subheading that restates
+             its headline is the commonest thing wrong with generated copy. -->
+        <h1>Welcome back, Ada</h1>
+        <p class="lead" id="out">Six entries have cleared since you were last here, and none of them need you.</p>
+        <div class="balance-card">
+          <p class="label">Balance, Bellweather Press</p>
+          <p class="figure">42.00</p>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<script>
+// The application's own behaviour, and it is deliberately real: the form
+// refuses what it should refuse, says which field and why, and only shows the
+// signed in screen when everything it asked for is there. A fixture that
+// accepted anything would prove nothing when the driver filled it in.
+(function () {
+  const form = document.getElementById('signin');
+  const email = document.getElementById('email');
+  const password = document.getElementById('password');
+  const terms = document.getElementById('terms');
+  const notice = document.getElementById('notice');
+  const noticeText = document.getElementById('notice-text');
+
+  function mark(fieldId, bad) {
+    document.getElementById(fieldId).classList.toggle('invalid', bad);
+  }
+
+  function refuse(message) {
+    noticeText.textContent = message;
+    notice.classList.add('shown');
+  }
+
+  form.addEventListener('submit', function (event) {
+    event.preventDefault();
+    notice.classList.remove('shown');
+
+    const noEmail = !email.value.trim();
+    const noPassword = !password.value;
+    mark('field-email', noEmail);
+    mark('field-password', noPassword);
+
+    if (noEmail || noPassword) {
+      refuse('Fill in the fields marked below and try again.');
+      (noEmail ? email : password).focus();
+      return;
+    }
+    if (!terms.checked) {
+      refuse('Accept the terms before signing in.');
+      terms.focus();
+      return;
+    }
+
+    document.getElementById('signed-out').style.display = 'none';
+    document.getElementById('signed-in').classList.add('shown');
+    document.getElementById('entries').classList.remove('locked');
+    document.getElementById('ledger-note').textContent = 'Showing the last six entries.';
+  });
+
+  // Clearing the refusal as soon as the person acts on it, so the message
+  // never outlives the problem it described.
+  [email, password].forEach(function (input) {
+    input.addEventListener('input', function () {
+      mark(input === email ? 'field-email' : 'field-password', false);
+    });
+  });
+
+  document.getElementById('forgot').addEventListener('click', function (event) {
+    event.preventDefault();
+    refuse('A reset link is on its way to the address on your account.');
+  });
+})();
+</script>
+</body>
+</html>

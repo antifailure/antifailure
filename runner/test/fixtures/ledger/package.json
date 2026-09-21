@@ -1,0 +1,7 @@
+{
+  "name": "af-ledger-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The Electron application the desktop driver is proven against.",
+  "main": "main.js"
+}

@@ -1,0 +1,501 @@
+/* Ledger, a macOS application.
+ *
+ * WHAT THIS IS NOT, stated first because the absences are the design. There is
+ * no gradient anywhere, on the window, the heading or any button. No frosted
+ * glass, no glow, no floating coloured shape behind anything. Nothing animates
+ * on a loop; there is no pulsing dot and no spinner. Every colour below was
+ * chosen for this application rather than taken from a framework's defaults,
+ * and every one of those defaults is the reason a generated interface is
+ * recognisable on sight.
+ *
+ * WHAT IT IS. A macOS window. The type is the system's own, because the single
+ * most native thing a Mac application can do is use the face every other Mac
+ * application uses, and because the alternative, Inter at four weights, is the
+ * most reliable tell there is. The palette is ink on paper with ONE accent, a
+ * deep ledger green, which is the colour a balanced book is written in and so
+ * means something here rather than decorating. Controls are flat with a real
+ * hairline, the way AppKit draws them, rather than a card with a shadow under
+ * every surface.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* Ink on paper. Never #000 or #fff: both are harsher than any Mac window
+   * and both read as untuned. */
+  --paper: #fbfbfd;
+  --paper-sunken: #f3f3f6;
+  --ink: #1d1d1f;
+  /* Three tiers, and every one of them MEASURED against the surface it sits
+   * on rather than picked because it looked about right. The first attempt
+   * used Apple's own #8e8e93 for the faintest tier, which is what the system
+   * uses for tertiary labels, and it came back at 2.94 to 1 on this panel:
+   * below the 4.5 floor in five separate places at once, including the
+   * masked figures and the whole sidebar. Every tier moved down a step. */
+  --ink-muted: #5f5f65;
+  --ink-faint: #6e6e73;
+
+  /* One accent, and it carries meaning: the green a ledger is in when it
+   * balances. Its pressed state is a real darker mix rather than an opacity,
+   * because a translucent button over a patterned surface shows the pattern. */
+  --accent: #1f6f4a;
+  --accent-pressed: #175639;
+  /* The focus ring, and it is the ONLY thing this token is used for: every
+   * input, the checkbox, both buttons and the link. It started at 0.12 and
+   * the screenshot showed why that was wrong rather than subtle: against a
+   * near white window a twelve percent halo is invisible at arm's length, so
+   * nobody watching could tell which field was being typed into. AppKit's own
+   * ring is far more assertive than a designer's instinct suggests. */
+  --accent-wash: rgba(31, 111, 74, 0.28);
+  /* What is legible ON the accent. It is a token rather than a literal
+   * because it is NOT the same colour in both themes: dark mode lifts the
+   * accent to clear the dark ground, and white on a lifted green is about
+   * 2.3 to 1, which fails. Every pair below is measured rather than judged. */
+  --on-accent: #ffffff;
+
+  --danger: #b3261e;
+  --danger-wash: rgba(179, 38, 30, 0.10);
+
+  --hairline: #e0e0e4;
+  --hairline-strong: #c9c9ce;
+  --field: #ffffff;
+
+  /* One radius vocabulary, by role rather than by taste: controls take the
+   * small one, panels the large one. Nothing takes a third. */
+  --radius-control: 6px;
+  --radius-panel: 10px;
+
+  /* One elevation, used once. A window this shape has nothing floating in it,
+   * so the only shadow is the one under the signed in confirmation, which
+   * genuinely arrives on top of what was there. */
+  --lift: 0 1px 2px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.08);
+
+  /* A real scale with real jumps, not four sizes inside one band. 28 to 11 is
+   * two and a half times, and every step is used for one thing. */
+  --size-title: 28px;
+  --size-lead: 15px;
+  --size-body: 13px;
+  --size-caption: 11px;
+
+  --system: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue",
+    system-ui, sans-serif;
+  /* Money is set in a face whose digits are one width, so a column of amounts
+   * lines up on the decimal point. A proportional figure in a ledger is a
+   * defect a bookkeeper notices before anything else. */
+  --numeric: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+/* Dark is AUTHORED, not inverted. The paper does not become black, it becomes
+ * the graphite a Mac window is in dark mode; the accent is lifted because the
+ * same green on a dark ground falls below contrast; and the hairlines invert
+ * their relationship to the surface rather than keeping their lightness. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #1e1e20;
+    --paper-sunken: #171719;
+    --ink: #f2f2f5;
+    --ink-muted: #a1a1a8;
+    --ink-faint: #85858c;
+
+    --accent: #46b17f;
+    --accent-pressed: #63c294;
+    --accent-wash: rgba(70, 177, 127, 0.32);
+    /* Dark ink on the lifted green, for the reason the token exists. */
+    --on-accent: #0d2318;
+
+    --danger: #ff6961;
+    --danger-wash: rgba(255, 105, 97, 0.16);
+
+    --hairline: #353538;
+    --hairline-strong: #4a4a4e;
+    --field: #2a2a2d;
+
+    --lift: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.45);
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--system);
+  font-size: var(--size-body);
+  line-height: 1.45;
+  color: var(--ink);
+  background: var(--paper);
+  -webkit-font-smoothing: antialiased;
+  /* Nothing in a window is selected by dragging across it except the text
+   * that is there to be read, so the chrome opts out. */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* The window is one grid: a sunken panel of real content on the left, the
+ * form on the right. Two columns rather than one centred card, because a
+ * centred card in an empty window is the shape every generated sign in has,
+ * and because the left panel is doing real work: it is the signed out state
+ * of the thing being signed in to. */
+.window {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  height: 100%;
+}
+
+/* macOS puts the traffic lights in the content with hiddenInset, and they are
+ * dragged by whatever is under them, so the top strip of both panes is a drag
+ * region and the layout starts below it. */
+.drag {
+  -webkit-app-region: drag;
+  height: 38px;
+}
+
+.ledger {
+  background: var(--paper-sunken);
+  border-right: 1px solid var(--hairline);
+  padding: 0 20px 20px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ledger h2 {
+  font-size: var(--size-caption);
+  font-weight: 590;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin: 6px 0 12px;
+}
+
+/* The signed out ledger. Real rows with real figures, dimmed and inert,
+ * because that is the honest state of this panel: the data exists and you
+ * cannot see it yet. An empty rectangle with a lock icon would have said less
+ * and looked like a placeholder. */
+.entries {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1;
+}
+
+.entry {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.entry:last-child { border-bottom: 0; }
+
+.entry .what {
+  color: var(--ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.entry .amount {
+  font-family: var(--numeric);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+.entry .amount.credit { color: var(--accent); }
+
+/* Locked. The figure is REPLACED by a mask rather than blurred.
+ *
+ * Blur was the first attempt and it was wrong, which the screenshot showed
+ * and the code never would have: a four pixel blur on small tabular digits
+ * does not read as "hidden on purpose", it reads as a rendering fault, and on
+ * the dark ground it read as a smudge. A row of dots is unambiguous, stays
+ * crisp at any scale, and is what an application that hides money actually
+ * does. It also tells the truth to a screen reader, because the mask replaces
+ * the number in the tree instead of leaving it there invisibly. */
+.amount .mask { display: none; }
+
+.locked .amount .figure { display: none; }
+
+.locked .amount .mask {
+  display: inline;
+  letter-spacing: 0.12em;
+  color: var(--ink-faint);
+}
+
+.ledger-note {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--hairline);
+  color: var(--ink-faint);
+  font-size: var(--size-caption);
+}
+
+/* The form pane. */
+.pane {
+  padding: 0 44px 40px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+/* A measure. Body text that runs the width of a window is the other half of
+ * the centred card tell. */
+.form-wrap {
+  width: 100%;
+  max-width: 380px;
+}
+
+h1 {
+  font-size: var(--size-title);
+  line-height: 1.15;
+  /* Display type is set tighter than body type. Leaving the default leading
+   * and tracking on 28px is how a headline ends up looking like large body
+   * copy. */
+  letter-spacing: -0.021em;
+  font-weight: 620;
+  margin: 0 0 6px;
+}
+
+.lead {
+  font-size: var(--size-lead);
+  color: var(--ink-muted);
+  margin: 0 0 26px;
+  text-wrap: balance;
+}
+
+.field { margin-bottom: 16px; }
+
+label {
+  display: block;
+  font-size: var(--size-body);
+  font-weight: 510;
+  margin-bottom: 6px;
+  -webkit-user-select: none;
+}
+
+input[type="email"],
+input[type="password"] {
+  width: 100%;
+  font: inherit;
+  font-size: var(--size-body);
+  color: var(--ink);
+  background: var(--field);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-control);
+  padding: 7px 10px;
+  -webkit-user-select: text;
+  user-select: text;
+  /* Named properties with a tuned curve rather than transition-all with one
+   * default duration on everything. */
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+input::placeholder { color: var(--ink-faint); }
+
+/* The focus ring is the platform's: the control's own border takes the accent
+ * and a soft ring sits outside it. Removing the outline without replacing it
+ * is the single most common way a keyboard becomes unusable. */
+input[type="email"]:focus-visible,
+input[type="password"]:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+
+/* A field the form has refused says so in three ways, because colour alone is
+ * not a signal a person who cannot see it receives: the border, the message
+ * below it, and the message's own leading mark. */
+.field.invalid input {
+  border-color: var(--danger);
+}
+
+.field.invalid input:focus-visible {
+  box-shadow: 0 0 0 3px var(--danger-wash);
+}
+
+.field-error {
+  display: none;
+  margin-top: 6px;
+  font-size: var(--size-caption);
+  color: var(--danger);
+}
+
+.field.invalid .field-error { display: block; }
+
+/* The acknowledgment. A real checkbox, sized up to a comfortable target,
+ * tinted with the one accent rather than left as the browser's blue. */
+.consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 4px 0 22px;
+}
+
+.consent input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+  flex: none;
+}
+
+.consent input[type="checkbox"]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-wash);
+  border-radius: 4px;
+}
+
+.consent label {
+  margin: 0;
+  font-weight: 400;
+  color: var(--ink-muted);
+}
+
+/* One primary action, bottom right, which is where a Mac window puts the
+ * button that commits. The secondary beside it is a real button with a real
+ * resting affordance rather than a ghost with nothing to press. */
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+button {
+  font: inherit;
+  font-size: var(--size-body);
+  font-weight: 510;
+  border-radius: var(--radius-control);
+  padding: 6px 15px;
+  border: 1px solid transparent;
+  transition: background-color 90ms ease, border-color 90ms ease;
+}
+
+.primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: var(--accent);
+}
+
+.primary:hover { background: var(--accent-pressed); border-color: var(--accent-pressed); }
+/* A real pressed state. A control that does not move under the pointer feels
+ * like a picture of a control. */
+.primary:active { transform: translateY(0.5px); }
+
+.primary:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+
+.secondary {
+  background: var(--field);
+  color: var(--ink);
+  border-color: var(--hairline-strong);
+}
+
+.secondary:hover { background: var(--paper-sunken); }
+.secondary:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+
+/* Disabled is a DIFFERENT treatment, not the enabled one at half opacity, and
+ * it is accompanied by a reason. A control that is off for a reason nobody
+ * states is a control people click twice and then complain about. */
+button:disabled {
+  background: var(--paper-sunken);
+  color: var(--ink-faint);
+  border-color: var(--hairline);
+  cursor: default;
+}
+
+button:disabled:hover { background: var(--paper-sunken); }
+
+.disabled-reason {
+  margin: 10px 0 0;
+  font-size: var(--size-caption);
+  color: var(--ink-faint);
+  text-align: right;
+}
+
+.helper {
+  margin: 18px 0 0;
+  font-size: var(--size-caption);
+  color: var(--ink-faint);
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover { text-decoration: underline; }
+
+a:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-wash);
+  border-radius: 3px;
+}
+
+/* The form's own refusal, above the fields, for the case that is about the
+ * attempt rather than about one field. Its mark is a character rather than an
+ * image so it survives any theme and reaches a screen reader as text. */
+.notice {
+  display: none;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 0 18px;
+  padding: 9px 11px;
+  border: 1px solid var(--danger);
+  background: var(--danger-wash);
+  border-radius: var(--radius-control);
+  color: var(--danger);
+  font-size: var(--size-body);
+}
+
+.notice.shown { display: flex; }
+.notice .mark { font-weight: 700; line-height: 1.3; flex: none; }
+
+/* Signed in. This is the only thing in the window that is lifted, and it is
+ * lifted because it genuinely arrives on top of what was there. */
+.signed-in {
+  display: none;
+}
+
+.signed-in.shown { display: block; }
+
+.balance-card {
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-panel);
+  background: var(--field);
+  box-shadow: var(--lift);
+  padding: 20px 22px;
+  margin: 20px 0 0;
+}
+
+.balance-card .label {
+  font-size: var(--size-caption);
+  font-weight: 590;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin: 0 0 6px;
+}
+
+.balance-card .figure {
+  font-family: var(--numeric);
+  font-variant-numeric: tabular-nums;
+  font-size: 30px;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  margin: 0;
+}
