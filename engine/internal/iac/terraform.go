@@ -372,7 +372,14 @@ var resourceKinds = map[string]Kind{
 	"azurerm_servicebus_queue":   KindQueue,
 	"azurerm_storage_queue":      KindQueue,
 	"google_pubsub_subscription": KindQueue,
-	// Topics.
+	// Topics. A Kinesis stream and an EventBridge bus are both here rather
+	// than under a name of their own: what a consumer needs to know about
+	// either is that production publishes into something several readers can
+	// consume from, which is what KindTopic means. They are in this table
+	// BECAUSE engine/pkg/emulator can create them, and
+	// TestEverySeedableTypeIsClassified fails if that list ever grows past it.
+	"aws_kinesis_stream":       KindTopic,
+	"aws_cloudwatch_event_bus": KindTopic,
 	"aws_sns_topic":            KindTopic,
 	"azurerm_servicebus_topic": KindTopic,
 	"azurerm_eventgrid_topic":  KindTopic,

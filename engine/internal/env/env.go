@@ -2067,6 +2067,22 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	}
 	spec.Emulators = emulators
 
+	// Production's declared cloud resources, read out of the infrastructure as
+	// code rather than out of a second copy somebody typed into the manifest.
+	//
+	// BEFORE any service starts, because the service is who the missing bucket
+	// is served to. What could not be read travels with them and is said out
+	// loud: a run that created four of production's six buckets and reported
+	// four has told the reader nothing about the two.
+	declared, unread, err := cloudResources(ctx, o.opts.Root, o.opts.Manifest.Infrastructure)
+	if err != nil {
+		return result, err
+	}
+	spec.CloudResources = declared
+	for _, u := range unread {
+		o.event(s, events.Progress, "infrastructure: "+u.String())
+	}
+
 	// The resolved values reach the services here rather than in the spec
 	// builder, because the lookup is per environment and the builder runs per
 	// service. Each service still receives only the names it declared, so one
