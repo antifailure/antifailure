@@ -217,6 +217,9 @@ const (
 	// The extension {extension} named by database.extensions could not be
 	// created in the image {image}.
 	AFDB040 Code = "AF-DB-040"
+	// Nothing reached the golden: the verification read 0 tables, and
+	// {origin} declares where its contents come from.
+	AFDB041 Code = "AF-DB-041"
 
 	// Detection
 	// No application could be detected in {path}.
@@ -1279,6 +1282,15 @@ var catalog = map[Code]Entry{
 		Message:   "The extension {extension} named by database.extensions could not be created in the image {image}.",
 		NextStep:  "Name an image that carries {extension} and set database.image to it, or drop {extension} from database.extensions. An extension is files on the server's disk before it is anything in a database, so no amount of SQL adds one the image does not have: pgvector/pgvector, postgis/postgis and timescale/timescaledb are the published images for the common ones.",
 		Docs:      "providers/databases",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFDB041: {
+		Code:      AFDB041,
+		Area:      "DB",
+		Message:   "Nothing reached the golden: the verification read 0 tables, and {origin} declares where its contents come from.",
+		NextStep:  "Check what {origin} names: a seed command that exits 0 without writing, or a source database that turns out to be empty, both produce this. Then refresh again. The golden is not published and nothing can branch it, which is the point: a golden that holds nothing and reports itself verified is worse than one that fails, because the word verified is what the next environment relies on. To build a golden with no data behind it deliberately, declare neither database.source_url_env nor database.seed; a project that declares neither gets the schema its migrations build and no rows, and that is supported.",
+		Docs:      "concepts/goldens",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
 	},

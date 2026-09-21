@@ -3314,7 +3314,7 @@ func serviceDir(inContext func(string) (string, bool), dir, name string) string 
 // ones does not, which is the whole claim.
 func (o *Orchestrator) seedGoldenSpec(
 	s *session, seed string, key *masking.Key, rules *masking.RuleSet, hash string,
-	provenance string,
+	provDigest string,
 ) provider.GoldenSpec {
 	return provider.GoldenSpec{
 		Version:   databaseVersion(o.opts.Manifest),
@@ -3328,7 +3328,7 @@ func (o *Orchestrator) seedGoldenSpec(
 		// golden on every single `af up` and branched it once. The fix for
 		// the leak is also the fix for that: one identity, written by
 		// every path that publishes and read by the path that selects.
-		Provenance: provenance,
+		Provenance: provDigest,
 		// No source database is configured, so the golden is built from
 		// nothing. Where the manifest names a seed command, that command
 		// is what puts data in it; otherwise the schema arrives with the
@@ -3374,9 +3374,18 @@ func (o *Orchestrator) seedGoldenSpec(
 		// named no provenance would be the one publish that could not be
 		// traced back to the work it was made for.
 		Verify: func(ctx context.Context, candidate secrets.Value) (string, error) {
-			_, att, verifyErr := o.verifyDatabase(ctx, s, candidate, hash, provenance)
+			report, att, verifyErr := o.verifyDatabase(ctx, s, candidate, hash, provDigest)
 			if verifyErr != nil {
 				return "", verifyErr
+			}
+			// The same guard the refresh path carries, and it belongs on both
+			// for the reason every duplicated check in this repository
+			// belongs on both: a project reaches one path or the other by
+			// whether it has a golden yet, which is not a property anybody
+			// chooses. A seed that runs and writes nothing produces an empty
+			// golden here exactly as it does there.
+			if emptyErr := refuseEmptyGolden(provenance{Seed: seed}, report); emptyErr != nil {
+				return "", emptyErr
 			}
 			return att, nil
 		},

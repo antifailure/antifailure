@@ -22302,6 +22302,18 @@ The extension {extension} named by database.extensions could not be created in t
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [providers/databases](/docs/providers/databases) |
 
+### AF-DB-041
+
+Nothing reached the golden: the verification read 0 tables, and {origin} declares where its contents come from.
+
+**What to do.** Check what {origin} names: a seed command that exits 0 without writing, or a source database that turns out to be empty, both produce this. Then refresh again. The golden is not published and nothing can branch it, which is the point: a golden that holds nothing and reports itself verified is worse than one that fails, because the word verified is what the next environment relies on. To build a golden with no data behind it deliberately, declare neither database.source_url_env nor database.seed; a project that declares neither gets the schema its migrations build and no rows, and that is supported.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `3` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/goldens](/docs/concepts/goldens) |
+
 ## Detection
 
 ### AF-DET-001
