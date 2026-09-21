@@ -47,11 +47,10 @@ import (
 //   - each side is first sent the same mix for a warm-up that is discarded,
 //     so a freshly branched database and a freshly started service are not
 //     measured answering from cold caches and an empty connection pool;
-//   - then each side is sent the mix in several short rounds in the Thue
-//     Morse order, base, this build, this build, base, this build, base, base,
-//     this build, so that a host warming or cooling across the comparison
-//     lands on both sides equally instead of on whichever went second. See
-//     compareOrder for why that order and not the obvious alternation;
+//   - then each side is sent the mix in eight short rounds, interleaved so
+//     that neither side always goes first, and a host warming or cooling
+//     across the comparison lands on both sides instead of on whichever went
+//     second. See DefaultCompareRounds for why eight;
 //   - round k uses the same seed on both sides, so the two sides are still
 //     sent the same request sequence round for round;
 //   - each side's rounds are pooled back into one result by load.Merge, from
@@ -287,11 +286,22 @@ func (o *Orchestrator) LoadCompare(
 
 // DefaultCompareRounds is how many interleaved rounds each side is sent.
 //
-// Four, because four is the smallest count at which the Thue Morse order
-// balances both the sum and the sum of squares of each side's slot positions,
-// which is what keeps a drift out of the p95 and not only out of the mean. See
-// compareOrder. Two balances the sum only.
-const DefaultCompareRounds = 4
+// Eight, from a model rather than from taste. The comparison judges a p95 of
+// each side's POOLED samples, and a pooled p95 is dominated by whichever side
+// owns the latest, most drifted slot; no order can split one slot between two
+// sides, so the leftover shrinks only as the slots get shorter. Modelled with
+// an extreme drift, half a millisecond per second on a 10 to 30 millisecond
+// route over 32 seconds a side, the bias of this build against the base was:
+//
+//	one pass each, the old way   plus 39.7 percent
+//	4 rounds                     minus 6.6 (base, this build, this build,
+//	                             base, repeated) or plus 7.1 (Thue Morse)
+//	8 rounds                     plus 0.03, either order
+//
+// At a realistic drift, a tenth of that, four rounds was already under a
+// quarter of a percent. Eight covers the drift nobody expects, and costs
+// nothing in traffic because the rounds split the same total.
+const DefaultCompareRounds = 8
 
 // DefaultCompareWarmup is how long each side is sent the mix, and discarded,
 // before anything is recorded. See the evidence in comparePlanFor.
@@ -344,28 +354,23 @@ func (s compareSide) String() string {
 }
 
 // compareOrder is the schedule, the Thue Morse sequence: slot n goes to this
-// build when n has an odd number of set bits, and to the base otherwise. For
-// four rounds that is base, this build, this build, base, this build, base,
-// base, this build.
+// build when n has an odd number of set bits, and to the base otherwise, so
+// four rounds are base, this build, this build, base, this build, base, base,
+// this build. Every pair of slots holds one of each side, so round k is one
+// seed sent at both.
 //
-// WHY NOT THE OBVIOUS ONE. The comparison judges a p95 of the POOLED samples,
-// not a mean, and that changes which order is fair. Base then this build every
-// time puts every drift on this build, which is the defect this file was
-// changed for. The next obvious fix, base, this build, this build, base,
-// repeated, balances the SUM of each side's slot positions, so a steady drift
-// cancels out of the mean; but it gives the base both the earliest and the
-// latest slot, 0 and 7 of 8, so the base's pooled distribution is wider than
-// this build's and its tail, which is where a p95 lives, is inflated by the
-// drift. That is the same "this build looks faster" in a smaller costume, and
-// it was caught writing the test for it rather than on camera.
-//
-// The Thue Morse order balances the sum AND the sum of squares of the slot
-// positions for four rounds (base 0, 3, 5, 6 and this build 1, 2, 4, 7: 14 and
-// 14, 70 and 70), so a drift adds the same centre and the same spread to both
-// sides, and the two extreme slots go one to each side. No schedule can make
-// two pooled percentiles immune to drift exactly; this is the one that makes
-// the leftover smallest. Every pair of slots still holds one of each side, so
-// round k is still one seed sent at both.
+// What the order does and does not buy, measured rather than argued, because
+// the first argument for it was wrong. Against base then this build every
+// time, which put every drift on this build, any interleaving that alternates
+// who goes first removes most of a steady drift: see DefaultCompareRounds.
+// Thue Morse also balances the sum and the sum of squares of each side's slot
+// positions (base 0, 3, 5, 6 and this build 1, 2, 4, 7: 14 and 14, 70 and 70),
+// which keeps a drift out of the centre and the spread of each side. It does
+// NOT keep a drift out of a pooled p95 any better than base, this build, this
+// build, base does: a p95 lives in the extremes, the latest slot has to go to
+// one side, and at four rounds the two orders left the same bias with opposite
+// signs. That leftover shrinks with the number of rounds, not with the order,
+// which is why the rounds are eight.
 func compareOrder(rounds int) []compareSide {
 	order := make([]compareSide, 0, 2*rounds)
 	for n := 0; n < 2*rounds; n++ {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/antifailure/antifailure/engine/internal/env"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
@@ -131,10 +132,7 @@ af load compare --seed 7 --keep`),
 				BaseRef:  orDefaultString(baseRef, cfg.BaseRef),
 				Duration: duration, Scale: scale, Seed: seed, Keep: keep,
 				Rounds: rounds, Warmup: warmup,
-				// Typed and zero is "none"; untyped is "the default". The two
-				// cannot share a value, so the flag's having been set is what
-				// tells them apart.
-				NoWarmup: cmd.Flags().Changed("warmup") && warmup <= 0,
+				NoWarmup: noWarmup(cmd.Flags(), warmup),
 				Progress: func(line string) { e.Out.Printf("  %s\n", line) },
 			})
 			if errors.Is(err, env.ErrLoadBaselineSameCommit) {
@@ -246,6 +244,17 @@ af load compare --seed 7 --keep`),
 	// file literally named json.
 	cmd.Flags().StringVar(&output, "report", "", "Write the comparison here as well as to the terminal")
 	return cmd
+}
+
+// noWarmup is whether the person asked for no warm-up.
+//
+// Typed and zero is "none"; not typed is "the default". The two cannot share a
+// value, because the flag's zero is also its unset state, so whether the flag
+// was set on the command line is what tells them apart. Reading the value
+// alone would make `--warmup 0s`, the arm that shows what the warm-up is for,
+// silently send the default warm-up instead.
+func noWarmup(flags *pflag.FlagSet, warmup time.Duration) bool {
+	return flags.Changed("warmup") && warmup <= 0
 }
 
 // loadComparisonConfig reads the block, treating an absent load block and an
