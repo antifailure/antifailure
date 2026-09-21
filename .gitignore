@@ -176,6 +176,7 @@ runner/artifacts/
 /notices
 /npmaudit
 /origincheck
+/paritycheck
 /planguard
 /prosecheck
 /proxysrc

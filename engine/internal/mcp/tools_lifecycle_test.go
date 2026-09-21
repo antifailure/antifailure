@@ -475,6 +475,7 @@ func TestDomainSchemas_AreBoundedAndDescribed(t *testing.T) {
 	p := &Project{ID: "p"}
 	tools := []*Tool{
 		newRunLoadTestTool(p, nil, nil),
+		newRunSQLWorkloadTool(p, nil, nil),
 		newRunWorkflowsTool(p, nil, nil),
 		newExploreTool(p, nil, nil),
 		newStartEnvironmentTool(p, nil, nil),
@@ -482,7 +483,7 @@ func TestDomainSchemas_AreBoundedAndDescribed(t *testing.T) {
 		newDescribeEnvironmentTool(p, nil),
 		newReadLogsTool(p, nil),
 	}
-	require.Len(t, tools, 7, "every tool in this domain has to be in this list")
+	require.Len(t, tools, 8, "every tool in this domain has to be in this list")
 
 	for _, tool := range tools {
 		require.NotEmpty(t, tool.Name, "a tool needs a name")

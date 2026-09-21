@@ -2044,6 +2044,29 @@ jobs:
         # that is documented, read, and unreachable by every apply passes both.
         run: go run ./tools/wirecheck .
 
+      - name: A capability reaches every surface, or says why it does not
+        # The concurrent SQL workload shipped as `af load sql` and was reachable
+        # from nothing else. engine/internal/mcp referenced
+        # env.Orchestrator.SQLLoad nowhere at all, so an agent driving the MCP
+        # server could rehearse a migration, send HTTP traffic, drive a browser
+        # and explore, and could not ask the one question somebody changing an
+        # index, a lock, a storage parameter or a query is actually asking.
+        #
+        # Nothing here could see it. surfacecheck is about which packages may be
+        # imported and whether an export changed shape; wirecheck is about
+        # whether a documented variable can be delivered by an installation
+        # route; routecheck is about whether a route the site calls is served.
+        # A capability reachable from exactly one surface passes all three
+        # cleanly, which is how this one survived: the instruments were green
+        # and could not have been anything else.
+        #
+        # The inventory is the exported method set of *env.Orchestrator, read
+        # with the type checker, and the surfaces are the packages that import
+        # it. A fourth importer fails rather than being ignored, because a
+        # surface this gate cannot classify is "I could not look" and not "I
+        # looked and it was fine".
+        run: go run ./tools/paritycheck .
+
       - name: Every hostname the site is served on is an origin the plane answers
         # antifailure.dev and www.antifailure.dev are two custom domains on one
         # Azure Static Web App. Both are Ready, both serve every page, and

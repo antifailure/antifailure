@@ -469,6 +469,21 @@ export const MCP_TOOLS: readonly McpToolFact[] = [
     servedBy: 'engine/internal/mcp/tools_load.go:newRunLoadTestTool',
   },
   {
+    name: 'run_sql_workload',
+    does:
+      'Answer whether this change holds up under production shaped concurrency at the database ' +
+      'itself. Clients on their own connections run whole transactions directly against the ' +
+      'branch\'s database rather than through the application, and it reports transactions per ' +
+      'second, transaction and per statement latency percentiles, deadlocks, serialization ' +
+      'failures, retries and the rows the statements actually touched.',
+    refuses:
+      'Its arguments name no connection string, branch, statement, source or threshold; the ' +
+      'statements come from the manifest\'s load.sql block or from pg_stat_statements on the ' +
+      'branch, a write is refused unless the manifest allows one, and an unknown field is ' +
+      'refused rather than ignored.',
+    servedBy: 'engine/internal/mcp/tools_sqlload.go:newRunSQLWorkloadTool',
+  },
+  {
     name: 'search_documentation',
     does:
       'Search the 92 pages this build ships and return the few lines that answer the question, ' +

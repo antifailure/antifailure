@@ -85,6 +85,7 @@ gate: _reports
     run "every manifest field is read or refused" just fieldsweep
     run "self-hosting inputs are stable" just inputcheck
     run "documented config can be set"   just wirecheck
+    run "a capability reaches every surface" just paritycheck
     run "every socket is plugged in"     just socketcheck
     run "the site calls routes that exist" just routecheck
     run "every hostname has an origin"   just origincheck
@@ -1522,6 +1523,25 @@ inputcheck:
 # that has stopped being needed is reported so the file cannot rot.
 wirecheck:
     go run ./tools/wirecheck .
+
+# Every customer facing capability is reachable from every surface that serves
+# customers, or says in writing why it is not.
+#
+# The concurrent SQL workload shipped as `af load sql` and was reachable from
+# nothing else: engine/internal/mcp referenced env.Orchestrator.SQLLoad nowhere
+# at all, so an agent driving the MCP server could rehearse a migration, send
+# HTTP traffic, drive a browser and explore, and could not ask the one question
+# somebody changing an index, a lock or a query is asking. Every instrument here
+# was green throughout, because not one of them asks this question: surfacecheck
+# is about API stability, wirecheck about whether a documented variable can be
+# delivered, routecheck about whether a route the site calls is served.
+#
+# The inventory is read from the code rather than from a list, because a hand
+# written inventory is the same drift with an extra step. It is the exported
+# method set of *env.Orchestrator, and the surfaces are the packages that import
+# it, so a fourth importer fails rather than being ignored.
+paritycheck:
+    go run ./tools/paritycheck .
 
 # Every extension point in engine/pkg/extension is implementable from outside
 # the engine module, and either consulted by the engine or declared as one that

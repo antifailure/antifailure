@@ -1,0 +1,84 @@
+# Capabilities on *env.Orchestrator that are NOT reachable from every customer
+# facing surface, with the reason each one is allowed to stay that way.
+#
+# THREE tab separated fields: the method, the KIND of gap, and why. The kinds
+# are the ones tools/paritycheck checks, and each one carries a structural
+# precondition that has to hold, so a row cannot be pasted onto an inconvenient
+# capability to quiet the gate:
+#
+#   accessor    the method takes no context.Context. It reports or sets a value
+#               its caller already has rather than doing work. A capability
+#               that takes a context can never be filed as one.
+#   cli-only    reachable from the command line and from no other surface. The
+#               row goes stale and FAILS the moment somebody wires it up.
+#   mcp-only    the mirror image. A capability an agent has and a person at a
+#               terminal does not is the same defect wearing other clothes.
+#   unreached   reachable from no surface at all. Either dead, or called only
+#               from inside engine/internal/env, and the row has to say which.
+#
+# THE REASON IS THE WHOLE POINT OF THE ROW. It is what the next person reads
+# instead of asking, and it is the difference between a gap somebody decided to
+# leave and a gap nobody knew about. The second kind is what this file exists to
+# make impossible: the concurrent SQL workload was reachable from `af load sql`
+# and from nothing else for as long as it existed, and no instrument in this
+# repository could see it.
+#
+# A row here is not an endorsement. Six of these are real capabilities the MCP
+# server does not have, and each says what would have to change for the row to
+# go away.
+#
+# Methods declared in engine/internal/env/export_test.go are not here and never
+# will be: they are not part of the shipped package, so the gate never loads
+# them. A ForTest method in a shipped file would appear as unreached and would
+# need a row, which is the right way round.
+
+# The security pass. af ci drives all three, and nothing on the MCP server runs
+# that pass: read_security_findings is a projection over the findings a finished
+# run already left in the store and runs nothing itself. All three move onto
+# this surface together, in the commit that gives the MCP server a tool that
+# RUNS the pass rather than reading its output.
+AccessProbe	cli-only	A step inside af ci's security pass, which drives the authenticated authorization differential against a live environment. Nothing on the MCP server runs that pass, and read_security_findings reads a finished run's findings rather than producing any.
+BaselineTwin	cli-only	Builds a SECOND environment from the base revision so the security families have something to compare the candidate against. The pass that needs it is af ci's, and this surface reads that pass's output rather than running it.
+DependencyFiles	cli-only	Reads the dependency manifests af ci's security pass scans. The third of the same pass, and it arrives here when a tool runs the pass rather than reading its findings.
+
+# Found by this gate on the day it was written, on a capability nobody aimed it
+# at. af load compare landed in #511 the same day, and it is on the command line
+# alone. The row is what this file is for: the gap is written down, with what
+# would close it, instead of being silent the way the SQL workload was.
+LoadCompare	cli-only	Brings a SECOND environment up from the base revision, pinned to the candidate's golden, sends the same mix at both under one seed and reports what moved. It arrives on this surface as a profile on run_load_test or a tool of its own, and until then an agent can send traffic at the candidate and cannot difference it against the base branch.
+
+# The three that WRITE A FILE into the checkout. No tool on the MCP server
+# writes one, and that is checked rather than assumed: engine/internal/mcp calls
+# neither os.WriteFile nor os.Create anywhere. A tool that wrote into the
+# repository would be a new kind of act for this server and is a decision rather
+# than a wiring job.
+MaskDraft	cli-only	Classifies a schema with the built in rules alone so af mask init can write masking.yaml into the checkout for a person to edit and commit. Nothing on the MCP server writes a file into the repository.
+RecordTraffic	cli-only	Reads a traffic export and produces the profile af traffic record writes into the repository with traffic.Write. Same reason as MaskDraft: this surface does not write files into the checkout.
+RecordVolume	cli-only	Measures the environment's data volume and produces the profile af volume record writes into the repository. Same reason as RecordTraffic, and assess_environment_fidelity is how this surface reports what the copy's volume actually is.
+
+# Values the caller already has. None of these takes a context and none of them
+# does work, so a tool that called one would be reading back its own argument or
+# a fact about the checkout that an agent with a filesystem can read for itself.
+AddSink	accessor	Takes an events.Sink the caller constructed. It configures an orchestrator rather than doing anything with one, and the MCP server's sinks are the ones its own Serve builds.
+Branch	accessor	Reports the branch its caller passed into env.Options, so a tool asking for it would be reading back its own argument.
+EnvID	accessor	Reports the environment name this orchestrator was built for. describe_environment carries the same name out of the run's own result.
+MarkEphemeral	accessor	Sets the lifetime the caller chose before anything runs. On this server that choice belongs to start_environment's own arguments.
+MaskingRulesPath	accessor	Reports where masking.yaml sits on disk, which is a fact about the checkout rather than about the change.
+SendableRoutes	accessor	Reports the routes the recorded traffic profile holds. run_load_test reports the routes it actually sent and the ones it refused, which is the same fact measured rather than predicted.
+TrafficMaxAge	accessor	Reports the manifest's load.traffic.max_age. explain_effective_configuration is how this surface answers a question about a manifest value.
+TrafficProfile	accessor	Reports the recorded traffic profile already on disk, and where it came from.
+TrafficProfilePath	accessor	Reports where the traffic profile sits on disk, the same shape as MaskingRulesPath and for the same reason.
+TrafficRate	accessor	Reports the arrival rate the recorded profile holds. run_load_test reports the target rate and the achieved rate side by side, which is the same number measured.
+VolumeMaxAge	accessor	Reports the manifest's volume profile max age, the same shape as TrafficMaxAge and for the same reason.
+VolumeProfile	accessor	Reports the recorded volume profile already on disk. assess_environment_fidelity is where this surface reports what the copy's volume actually is.
+VolumeProfilePath	accessor	Reports where the volume profile sits on disk, a fact about the checkout rather than about the change.
+
+# Exported and reached by no surface. Three of these are called only from inside
+# engine/internal/env, which means the EXPORT is what is wrong rather than the
+# wiring, and unexporting one is a change to make deliberately rather than while
+# passing. They are named here so that a future reader finds a decision instead
+# of a silence.
+ControlPlane	unreached	Exists so a test can assert the credential chain from the command line through env.Options to telemetry, which is a copy that was once forgotten and invisible from every direction. Its own doc comment says so, and no shipped file calls it.
+ProvisionPersonas	unreached	Called only from inside engine/internal/env, by Test, Explore and AccessProbe, each of which provisions the personas its own run needs.
+SafeRoutes	unreached	Called only from inside engine/internal/env, by the load and fidelity paths. Both surfaces report the safe and the refused routes out of a run's own result instead.
+WebhookSecrets	unreached	Called only from inside engine/internal/env, by WebhookSecretFor and by the service environment builder. WebhookSecretFor is the one both surfaces use.
