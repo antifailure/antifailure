@@ -42,6 +42,7 @@ func validate(m *schema.Manifest, doc *yaml.Node, root string) []Problem {
 	v.workflows(m)
 	v.terminalWorkflows(m)
 	v.desktop(m)
+	v.mobile(m)
 	v.diversity(m)
 	v.invariants(m)
 	v.oracle(m)
@@ -1696,6 +1697,34 @@ func (v *validator) desktop(m *schema.Manifest) {
 		v.add("desktop.process",
 			"An Electron application carries a process name.",
 			"Remove it. `process` is how a native application is found after its bundle is opened, and an Electron application is launched directly, so nothing reads this.")
+	}
+}
+
+// mobile is desktop's pairing, for the phone surfaces.
+//
+// THE DEFECT THIS EXISTS FOR is the one desktop above closed, and it had
+// happened again one surface over. A workflow could say `surface: ios`, the
+// schema accepted it, the validator passed it, the engine selected the iOS
+// driver, and the runner refused the job for want of an application's
+// identifier, after an environment had been built and paid for. There was not
+// even a field in which to write one.
+func (v *validator) mobile(m *schema.Manifest) {
+	drives := false
+	for i := range m.Workflows {
+		if s := m.Workflows[i].Surface; s == schema.SurfaceIOS || s == schema.SurfaceAndroid {
+			drives = true
+			break
+		}
+	}
+	if drives && m.Mobile == nil {
+		v.add("mobile",
+			"A workflow drives a phone and no mobile application is declared.",
+			"Add a `mobile` block with the application's `id`: its bundle identifier on iOS. There is no default, because which application on the device is under test cannot be guessed.")
+	}
+	if m.Mobile != nil && !drives {
+		v.add("mobile",
+			"A mobile application is declared and no workflow drives it.",
+			"Give a workflow `surface: ios`, or remove the `mobile` block: an application nothing opens is a setting somebody will believe they have made.")
 	}
 }
 

@@ -257,6 +257,21 @@ func Explain(m *schema.Manifest, width int) string {
 		b.WriteString("\n")
 	}
 
+	if m.Mobile != nil {
+		// Printed once, above the workflows, for the reason the desktop
+		// application is: it is declared once, and a reader needs to know
+		// what the phone workflows were driven against.
+		b.WriteString("Mobile application\n")
+		fmt.Fprintf(&b, "  %-24s %s\n", "id", value(m.Mobile.ID, 27, width))
+		if m.Mobile.App != "" {
+			fmt.Fprintf(&b, "  %-24s %s\n", "installs", value(m.Mobile.App, 27, width))
+		}
+		if m.Mobile.Device != "" {
+			fmt.Fprintf(&b, "  %-24s %s\n", "on", value(m.Mobile.Device, 27, width))
+		}
+		b.WriteString("\n")
+	}
+
 	if len(m.Workflows) > 0 {
 		// Which surface they drive, said once in the heading rather than on
 		// every line, because a manifest whose workflows name more than one

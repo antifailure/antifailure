@@ -34,21 +34,27 @@ type Manifest struct {
 	// describes one product, and required by a manifest that names the
 	// surface at all: without it the run reaches the runner and is refused
 	// there for want of something to open.
-	Desktop        *DesktopApplication `json:"desktop,omitempty" yaml:"desktop,omitempty"`
-	Invariants     []Invariant         `json:"invariants,omitempty" yaml:"invariants,omitempty"`
-	Insights       *Insights           `json:"insights,omitempty" yaml:"insights,omitempty"`
-	Change         *Change             `json:"change,omitempty" yaml:"change,omitempty"`
-	Oracle         *Oracle             `json:"oracle,omitempty" yaml:"oracle,omitempty"`
-	Explore        *Explore            `json:"explore,omitempty" yaml:"explore,omitempty"`
-	Diversity      *Diversity          `json:"diversity,omitempty" yaml:"diversity,omitempty"`
-	Fidelity       *Fidelity           `json:"fidelity,omitempty" yaml:"fidelity,omitempty"`
-	Load           *Load               `json:"load,omitempty" yaml:"load,omitempty"`
-	Policy         *Policy             `json:"policy,omitempty" yaml:"policy,omitempty"`
-	Runtime        *Runtime            `json:"runtime,omitempty" yaml:"runtime,omitempty"`
-	Infrastructure *Infrastructure     `json:"infrastructure,omitempty" yaml:"infrastructure,omitempty"`
-	GitHub         *GitHub             `json:"github,omitempty" yaml:"github,omitempty"`
-	Security       *Security           `json:"security,omitempty" yaml:"security,omitempty"`
-	Chaos          *Chaos              `json:"chaos,omitempty" yaml:"chaos,omitempty"`
+	Desktop *DesktopApplication `json:"desktop,omitempty" yaml:"desktop,omitempty"`
+	// Mobile is which application the workflows driving SurfaceIOS or
+	// SurfaceAndroid are driven in, declared once for the same reason Desktop
+	// is. Without it a phone surface is nameable and unreachable: the runner
+	// requires the application's identifier and refuses the job without one,
+	// after the environment has been built.
+	Mobile         *MobileApplication `json:"mobile,omitempty" yaml:"mobile,omitempty"`
+	Invariants     []Invariant        `json:"invariants,omitempty" yaml:"invariants,omitempty"`
+	Insights       *Insights          `json:"insights,omitempty" yaml:"insights,omitempty"`
+	Change         *Change            `json:"change,omitempty" yaml:"change,omitempty"`
+	Oracle         *Oracle            `json:"oracle,omitempty" yaml:"oracle,omitempty"`
+	Explore        *Explore           `json:"explore,omitempty" yaml:"explore,omitempty"`
+	Diversity      *Diversity         `json:"diversity,omitempty" yaml:"diversity,omitempty"`
+	Fidelity       *Fidelity          `json:"fidelity,omitempty" yaml:"fidelity,omitempty"`
+	Load           *Load              `json:"load,omitempty" yaml:"load,omitempty"`
+	Policy         *Policy            `json:"policy,omitempty" yaml:"policy,omitempty"`
+	Runtime        *Runtime           `json:"runtime,omitempty" yaml:"runtime,omitempty"`
+	Infrastructure *Infrastructure    `json:"infrastructure,omitempty" yaml:"infrastructure,omitempty"`
+	GitHub         *GitHub            `json:"github,omitempty" yaml:"github,omitempty"`
+	Security       *Security          `json:"security,omitempty" yaml:"security,omitempty"`
+	Chaos          *Chaos             `json:"chaos,omitempty" yaml:"chaos,omitempty"`
 }
 
 // ServiceKind is what a service is.
@@ -855,6 +861,30 @@ type DesktopApplication struct {
 	// directly and never looked up. Empty is filled in by normalisation with
 	// the bundle's name without .app.
 	Process string `json:"process,omitempty" yaml:"process,omitempty"`
+}
+
+// MobileApplication is which application the phone workflows drive.
+//
+// The piece without which SurfaceIOS was a name and nothing else, which is the
+// defect DesktopApplication was written to close, one surface over. The
+// engine accepted `surface: ios` at validation, selected the iOS driver, and
+// sent a job document with nothing in it saying which application to drive;
+// the runner requires that and refused every iOS run before touching a device.
+type MobileApplication struct {
+	// ID is the iOS bundle identifier, or the Android package name. The one
+	// thing that cannot be guessed, so the one thing required: a machine with
+	// one simulator does not need to be told which, and it does need to be
+	// told which of the applications on it is under test.
+	ID string `json:"id" yaml:"id"`
+	// App is the built application to install before driving: a .app built
+	// for the simulator on iOS, an .apk on Android. Relative paths are
+	// resolved against the directory holding the manifest before the runner
+	// is told, as Desktop's are. Empty drives an application already
+	// installed on the device.
+	App string `json:"app,omitempty" yaml:"app,omitempty"`
+	// Device is the simulator's UDID or the device's adb serial. Empty picks
+	// the booted one, or the newest available.
+	Device string `json:"device,omitempty" yaml:"device,omitempty"`
 }
 
 // The kinds of desktop application, which is which accessibility tree the
