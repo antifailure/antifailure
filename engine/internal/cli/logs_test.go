@@ -96,10 +96,12 @@ func TestLogsOffersNoRemedyWhenStatusCannotBeRead(t *testing.T) {
 }
 
 func TestLogsPrintsWhatADeclaredServiceWrote(t *testing.T) {
+	// Running, so an empty message printed beside the output would be the
+	// running one and the assertion below could see it.
 	src := &fakeLogSource{lines: []provider.LogLine{
 		{Service: "ledger", Text: "listening on :8080"},
 		{Service: "ledger", Text: "posted entry 42"},
-	}}
+	}, status: upWith(provider.RunningService{Name: "ledger", State: "running"})}
 	got := runShowLogs(t, src, "ledger")
 	require.Contains(t, got, "listening on :8080\nposted entry 42\n")
 	require.NotContains(t, got, "written nothing")
