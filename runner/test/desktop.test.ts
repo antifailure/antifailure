@@ -22,9 +22,10 @@
 import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:net';
-import { mkdtempSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   locate, normalizeRole, snapshotFrom, walk, filledOf, chosen, type AxNode,
 } from '../src/drivers/ax.ts';
@@ -37,6 +38,8 @@ import { driverFor } from '../src/drivers/driver.ts';
 import { socketSink, decode, type LiveEvent } from '../src/live.ts';
 import type { AxSurface } from '../src/drivers/surface.ts';
 import type { Snapshot } from '../src/workflow.ts';
+
+const here = dirname(fileURLToPath(import.meta.url));
 
 const WHERE = { url: 'desktop://fixture', title: 'Fixture' };
 
@@ -509,47 +512,22 @@ function electronBinary(): { readonly path: string } | { readonly absent: string
   };
 }
 
-/** fixtureApp writes a real, minimal Electron application: a sign-in screen
- *  with two required text fields, a required acknowledgment, a submit button
- *  and a link, which is the shape of the screens this driver exists for. */
+/** fixtureApp is the Electron application this driver is proven against.
+ *
+ * Real files under test/fixtures/ledger rather than a string written to a
+ * temporary directory, and the reason is that it has two jobs. It is the
+ * fixture, so its accessible names are the interface this test drives by. It
+ * is also the application a person WATCHES being driven, so it is built to be
+ * looked at, and a sign-in screen assembled out of concatenated markup inside
+ * a test file could never be either reviewed or designed.
+ *
+ * The names it must keep are "Email address", "Password", "I accept the
+ * terms", "Sign in" and "Forgot your password", plus the acknowledgment being
+ * really `required`. Its own comment says so, next to the markup, which is
+ * where somebody about to rename one of them will actually be.
+ */
 function fixtureApp(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'af-electron-fixture-'));
-  writeFileSync(join(dir, 'package.json'), JSON.stringify({
-    name: 'af-desktop-fixture', version: '1.0.0', main: 'main.js',
-  }));
-  writeFileSync(join(dir, 'main.js'), [
-    "const { app, BrowserWindow } = require('electron');",
-    'app.whenReady().then(() => {',
-    "  const w = new BrowserWindow({ width: 760, height: 560, title: 'Ledger' });",
-    "  w.loadFile('index.html');",
-    '});',
-    "app.on('window-all-closed', () => app.quit());",
-    '',
-  ].join('\n'));
-  writeFileSync(join(dir, 'index.html'), [
-    '<!doctype html><html><head><title>Ledger</title></head><body>',
-    '<h1>Sign in to Ledger</h1>',
-    '<form id="f">',
-    '<p><label for="e">Email address</label><input id="e" type="email" required></p>',
-    '<p><label for="p">Password</label><input id="p" type="password" required></p>',
-    '<p><label for="t">I accept the terms</label><input id="t" type="checkbox" required></p>',
-    '<p><button type="submit">Sign in</button></p>',
-    '</form>',
-    '<p><a href="#" id="forgot">Forgot your password</a></p>',
-    '<div id="out"></div>',
-    '<script>',
-    "document.getElementById('f').addEventListener('submit', (ev) => {",
-    '  ev.preventDefault();',
-    "  const filled = document.getElementById('e').value && document.getElementById('p').value",
-    "    && document.getElementById('t').checked;",
-    "  document.getElementById('f').style.display = filled ? 'none' : '';",
-    "  document.getElementById('out').textContent = filled",
-    "    ? 'Welcome back. Your balance is 42 pounds.' : 'Something is missing.';",
-    '});',
-    '</script></body></html>',
-    '',
-  ].join('\n'));
-  return dir;
+  return join(here, 'fixtures', 'ledger');
 }
 
 test('the Electron surface drives a real Electron application, and says no when it should',
