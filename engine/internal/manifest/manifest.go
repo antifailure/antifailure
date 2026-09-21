@@ -547,6 +547,12 @@ var knownKeys = []string{
 	// are already above, so these are the keys that appear nowhere else.
 	"script", "clients", "transactions", "think_time", "writes",
 	"max_statements", "mean_increase",
+	// The base branch comparison block. p95_increase is spelled under both
+	// load.thresholds and load.comparison.thresholds and means a different
+	// denominator in each, which is exactly why both are listed: a suggestion
+	// names the key, and the reference page is where a reader learns which of
+	// the two baselines they are configuring.
+	"comparison", "throughput_drop", "error_rate_increase",
 	"migration_lock", "warn_ms", "fail_ms", "migration_failed", "migration_rewrite",
 	"migration_lint", "plan_regression", "load_regression", "egress_surprise",
 	"workflows_unverified",

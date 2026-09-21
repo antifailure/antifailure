@@ -56,6 +56,7 @@ is a generator that charges four hundred cards.`),
 	cmd.AddCommand(newLoadRunCommand(e, true))
 	cmd.AddCommand(newLoadScenarioCommand(e))
 	cmd.AddCommand(newLoadSQLCommand(e))
+	cmd.AddCommand(newLoadCompareCommand(e))
 	return cmd
 }
 

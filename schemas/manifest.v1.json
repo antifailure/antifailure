@@ -1649,7 +1649,7 @@
       "title": "Load",
       "type": "object",
       "additionalProperties": false,
-      "description": "Traffic shaped like production, compared between the base branch and this one. Results are always deltas, never absolute capacity claims.",
+      "description": "Traffic shaped like production, sent at an environment. Results are never absolute capacity claims: one machine under a fraction of production's rate cannot tell you what the fleet serves. Two different baselines are available and they are not interchangeable. load.thresholds judges one run against PRODUCTION's own per route p95, carried by the traffic source. load.comparison judges this branch against a second run of the same workload on the base branch, which is the only place in this block a base branch delta is measured.",
       "properties": {
         "enabled": {
           "type": "boolean",
@@ -1716,7 +1716,7 @@
         "thresholds": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Deltas that fail the run. Applied to the difference against the base branch, never to absolute numbers.",
+          "description": "What fails a SINGLE run. These are measured against production, or against the run's own responses, and never against the base branch: nothing here brings a second environment up, so no key in this object can see another build. The base branch comparison is load.comparison, which has its own thresholds.",
           "properties": {
             "p95_increase": {
               "type": "number",
@@ -1736,6 +1736,55 @@
               "minimum": 0,
               "deprecated": true,
               "description": "Not read by anything, and refused by the engine. A load run counts requests, not statements. The check that compares statement counts against the base branch is insights.query_regression, and how much growth fails it is insights.regression_factor."
+            }
+          }
+        },
+        "comparison": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Run this same workload against the base branch too, and difference the two. A second environment is brought up from the base revision and pinned to the candidate's golden, so both sides start from identical rows, and both are sent the same request sequence under the same seed. This is the only part of load that measures a base branch delta. What the seed cannot control is said in the report rather than left implied: two runs against two environments are not a controlled experiment, so a difference is a difference and a threshold is what turns it into a verdict.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false,
+              "description": "Whether the comparison runs. Present but false is how a project keeps its thresholds and turns the check off for a while."
+            },
+            "baseline": {
+              "type": "string",
+              "enum": [
+                "merge_base",
+                "ref"
+              ],
+              "default": "merge_base",
+              "description": "How the version to compare against is chosen. merge_base answers what this branch changes; ref answers what changes when it ships."
+            },
+            "base_ref": {
+              "type": "string",
+              "maxLength": 256,
+              "description": "The git ref the baseline comes from, or the ref the merge base is taken against. Empty tries origin/HEAD, then origin/main, then origin/master, and says which it used."
+            },
+            "thresholds": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Deltas against the base branch that fail the run. Every key here is a ratio between two measurements of the same workload, one per build, and each is evaluated only when both sides carried the number. A side that did not measure is reported unverified rather than passed, because a threshold that silently evaluated nothing is how a check stops meaning anything.",
+              "properties": {
+                "p95_increase": {
+                  "type": "number",
+                  "minimum": 0,
+                  "description": "How much slower than THE BASE BRANCH a route may get, as a ratio of the base branch's own p95 for that route. Distinct from load.thresholds.p95_increase, which compares the same measurement against production instead. A route present on one side only is unmeasurable, never a breach. NO DEFAULT, and that is a measurement rather than an omission: two builds of identical code, compared on one developer machine, differed by up to 52 percent at the tail over a two second run and 36 percent over thirty seconds. A default under that floor would fail builds that changed nothing, and a check that cries wolf is the last one anybody reads. Measure your own floor before choosing a number, by comparing a branch against itself a few times."
+                },
+                "throughput_drop": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "How much of the base branch's achieved request rate this branch may lose, as a ratio. 0.25 fails a build serving a quarter fewer requests per second than the base branch did. Measured from the rate each run actually achieved rather than the rate it aimed at, because a run that fell behind its target reports the target as fine while the queue grows. NO DEFAULT, for the same measured reason p95_increase has none: identical builds on one machine differed by up to 21 percent in achieved rate. Throughput is the steadier of the two measurements and its floor is still not zero."
+                },
+                "error_rate_increase": {
+                  "type": "number",
+                  "minimum": 0,
+                  "description": "How much the share of failing requests may rise against the base branch, in absolute percentage points expressed as a fraction. 0.01 fails a build whose error rate went from one percent to two. Absolute rather than a ratio, because a base branch error rate of zero has no ratio and a build that introduces errors where there were none is the case this most needs to catch."
+                }
+              }
             }
           }
         },

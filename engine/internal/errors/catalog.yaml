@@ -1040,6 +1040,20 @@ errors:
     docs: concepts/sql-workloads
     retryable: false
     exit_code: 8
+  - code: AF-LOD-023
+    area: LOD
+    message: "The base branch comparison exceeded thresholds the manifest sets: {detail}"
+    next_step: "Read the per route table in the report: it names the base branch p95 and this build's beside each other. Raise the limit under load.comparison.thresholds if the change is deliberate, and remember a difference between two sequential runs on one host is not a controlled experiment."
+    docs: concepts/load
+    retryable: false
+    exit_code: 8
+  - code: AF-LOD-024
+    area: LOD
+    message: "The base branch comparison judged nothing: {detail}"
+    next_step: "Every declared threshold went unmeasured, which is not a clean comparison. Check that both sides sent the same routes: a route served on one side only has no counterpart to be compared against, and a run that sent nothing has none at all."
+    docs: concepts/load
+    retryable: false
+    exit_code: 3
   - code: AF-LOD-001
     planned: true
     area: LOD
@@ -1075,7 +1089,7 @@ errors:
   - code: AF-ORC-003
     area: ORC
     message: "The baseline revision could not be resolved: {detail}"
-    next_step: "Set oracle.base_ref to a branch, tag, or commit this checkout can see, and fetch it if it is a remote ref."
+    next_step: "Set the base_ref of whichever block asked for the comparison, oracle.base_ref or load.comparison.base_ref, to a branch, tag, or commit this checkout can see, and fetch it if it is a remote ref. The flag that overrides either is --baseline."
     docs: concepts/oracle
     retryable: false
     exit_code: 3

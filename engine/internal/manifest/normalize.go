@@ -652,6 +652,7 @@ func normalizeLoad(m *schema.Manifest) {
 	// put a threshold on every manifest that could not affect any verdict.
 	// Writing one is refused by the validator, which names the check that does
 	// compare statement counts.
+	normalizeLoadComparison(l)
 	for i, r := range l.SafeRoutes {
 		l.SafeRoutes[i] = normalizeRoute(r)
 	}
@@ -677,6 +678,38 @@ func normalizeLoad(m *schema.Manifest) {
 // choice: a migration that fails against production's shape fails the deploy.
 // Everything else defaults to warn, because a gate that blocks on its first
 // day is a gate people turn off on their second.
+// normalizeLoadComparison fills the base branch comparison's shape, and
+// deliberately fills NONE of its thresholds.
+//
+// No default for any of the three, and that is a measurement rather than an
+// oversight. Two builds of identical code, compared on one developer machine,
+// differed by as much as 52 percent at the tail over a two second run, 36
+// percent over thirty seconds, and 21 percent in achieved request rate. Every
+// default this file could plausibly have chosen, 0.25 for latency to match the
+// production facing threshold and 0.1 for throughput, sits UNDER that floor.
+// Shipping one would have failed builds that changed nothing, which is the
+// check people turn off rather than read, and it would have been this
+// repository shipping the exact defect it keeps finding in its own
+// instruments: a number that looks like a measurement and is really noise.
+//
+// So the comparison runs as a REPORT until somebody declares a limit, and the
+// documentation tells them to measure their own floor first. A machine's floor
+// is not something this product can know from here.
+//
+// Zero means unset, as it does for every other threshold in this file.
+func normalizeLoadComparison(l *schema.Load) {
+	c := l.Comparison
+	if c == nil {
+		return
+	}
+	if c.Baseline == "" {
+		c.Baseline = schema.BaselineMergeBase
+	}
+	if c.Thresholds == nil {
+		c.Thresholds = &schema.LoadComparisonThresholds{}
+	}
+}
+
 func normalizePolicy(m *schema.Manifest) {
 	if m.Policy == nil {
 		m.Policy = &schema.Policy{}

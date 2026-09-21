@@ -330,10 +330,194 @@ than reporting a clean p95. Point `source_config.path` at a longer export.
 `error_rate: 0.01` is counted from the run's own responses, so it needs no
 baseline and applies under every source.
 
+Neither of these compares against the base branch, and nothing in
+`load.thresholds` does: no key in it brings a second environment up, so none of
+them can see another build. That comparison is `load.comparison` below.
+
 There is no `query_count_increase`. It was in the schema, nothing ever read it,
 and a manifest that sets it is now refused by name. The check it describes is
 `insights.query_regression`, and how much growth fails it is
 `insights.regression_factor`.
+
+## Comparing two builds
+
+Everything above measures ONE build. `p95_increase` divides a measured p95 by
+production's own p95 for that route, which answers "is this route slower than
+the fleet serves it". It does not answer "did my change make it slower", and
+for a long time nothing here did, while the schema's own description of this
+block claimed otherwise. The block that answers the second question is
+`load.comparison`.
+
+```yaml
+load:
+  enabled: true
+  source: otel
+  source_config:
+    path: telemetry/traces.json
+  safe_routes:
+    - GET /orders
+  comparison:
+    enabled: true
+    baseline: merge_base
+    thresholds:
+      # There is no default for either of these, and these numbers are not one.
+      # Measure your own noise floor first, below, and set them above it.
+      p95_increase: 0.6
+      throughput_drop: 0.3
+```
+
+```
+af load compare
+```
+
+It brings a second environment up from the base revision, branches the SAME
+golden for both so the two sides answer queries over identical rows, sends both
+the same weighted mix in the same order under the same seed, and reports every
+route and every run wide number that moved.
+
+```
+  route          base p95  this build p95  change    moved
+  GET /orders    41.2      104.7           +154.1%   worse
+  GET /health    2.1       2.0             -4.8%     better
+```
+
+One golden for both sides is the part that makes the number worth anything. Two
+goldens would mean the two builds answered queries over different rows, and
+every latency difference would be a difference in how much data each side held
+rather than a difference in the code. The candidate environment comes up first
+so that its golden is the one the base side is pinned to, which also means a
+scheduled golden refresh landing mid comparison cannot separate the two.
+
+### What the comparison cannot control
+
+Every report says this, because a number labelled a regression that is really
+machine noise is how a check stops being read.
+
+The two runs are sequential. Two environments sending traffic at once on one
+host would contend with each other and measure that instead, so the base
+branch runs first and this build runs second, and the second meets a host the
+first has just warmed. The seed makes the request sequence identical. It does
+not make the machine, the neighbours on the host or the time of day identical.
+
+So a difference is a difference. A threshold is what turns one into a verdict,
+and it is yours to set.
+
+### Measure your own noise floor first
+
+None of the comparison thresholds has a default, and that is a measurement
+rather than an omission.
+
+Two builds of IDENTICAL code, sent the same requests under the same seed,
+differed by this much. Five repeats per run length.
+
+| run length | worst p95 difference | median | worst throughput difference | median |
+| --- | --- | --- | --- | --- |
+| 2 seconds | 52.0% | 24.7% | 9.6% | 3.1% |
+| 10 seconds | 44.3% | 17.9% | 20.9% | 4.9% |
+| 30 seconds | 36.4% | 7.6% | 6.8% | 1.1% |
+
+Where those numbers came from, because a measurement with no conditions
+attached is worth less than no measurement. They were taken on one 8 core
+developer laptop running several other builds at the same time, at a load
+average around 49 with the container virtualisation taking most of a core.
+That is six times the point at which this repository's own gate warns that
+timing measurements stop meaning anything. The test prints the core count, the
+load average and the virtualisation share beside every cell it measures, so
+nobody reads one machine's figures as another's.
+
+They are therefore an UPPER bound, and how much of that bound is the
+instrument rather than the machine is NOT known. Two things are mixed together
+in it and they behave differently. A p95 estimated from a few hundred samples
+carries sampling error on any machine, and that part shrinks as the run
+lengthens: the MEDIAN divergence above falls from 24.7% to 7.6% between a two
+second run and a thirty second one. Contention adds spikes on top, and that
+part barely moves with run length: the WORST divergence only falls from 52% to
+36% over the same range. Sampling error is the product's, spikes are the
+host's, and this measurement does not separate them.
+
+So the claim this product is entitled to make is the narrow one. This
+comparison reliably catches large regressions. How small a regression it can
+catch depends on the hardware you run it on, and the only honest way to know
+yours is to measure it.
+
+### Measuring yours
+
+Point the comparison at a branch that changes nothing, and run it a few times.
+Every difference it reports is noise by construction, because there is no
+change for it to be measuring.
+
+```
+git switch -c noise-floor origin/main
+af load compare --baseline origin/main --duration 30s
+```
+
+Repeat that five times and read the largest p95 difference it prints. That
+number is your floor. Set `p95_increase` above it, and prefer a longer
+`duration`: more samples in the tail is the one thing that helps on every
+machine.
+
+Nothing is wrong with either side during those runs. A p95 is the tail of a
+distribution, a short run has few samples in that tail, and a shared machine
+has neighbours. Even so, the obvious defaults, 0.25 for latency to match the
+production facing threshold and 0.1 for throughput, sit UNDER the floor
+measured above: shipping them would have failed builds that changed nothing,
+and a check that cries wolf is the last one anybody reads.
+
+The table above was produced by this product's own test of the same thing,
+which is in the repository if you want to read what it does:
+
+```
+AF_NOISE_FLOOR=1 go test ./internal/workload -run TestNoiseFloor -v
+```
+
+For scale: the deliberate regression this product tests against, a single route
+given a sleep of 40 milliseconds, moves that route's p95 by roughly 600 to 750
+percent and cuts throughput by roughly 78 percent, measured on the same
+contended machine as the floor. That is an order of magnitude clear of it. A
+regression of 20 percent on a two second run is not, and no threshold can
+rescue that. Lengthen the run instead.
+
+### Thresholds against the base branch
+
+`p95_increase` under `load.comparison.thresholds` is a different number from
+the one under `load.thresholds`, and they are spelled the same on purpose: the
+question "how much slower is too slow" has one answer, and the two keys differ
+in what they divide by. This one divides by the base branch's own p95 for that
+route.
+
+`throughput_drop: 0.1` fails a build serving a tenth fewer requests per second
+than the base branch did. It is read from the rate each run actually achieved
+rather than the rate it aimed at, because a run that fell behind its target
+reports the target as fine while the queue grows. Nothing else in this product
+compares throughput, and a build can serve every request it completes quickly
+while completing half as many.
+
+`error_rate_increase` is in absolute points rather than as a ratio, and has no
+default. A base branch that failed nothing has no ratio to be measured against,
+and a build that introduces errors where there were none is the case that most
+needs catching.
+
+A route present on one side only is `unmeasurable`, never a breach and never a
+pass. A candidate that stopped serving a route has no p95 to be slower than,
+and reporting that as clean would hide the loudest result the run can produce.
+
+```
+AF-LOD-024 The base branch comparison judged nothing: every declared base
+branch threshold went unmeasured, so this comparison judged nothing.
+```
+
+That is the same discipline `AF-LOD-016` applies to the single run threshold. A
+limit that was in force and evaluated zero routes has not passed, and the
+command exits non-zero rather than reporting a clean comparison.
+
+### How it differs from the oracle
+
+`af oracle` also brings a second environment up from a baseline revision and
+also branches one golden for both. It sends declared probes and diffs the
+RESPONSES and the DATABASE CONTENTS, which is a much stronger claim about
+correctness and says nothing about speed. `af load compare` sends the traffic
+mix and differences the TIMING and the THROUGHPUT. They answer different
+questions and neither replaces the other.
 
 ## Aborting
 

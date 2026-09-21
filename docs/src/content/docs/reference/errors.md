@@ -1244,6 +1244,30 @@ The SQL workload proved nothing: {detail}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/sql-workloads](/docs/concepts/sql-workloads) |
 
+### AF-LOD-023
+
+The base branch comparison exceeded thresholds the manifest sets: {detail}
+
+**What to do.** Read the per route table in the report: it names the base branch p95 and this build's beside each other. Raise the limit under load.comparison.thresholds if the change is deliberate, and remember a difference between two sequential runs on one host is not a controlled experiment.
+
+| | |
+| --- | --- |
+| Exit code | `8` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/load](/docs/concepts/load) |
+
+### AF-LOD-024
+
+The base branch comparison judged nothing: {detail}
+
+**What to do.** Every declared threshold went unmeasured, which is not a clean comparison. Check that both sides sent the same routes: a route served on one side only has no counterpart to be compared against, and a run that sent nothing has none at all.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/load](/docs/concepts/load) |
+
 ## Manifest
 
 ### AF-MAN-001
@@ -1520,7 +1544,7 @@ The oracle is on and declares no requests to send.
 
 The baseline revision could not be resolved: {detail}
 
-**What to do.** Set oracle.base_ref to a branch, tag, or commit this checkout can see, and fetch it if it is a remote ref.
+**What to do.** Set the base_ref of whichever block asked for the comparison, oracle.base_ref or load.comparison.base_ref, to a branch, tag, or commit this checkout can see, and fetch it if it is a remote ref. The flag that overrides either is --baseline.
 
 | | |
 | --- | --- |

@@ -1092,6 +1092,28 @@
       "planned": false
     },
     {
+      "code": "AF-LOD-023",
+      "area": "LOD",
+      "areaName": "Load",
+      "message": "The base branch comparison exceeded thresholds the manifest sets: {detail}",
+      "resolution": "Read the per route table in the report: it names the base branch p95 and this build's beside each other. Raise the limit under load.comparison.thresholds if the change is deliberate, and remember a difference between two sequential runs on one host is not a controlled experiment.",
+      "docs": "https://antifailure.dev/docs/concepts/load",
+      "retryable": false,
+      "exitCode": 8,
+      "planned": false
+    },
+    {
+      "code": "AF-LOD-024",
+      "area": "LOD",
+      "areaName": "Load",
+      "message": "The base branch comparison judged nothing: {detail}",
+      "resolution": "Every declared threshold went unmeasured, which is not a clean comparison. Check that both sides sent the same routes: a route served on one side only has no counterpart to be compared against, and a run that sent nothing has none at all.",
+      "docs": "https://antifailure.dev/docs/concepts/load",
+      "retryable": false,
+      "exitCode": 3,
+      "planned": false
+    },
+    {
       "code": "AF-MAN-001",
       "area": "MAN",
       "areaName": "Manifest",
@@ -1338,7 +1360,7 @@
       "area": "ORC",
       "areaName": "Differential oracle",
       "message": "The baseline revision could not be resolved: {detail}",
-      "resolution": "Set oracle.base_ref to a branch, tag, or commit this checkout can see, and fetch it if it is a remote ref.",
+      "resolution": "Set the base_ref of whichever block asked for the comparison, oracle.base_ref or load.comparison.base_ref, to a branch, tag, or commit this checkout can see, and fetch it if it is a remote ref. The flag that overrides either is --baseline.",
       "docs": "https://antifailure.dev/docs/concepts/oracle",
       "retryable": false,
       "exitCode": 3,
