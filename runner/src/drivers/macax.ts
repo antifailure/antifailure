@@ -256,7 +256,13 @@ async function apps(): Promise<readonly RunningApp[]> {
 /** What the native surface needs to reach an application. */
 export interface MacTarget {
   /** bundlePath launches a copy of the application, "/Applications/Notes.app".
-   *  Absent attaches to one that is already running. */
+   *  Absent attaches to one that is already running.
+   *
+   *  A path given while an application of that name is ALREADY running is
+   *  refused rather than attached to, because `open -a` would activate the
+   *  running copy and the run would then be about a screen it did not create.
+   *  Attaching on purpose is what leaving this out means, which is why the
+   *  refusal costs nobody the ability to do it. */
   readonly bundlePath?: string;
   /** name is the application's name as macOS reports it, used to find the
    *  process this surface drives. Required whether launching or attaching,
@@ -299,6 +305,45 @@ export async function openMac(target: MacTarget): Promise<AxSurface> {
 
   let launched: ChildProcess | undefined;
   if (target.bundlePath) {
+    // A RUN MAY NOT INHERIT AN APPLICATION IT DID NOT START, and this is the
+    // one refusal in this file that is about the product rather than about
+    // macOS.
+    //
+    // `open -a` ACTIVATES an application that is already running instead of
+    // launching a fresh one. So without this check, a run that names a bundle
+    // drives whatever the last run, or the person at the keyboard, left on
+    // screen. That is not a rehearsal: the verdict is about a state nobody in
+    // this run created.
+    //
+    // It is a FALSE PASS FACTORY rather than an inconvenience, and it was
+    // caught in the act. A drive came back green whose own step list showed it
+    // never filled the email, against a fixture that refuses an empty email,
+    // because an instance left over from an earlier run had that field filled
+    // already. The first customer with their application already open would
+    // get a pass that means nothing, and the second would get a failure they
+    // could not reproduce, and neither would suspect the launcher.
+    //
+    // REFUSED RATHER THAN TERMINATED, and the asymmetry decides it before any
+    // argument about correctness. A bundle path can name Slack, Mail, or the
+    // customer's own editor, and an agent that quits one of those has an
+    // unbounded blast radius that belongs to somebody else. Refusing costs one
+    // blocked run and a sentence saying what to do.
+    //
+    // This is also what makes MacTarget's own documentation true. It says a
+    // bundlePath LAUNCHES a copy and that attaching is what happens when one
+    // is absent; until this line the code did neither, and a caller who wanted
+    // to attach deliberately still can by leaving the path out.
+    const already = await findPid(target.name);
+    if (already !== undefined) {
+      throw new AxError(
+        `${target.name} is already running, and this run did not start it. Attaching to it ` +
+        `would drive whatever is on its screen now, so the verdict would be about a state ` +
+        `this run never created: a workflow can pass because an earlier one left the form ` +
+        `filled in. Quit ${target.name} and run again. If driving the copy that is already ` +
+        `open is what you meant, name it without an application path, which is how this ` +
+        `driver attaches on purpose.`,
+      );
+    }
     // `open` rather than exec'ing the binary, so the application is launched
     // the way the platform launches one: a real process with a dock entry, an
     // activation policy and a window server connection. A binary started

@@ -23,16 +23,17 @@ import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:net';
 import { mkdtempSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   locate, normalizeRole, snapshotFrom, walk, filledOf, chosen, type AxNode,
 } from '../src/drivers/ax.ts';
-import { treeFrom } from '../src/drivers/electron.ts';
+import { treeFrom, openElectron } from '../src/drivers/electron.ts';
 import { runDesktop, desktop, type DesktopApp } from '../src/drivers/desktop.ts';
 import {
-  AxError, trusted, screenIsLocked, GRANT_INSTRUCTION, LOCKED_SCREEN,
+  AxError, openMac, trusted, screenIsLocked, GRANT_INSTRUCTION, LOCKED_SCREEN,
 } from '../src/drivers/macax.ts';
 import { driverFor } from '../src/drivers/driver.ts';
 import { socketSink, decode, type LiveEvent } from '../src/live.ts';
@@ -615,6 +616,19 @@ test('the native surface drives a real macOS application through AXUIElement',
     // the driver refusing a locked screen is the driver working.
     if (await screenIsLocked()) return cannotCheck(t, LOCKED_SCREEN);
 
+    // TextEdit belongs to whoever is at this machine, not to this test. A
+    // bundle path whose application is ALREADY running is now refused rather
+    // than attached to, so that a run cannot inherit a screen it did not
+    // create, and the one thing this test must not do about that is quit
+    // somebody's editor to make itself green. Skipped with the reason, which
+    // is the honest answer and the one AF_REQUIRE_DESKTOP turns into a
+    // failure on a host that claims to support this surface.
+    if (isRunning('TextEdit')) {
+      return cannotCheck(t,
+        'TextEdit is already open on this machine, and a run may not attach to an ' +
+        'application it did not start. Quit TextEdit and run this again.');
+    }
+
     const app: DesktopApp = {
       kind: 'macos', bundlePath: '/System/Applications/TextEdit.app', name: 'TextEdit',
       readyTimeoutMs: 30_000,
@@ -642,4 +656,146 @@ test('the native surface drives a real macOS application through AXUIElement',
     });
     assert.equal(failed[0]!.outcome.verdict, 'fail', failed[0]!.outcome.detail);
     assert.equal(failed[0]!.outcome.cause, 'expectation-not-met');
+  });
+
+// A RUN'S VERDICT DEPENDS ONLY ON WHAT THAT RUN DID, across both kinds of
+// desktop application.
+//
+// The two kinds reach that guarantee by different mechanisms, and writing the
+// guarantee down rather than the two behaviours is the point: the next person
+// changing either one needs to be told what they are not allowed to break.
+// Electron launches its own process every time. macOS refuses a bundle whose
+// application is already running, because `open -a` would activate the running
+// copy instead of launching a fresh one.
+//
+// THE DEFECT THIS EXISTS FOR was caught in the act rather than reasoned about.
+// A drive came back green whose own step list showed it never filled the
+// email, against a fixture that refuses an empty email; an instance left over
+// from an earlier run had the field filled already, so the planner correctly
+// skipped it and the form correctly signed in. A rehearsal that inherits the
+// previous run's state is not a rehearsal, and a pass it produces is about
+// nothing.
+
+/** isRunning answers whether an application of that exact name is open.
+ *
+ * By exact name, because a substring match would call TextEdit running on the
+ * strength of somebody's TextEditor. It is asked rather than worked around:
+ * the answer decides whether a check can run, never whether something gets
+ * terminated. */
+function isRunning(name: string): boolean {
+  try {
+    execFileSync('pgrep', ['-x', name], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** nativeFixture builds the AppKit application and returns its bundle, or
+ *  says why there is none. swiftc ships with the Xcode command line tools and
+ *  is not something this package depends on. */
+function nativeFixture(into: string): { readonly bundle: string } | { readonly absent: string } {
+  if (process.platform !== 'darwin') {
+    return { absent: `a native macOS application needs macOS and this is ${process.platform}.` };
+  }
+  const build = join(here, 'fixtures', 'ledger-native', 'build.sh');
+  if (!existsSync(build)) return { absent: `the native fixture's build script is missing at ${build}.` };
+  try {
+    execFileSync(build, [into], { stdio: 'pipe' });
+  } catch (err) {
+    return {
+      absent: 'the native fixture would not build, which on this machine almost always means ' +
+        `swiftc is absent (xcode-select --install): ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  return { bundle: join(into, 'AfLedger.app') };
+}
+
+/** quitFixture leaves no instance of the fixture behind, by its own exact
+ *  process name. Nothing else on a machine answers to it, which is what makes
+ *  this safe to call: the refusal being tested must never be worked around by
+ *  terminating an application somebody else opened. */
+function quitFixture(): void {
+  try {
+    execFileSync('pkill', ['-x', 'AfLedger'], { stdio: 'ignore' });
+  } catch {
+    // pkill exits non zero when nothing matched, which is the ordinary case.
+  }
+}
+
+test('a macOS run refuses to inherit an application it did not start, and drives one it did',
+  async (t: TestContext) => {
+    const built = nativeFixture(mkdtempSync(join(tmpdir(), 'af-native-')));
+    if ('absent' in built) return cannotCheck(t, built.absent);
+    if (!(await trusted())) return cannotCheck(t, GRANT_INSTRUCTION);
+    if (await screenIsLocked()) return cannotCheck(t, LOCKED_SCREEN);
+    quitFixture();
+    t.after(quitFixture);
+
+    const target = { kind: 'macos' as const, bundlePath: built.bundle, name: 'AfLedger', readyTimeoutMs: 20_000 };
+
+    // THE ACCEPT ARM FIRST, and on a genuinely clean start rather than on the
+    // absence of a refusal. A gate that refuses everything would pass the
+    // arm below and make this surface useless on every clean machine, which
+    // is worse than the defect it is closing.
+    const first = await openMac(target);
+    const snapshot = await first.snapshot();
+    assert.ok(snapshot.fields.some((f: { name: string }) => f.name === 'Email address'),
+      `a clean start was refused or read nothing: ${JSON.stringify(snapshot.fields)}`);
+
+    // Now one IS running, and it is the one this driver started, which is the
+    // case a second run cannot tell apart from a person's own open window.
+    await assert.rejects(
+      () => openMac(target),
+      (err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        // The sentence is asserted, not just the refusal. A person who cannot
+        // tell from it what to do next works around it by raising a flag they
+        // do not understand.
+        assert.match(message, /AfLedger is already running/);
+        assert.match(message, /this run did not start it/);
+        assert.match(message, /Quit AfLedger and run again/);
+        assert.match(message, /without an application path/);
+        return true;
+      },
+      'a second run attached to the application the first one opened',
+    );
+
+    // And attaching ON PURPOSE still works, with no path, which is what the
+    // refusal above points the reader at. Without this the refusal would have
+    // removed a capability rather than protected one.
+    const attached = await openMac({ kind: 'macos', name: 'AfLedger', readyTimeoutMs: 20_000 } as never);
+    assert.ok((await attached.snapshot()).fields.length > 0,
+      'attaching on purpose, with no application path, stopped working');
+    await attached.close();
+    await first.close();
+  });
+
+test('an Electron run gets its own process rather than the one already open',
+  async (t: TestContext) => {
+    const binary = electronBinary();
+    if ('absent' in binary) return cannotCheck(t, binary.absent);
+    const app: DesktopApp = {
+      kind: 'electron', executablePath: binary.path, args: [fixtureApp()], timeoutMs: 30_000,
+    };
+    // Two at once. The second must open its own application rather than
+    // attaching to the first's or refusing, which is how this kind reaches
+    // the same guarantee the macOS one reaches by refusing.
+    const first = await openElectron(app);
+    const second = await openElectron(app);
+    try {
+      const a = await first.snapshot();
+      const b = await second.snapshot();
+      assert.ok(a.fields.some((f: { name: string }) => f.name === 'Email address'));
+      assert.ok(b.fields.some((f: { name: string }) => f.name === 'Email address'));
+      // The proof that they are two applications and not one: filling a field
+      // in the first must not appear in the second.
+      await first.fill(/Email address/i, 'first@example.test');
+      const after = await second.snapshot();
+      assert.equal(after.fields.find((f: { name: string }) => f.name === 'Email address')?.filled, false,
+        'what one Electron run typed was visible to another, so they share an application');
+    } finally {
+      await first.close();
+      await second.close();
+    }
   });
