@@ -24088,6 +24088,52 @@ of it. A run that sent nothing, and a ` + "`" + `p95_increase` + "`" + ` thresho
 force with no baseline to measure against, are both ` + "`" + `INCONCLUSIVE` + "`" + `: a check
 that ran nothing and reported green is a check everybody believes is running.
 
+### ` + "`" + `run_sql_workload` + "`" + `
+
+Runs a concurrent SQL workload against the branch's database and reports
+transactions per second, transaction and per statement latency percentiles,
+deadlocks, serialization failures, retries and the rows the statements actually
+touched. This is ` + "`" + `af load sql` + "`" + ` on this surface.
+
+Use it rather than ` + "`" + `run_load_test` + "`" + ` for a change to an index, a lock, a storage
+parameter or a query. ` + "`" + `run_load_test` + "`" + ` sends HTTP traffic, so the number it
+reports is the application's latency with the database somewhere inside it,
+reachable only through whatever the application happens to do on a route
+` + "`" + `load.safe_routes` + "`" + ` names safe. This one runs whole transactions on their own
+connections, directly.
+
+The statements come from the manifest's ` + "`" + `load.sql` + "`" + ` block, or from
+` + "`" + `pg_stat_statements` + "`" + ` on the branch, which is the traffic that really ran
+weighted by how often it ran. A derived mix cannot recover the parameter values,
+because the statistics normalise them away, so it asks the server for the
+parameter types and generates values of those types, and it refuses a write
+unless the manifest allows one. The statements it read and would not run are
+reported with their reason, because a run that took two transactions out of
+forty otherwise reads exactly like one that took them all.
+
+` + "`" + `concurrency` + "`" + `, ` + "`" + `duration_seconds` + "`" + `, ` + "`" + `transactions_per_client` + "`" + `, ` + "`" + `think_time_ms` + "`" + `,
+` + "`" + `seed` + "`" + ` and ` + "`" + `transaction_names` + "`" + ` are optional and bounded by the schema. Leaving
+one out is not the same as passing a default: an absent value lets the
+manifest's own ` + "`" + `load.sql` + "`" + ` decide.
+
+Every result carries how many of the run's own backends the server had inside a
+transaction at one instant, read from ` + "`" + `pg_stat_activity` + "`" + ` while it was going. N
+clients are not N concurrent sessions: a pool, a lock, a serialised client
+library or a think time longer than the statement all produce a run that spawned
+eight clients and never had two statements in flight. When the observer could
+not run at all, that is reported as not observed and never as zero overlap,
+because those are opposite claims.
+
+A run that committed no transaction is ` + "`" + `INCONCLUSIVE` + "`" + `, and so is a
+` + "`" + `mean_increase` + "`" + ` threshold that was in force with no baseline to measure against,
+for the same reason ` + "`" + `run_load_test` + "`" + ` reports an inert ` + "`" + `p95_increase` + "`" + ` that way. A
+project that declares no ` + "`" + `load.sql` + "`" + ` block is ` + "`" + `INCONCLUSIVE` + "`" + ` too, rather than a
+pass over a workload that does not exist. A threshold in ` + "`" + `load.sql.thresholds` + "`" + `
+that was crossed is a failure whatever ` + "`" + `policy.load_regression` + "`" + ` says: that level
+is about ` + "`" + `load.thresholds` + "`" + ` over HTTP routes, and ` + "`" + `af load sql` + "`" + ` exits non zero on
+a SQL breach regardless of it, so a tool that ranked one at that level would
+pass a run the command line fails.
+
 ### ` + "`" + `run_browser_workflows` + "`" + `
 
 Drives the manifest's declared workflows, the browser ones through a real

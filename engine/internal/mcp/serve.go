@@ -137,6 +137,7 @@ func Serve(ctx context.Context, cfg Config) error {
 	server.Register(newInspectEgressTool(project, orch.observe))
 	server.Register(newRehearseMigrationTool(project, engine, orch.rehearse))
 	server.Register(newRunLoadTestTool(project, engine, orch.sendLoad))
+	server.Register(newRunSQLWorkloadTool(project, engine, orch.sendSQLWorkload))
 	server.Register(newRunWorkflowsTool(project, engine, orch.driveWorkflows))
 	server.Register(newExploreTool(project, engine, orch.driveExploration))
 	server.Register(newStartEnvironmentTool(project, engine, orch.bringUp))
