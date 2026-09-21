@@ -1,0 +1,18 @@
+{
+  "runId": "layout-fixture",
+  "marker": "Expected: the receipt shows the plan",
+  "session": { "signedIn": true, "label": "fixture", "orgId": "org-fixture", "role": "owner", "csrfToken": "fixture", "plan": "team", "hostedAccess": true },
+  "trpc": {
+    "runs.get": { "id": "layout-fixture", "kind": "agents", "state": "finished", "started_at": "2026-09-21T10:00:00Z", "finished_at": "2026-09-21T10:04:00Z", "created_at": "2026-09-21T10:00:00Z", "env_id": "pr-1482-web", "branch": "fix/checkout", "pull_request": 1482, "repository": "acme/storefront" },
+    "runs.verdicts": [
+      { "workflow": "checkout", "persona": "owner", "value": "fail", "summary": "Pressing Buy the paid plan returned a 500 and the page showed a blank card instead of the receipt.", "steps": 14, "duration_ms": 48210,
+        "reproduction": ["Bring the environment up with af up, then follow these:", "1. Open /pricing", "2. Press Buy the paid plan: the primary action on the page", "Expected: the receipt shows the plan, the amount charged and the next billing date", "Got: Pressing Buy the paid plan returned a 500 and the page showed a blank card instead of the receipt.", "af explore --persona 'owner' --start '/pricing?plan=pro&cycle=annual' --viewport desktop --budget 40"] },
+      { "workflow": "invite-member", "persona": "owner", "value": "blocked", "summary": "The invite form never rendered, so the workflow could not start.", "steps": 1, "duration_ms": 3100, "reproduction": null },
+      { "workflow": "sign-up", "persona": "new visitor", "value": "pass", "summary": "Created an account and landed on the dashboard.", "steps": 6, "duration_ms": 9120, "reproduction": null },
+      { "workflow": "reset-password", "persona": "operator", "value": "flaky", "summary": "Passed on the second attempt; the email arrived after the 10 second wait.", "steps": 9, "duration_ms": 21044, "reproduction": ["af explore --persona 'operator' --start '/account/reset' --budget 20"] }
+    ],
+    "runs.artifacts": [],
+    "runs.recent": { "runs": [], "nextCursor": null },
+    "environments.list": { "environments": [] }
+  }
+}

@@ -1252,6 +1252,19 @@ jobs:
         # application it could not find. It refuses one now instead.
         run: go run ./tools/motioncheck .
 
+      - name: The run page's verdicts are not clipped at any width
+        # The verdicts table carried the reproduction as a seventh column with
+        # an 860px minimum, and every laptop window from 640 to 1279 wide cut
+        # that column off at the card edge; above that the reproduction was cut
+        # off inside its own 259px box. Both are layout, which no unit test lays
+        # out. This serves the built export with a fixture control plane, opens
+        # the run page in headless Chrome at eleven widths from 360 to 1600 and
+        # fails on anything inside the card that scrolls or paints past it. The
+        # runner image ships Google Chrome; the script refuses rather than
+        # skipping when it cannot find one, or when out/ was never built.
+        run: npm run test:layout
+        working-directory: console
+
       - name: The console exported the routes the control plane routes to
         # A static export writes one file per route. If a page stops exporting
         # -- which is what a stray server-only import does -- the route it

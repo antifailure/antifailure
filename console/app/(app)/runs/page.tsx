@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Fragment, Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { bytes, when } from "@/lib/format";
 import { mutate, query, useApi, usePages } from "@/lib/api";
@@ -20,6 +20,7 @@ import {
   Machine,
   Page,
   Row,
+  RowDetail,
   Table,
   TableSkeleton,
   TableWrap,
@@ -137,8 +138,11 @@ function NothingVerified({ values }: { values: readonly string[] }) {
 function Reproduction({ value }: { value: unknown }) {
   const text = reproductionText(value);
   if (text === null) return <span className="text-dim">none recorded</span>;
-  return <Machine>{text}</Machine>;
+  return <Machine wrap>{text}</Machine>;
 }
+
+/** The verdicts table's columns, which the reproduction line under a row spans. */
+const VERDICT_COLUMNS = 6;
 
 function Detail({ runId, onClose }: { runId: string; onClose: () => void }) {
   const run = useApi<Run>(() => query("runs.get", { runId }), [runId]);
@@ -208,7 +212,7 @@ function Detail({ runId, onClose }: { runId: string; onClose: () => void }) {
               <>
               <NothingVerified values={rows.map((v) => v.value)} />
               <TableWrap>
-                <Table className="sm:min-w-[860px]">
+                <Table>
                   <thead>
                     <tr>
                       <Th>Workflow</Th>
@@ -217,24 +221,33 @@ function Detail({ runId, onClose }: { runId: string; onClose: () => void }) {
                       <Th>Summary</Th>
                       <Th numeric>Steps</Th>
                       <Th numeric>Duration</Th>
-                      <Th>Reproduction</Th>
                     </tr>
                   </thead>
                   <tbody>
                     {rows.map((v, i) => (
-                      <Row key={`${v.workflow}-${i}`}>
-                        <Td mono>{v.workflow}</Td>
-                        <Td label="Persona">{v.persona ?? "--"}</Td>
-                        <Td label="Verdict">
-                          <Badge tone={toneFor(v.value)}>{v.value}</Badge>
-                        </Td>
-                        <Td label="Summary" className="max-w-[36ch]">{v.summary ?? "--"}</Td>
-                        <Td label="Steps" numeric>{v.steps ?? "--"}</Td>
-                        <Td label="Duration" numeric>{seconds(v.duration_ms)}</Td>
-                        <Td label="Reproduction" className="max-w-[34ch]">
-                          <Reproduction value={v.reproduction} />
-                        </Td>
-                      </Row>
+                      <Fragment key={`${v.workflow}-${i}`}>
+                        <Row>
+                          <Td mono>{v.workflow}</Td>
+                          <Td label="Persona">{v.persona ?? "--"}</Td>
+                          <Td label="Verdict">
+                            <Badge tone={toneFor(v.value)}>{v.value}</Badge>
+                          </Td>
+                          <Td label="Summary">{v.summary ?? "--"}</Td>
+                          <Td label="Steps" numeric>{v.steps ?? "--"}</Td>
+                          <Td label="Duration" numeric>{seconds(v.duration_ms)}</Td>
+                        </Row>
+                        {/* Under the row rather than beside it: see RowDetail.
+                            A pass has nothing to reproduce, and the runner
+                            records none for one, so a pass gets no line rather
+                            than a line saying so. Anything else without one
+                            still says none was recorded, because there it is
+                            the absence somebody needs to know about. */}
+                        {v.value === "pass" && reproductionText(v.reproduction) === null ? null : (
+                          <RowDetail span={VERDICT_COLUMNS} label="Reproduction">
+                            <Reproduction value={v.reproduction} />
+                          </RowDetail>
+                        )}
+                      </Fragment>
                     ))}
                   </tbody>
                 </Table>

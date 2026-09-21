@@ -103,6 +103,7 @@ gate: _reports
     run "every link resolves"            just links
     run "no class that never applies"    just classcheck
     run "no animation that never stops" just motioncheck
+    run "the run page is not clipped"    just consolelayout
     run "the built docs carry their head" just docscheck
     run "the site's own claims"          just seo
     run "prose stays readable"           just readability
@@ -1097,6 +1098,17 @@ classcheck:
 # this gate.
 motioncheck:
     go run ./tools/motioncheck .
+
+# The run page's verdicts are not clipped at any width from 360 to 1600.
+#
+# The reproduction was a seventh column with an 860px minimum, so every laptop
+# window from 640 to 1279 cut it off at the card edge, and above that it was cut
+# off inside its own box. Serves the built console export with a fixture control
+# plane and measures the render in headless Chrome. Needs a built console and a
+# Chrome (AF_CHROME, google-chrome on PATH, or a Playwright cache), and refuses
+# rather than skipping when either is missing.
+consolelayout:
+    npm --prefix console run test:layout
 
 # Spelling, with the project dictionary in tools/docs/dictionary.txt. Pinned,
 # because floating on the tag once resolved a version whose sibling package was

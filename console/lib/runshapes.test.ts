@@ -228,6 +228,22 @@ test("the reproduction is printed as the runner recorded it", () => {
   assert.equal(reproductionText("af test --workflow checkout"), "af test --workflow checkout");
 });
 
+test("a reproduction recorded as steps is printed as its steps", () => {
+  // The shape the runner writes and the engine forwards: an array of lines.
+  // Stringified, every step carried quotes and a trailing comma between two
+  // brackets, and the customer was handed a payload instead of instructions.
+  const steps = [
+    "Bring the environment up with af up, then follow these:",
+    "1. Open /pricing",
+    "Got: HTTP 500 from POST /api/checkout",
+  ];
+  assert.equal(reproductionText(steps), steps.join("\n"));
+  // Nothing recorded, whichever way it arrives.
+  assert.equal(reproductionText([]), null);
+  // A list that is not all strings is not steps, so it is printed whole.
+  assert.equal(reproductionText(["a", 1]), '[\n  "a",\n  1\n]');
+});
+
 test("a verdict with no reproduction says so rather than printing null", () => {
   assert.equal(reproductionText(null), null);
   assert.equal(reproductionText(undefined), null);

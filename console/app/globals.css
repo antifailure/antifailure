@@ -196,6 +196,16 @@ body {
  * sites are what drifted in the first place.
  */
 /*
+ * A row and the RowDetail line under it are one record, so no hairline between
+ * them. The selector sits on the row ABOVE the line, which is why it is here
+ * and not a class on the line itself. Unlayered, so it outranks the `border-b`
+ * utility every cell carries.
+ */
+.af-table tr:has(+ tr.af-detail) > td {
+  border-bottom-color: transparent;
+}
+
+/*
  * A table on a phone.
  *
  * Every list in here was a table that scrolled sideways inside its box. That
@@ -236,6 +246,24 @@ body {
 
   .af-table tr:last-child {
     border-bottom: 0;
+  }
+
+  /* The stacked record carries on into its detail line: no rule and no gap
+     between the two, so the reproduction reads as the last field of the
+     record above it rather than as a record of its own. */
+  .af-table tr:has(+ tr.af-detail) {
+    border-bottom: 0;
+    padding-bottom: 0;
+  }
+
+  .af-table tr.af-detail {
+    padding-top: 4px;
+  }
+
+  /* Its heading in the type the stacked headings beside the other fields use. */
+  .af-table tr.af-detail .af-cell > p {
+    font-size: 11.5px;
+    letter-spacing: 0.06em;
   }
 
   .af-table td {
