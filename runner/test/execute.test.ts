@@ -183,6 +183,58 @@ test('leading in the cell keeps the rest of the sentence for the details block',
   assert.ok(result.detail.includes('nothing confirms it either'), result.detail);
 });
 
+// AN UNMET EXPECTATION IS NOT AN ERROR UNLESS SOMETHING SHOWED ONE.
+//
+// Every expectation-not-met used to be explained as "The page shows an error
+// rather than what was expected", because judge answers unmet both for a
+// failure banner and for a quoted string that is simply absent. The second is
+// what a deliberately impossible expectation produces, and on 2026-09-21 it was
+// reported that way twice over healthy screens: an iOS journal showing every
+// entry, and a terminal menu drawn in full. finalJudgement is the path web,
+// desktop, iOS and Android all share, so these two cases hold for all four;
+// test/mobile.test.ts and test/desktop.test.ts drive the same function from
+// their own snapshots.
+
+const healthyJournal: Snapshot = {
+  url: 'http://127.0.0.1:46000/journal', title: 'Journal', fields: [], controls: [],
+  submits: [], unnamed: 0, status: 200,
+  text: 'Journal\nMonday: walked to the harbour.\nTuesday: finished the book.',
+};
+
+test('a quoted expectation missing from a healthy page names the expectation and claims no error', () => {
+  const result = finalJudgement(
+    { name: 'w', description: 'd', expect: ['"Entry for Sunday"'] }, healthyJournal, STUCK, []);
+  assert.equal(result.cause, 'expectation-not-met', 'the verdict must not change');
+  assert.ok(result.detail.slice(0, CELL).includes('"Entry for Sunday" was not found.'),
+    `the cell does not name the missing expectation: ${result.detail.slice(0, CELL)}`);
+  assert.ok(!/shows an error|showed a failure/i.test(result.detail),
+    `the detail claims an error on a healthy page: ${result.detail}`);
+  assert.ok(result.detail.includes('No error was showing. Instead it showed: "Journal Monday: walked to the harbour.'),
+    `the detail does not say what was showing: ${result.detail}`);
+  assert.ok(result.detail.endsWith(STUCK), 'the planner\'s own sentence is kept, after the facts');
+});
+
+test('several missing expectations are all named, and a met one is not', () => {
+  const result = finalJudgement(
+    { name: 'w', description: 'd', expect: ['"Journal"', '"Entry for Sunday"', '"Entry for Saturday"'] },
+    healthyJournal, STUCK, []);
+  assert.equal(result.cause, 'expectation-not-met');
+  assert.ok(result.detail.startsWith('"Entry for Sunday" and "Entry for Saturday" were not found.'),
+    result.detail);
+});
+
+test('a page genuinely showing an error still says so, quotes it and names what was missing', () => {
+  const broken = { ...healthyJournal, text: 'Journal\nSomething went wrong. Please try later.' };
+  const result = finalJudgement(
+    { name: 'w', description: 'd', expect: ['"Entry for Sunday"'] }, broken, STUCK, []);
+  assert.equal(result.cause, 'expectation-not-met');
+  assert.ok(result.detail.includes(
+    'The page shows an error rather than what was expected. It says: "Something went wrong."'),
+  result.detail);
+  assert.ok(result.detail.includes('"Entry for Sunday" was not found.'), result.detail);
+  assert.ok(!result.detail.includes('No error was showing'), result.detail);
+});
+
 test('a budget detail names the budget, how far in, the attempt and the last step', () => {
   // The next question about a workflow that ran out of time is whether it was
   // stuck or merely slow, and the last step taken is what answers it.

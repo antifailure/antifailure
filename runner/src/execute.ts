@@ -10,7 +10,7 @@ import { Session } from './browser.ts';
 import { signIn, type Persona, type Page } from './login.ts';
 import type { InboxSource } from './inbox.ts';
 import {
-  DeterministicPlanner, failureSentence, freshIdentity, judgeAll, unmatchable,
+  DeterministicPlanner, failureSentence, freshIdentity, judgeAll, notFound, observed, unmatchable,
   type Action, type Planner, type Snapshot, type Workflow,
 } from './workflow.ts';
 import { classify, type Attempt, type Cause, type Outcome } from './verdict.ts';
@@ -487,12 +487,20 @@ export function finalJudgement(
       // a database that is down and a card that was declined. The words on the
       // screen are the only thing that tells those apart, and they were being
       // thrown away one line before the report was written.
+      //
+      // And only said when it is true. `unmet` also means a quoted expectation
+      // is simply absent from a healthy page, and calling that an error sent
+      // the reader hunting for one that did not exist. Without a failure
+      // sentence the detail names what was missing and what was there
+      // instead, and leads with them, because the planner's `why` is 183
+      // characters on its own and the report's cell keeps 120.
       const said = failureSentence(snapshot.text);
+      const missing = notFound(workflow.expect, snapshot.text);
       return {
         cause: 'expectation-not-met',
         detail: said
-          ? `${why} The page shows an error rather than what was expected. It says: "${said}"`
-          : `${why} The page shows an error rather than what was expected.`,
+          ? `${why} The page shows an error rather than what was expected. It says: "${said}" ${missing}`
+          : `${missing} ${observed(snapshot.text, 'start')} ${why}`,
         taken,
       };
     }

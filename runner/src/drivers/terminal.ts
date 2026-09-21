@@ -28,7 +28,7 @@
 // draw keeps their evidence the program's own output and nothing else.
 
 import { spawn } from 'node:child_process';
-import { judgeAll } from '../workflow.ts';
+import { failureSentence, judgeAll, notFound, observed } from '../workflow.ts';
 import { classify, type Attempt, type Cause } from '../verdict.ts';
 import { nullSink, type LiveSink } from '../live.ts';
 import { openScreen, type Screen } from './screen.ts';
@@ -288,11 +288,7 @@ function driveThroughAPipe(
           output,
         });
       } else if (verdict === 'unmet') {
-        resolve({
-          cause: 'expectation-not-met',
-          detail: 'The output showed a failure rather than what was expected.',
-          output,
-        });
+        resolve({ cause: 'expectation-not-met', detail: unmetDetail(workflow.expect, output, 'output', output), output });
       } else {
         resolve({
           cause: 'page-unreadable',
@@ -516,7 +512,11 @@ async function driveOnAScreen(
   if (verdict === 'unmet') {
     return {
       cause: 'expectation-not-met',
-      detail: 'The screen showed a failure rather than what was expected.',
+      // The last screen that had anything on it, not the transcript, which
+      // repeats every frame drawn on the way there, and not the final grid,
+      // which a program that restored the terminal on its way out left blank.
+      detail: unmetDetail(workflow.expect, transcript, 'screen',
+        [...shown, everything].reverse().find((s) => s.trim() !== '') ?? ''),
       output: transcript,
     };
   }
@@ -525,6 +525,24 @@ async function driveOnAScreen(
     detail: 'Nothing on the screen confirmed or contradicted what was expected.',
     output: transcript,
   };
+}
+
+/** unmetDetail explains an unmet expectation without inventing an error.
+ *
+ * This said the output or the screen showed a failure every time, including
+ * for a program drawing its whole healthy menu with one quoted string absent,
+ * which sent the reader looking for a failure nobody could find. A failure is
+ * named only when `failureSentence` found one in what was judged, and quoted;
+ * otherwise the detail names what was missing and ends with the last thing the
+ * program showed, because a terminal's final screen is where its answer is. */
+function unmetDetail(
+  expect: readonly string[], judged: string, where: 'output' | 'screen', last: string,
+): string {
+  const said = failureSentence(judged);
+  const missing = notFound(expect, judged);
+  return said
+    ? `The ${where} showed a failure rather than what was expected. It says: "${said}" ${missing}`
+    : `${missing} ${observed(last, 'end')}`;
 }
 
 /** notOurs is the driver's own failure, which is blocked rather than failed:
