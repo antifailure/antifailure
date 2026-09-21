@@ -1104,12 +1104,13 @@ func appendUnique(s []string, v string) []string {
 // Nil when the repository has none, and nil is the answer: the section is
 // optional, its absence is what the fidelity report reads to say "this
 // application declared no infrastructure", and an empty section would turn
-// that honest silence into a manifest af up refuses for naming no path.
+// that honest silence into a manifest af up refuses for naming no stack.
 //
-// Only source and paths are written. Which workspace and which variable files
-// describe production is not stated anywhere in a repository, so guessing
-// either would put a value that cannot be checked into the one section that
-// describes production rather than the copy. See the head of infra.go.
+// Only source and path are written per stack. Which workspace and which
+// variable files describe production is not stated anywhere in a repository,
+// so guessing either would put a value that cannot be checked into the one
+// section that describes production rather than the copy. See the head of
+// infra.go.
 func mergeInfrastructure(findings []Finding) *schema.Infrastructure {
 	var paths []string
 	for _, f := range OfKind(findings, KindInfra) {
@@ -1121,5 +1122,9 @@ func mergeInfrastructure(findings []Finding) *schema.Infrastructure {
 	// Sorted, because two runs over one tree have to produce byte identical
 	// YAML and a manifest that shuffles on every run cannot be reviewed.
 	sort.Strings(paths)
-	return &schema.Infrastructure{Source: schema.InfraTerraform, Paths: paths}
+	stacks := make([]schema.InfraStack, 0, len(paths))
+	for _, p := range paths {
+		stacks = append(stacks, schema.InfraStack{Source: schema.InfraTerraform, Path: p})
+	}
+	return &schema.Infrastructure{Stacks: stacks}
 }

@@ -197,16 +197,16 @@ func renderInfrastructure(env *Env, res *detect.Result) {
 	}
 	env.Out.Section("Infrastructure as code")
 	if in != nil {
-		rows := make([][]string, 0, len(in.Paths))
-		for _, p := range in.Paths {
-			rows = append(rows, []string{p, string(in.Source)})
+		rows := make([][]string, 0, len(in.Stacks))
+		for _, st := range in.Stacks {
+			rows = append(rows, []string{st.Path, string(st.Source)})
 		}
-		env.Out.Table([]Column{Flex("ROOT MODULE"), Col("DECLARED BY")}, rows)
+		env.Out.Table([]Column{Flex("STACK"), Col("DECLARED BY")}, rows)
 		env.Out.Note(StyleDim,
 			"Nothing here changes what the environment builds. It is what af fidelity compares "+
-				"the copy against. infrastructure.workspace and infrastructure.var_files are "+
-				"empty because nothing in this repository says which workspace or which variable "+
-				"file describes production; fill them in if production is read through either.")
+				"the copy against. Each stack's workspace and var_files are empty because nothing "+
+				"in this repository says which workspace or which variable file describes "+
+				"production; fill them in if production is read through either.")
 	}
 	for _, n := range notes {
 		env.Out.Note(StyleWarn, n)

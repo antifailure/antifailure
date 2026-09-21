@@ -502,7 +502,7 @@ func suggest(got string, siblings []string) string {
 var knownKeys = []string{
 	"version", "name", "services", "database", "datastores", "egress", "personas", "auth", "workflows",
 	"invariants", "insights", "change", "explore", "fidelity",
-	"load", "policy", "runtime", "github", "infrastructure", "workspace", "var_files",
+	"load", "policy", "runtime", "github", "infrastructure", "stacks", "workspace", "var_files",
 	"path", "kind", "build", "command", "port", "health_path", "health_timeout",
 	"env", "replicas", "resources", "schedule", "migrate", "depends_on",
 	"strategy", "dockerfile", "target", "context", "image", "args", "allow_hosts",

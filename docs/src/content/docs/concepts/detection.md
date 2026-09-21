@@ -25,7 +25,7 @@ describes itself, in the files you use to run it.
 | Dependency lists | Third party APIs, which become egress rules |
 | Migration directories | The migrate command |
 | Cron and schedule files | Scheduled services |
-| `*.tf` files | The Terraform root modules, which become [`infrastructure.paths`](/docs/reference/manifest#infrastructure) |
+| `*.tf` files | The Terraform root modules, which become [`infrastructure.stacks`](/docs/reference/manifest#infrastructure) |
 
 The dependency list is the one that surprises people. A `stripe` dependency
 produces an egress rule for `api.stripe.com` in sandbox mode, a `resend`
@@ -40,8 +40,8 @@ are planned and applied on their own. A repository that only publishes modules
 gets no section and a sentence saying why, because "we found no infrastructure"
 and "we found only building blocks" are different facts.
 
-It never drafts `infrastructure.workspace` or `infrastructure.var_files`, and
-it says so under its own heading. Which workspace holds production, and which
+It never drafts a stack's `workspace` or `var_files`, and it says so under its
+own heading. Which workspace holds production, and which
 of `production.tfvars`, `staging.tfvars` and `dev.tfvars` describes it, is not
 stated anywhere in a repository. A file name is not a fact, and this is the one
 section of the manifest that describes production rather than the copy, so

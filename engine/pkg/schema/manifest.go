@@ -1705,13 +1705,15 @@ const (
 	ForkAlways ForkPolicy = "always"
 )
 
-// InfraSource names the tool that declares an application's infrastructure.
+// InfraSource names the tool that declares one stack of an application's
+// infrastructure.
 //
-// A closed vocabulary with one member, on the same reasoning LoadSource states
-// a few hundred lines up: a value the schema accepts and nothing can read is
-// worse than a value that is not offered, because the first looks like a
-// configured feature and behaves like a missing one. The list grows when a
-// reader for the next tool exists, and not before.
+// A closed vocabulary, on the same reasoning LoadSource states a few hundred
+// lines up: a value the schema accepts and nothing can read is worse than a
+// value that is not offered, because the first looks like a configured feature
+// and behaves like a missing one. It carries exactly the tools a reader exists
+// for, and a new member lands in the same commit as the reader it names rather
+// than being reserved ahead of one.
 //
 // OpenTofu is deliberately not a second member. It writes the same language
 // and is read by the same reader, so a second spelling would be two names for
@@ -1733,23 +1735,39 @@ const InfraTerraform InfraSource = "terraform"
 // rather than assumed: a copy nobody compared against its own infrastructure
 // has not been shown to reproduce it.
 type Infrastructure struct {
-	// Source is the tool that declares the infrastructure.
+	// Stacks are the directories that declare production, one entry each.
+	Stacks []InfraStack `json:"stacks" yaml:"stacks"`
+}
+
+// InfraStack is one directory that declares part of production, and how it is
+// read.
+//
+// WHY EVERY KEY IS ON THE STACK AND NOT ON THE LIST, because the first draft
+// of this had source, workspace and var_files one level up and it was wrong
+// twice over. A workspace is selected inside ONE root module and a variable
+// file is passed to ONE invocation, so either of them beside three directories
+// is a statement nobody can act on; that shape needed a cross field refusal
+// whose existence was a symptom rather than a rule, and the first person it
+// refuses is the one with the most infrastructure. And a real repository
+// declares its cloud in one tool and its workloads in another, so a single
+// source for the whole list cannot describe the ordinary case either. Per
+// stack, every key means exactly one thing and there is no rule left to write.
+type InfraStack struct {
+	// Source is the tool that declares this stack.
 	Source InfraSource `json:"source" yaml:"source"`
-	// Paths are the root module directories, relative to the repository root.
+	// Path is the stack's directory, relative to the repository root.
+	Path string `json:"path" yaml:"path"`
+	// Workspace is which workspace holds production, for a stack that
+	// separates its environments that way.
 	//
-	// A list because a root module is the unit that is planned and applied on
-	// its own, and an application whose infrastructure is split by concern has
-	// several. Every entry is checked to exist and to be a directory.
-	Paths []string `json:"paths" yaml:"paths"`
-	// Workspace is which workspace holds production.
-	//
-	// Only meaningful alongside a single root module, because a workspace is
-	// selected inside one, and validation refuses it beside several rather
-	// than picking one of them.
+	// Read rather than selected. Nothing here runs Terraform, and the name is
+	// what lets an expression mentioning terraform.workspace resolve to a
+	// value instead of being reported as unreadable.
 	Workspace string `json:"workspace,omitempty" yaml:"workspace,omitempty"`
 	// VarFiles are the variable files that describe production, in the order
-	// they would be passed. Refused beside several root modules for the same
-	// reason Workspace is: a variable file is an argument to one.
+	// they would be passed. They are what turns a variable with no default
+	// from a value decided outside the configuration into one that can be
+	// read here.
 	VarFiles []string `json:"var_files,omitempty" yaml:"var_files,omitempty"`
 }
 

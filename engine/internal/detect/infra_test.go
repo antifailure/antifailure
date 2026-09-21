@@ -47,8 +47,8 @@ module "database" {
 	res := run(t, "shopfront", files)
 
 	require.NotNil(t, res.Draft.Infrastructure, "a repository with Terraform in it drafts the section")
-	require.Equal(t, schema.InfraTerraform, res.Draft.Infrastructure.Source)
-	require.Equal(t, []string{"infra"}, res.Draft.Infrastructure.Paths)
+	require.Equal(t, []schema.InfraStack{{Source: schema.InfraTerraform, Path: "infra"}},
+		res.Draft.Infrastructure.Stacks)
 	requireDraftValidates(t, res.Draft, files)
 }
 
@@ -68,7 +68,7 @@ func TestInfra_DraftsEveryRootModuleWhenThereAreSeveral(t *testing.T) {
 	res := run(t, "shopfront", files)
 	require.Equal(t,
 		[]string{"infra/app", "infra/data", "infra/network"},
-		res.Draft.Infrastructure.Paths)
+		infraStackPaths(res.Draft.Infrastructure))
 	requireDraftValidates(t, res.Draft, files)
 }
 
@@ -82,7 +82,7 @@ func TestInfra_DraftsTheRepositoryRootAsTheCurrentDirectory(t *testing.T) {
 		"main.tf":      `resource "aws_s3_bucket" "this" {}`,
 	}
 	res := run(t, "shopfront", files)
-	require.Equal(t, []string{"."}, res.Draft.Infrastructure.Paths)
+	require.Equal(t, []string{"."}, infraStackPaths(res.Draft.Infrastructure))
 	requireDraftValidates(t, res.Draft, files)
 }
 
@@ -168,7 +168,7 @@ module "network" {
 	}
 	res := run(t, "shopfront", files)
 	require.NotNil(t, res.Draft.Infrastructure)
-	require.Equal(t, []string{"infra"}, res.Draft.Infrastructure.Paths)
+	require.Equal(t, []string{"infra"}, infraStackPaths(res.Draft.Infrastructure))
 }
 
 func TestInfra_DoesNotReadASourceArgumentOutsideAModuleBlock(t *testing.T) {
@@ -192,7 +192,7 @@ terraform {
 		"infra/not-a-module/main.tf": `resource "null_resource" "this" {}`,
 	}
 	res := run(t, "shopfront", files)
-	require.Contains(t, res.Draft.Infrastructure.Paths, "infra/stack",
+	require.Contains(t, infraStackPaths(res.Draft.Infrastructure), "infra/stack",
 		"the stack calls no module, so it is a root module")
 }
 
@@ -208,7 +208,7 @@ func TestInfra_LeavesOutADirectoryUnderModulesEvenWhenNothingCallsIt(t *testing.
 		"modules/logging/main.tf": `resource "aws_cloudwatch_log_group" "this" {}`,
 	}
 	res := run(t, "shopfront", files)
-	require.Equal(t, []string{"infra"}, res.Draft.Infrastructure.Paths)
+	require.Equal(t, []string{"infra"}, infraStackPaths(res.Draft.Infrastructure))
 }
 
 func TestInfra_NeverDraftsAWorkspaceOrAVariableFile(t *testing.T) {
@@ -227,9 +227,9 @@ func TestInfra_NeverDraftsAWorkspaceOrAVariableFile(t *testing.T) {
 		"infra/dev.tfvars":        `image = "shopfront:3"`,
 	}
 	res := run(t, "shopfront", files)
-	require.Equal(t, []string{"infra"}, res.Draft.Infrastructure.Paths)
-	require.Empty(t, res.Draft.Infrastructure.Workspace)
-	require.Empty(t, res.Draft.Infrastructure.VarFiles)
+	require.Equal(t, []string{"infra"}, infraStackPaths(res.Draft.Infrastructure))
+	require.Empty(t, res.Draft.Infrastructure.Stacks[0].Workspace)
+	require.Empty(t, res.Draft.Infrastructure.Stacks[0].VarFiles)
 }
 
 func TestInfra_FindingsCarryASourceTheSchemaKnows(t *testing.T) {
@@ -286,4 +286,14 @@ func pad2(n int) string {
 		return "0" + string(rune('0'+n))
 	}
 	return string(rune('0'+n/10)) + string(rune('0'+n%10))
+}
+
+// infraStackPaths is the drafted stacks' paths, in order, which is what most
+// of these assertions are about.
+func infraStackPaths(in *schema.Infrastructure) []string {
+	out := make([]string, 0, len(in.Stacks))
+	for _, st := range in.Stacks {
+		out = append(out, st.Path)
+	}
+	return out
 }
