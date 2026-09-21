@@ -422,11 +422,27 @@ describes itself, in the files you use to run it.
 | Dependency lists | Third party APIs, which become egress rules |
 | Migration directories | The migrate command |
 | Cron and schedule files | Scheduled services |
+| ` + "`" + `*.tf` + "`" + ` files | The Terraform root modules, which become [` + "`" + `infrastructure.paths` + "`" + `](/docs/reference/manifest#infrastructure) |
 
 The dependency list is the one that surprises people. A ` + "`" + `stripe` + "`" + ` dependency
 produces an egress rule for ` + "`" + `api.stripe.com` + "`" + ` in sandbox mode, a ` + "`" + `resend` + "`" + `
 dependency produces one for ` + "`" + `api.resend.com` + "`" + ` in capture mode, and a ` + "`" + `sentry` + "`" + `
 dependency produces a block with a sentence saying why.
+
+Terraform is the one source where finding the files is not the whole job.
+Every directory holding a ` + "`" + `.tf` + "`" + ` file is a module and most of them are not root
+modules, so detection reads the ` + "`" + `module` + "`" + ` blocks, takes out the directories
+something calls with a local source, and drafts what is left: the units that
+are planned and applied on their own. A repository that only publishes modules
+gets no section and a sentence saying why, because "we found no infrastructure"
+and "we found only building blocks" are different facts.
+
+It never drafts ` + "`" + `infrastructure.workspace` + "`" + ` or ` + "`" + `infrastructure.var_files` + "`" + `, and
+it says so under its own heading. Which workspace holds production, and which
+of ` + "`" + `production.tfvars` + "`" + `, ` + "`" + `staging.tfvars` + "`" + ` and ` + "`" + `dev.tfvars` + "`" + ` describes it, is not
+stated anywhere in a repository. A file name is not a fact, and this is the one
+section of the manifest that describes production rather than the copy, so
+nothing downstream could catch a wrong answer.
 
 ## What it says it is unsure about
 
