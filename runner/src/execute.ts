@@ -498,13 +498,9 @@ export function finalJudgement(
       // expectation is: it sends somebody to look at a page that may be showing
       // exactly what was asked for.
       const blind = unmatchable(workflow.expect);
-      const advice = blind.length > 0
-        ? `${blind.length === 1 ? 'This expectation has' : 'These expectations have'} no word ` +
-          `this can look for, so ${blind.length === 1 ? 'it' : 'they'} could not have been met ` +
-          `whatever the page showed: ${blind.map((e) => JSON.stringify(e)).join(', ')}. Quote a ` +
-          `string to require it exactly, or write words of three letters or more.`
-        : `Set a model key so the runner can read the page, or write an expectation whose words ` +
-          `appear on it.`;
+      const unreadable =
+        `Nothing on the page contradicts what was expected, and nothing confirms it either, so ` +
+        `this run proved nothing.`;
       return {
         // page-unreadable, not synthesized-response. This branch is about a
         // page nobody could read; the other name belongs to a response a
@@ -512,9 +508,40 @@ export function finalJudgement(
         // see. Wearing it here left the real case with a mapping and no
         // producer for as long as synth has existed.
         cause: 'page-unreadable',
-        detail:
-          `${why} Nothing on the page contradicts what was expected, and nothing confirms it ` +
-          `either, so this run proved nothing. ${advice}`,
+        // AN EXPECTATION THAT COULD NEVER MATCH GOES FIRST, AND THE QUOTED
+        // NAME GOES FIRST WITHIN IT.
+        //
+        // Two reasons, and the second is the one that decides it. The report's
+        // table cell is capped at 120 characters by oneLine in the engine's
+        // report package, and `why` alone is 183, so anything after it reaches
+        // no one: it survives only on the `Got:` line inside a collapsed
+        // details block, which is where somebody looks once they already
+        // suspect something. That is the ergonomic half.
+        //
+        // The half that decides it is that `why` is WRONG here. It says
+        // nothing on this page moves the workflow forward, about a page that
+        // may be showing exactly what was asked for, so leading with it points
+        // the reader at their application when the fault is in their
+        // expectation. A diagnostic that is merely incomplete costs a click; a
+        // diagnostic that points the wrong way costs the hour.
+        //
+        // The name leads the sentence rather than closing it for the same
+        // reason: a sentence that leads and then truncates before naming which
+        // expectation tells somebody there is a problem and not what it is,
+        // which is worse than the folded version it replaces. Quoted names
+        // first, mechanism second, what to do third.
+        //
+        // Only when there is such an expectation. One that was not met is a
+        // different fact from one that could never be met, and only the second
+        // earns the front of the cell.
+        detail: blind.length > 0
+          ? `${blind.map((e) => JSON.stringify(e)).join(', ')} could never match any page, so ` +
+            `this workflow can neither pass nor fail. ` +
+            `${blind.length === 1 ? 'It carries' : 'They carry'} no word this can look for. ` +
+            `Quote a string to require it exactly, or write words of three letters or more. ` +
+            `${why} ${unreadable}`
+          : `${why} ${unreadable} Set a model key so the runner can read the page, or write an ` +
+            `expectation whose words appear on it.`,
         taken,
       };
     }
