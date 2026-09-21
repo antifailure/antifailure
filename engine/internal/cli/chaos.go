@@ -118,6 +118,14 @@ func printChaos(e *Env, run *env.ChaosRun) {
 	for _, f := range run.Report.Faults {
 		e.Out.Println("")
 		switch {
+		case f.Refused:
+			e.Out.Status(SymbolSkip, f.Name, f.Kind+" on "+f.Target)
+			e.Out.Note(StyleDim, "Refused before it touched anything: "+f.Error)
+			continue
+		case f.Error != "" && f.Injected && !f.Undone:
+			e.Out.Status(SymbolWarn, f.Name, f.Kind+" on "+f.Target)
+			e.Out.Note(StyleDim, "Injected and not undone, so this environment is still broken: "+f.Error)
+			continue
 		case f.Error != "":
 			e.Out.Status(SymbolSkip, f.Name, f.Kind+" on "+f.Target)
 			e.Out.Note(StyleDim, "Could not inject: "+f.Error)

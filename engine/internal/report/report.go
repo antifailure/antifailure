@@ -1084,6 +1084,15 @@ type ChaosFault struct {
 	Undone   bool
 	// Error is why the fault could not be injected, when it could not.
 	Error string
+	// Refused is whether the fault was turned down by the guard that keeps a
+	// fault inside this environment, before it touched anything. That is a
+	// different fact from an Error with Refused false, which is a fault that
+	// tried to go in and failed partway: a refusal leaves the environment as
+	// it found it, so every other fault in the run was measured against an
+	// unbroken system and its result stands. Reporting the two alike told a
+	// reader that a durability proof run AFTER a refused disk fill meant
+	// nothing, on the same screen that showed it.
+	Refused bool
 	// Recovery is the durability proof, when one was run around this fault.
 	Recovery *ChaosRecovery
 	// DurationMs is how long the fault and its verification took.

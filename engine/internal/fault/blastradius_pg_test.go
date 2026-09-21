@@ -396,7 +396,10 @@ func TestReadOnlyData_RefusesWhenTheWriteWouldStillSucceed(t *testing.T) {
 		Target: fault.Target{Role: fault.RoleDatabase}, Path: "/rootdata",
 	})
 	require.Error(t, err, "a read only fault was accepted on a directory its owner can still write")
-	require.Contains(t, err.Error(), "AF-CHS-005")
+	// 004, applied and changed nothing, rather than 005, which is refused
+	// before acting. The mode was changed and put back, which the assertion
+	// below proves, so this fault acted.
+	require.Contains(t, err.Error(), "AF-CHS-004")
 	require.Contains(t, err.Error(), "root ignores it")
 	// And it put the mode back on the way out, so a refused fault leaves
 	// nothing behind.

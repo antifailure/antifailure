@@ -2,6 +2,7 @@ package env
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"strings"
 	"time"
@@ -122,7 +123,7 @@ func (o *Orchestrator) runOneFault(
 
 	in, err := inj.Inject(ctx, f)
 	if err != nil {
-		entry.Error = err.Error()
+		entry.Error, entry.Refused = err.Error(), refusedAsUnsafe(err)
 		return entry, nil
 	}
 	entry.Injected, entry.Evidence = true, in.Evidence
@@ -134,6 +135,20 @@ func (o *Orchestrator) runOneFault(
 	}
 	entry.Undone = true
 	return entry, nil
+}
+
+// refusedAsUnsafe reports whether err is the injector turning a fault down
+// because its effect would reach past this environment, which it decides
+// before it writes anything.
+//
+// Read from the catalog code rather than from the message, so rewording the
+// sentence cannot move a fault from one side of the line to the other, and
+// the code has one meaning for this to rely on: AF-CHS-005 is raised only
+// where the check runs before the fault acts. The one place that raised it
+// after acting, a read only fault that changed nothing, raises AF-CHS-004,
+// which is the code that says exactly that.
+func refusedAsUnsafe(err error) bool {
+	return stderrors.Is(err, aferrors.Coded(aferrors.AFCHS005))
 }
 
 // wantsCrashProof reports whether the durability proof runs around this fault.
@@ -199,9 +214,19 @@ func (o *Orchestrator) crashProof(
 	// The undo runs whatever happened, including when Verify returned an
 	// error before it reached its own Recover. Undo is idempotent, so the
 	// ordinary path calls it twice and the second call does nothing.
+	//
+	// A non nil injection means the fault WENT IN, whatever Verify said
+	// afterwards, so Injected is set here rather than only on the path where
+	// Verify succeeded. Without it an undo that failed after a Verify error
+	// left Injected false and Undone false, which no reader could tell from a
+	// fault that never went in, and the finding that says this environment is
+	// still broken never fired.
 	if injection != nil {
-		if undoErr := injection.Undo(context.WithoutCancel(ctx)); undoErr != nil && entry.Error == "" {
-			entry.Error = undoErr.Error()
+		entry.Injected = true
+		if undoErr := injection.Undo(context.WithoutCancel(ctx)); undoErr != nil {
+			if entry.Error == "" {
+				entry.Error = undoErr.Error()
+			}
 		} else {
 			entry.Undone = true
 		}
@@ -210,6 +235,7 @@ func (o *Orchestrator) crashProof(
 	if err != nil {
 		if entry.Error == "" {
 			entry.Error = err.Error()
+			entry.Refused = refusedAsUnsafe(err)
 		}
 		entry.Evidence = res.Evidence
 		return entry, nil
@@ -259,10 +285,57 @@ func recoveryOf(res pgcrash.Result) *report.ChaosRecovery {
 // ChaosFailure, which defaults to fail. A run that could not establish its
 // claim is at ChaosUnverified, which defaults to warn: it is a real fact
 // somebody has to see and it is not evidence that the change broke anything.
+//
+// THREE FACTS ARRIVE WITH AN ERROR, and they used to share one finding. A
+// fault that went in and did not come out is still applied, so everything
+// measured after it is suspect. A fault the injector refused as unsafe never
+// touched anything, so nothing else in the run is affected. A fault that tried
+// to go in and failed is the case the refused rule was written for. Reading
+// Error first gave all three the refused rule's sentence, which told a reader
+// that a durability proof run AFTER a refused disk fill meant nothing, on the
+// screen that showed it, and reported a fault still applied to this
+// environment as one that "was not applied". So the order below is the order
+// of how much each one damages: left in place, then refused as unsafe, then
+// could not be injected.
 func ChaosFindings(f report.ChaosFault, proof *pgcrash.Result, gate report.Policy) []report.Finding {
 	where := "fault " + f.Name
 	var out []report.Finding
-	if f.Error != "" {
+	switch {
+	case f.Injected && !f.Undone:
+		detail := fmt.Sprintf("%s was injected and its undo did not run, so this environment is still broken.", where)
+		if f.Error != "" {
+			detail = fmt.Sprintf("%s was injected and its undo failed, so this environment is still broken: %s", where, f.Error)
+		}
+		out = append(out, report.Finding{
+			Rule:   RuleFaultNotUndone,
+			Level:  gate.ChaosUnverified,
+			Title:  "A fault was left in place",
+			Detail: detail,
+			Fix:    "Tear the environment down and build it again. Anything that ran after this fault was measured against a broken environment.",
+			Where:  where,
+		})
+	case f.Refused:
+		// Unverified rather than informational, deliberately. The manifest
+		// declared this fault, so it declared a claim, and the claim was not
+		// established: reporting that below warn would be reporting an
+		// unestablished claim as nothing to see. It fires on every run only
+		// while the manifest declares a fault this environment cannot hold,
+		// which is a manifest a person can fix, so the warn is a to do and not
+		// noise. What it must NOT do is reach past its own fault.
+		return []report.Finding{{
+			Rule:  RuleFaultUnsafe,
+			Level: gate.ChaosUnverified,
+			Title: "A fault was refused before it touched anything",
+			Detail: fmt.Sprintf("%s was not applied: %s It was turned down by the guard that keeps a fault "+
+				"inside this environment, before it acted, so it left this environment as it was and changed "+
+				"nothing the other faults in this run measured. What this fault was declared to establish "+
+				"was not established.", where, f.Error),
+			Fix: "Read the refusal, which names what would have reached past this environment. Change the fault " +
+				"or the environment so the effect stays inside it, or remove the fault: while it is declared, " +
+				"every run reports its claim as not established.",
+			Where: where,
+		}}
+	case f.Error != "":
 		return []report.Finding{{
 			Rule:   RuleFaultRefused,
 			Level:  gate.ChaosUnverified,
@@ -271,16 +344,6 @@ func ChaosFindings(f report.ChaosFault, proof *pgcrash.Result, gate report.Polic
 			Fix:    "Read what the container said, and correct the fault or the environment it is aimed at.",
 			Where:  where,
 		}}
-	}
-	if f.Injected && !f.Undone {
-		out = append(out, report.Finding{
-			Rule:   RuleFaultNotUndone,
-			Level:  gate.ChaosUnverified,
-			Title:  "A fault was left in place",
-			Detail: fmt.Sprintf("%s was injected and its undo did not run, so this environment is still broken.", where),
-			Fix:    "Tear the environment down and build it again. Anything that ran after this fault was measured against a broken environment.",
-			Where:  where,
-		})
 	}
 	if proof == nil {
 		return out
@@ -300,9 +363,10 @@ func ChaosFindings(f report.ChaosFault, proof *pgcrash.Result, gate report.Polic
 	return out
 }
 
-// The two rules this package RAISES, as opposed to the ones pgcrash owns. They
-// are about the fault rather than about the recovery: a fault that would not go
-// in, and a fault that would not come out.
+// The three rules this package RAISES, as opposed to the ones pgcrash owns.
+// They are about the fault rather than about the recovery: a fault that tried
+// to go in and failed, a fault the injector refused as unsafe before it acted,
+// and a fault that would not come out.
 //
 // Aliases rather than literals. The classification that decides what a chaos
 // finding MEANS lives in engine/internal/gate, so that the command line and the
@@ -310,6 +374,7 @@ func ChaosFindings(f report.ChaosFault, proof *pgcrash.Result, gate report.Polic
 // is two strings that agree until somebody edits one.
 const (
 	RuleFaultRefused   = gate.RuleFaultRefused
+	RuleFaultUnsafe    = gate.RuleFaultUnsafe
 	RuleFaultNotUndone = gate.RuleFaultNotUndone
 )
 
