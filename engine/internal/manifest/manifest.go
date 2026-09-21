@@ -508,6 +508,10 @@ var knownKeys = []string{
 	"strategy", "dockerfile", "target", "context", "image", "args", "allow_hosts",
 	"required", "sandbox", "value", "from", "scope", "cpu", "memory",
 	"provider", "source_url_env", "url_env", "masking_rules", "golden", "subset", "seed",
+	// What the Postgres a golden is built in actually is. `image` is already
+	// above, because a service build declares one too, and one flat list is
+	// the point.
+	"extensions", "preload_libraries",
 	"max_age", "retain", "storage", "storage_url", "volume", "profile",
 	"engine", "stance", "because",
 	// The declarations a stance the engine ACTS on has to carry. A typo in

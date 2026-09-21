@@ -500,7 +500,7 @@ The provider's concurrent branch limit ({limit}) is reached.
 
 The source database uses the extension {extension}, and the Postgres the golden is built in does not carry it.
 
-**What to do.** Point database.provider at a service whose Postgres has {extension}, or drop the extension from the source schema. The docker provider builds a golden in the stock postgres image, which carries the contrib modules and nothing else, so PostGIS, pgvector, TimescaleDB and pg_cron are not there.
+**What to do.** Set database.image to an image whose Postgres carries {extension}, such as pgvector/pgvector:pg17 or postgis/postgis:17-3.5, and add {extension} to database.extensions so it is created before the copy runs. An extension loaded at server start rather than created in a database, such as timescaledb, citus or pg_cron, also goes in database.preload_libraries. The stock postgres image the docker provider builds from otherwise carries the contrib modules and nothing else, which is why this is the default answer rather than the only one; a hosted provider whose Postgres already has {extension} is the other.
 
 | | |
 | --- | --- |
@@ -807,6 +807,42 @@ The role {role} on {host} may not create databases, and {vendor} does not let yo
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [providers/managed-postgres](/docs/providers/managed-postgres) |
+
+### AF-DB-038
+
+The image {image} declares {volume} as a volume, and the golden's data directory {datadir} is inside it.
+
+**What to do.** A golden is the container's filesystem committed, and anything written under a declared volume is written to an anonymous volume instead, so this image would publish a golden holding no rows and report success. Use an image that does not declare a volume over that path, or rebuild yours without it.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [providers/databases](/docs/providers/databases) |
+
+### AF-DB-039
+
+The image {image} runs Postgres {found} and database.version declares {declared}.
+
+**What to do.** Set database.version to {found}, or name an image built on {declared}. The two are checked rather than trusted because every branch of this golden would run a Postgres your application does not, and nothing later in the run would notice.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [providers/databases](/docs/providers/databases) |
+
+### AF-DB-040
+
+The extension {extension} named by database.extensions could not be created in the image {image}.
+
+**What to do.** Name an image that carries {extension} and set database.image to it, or drop {extension} from database.extensions. An extension is files on the server's disk before it is anything in a database, so no amount of SQL adds one the image does not have: pgvector/pgvector, postgis/postgis and timescale/timescaledb are the published images for the common ones.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [providers/databases](/docs/providers/databases) |
 
 ## Detection
 

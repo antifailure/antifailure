@@ -14036,6 +14036,11 @@ database:
 | [` + "`" + `azurepg` + "`" + `](/docs/providers/azurepg) | A point in time restore of an Azure Database for PostgreSQL Flexible Server | Expected to grow with the database. The snapshot half is flat and the log replay half is not, so this provider does not claim copy on write. Never timed on Azure | A flexible server, a service principal, and the enterprise edition |
 | [` + "`" + `rds` + "`" + `](/docs/providers/rds) | An instance restored from a snapshot of an Amazon RDS for PostgreSQL instance | Grows with the database, because a restore hydrates a new volume with every byte. One live restore took 5 minutes 4 seconds at 20 GB | An RDS for PostgreSQL instance, an IAM role, and the enterprise edition |
 
+A schema is rarely only Postgres. What the golden's server carries, meaning
+PostGIS, pgvector, TimescaleDB, pg_cron, or a table stored in an access method
+that came out of an extension, is configured on the ` + "`" + `docker` + "`" + ` provider and
+described in [Extensions and custom storage](/docs/providers/extensions).
+
 ` + "`" + `docker` + "`" + ` is the default and needs nothing. Its branch time is flat, measured
 rather than assumed: the conformance suite branches an 8 MiB golden and a 512 MiB
 one and the daemon's storage driver shares the layers, so the two cost the same.
@@ -14780,6 +14785,183 @@ what it covers.
 
 Nothing is reserved here, because no emulator is built into this binary. A
 registration can shadow nothing.
+`,
+	"providers/extensions.md": `---
+title: Extensions and custom storage
+description: How a golden carries PostGIS, pgvector, TimescaleDB or pg_cron, and what happens to a table stored in an access method that is not the heap.
+sidebar:
+  order: 18
+---
+
+A Postgres schema is rarely only Postgres. It has PostGIS geometry, or pgvector
+embeddings, or a TimescaleDB hypertable, or a table stored in an access method
+that came out of an extension. A golden that cannot carry those is a golden of
+somebody else's database.
+
+The ` + "`" + `docker` + "`" + ` provider builds a golden inside a container, so what that container
+carries is a decision the manifest makes:
+
+` + "`" + "`" + "`" + `yaml
+database:
+  provider: docker
+  version: 17
+  image: pgvector/pgvector:pg17
+  extensions:
+    - vector
+    - pg_trgm
+` + "`" + "`" + "`" + `
+
+Three keys, because the answer has three parts and skipping any one of them
+produces a server that starts perfectly and is missing something.
+
+## The image is where an extension lives
+
+An extension is files on the server's disk before it is anything in a database.
+No SQL adds one the image does not have, which is why a missing extension fails
+at ` + "`" + `CREATE EXTENSION` + "`" + ` with "is not available" rather than at install time.
+
+Without ` + "`" + `database.image` + "`" + ` the provider runs ` + "`" + `postgres:<version>-alpine` + "`" + `, which
+carries the contrib modules and nothing else. That is the right default and it
+is the reason [AF-DB-007](/docs/reference/errors) exists: a copy of a schema
+using PostGIS stops on the first object that needs it.
+
+Name an image that already carries what the schema needs. ` + "`" + `pgvector/pgvector` + "`" + `,
+` + "`" + `postgis/postgis` + "`" + `, ` + "`" + `timescale/timescaledb` + "`" + ` and ` + "`" + `citusdata/citus` + "`" + ` all publish
+one, and an image you build yourself works the same way. Pin it by digest where
+the golden has to be reproducible.
+
+Two things the image has to be true about, and both are checked rather than
+trusted:
+
+- **It runs the official entrypoint and honours ` + "`" + `PGDATA` + "`" + `.** A golden is the
+  container's filesystem committed, so the data directory is moved to
+  ` + "`" + `/var/lib/antifailure/pgdata` + "`" + ` to keep it out of the volume the stock image
+  declares. An image declaring a volume of its own over that path is refused,
+  because the alternative is a golden that publishes successfully and holds no
+  rows at all.
+- **It is the major version the manifest declares.** ` + "`" + `database.version` + "`" + ` is
+  compared against what the server reports, not against the tag. An image on
+  16 beside ` + "`" + `version: 17` + "`" + ` is refused, because everything downstream works and
+  every environment runs a Postgres your application does not.
+
+## The extension still has to be created
+
+An extension installed in the image and never created carries no types, no
+operators, no functions and no table access methods. ` + "`" + `database.extensions` + "`" + ` is
+the list to create, in the order given, one ` + "`" + `CREATE EXTENSION IF NOT EXISTS` + "`" + `
+each, before the source is copied in.
+
+Before, because the copy is what needs them. ` + "`" + `IF NOT EXISTS` + "`" + `, because an image
+such as ` + "`" + `citusdata/citus` + "`" + ` creates some of its own and a manifest naming one of
+those is right rather than wrong.
+
+An extension the image does not carry is refused by name, with the image named,
+so that the answer is about the image rather than about your SQL.
+
+## Some extensions are loaded, not created
+
+` + "`" + `timescaledb` + "`" + `, ` + "`" + `citus` + "`" + ` and ` + "`" + `pg_cron` + "`" + ` are loaded by the postmaster before any
+database is opened. Creating one in a server that did not load it fails with a
+message about ` + "`" + `shared_preload_libraries` + "`" + `, and a server holding such an
+extension's catalog entries without its library refuses to start at all.
+
+` + "`" + "`" + "`" + `yaml
+database:
+  provider: docker
+  version: 17
+  image: timescale/timescaledb:2.17.2-pg17
+  preload_libraries:
+    - timescaledb
+  extensions:
+    - timescaledb
+` + "`" + "`" + "`" + `
+
+` + "`" + `preload_libraries` + "`" + ` is ADDED to ` + "`" + `shared_preload_libraries` + "`" + ` rather than
+replacing it. Dropping ` + "`" + `pg_stat_statements` + "`" + ` is not an option the manifest has:
+without it the insights read a permanently empty table and report that
+statement timing is unavailable on every environment.
+
+The libraries you declare come first, in the order you write them, and
+` + "`" + `pg_stat_statements` + "`" + ` follows them. That order is measured rather than chosen:
+citus refuses to load from anywhere but the front, and a server started with
+the statistics module ahead of it exits during initialisation with "Citus has
+to be loaded first" and never accepts a connection. Nothing has the opposite
+requirement, so the statistics module is the one that moves. A plain library
+name only, never a path.
+
+The list is recorded on the golden image and read back when a branch starts, so
+a branch carries what its golden was built with even if the manifest has since
+stopped asking. Removing a line changes the next golden, never the branches of
+the ones that already exist.
+
+## Tables in a custom access method
+
+A table created ` + "`" + `USING <am>` + "`" + ` from an extension is carried end to end: through
+the golden, through every branch of it, through ` + "`" + `pg_dump` + "`" + ` and ` + "`" + `pg_restore` + "`" + `, and
+through subsetting, whose loads go in as binary ` + "`" + `COPY` + "`" + `.
+
+The access method travels with the table rather than being flattened. Read it
+back on the far side and it is the one you created the table with:
+
+` + "`" + "`" + "`" + `sql
+SELECT am.amname
+FROM pg_class c JOIN pg_am am ON am.oid = c.relam
+WHERE c.relname = 'measurements';
+` + "`" + "`" + "`" + `
+
+The extension providing the access method has to be in the image and in
+` + "`" + `database.extensions` + "`" + `, for the ordinary reason: the restore reaches a
+` + "`" + `CREATE TABLE ... USING columnar` + "`" + ` and the access method has to exist before it.
+
+### What masking will not do, and why it says so
+
+Masking rewrites a row at a time, addressed by the table's primary key or, when
+there is none, by ` + "`" + `ctid` + "`" + `. Both of those are guarantees of the heap rather than
+of Postgres. An access method is free to implement neither, and the catalog
+records the handler without recording what the handler implements, so there is
+nothing to ask.
+
+Measured against ` + "`" + `columnar` + "`" + ` from citus on Postgres 17.2, both are refused:
+` + "`" + `SELECT ctid FROM t` + "`" + ` and ` + "`" + `UPDATE t SET ... WHERE id = 2` + "`" + ` each answer "UPDATE
+and CTID scans not supported for ColumnarScan", and the table accepts a primary
+key regardless, so nothing about its shape warns you first.
+
+The refusal is keyed on the access method not being the heap, rather than on
+what any one engine implements, so it is conservative: an access method that
+would in fact have accepted the rewrite is refused too. There is nothing to ask
+that would distinguish them.
+
+So masking refuses at planning time, before anything is written, naming the
+table and the access method. A run that discovered this partway through a table
+would leave data neither real nor safe.
+
+The refusal is narrow. It applies only to a column masking would actually
+rewrite, so a table on a custom access method whose columns are preserved, or
+that holds nothing any rule matches, goes through untouched. Give such a column
+a rule that preserves it, and the golden carries the table:
+
+` + "`" + "`" + "`" + `yaml
+# masking.yaml
+rules:
+  - table: archived_people
+    column: email
+    transform: preserve
+    why: columnar storage cannot be rewritten a row at a time, and this archive is already scrubbed at source
+` + "`" + "`" + "`" + `
+
+Preserving a column is a decision somebody has to be able to defend, which is
+why it is written down with a reason rather than inferred from the storage.
+
+## What is not covered
+
+- These three keys are the ` + "`" + `docker` + "`" + ` provider's. A hosted provider furnishes its
+  own Postgres, so the extensions available in it are that service's to enable,
+  and a manifest naming any of the three beside another provider is refused
+  rather than ignored.
+- Row counts and table sizes for a custom access method are whatever that
+  access method reports through ` + "`" + `pg_class.reltuples` + "`" + ` and ` + "`" + `pg_table_size` + "`" + `. An
+  access method that does not maintain them reports zero, and the fidelity and
+  volume numbers will say zero rather than guessing.
 `,
 	"providers/limits.md": `---
 title: Provider limits
@@ -20772,7 +20954,7 @@ The provider's concurrent branch limit ({limit}) is reached.
 
 The source database uses the extension {extension}, and the Postgres the golden is built in does not carry it.
 
-**What to do.** Point database.provider at a service whose Postgres has {extension}, or drop the extension from the source schema. The docker provider builds a golden in the stock postgres image, which carries the contrib modules and nothing else, so PostGIS, pgvector, TimescaleDB and pg_cron are not there.
+**What to do.** Set database.image to an image whose Postgres carries {extension}, such as pgvector/pgvector:pg17 or postgis/postgis:17-3.5, and add {extension} to database.extensions so it is created before the copy runs. An extension loaded at server start rather than created in a database, such as timescaledb, citus or pg_cron, also goes in database.preload_libraries. The stock postgres image the docker provider builds from otherwise carries the contrib modules and nothing else, which is why this is the default answer rather than the only one; a hosted provider whose Postgres already has {extension} is the other.
 
 | | |
 | --- | --- |
@@ -21079,6 +21261,42 @@ The role {role} on {host} may not create databases, and {vendor} does not let yo
 | Exit code | ` + "`" + `3` + "`" + ` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [providers/managed-postgres](/docs/providers/managed-postgres) |
+
+### AF-DB-038
+
+The image {image} declares {volume} as a volume, and the golden's data directory {datadir} is inside it.
+
+**What to do.** A golden is the container's filesystem committed, and anything written under a declared volume is written to an anonymous volume instead, so this image would publish a golden holding no rows and report success. Use an image that does not declare a volume over that path, or rebuild yours without it.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `3` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [providers/databases](/docs/providers/databases) |
+
+### AF-DB-039
+
+The image {image} runs Postgres {found} and database.version declares {declared}.
+
+**What to do.** Set database.version to {found}, or name an image built on {declared}. The two are checked rather than trusted because every branch of this golden would run a Postgres your application does not, and nothing later in the run would notice.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `3` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [providers/databases](/docs/providers/databases) |
+
+### AF-DB-040
+
+The extension {extension} named by database.extensions could not be created in the image {image}.
+
+**What to do.** Name an image that carries {extension} and set database.image to it, or drop {extension} from database.extensions. An extension is files on the server's disk before it is anything in a database, so no amount of SQL adds one the image does not have: pgvector/pgvector, postgis/postgis and timescale/timescaledb are the published images for the common ones.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `3` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [providers/databases](/docs/providers/databases) |
 
 ## Detection
 
@@ -24347,10 +24565,13 @@ Where the environment's Postgres comes from, and how the production copy is made
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | ` + "`" + `api_key_env` + "`" + ` | string | no | The name of the variable holding the provider's API key. Named rather than carried: a manifest is committed and a key is not. Defaults to NEON_API_KEY for the neon provider. For the pgurl provider it names the connection string of the server that holds the goldens and the branches, which is the credential in that case, and defaults to PGURL_ADMIN_URL. |
+| ` + "`" + `extensions` + "`" + ` | list of string | no | Extensions to create in the golden before the source is copied into it, one CREATE EXTENSION IF NOT EXISTS each, in the order given. Declare the ones the schema depends on: an extension that is installed in the image but never created carries no types, no operators and no table access methods, so a table stored with one is refused by the restore rather than created. An extension the image does not carry is refused by name, with the image named, rather than surfacing later as a type nobody can find. The golden is committed after this runs, so every branch of it already has them. Max items 32. |
 | ` + "`" + `golden` + "`" + ` | [Golden](#golden) | no | The masked, verified copy every environment branches from. |
+| ` + "`" + `image` + "`" + ` | string | no | The container image the docker provider runs Postgres from, instead of the stock postgres:<version>-alpine. This is how a schema that needs PostGIS, pgvector, TimescaleDB, pg_cron or a custom table access method gets a golden at all: the stock image carries the contrib modules and nothing else, so an extension the source has and the image does not stops the restore. Name an image that already carries what the schema needs, such as pgvector/pgvector:pg17 or postgis/postgis:17-3.5, and pin it by digest where the golden has to be reproducible. The image must run the official entrypoint and honour PGDATA, because the golden is the container's filesystem committed, and it must be the major version this block declares: a mismatch is refused rather than committed. Only the docker provider has an image to choose, so any other provider refuses this key rather than ignoring it. Max length 512. |
 | ` + "`" + `masking_rules` + "`" + ` | string | no | Path to the masking rules file, relative to the repository root. Defaults to ` + "`" + `masking.yaml` + "`" + `. Max length 512. |
 | ` + "`" + `max_branches` + "`" + ` | integer | no | The plan's concurrent branch limit, where the provider has one it cannot read from its own API. Reaching it fails with AF-DB-006 rather than hanging. Minimum 1. |
 | ` + "`" + `migrations` + "`" + ` | [Migrations](#migrations) | no | Where the project's own SQL migrations live, for a project whose migrate command is its own script rather than a tool the rehearsal recognises. |
+| ` + "`" + `preload_libraries` + "`" + ` | list of string | no | Libraries to add to shared_preload_libraries, for an extension that has to be loaded at server start rather than created in a database, such as timescaledb, citus or pg_cron. They are ADDED to shared_preload_libraries rather than replacing it, and they come FIRST, with pg_stat_statements after them: citus refuses to load from anywhere but the front and the server then exits during initialisation, while the statistics module chains with whatever else hooks the executor and does not care where it sits. Dropping the statistics module is not an option this key has, because that leaves the insights reading a permanently empty table and reporting that statement timing is unavailable on every environment. A plain library name only, never a path, because this value is a list of shared objects the server loads as its own code. The list is stamped on the golden image and read back when a branch starts, so a branch of a golden built with a library preloaded starts with it too even if the manifest has since stopped asking for it. Max items 32. |
 | ` + "`" + `project` + "`" + ` | string | no | The account-side project a hosted provider creates branches in, such as a Neon project. Not a secret, which is why it lives here and the key that reaches it does not. |
 | ` + "`" + `provider` + "`" + ` | string | no | Which provider creates branches. docker is local and needs nothing; neon, supabase, dblab and xata talk to a service; pgurl is any reachable Postgres, which is where the goldens and the branches are kept as databases on a server you name. For xata, database.project is '<organization>/<project>'. aurora clones an Amazon Aurora PostgreSQL cluster and is in the enterprise edition, so a community build names it here and refuses it when a manifest selects it. ` + "`" + `cloudsql` + "`" + ` fast clones a Google Cloud SQL for PostgreSQL instance and ` + "`" + `azurepg` + "`" + ` restores an Azure Database for PostgreSQL Flexible Server to a point in time; both are enterprise for the same reason. ` + "`" + `azurepg` + "`" + ` is the one provider here that does not branch in time flat in the size of the database, because a restore replays write ahead logs after the snapshot and that half is not flat. ` + "`" + `rds` + "`" + ` restores an Amazon RDS for PostgreSQL DB snapshot, is enterprise for the same reason, and does not branch in flat time either, because a restore hydrates a new volume with every byte. Defaults to ` + "`" + `docker` + "`" + `. |
 | ` + "`" + `seed` + "`" + ` | string | no | Command that fills the golden with data, for a project with no production database yet. It runs once per refresh with DATABASE_URL set, and every branch is a copy of what it made, so the cost is paid once rather than per environment. Mutually exclusive with source_url_env. Max length 1024. |

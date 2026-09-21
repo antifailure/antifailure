@@ -358,6 +358,31 @@
           "default": 17,
           "description": "Postgres major version. Match it to the source: a golden built on a different major is an environment running a Postgres your application does not."
         },
+        "image": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "The container image the docker provider runs Postgres from, instead of the stock postgres:<version>-alpine. This is how a schema that needs PostGIS, pgvector, TimescaleDB, pg_cron or a custom table access method gets a golden at all: the stock image carries the contrib modules and nothing else, so an extension the source has and the image does not stops the restore. Name an image that already carries what the schema needs, such as pgvector/pgvector:pg17 or postgis/postgis:17-3.5, and pin it by digest where the golden has to be reproducible. The image must run the official entrypoint and honour PGDATA, because the golden is the container's filesystem committed, and it must be the major version this block declares: a mismatch is refused rather than committed. Only the docker provider has an image to choose, so any other provider refuses this key rather than ignoring it."
+        },
+        "extensions": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$",
+            "maxLength": 63
+          },
+          "description": "Extensions to create in the golden before the source is copied into it, one CREATE EXTENSION IF NOT EXISTS each, in the order given. Declare the ones the schema depends on: an extension that is installed in the image but never created carries no types, no operators and no table access methods, so a table stored with one is refused by the restore rather than created. An extension the image does not carry is refused by name, with the image named, rather than surfacing later as a type nobody can find. The golden is committed after this runs, so every branch of it already has them."
+        },
+        "preload_libraries": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$",
+            "maxLength": 63
+          },
+          "description": "Libraries to add to shared_preload_libraries, for an extension that has to be loaded at server start rather than created in a database, such as timescaledb, citus or pg_cron. They are ADDED to shared_preload_libraries rather than replacing it, and they come FIRST, with pg_stat_statements after them: citus refuses to load from anywhere but the front and the server then exits during initialisation, while the statistics module chains with whatever else hooks the executor and does not care where it sits. Dropping the statistics module is not an option this key has, because that leaves the insights reading a permanently empty table and reporting that statement timing is unavailable on every environment. A plain library name only, never a path, because this value is a list of shared objects the server loads as its own code. The list is stamped on the golden image and read back when a branch starts, so a branch of a golden built with a library preloaded starts with it too even if the manifest has since stopped asking for it."
+        },
         "source_url_env": {
           "type": "string",
           "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",

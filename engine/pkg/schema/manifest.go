@@ -184,11 +184,27 @@ const (
 
 // Database says where the environment's Postgres comes from.
 type Database struct {
-	Provider     DBProvider `json:"provider,omitempty" yaml:"provider,omitempty"`
-	Version      int        `json:"version,omitempty" yaml:"version,omitempty"`
-	SourceURLEnv string     `json:"source_url_env,omitempty" yaml:"source_url_env,omitempty"`
-	URLEnv       string     `json:"url_env,omitempty" yaml:"url_env,omitempty"`
-	MaskingRules string     `json:"masking_rules,omitempty" yaml:"masking_rules,omitempty"`
+	Provider DBProvider `json:"provider,omitempty" yaml:"provider,omitempty"`
+	Version  int        `json:"version,omitempty" yaml:"version,omitempty"`
+	// Image is the container image the docker provider runs Postgres from,
+	// instead of the stock one built from Version. It is how a schema that
+	// needs PostGIS, pgvector, TimescaleDB or a custom table access method
+	// gets a golden at all.
+	Image string `json:"image,omitempty" yaml:"image,omitempty"`
+	// Extensions are created in the golden before the source is copied into
+	// it. An extension present in the image and never created carries none of
+	// its types, operators or table access methods, so declaring the image is
+	// only half of the answer.
+	Extensions []string `json:"extensions,omitempty" yaml:"extensions,omitempty"`
+	// PreloadLibraries are ADDED to shared_preload_libraries, never a
+	// replacement for it: pg_stat_statements has to stay, or the insights read
+	// a permanently empty table. They lead the list, because citus refuses to
+	// load from anywhere but the front and the statistics module does not care
+	// where it sits.
+	PreloadLibraries []string `json:"preload_libraries,omitempty" yaml:"preload_libraries,omitempty"`
+	SourceURLEnv     string   `json:"source_url_env,omitempty" yaml:"source_url_env,omitempty"`
+	URLEnv           string   `json:"url_env,omitempty" yaml:"url_env,omitempty"`
+	MaskingRules     string   `json:"masking_rules,omitempty" yaml:"masking_rules,omitempty"`
 	// Project identifies the account-side project for a hosted provider, such
 	// as a Neon project. It is not a secret and belongs in the manifest; the
 	// credential that reaches it does not, which is what APIKeyEnv is for.
