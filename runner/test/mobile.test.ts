@@ -170,6 +170,42 @@ const ANDROID_SOURCE = `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
 const androidSnapshot = () =>
   snapshotFrom(fromAndroid(ANDROID_SOURCE), { url: 'android://probe', title: 'probe' });
 
+// An unmet expectation on a phone is not an error unless the phone showed one.
+//
+// On 2026-09-21 an iOS workflow with a deliberately impossible expectation,
+// in front of a journal showing every entry it should, was explained as "The
+// page shows an error rather than what was expected." Both platforms reach a
+// verdict through finalJudgement, and these drive it from each platform's own
+// tree, so the text judged is exactly the text a device run would judge.
+
+const impossible = { name: 'w', description: 'd', expect: ['"An entry that was never written"'] };
+const STUCK_HERE = 'Nothing on this page moves the workflow forward.';
+
+for (const [platform, source, snap, replace] of [
+  ['iOS', IOS_SOURCE, (xml: string) => snapshotFrom(fromIOS(xml), { url: 'ios://probe', title: 'Probe' }),
+    (xml: string) => xml.replaceAll('Welcome back', 'Something went wrong')],
+  ['Android', ANDROID_SOURCE,
+    (xml: string) => snapshotFrom(fromAndroid(xml), { url: 'android://probe', title: 'probe' }),
+    (xml: string) => xml.replaceAll('Welcome back', 'Something went wrong')],
+] as const) {
+  test(`an ${platform} screen that is healthy and lacks the expectation is not reported as an error`, () => {
+    const result = finalJudgement(impossible, snap(source), STUCK_HERE, []);
+    assert.equal(result.cause, 'expectation-not-met', 'the verdict must not change');
+    assert.ok(result.detail.startsWith('"An entry that was never written" was not found.'), result.detail);
+    assert.ok(!/shows an error|showed a failure/i.test(result.detail),
+      `the detail claims an error on a healthy screen: ${result.detail}`);
+    assert.ok(/No error was showing\. Instead it showed: "[^"]*Welcome back/.test(result.detail),
+      `the detail does not say what the screen showed: ${result.detail}`);
+  });
+
+  test(`an ${platform} screen genuinely showing an error still says so`, () => {
+    const result = finalJudgement(impossible, snap(replace(source)), STUCK_HERE, []);
+    assert.equal(result.cause, 'expectation-not-met');
+    assert.ok(result.detail.includes(
+      'The page shows an error rather than what was expected. It says: "Something went wrong"'), result.detail);
+  });
+}
+
 test('an Android field takes its name from the content description and its value from the text', () => {
   // Collapsing the two is the trap: a content description is the LABEL and
   // the text is what is typed, so reading the name out of `text` would make an
@@ -453,39 +489,3 @@ test('a long mobile label is reachable, and is counted rather than vanishing whe
   assert.deepEqual(capped.controls, []);
   assert.equal(capped.unnamed, 1, 'an over long label vanished without being counted');
 });
-
-// An unmet expectation on a phone is not an error unless the phone showed one.
-//
-// On 2026-09-21 an iOS workflow with a deliberately impossible expectation,
-// in front of a journal showing every entry it should, was explained as "The
-// page shows an error rather than what was expected." Both platforms reach a
-// verdict through finalJudgement, and these drive it from each platform's own
-// tree, so the text judged is exactly the text a device run would judge.
-
-const impossible = { name: 'w', description: 'd', expect: ['"An entry that was never written"'] };
-const STUCK_HERE = 'Nothing on this page moves the workflow forward.';
-
-for (const [platform, source, snap, replace] of [
-  ['iOS', IOS_SOURCE, (xml: string) => snapshotFrom(fromIOS(xml), { url: 'ios://probe', title: 'Probe' }),
-    (xml: string) => xml.replaceAll('Welcome back', 'Something went wrong')],
-  ['Android', ANDROID_SOURCE,
-    (xml: string) => snapshotFrom(fromAndroid(xml), { url: 'android://probe', title: 'probe' }),
-    (xml: string) => xml.replaceAll('Welcome back', 'Something went wrong')],
-] as const) {
-  test(`an ${platform} screen that is healthy and lacks the expectation is not reported as an error`, () => {
-    const result = finalJudgement(impossible, snap(source), STUCK_HERE, []);
-    assert.equal(result.cause, 'expectation-not-met', 'the verdict must not change');
-    assert.ok(result.detail.startsWith('"An entry that was never written" was not found.'), result.detail);
-    assert.ok(!/shows an error|showed a failure/i.test(result.detail),
-      `the detail claims an error on a healthy screen: ${result.detail}`);
-    assert.ok(/No error was showing\. Instead it showed: "[^"]*Welcome back/.test(result.detail),
-      `the detail does not say what the screen showed: ${result.detail}`);
-  });
-
-  test(`an ${platform} screen genuinely showing an error still says so`, () => {
-    const result = finalJudgement(impossible, snap(replace(source)), STUCK_HERE, []);
-    assert.equal(result.cause, 'expectation-not-met');
-    assert.ok(result.detail.includes(
-      'The page shows an error rather than what was expected. It says: "Something went wrong"'), result.detail);
-  });
-}
