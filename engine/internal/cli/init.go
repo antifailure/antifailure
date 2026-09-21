@@ -172,6 +172,58 @@ func initDatastores(proposed []detect.ProposedDatastore) []InitDatastore {
 // about what was not, so the gap only surfaces as a refusal nobody can read,
 // in an environment, at the moment the call is made. This is the one place it
 // can be read before then.
+// renderInfrastructure says what was found about the infrastructure as code,
+// and what was deliberately left blank.
+//
+// Its own section rather than a row under Assumed, because the paths are not
+// assumed: they were read out of the tree, and the sentence under Assumed says
+// the opposite. What IS worth saying is the half that was left out on purpose.
+// Which workspace holds production, and which variable file describes it, is
+// stated nowhere in a repository, and this is the one section of the manifest
+// that describes production rather than the copy, so a guess there could not be
+// checked by anything downstream. The reader is told the keys exist and that
+// they are theirs to fill, which is the difference between a blank somebody
+// chose and a blank nobody noticed.
+//
+// It also carries the analyzer's own notes, which are the two cases where a
+// repository has Terraform and no section is drafted from it. Without this
+// they were findings nothing read, which is the shape of a feature that looks
+// finished and does nothing.
+func renderInfrastructure(env *Env, res *detect.Result) {
+	notes := infraNotes(res.Findings)
+	in := res.Draft.Infrastructure
+	if in == nil && len(notes) == 0 {
+		return
+	}
+	env.Out.Section("Infrastructure as code")
+	if in != nil {
+		rows := make([][]string, 0, len(in.Paths))
+		for _, p := range in.Paths {
+			rows = append(rows, []string{p, string(in.Source)})
+		}
+		env.Out.Table([]Column{Flex("ROOT MODULE"), Col("DECLARED BY")}, rows)
+		env.Out.Note(StyleDim,
+			"Nothing here changes what the environment builds. It is what af fidelity compares "+
+				"the copy against. infrastructure.workspace and infrastructure.var_files are "+
+				"empty because nothing in this repository says which workspace or which variable "+
+				"file describes production; fill them in if production is read through either.")
+	}
+	for _, n := range notes {
+		env.Out.Note(StyleWarn, n)
+	}
+}
+
+// infraNotes returns what the infrastructure analyzer could not draft.
+func infraNotes(findings []detect.Finding) []string {
+	var out []string
+	for _, f := range detect.OfKind(findings, detect.KindNote) {
+		if f.Subject == "infrastructure" {
+			out = append(out, f.Detail)
+		}
+	}
+	return out
+}
+
 func cloudGaps(findings []detect.Finding) []string {
 	var out []string
 	for _, f := range detect.OfKind(findings, detect.KindNote) {
@@ -731,6 +783,8 @@ func renderInitSummary(env *Env, res *detect.Result, assumed map[string]string, 
 			env.Out.Note(StyleWarn, gap)
 		}
 	}
+
+	renderInfrastructure(env, res)
 
 	if len(assumed) > 0 {
 		env.Out.Section("Assumed")
