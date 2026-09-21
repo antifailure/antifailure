@@ -508,11 +508,18 @@ func TestExplain_WrapsTheInfrastructureSectionIntoANarrowTerminal(t *testing.T) 
 	// guaranteed, and what this holds, is that everything breakable breaks: a
 	// line may exceed the width only when one unbreakable token in it already
 	// would.
-	root := repoWith(t, "infra/terraform/main.tf", "infra/terraform/prod.tfvars")
+	// TWO variable files, and short ones. With a single long path the var
+	// files line is one unbreakable token, so the rule below excuses it and
+	// its wrapping is never exercised at all: the cell aimed at that line came
+	// back SURVIVED against a fixture that could not reach it. Two short paths
+	// joined by a comma is breakable content, which is the only kind a wrap
+	// can be measured on.
+	root := repoWith(t, "infra/terraform/main.tf",
+		"infra/terraform/a.tfvars", "infra/terraform/b.tfvars")
 	m, err := parseIn(t, root, infraBase+`  stacks:
     - source: terraform
       path: infra/terraform
-      var_files: [infra/terraform/prod.tfvars]
+      var_files: [infra/terraform/a.tfvars, infra/terraform/b.tfvars]
 `)
 	require.NoError(t, err)
 
