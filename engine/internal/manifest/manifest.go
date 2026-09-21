@@ -572,6 +572,9 @@ var knownKeys = []string{
 	// The desktop application a workflow with surface: desktop is driven in.
 	// kind and args are already above.
 	"desktop", "application", "process",
+	// The mobile application a workflow with surface: ios is driven in. id is
+	// already above.
+	"mobile", "app", "device",
 	"oracle", "baseline", "base_ref", "fail_on", "probes", "method", "body",
 	"compare_timestamps", "compare_uuids", "ignore", "headers", "fields",
 	"tables", "exclude",
