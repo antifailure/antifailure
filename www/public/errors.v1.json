@@ -1763,6 +1763,28 @@
       "planned": false
     },
     {
+      "code": "AF-RUN-050",
+      "area": "RUN",
+      "areaName": "Runtime",
+      "message": "The manifest declares no service called {service}, so there is no output by that name to show. The services it declares are {declared}.",
+      "resolution": "Name one of those, or run 'af logs' with no name to read every service.",
+      "docs": "https://antifailure.dev/docs/reference/manifest",
+      "retryable": false,
+      "exitCode": 2,
+      "planned": false
+    },
+    {
+      "code": "AF-RUN-051",
+      "area": "RUN",
+      "areaName": "Runtime",
+      "message": "{service} is {what}, not a service, so it writes no output that 'af logs' can show.",
+      "resolution": "What the services saw of it, a refused connection or a failed migration, is in their own output. Run 'af logs' with no name to read every service: {declared}.",
+      "docs": "https://antifailure.dev/docs/reference/manifest",
+      "retryable": false,
+      "exitCode": 2,
+      "planned": false
+    },
+    {
       "code": "AF-SCH-001",
       "area": "SCH",
       "areaName": "Scheduling",

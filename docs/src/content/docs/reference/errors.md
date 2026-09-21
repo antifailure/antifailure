@@ -1988,6 +1988,30 @@ The {emulator} emulator started but never accepted a connection at {address} wit
 | Retryable | Yes. The engine retries automatically where it can. |
 | More | [guides/local-runtime](/docs/guides/local-runtime) |
 
+### AF-RUN-050
+
+The manifest declares no service called {service}, so there is no output by that name to show. The services it declares are {declared}.
+
+**What to do.** Name one of those, or run 'af logs' with no name to read every service.
+
+| | |
+| --- | --- |
+| Exit code | `2` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [reference/manifest](/docs/reference/manifest) |
+
+### AF-RUN-051
+
+{service} is {what}, not a service, so it writes no output that 'af logs' can show.
+
+**What to do.** What the services saw of it, a refused connection or a failed migration, is in their own output. Run 'af logs' with no name to read every service: {declared}.
+
+| | |
+| --- | --- |
+| Exit code | `2` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [reference/manifest](/docs/reference/manifest) |
+
 ## Scheduling
 
 ### AF-SCH-001

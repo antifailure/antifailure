@@ -3221,7 +3221,17 @@ func (o *Orchestrator) DeliverWebhook(
 }
 
 // Logs returns recent output from the environment's services.
+//
+// A name is checked against the manifest before the runtime is asked. The
+// runtime filters by a label and answers an unknown name with zero lines and no
+// error, which is the same answer as a service that has written nothing, so
+// `af logs database` in a project whose database is its database block, with
+// the environment up and serving, printed "Nothing has been written yet" and
+// told the reader to bring up an environment that was already up.
 func (o *Orchestrator) Logs(ctx context.Context, service string, tail int) ([]provider.LogLine, error) {
+	if err := o.unreadableService(service); err != nil {
+		return nil, err
+	}
 	rt, err := o.newRuntime(ctx)
 	if err != nil {
 		return nil, err
@@ -3234,6 +3244,51 @@ func (o *Orchestrator) Logs(ctx context.Context, service string, tail int) ([]pr
 			"the %s runtime cannot read logs", rt.Name()))
 	}
 	return reader.Logs(ctx, o.envID, service, tail)
+}
+
+// databaseNames are what somebody types when they mean the manifest's
+// database block. None of them is a service unless the manifest declares one
+// by that name, and a declared service always wins.
+var databaseNames = map[string]bool{
+	"database": true, "db": true, "postgres": true, "postgresql": true, "primary": true,
+}
+
+// unreadableService refuses a name Logs has nothing to read for.
+//
+// Empty reads every service, and the egress sidecar is allowed by its alias
+// because the local runtime returns its log when, and only when, it is asked
+// for by name. Anything else has to be a service the manifest declares. The
+// database and the datastores are refused with their own sentence, because
+// they are declared, just not as services, and "no such service" would send
+// somebody looking for a typo that is not there.
+func (o *Orchestrator) unreadableService(service string) error {
+	if service == "" || service == local.ProxyAlias {
+		return nil
+	}
+	m := o.opts.Manifest
+	if m == nil {
+		return nil
+	}
+	declared := make([]string, 0, len(m.Services))
+	for _, s := range m.Services {
+		if s.Name == service {
+			return nil
+		}
+		declared = append(declared, s.Name)
+	}
+	names := listNames(declared)
+	for _, d := range m.Datastores {
+		if d.Name == service {
+			return aferrors.Coded(aferrors.AFRUN051, "service", service,
+				"what", fmt.Sprintf("a %s datastore the manifest declares", d.Engine),
+				"declared", names)
+		}
+	}
+	if m.Database != nil && databaseNames[strings.ToLower(service)] {
+		return aferrors.Coded(aferrors.AFRUN051, "service", service,
+			"what", "the manifest's database block", "declared", names)
+	}
+	return aferrors.Coded(aferrors.AFRUN050, "service", service, "declared", names)
 }
 
 // sidecarObserver is a runtime whose egress sidecar can be questioned.
