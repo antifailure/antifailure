@@ -639,6 +639,25 @@ type runnerJob struct {
 	LiveSocket string
 }
 
+// documentFor is the job document a runnerJob becomes, and the one place that
+// mapping is written. It was a literal inside driveRunner, which meant the only
+// way to learn whether a field made it onto the wire was to run the runner, and
+// so no test ever asked: a field added to runnerJob and forgotten here reaches
+// the runner as nothing, silently, which is the phone surface's defect again.
+func documentFor(job runnerJob, self string) jobDocument {
+	return jobDocument{
+		BaseURL: job.BaseURL, Artifacts: job.Artifacts,
+		Workflows: job.Workflows, Personas: job.Personas,
+		Terminal: job.Terminal, Surface: job.Surface,
+		Desktop:   job.Desktop,
+		Mobile:    job.Mobile,
+		Diversity: job.Diversity,
+		AF:        self, WorkDir: job.WorkDir,
+		Attempts: job.Attempts, Headless: job.Headless,
+		Live: job.LiveSocket,
+	}
+}
+
 // driveRunner writes the job document, runs the runner, and reads its verdict.
 //
 // A non zero exit with a readable report is a test failure, which the caller
@@ -659,17 +678,7 @@ func (o *Orchestrator) driveRunner(ctx context.Context, job runnerJob) (*TestRep
 	// is still one place that decides how the runner is started and what a
 	// runner that writes nothing means. This landed as a second copy of that
 	// code, which is the drift its comment was written to prevent.
-	stdout, err := o.invokeRunner(ctx, job.Runner, jobDocument{
-		BaseURL: job.BaseURL, Artifacts: job.Artifacts,
-		Workflows: job.Workflows, Personas: job.Personas,
-		Terminal: job.Terminal, Surface: job.Surface,
-		Desktop:   job.Desktop,
-		Mobile:    job.Mobile,
-		Diversity: job.Diversity,
-		AF:        self, WorkDir: job.WorkDir,
-		Attempts: job.Attempts, Headless: job.Headless,
-		Live: job.LiveSocket,
-	})
+	stdout, err := o.invokeRunner(ctx, job.Runner, documentFor(job, self))
 	if err != nil {
 		return nil, err
 	}

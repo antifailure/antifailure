@@ -2,6 +2,7 @@ package env
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -94,4 +95,30 @@ func TestMobileApp_ARunWithNoPhoneWorkflowSendsNoApplication(t *testing.T) {
 
 	none := orchestratorFor(t, t.TempDir(), mobileManifest(nil, aPhoneWorkflow("read")))
 	require.Nil(t, none.mobileApp(none.workflowDocs(nil)))
+}
+
+// THE WIRE, which is the hop that was missing. The application reaches the
+// bytes the runner actually reads, through the one mapping from runnerJob and
+// the one serialiser, and not only a Go value built beside them. The runner's
+// MobileDoc reads `mobile.id` and refuses a phone run without it, so a field
+// that stopped short of these bytes is every iOS run refused again.
+func TestMobileApp_TheApplicationIsOnTheWireTheRunnerReads(t *testing.T) {
+	o := orchestratorFor(t, t.TempDir(), mobileManifest(&schema.MobileApplication{ID: "com.example.ledger"},
+		aPhoneWorkflow("read")))
+	job := runnerJob{Surface: "ios", Workflows: o.workflowDocs(nil), Mobile: o.mobileApp(o.workflowDocs(nil))}
+	body, err := o.runnerDocument(documentFor(job, ""))
+	require.NoError(t, err)
+	require.Contains(t, string(body), `"mobile":{"id":"com.example.ledger"}`,
+		"the phone application never reached the document the runner reads")
+	require.Contains(t, string(body), `"surface":"ios"`)
+}
+
+// And the line in Test that fills it, asserted on the source for the reason
+// desktop's is: Test needs a running environment to reach, and the one run
+// that proves it end to end is `af test` against a real simulator.
+func TestTest_APhoneRunIsBuiltWithItsApplication(t *testing.T) {
+	body, err := os.ReadFile("test.go")
+	require.NoError(t, err)
+	require.Contains(t, string(body), "Mobile:    o.mobileApp(workflows),",
+		"Orchestrator.Test no longer fills the phone application, so a phone run reaches the runner with no application")
 }
