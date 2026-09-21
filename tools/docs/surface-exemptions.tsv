@@ -47,6 +47,14 @@ DependencyFiles	cli-only	Reads the dependency manifests af ci's security pass sc
 # would close it, instead of being silent the way the SQL workload was.
 LoadCompare	cli-only	Brings a SECOND environment up from the base revision, pinned to the candidate's golden, sends the same mix at both under one seed and reports what moved. It arrives on this surface as a profile on run_load_test or a tool of its own, and until then an agent can send traffic at the candidate and cannot difference it against the base branch.
 
+# The second one this gate found on a capability that landed the same day, and
+# the same shape as LoadCompare above. Fault injection and the crash recovery
+# proof arrived in #517 while this gate arrived in #533, so neither pull
+# request could see the other and both were honestly green on their own head.
+# The gap is real rather than an accident of that timing, and the row states it
+# until the tool exists.
+RunChaos	cli-only	Injects the faults the manifest's chaos block declares against the environment's own containers, undoes every one of them, and around a fault aimed at the database proves that every acknowledged commit survived, that no commit appeared that no client ever wrote, and that recovery really replayed the write ahead log. It arrives on this surface as a tool that runs the pass and returns its findings, the way run_load_test does for load, and until then an agent can rehearse a change against a system that works and has no way to ask what that system does when it stops working.
+
 # The three that WRITE A FILE into the checkout. No tool on the MCP server
 # writes one, and that is checked rather than assumed: engine/internal/mcp calls
 # neither os.WriteFile nor os.Create anywhere. A tool that wrote into the
