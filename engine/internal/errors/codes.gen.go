@@ -283,6 +283,18 @@ const (
 	AFLOD015 Code = "AF-LOD-015"
 	// The p95_increase threshold proved nothing: {detail}
 	AFLOD016 Code = "AF-LOD-016"
+	// The SQL workload could not be run: {detail}
+	AFLOD017 Code = "AF-LOD-017"
+	// The SQL workload's clients could not all connect: {detail}
+	AFLOD018 Code = "AF-LOD-018"
+	// The statement statistics could not be read: {detail}
+	AFLOD019 Code = "AF-LOD-019"
+	// No statement could be taken from the statistics: {detail}
+	AFLOD020 Code = "AF-LOD-020"
+	// The SQL workload proved nothing: {detail}
+	AFLOD021 Code = "AF-LOD-021"
+	// {count} SQL workload thresholds were breached.
+	AFLOD022 Code = "AF-LOD-022"
 
 	// Manifest
 	// No antifailure.yaml was found in {path} or any parent directory.
@@ -1436,6 +1448,60 @@ var catalog = map[Code]Entry{
 		Docs:      "concepts/load",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
+	},
+	AFLOD017: {
+		Code:      AFLOD017,
+		Area:      "LOD",
+		Message:   "The SQL workload could not be run: {detail}",
+		NextStep:  "Bring the environment up with 'af up', then check the load.sql section of the manifest and the workload document it names.",
+		Docs:      "concepts/sql-workloads",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFLOD018: {
+		Code:      AFLOD018,
+		Area:      "LOD",
+		Message:   "The SQL workload's clients could not all connect: {detail}",
+		NextStep:  "Lower load.sql.clients, or raise max_connections on the database. A run at a concurrency nobody chose measures nothing, so this refuses rather than running with fewer.",
+		Docs:      "concepts/sql-workloads",
+		Retryable: true,
+		ExitCode:  ExitProvider,
+	},
+	AFLOD019: {
+		Code:      AFLOD019,
+		Area:      "LOD",
+		Message:   "The statement statistics could not be read: {detail}",
+		NextStep:  "A derived mix needs pg_stat_statements. Start the database with -c shared_preload_libraries=pg_stat_statements, or declare the workload with load.sql.source set to declared.",
+		Docs:      "concepts/sql-workloads",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFLOD020: {
+		Code:      AFLOD020,
+		Area:      "LOD",
+		Message:   "No statement could be taken from the statistics: {detail}",
+		NextStep:  "Send traffic at the environment first so the branch records what it ran, allow writes with load.sql.writes, or declare the workload instead.",
+		Docs:      "concepts/sql-workloads",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFLOD021: {
+		Code:      AFLOD021,
+		Area:      "LOD",
+		Message:   "The SQL workload proved nothing: {detail}",
+		NextStep:  "A run that committed no transaction has measured neither throughput nor latency. The errors above say why each attempt failed.",
+		Docs:      "concepts/sql-workloads",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFLOD022: {
+		Code:      AFLOD022,
+		Area:      "LOD",
+		Message:   "{count} SQL workload thresholds were breached.",
+		NextStep:  "Each one is listed above with what it measured. Fix the regression, or change what the manifest asks for.",
+		Docs:      "concepts/sql-workloads",
+		Retryable: false,
+		ExitCode:  ExitTestFailure,
 	},
 	AFMAN001: {
 		Code:      AFMAN001,

@@ -22,20 +22,22 @@
 // running the same selection at scale 1 and at scale 4 is two versions, and
 // comparing their runs is the thing Studio is for.
 //
-// The four kinds stay four kinds here as well as in the schema. There is no
+// The kinds stay separate kinds here as well as in the schema. There is no
 // shared body type, no shared field set and no compiler between them, because
 // they measure materially different things: a mix has no order, a journey has
-// no browser, a workflow has no request rate, and an exploration has no pass.
+// no browser, a workflow has no request rate, an exploration has no pass, and a
+// SQL workload never touches the application at all.
 
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
 
-/** The four kinds, in the order the enum declares them. */
+/** Every kind, in the order the enum declares them. */
 export const WORKLOAD_KINDS = [
   'observed_load',
   'http_scenario',
   'browser_workflow',
   'exploration',
+  'sql_workload',
 ] as const
 
 export type WorkloadKind = (typeof WORKLOAD_KINDS)[number]
@@ -119,23 +121,57 @@ const exploration = z
   })
   .strict()
 
+/**
+ * `af load sql --only <transactions> --duration <d> --seed <n> --concurrency <n>`.
+ *
+ * `concurrency` is how many CLIENTS run at once, each on its own connection,
+ * rather than a ceiling on requests in flight. It is spelled concurrency
+ * anyway, and the reason is the rule this whole file follows: a knob may exist
+ * here only if the plain command has a flag for it, and the engine looks that
+ * flag up by the knob's own name. A third spelling would have meant a hosted
+ * SQL workload could never say how many clients to run.
+ *
+ * There is no scale. A mix multiplies production's arrival rate, and a SQL
+ * workload has no arrival rate to multiply: how much work it does is its client
+ * count and its length.
+ */
+const sqlWorkload = z
+  .object({
+    /** Transaction names from the workload document or from the derived mix.
+     *  Empty means every transaction, which is what `af load sql` with no
+     *  --only does. Unlike a scenario or a goal, the transactions of one mix
+     *  are weighted against each other inside one run rather than being
+     *  separate runs, so running all of them is the ordinary request. */
+    select: selection,
+    /** Seconds, sent as a Go duration. */
+    durationSeconds: z.number().int().min(1).max(900).optional(),
+    /** Makes two runs execute the same sequence. The command's default is 1. */
+    seed: z.number().int().min(0).max(2_147_483_647).optional(),
+    /** Clients, each on its own connection. Bounded at the schema's own cap. */
+    concurrency: z.number().int().min(1).max(1000).optional(),
+  })
+  .strict()
+
 const WORKLOAD_BODY_SCHEMAS = {
   observed_load: observedLoad,
   http_scenario: httpScenario,
   browser_workflow: browserWorkflow,
   exploration,
+  sql_workload: sqlWorkload,
 } as const
 
 type ObservedLoadBody = z.infer<typeof observedLoad>
 type HttpScenarioBody = z.infer<typeof httpScenario>
 type BrowserWorkflowBody = z.infer<typeof browserWorkflow>
 type ExplorationBody = z.infer<typeof exploration>
+type SQLWorkloadBody = z.infer<typeof sqlWorkload>
 
 export type WorkloadBody =
   | ObservedLoadBody
   | HttpScenarioBody
   | BrowserWorkflowBody
   | ExplorationBody
+  | SQLWorkloadBody
 
 interface ParsedBody {
   body: WorkloadBody
@@ -269,6 +305,24 @@ export function dispatchInputs(kind: WorkloadKind, body: WorkloadBody): Dispatch
           command: 'explore',
           workflows: b.select.join(','),
           seed: b.seed ?? '',
+        },
+      }
+    }
+    case 'sql_workload': {
+      const b = body as SQLWorkloadBody
+      return {
+        // The verb is new, so a repository still carrying an older workflow
+        // file has no `sql` option on its command input and GitHub refuses the
+        // dispatch. Every input it sends is one the newer file already
+        // declares, so nothing beyond the verb has to change.
+        needsUpdatedWorkflow: true,
+        inputs: {
+          ...LEGACY_INPUTS,
+          command: 'sql',
+          workflows: b.select.join(','),
+          duration: b.durationSeconds === undefined ? '' : `${b.durationSeconds}s`,
+          seed: b.seed === undefined ? '' : String(b.seed),
+          concurrency: b.concurrency === undefined ? '' : String(b.concurrency),
         },
       }
     }

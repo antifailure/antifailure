@@ -155,7 +155,7 @@ func FromOTLP(data []byte) (TraceRead, error) {
 	for _, b := range buckets {
 		r := Route{Method: b.method, Path: b.path, Weight: float64(len(b.durations))}
 		if len(b.durations) >= minBaselineSamples {
-			r.P95Ms = percentiles(b.durations).P95Ms
+			r.P95Ms = Percentiles(b.durations).P95Ms
 		}
 		read.Requests[r.String()] = len(b.durations)
 		read.Shape.Routes = append(read.Shape.Routes, r)

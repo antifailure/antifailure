@@ -8444,7 +8444,8 @@
                       "observed_load",
                       "http_scenario",
                       "browser_workflow",
-                      "exploration"
+                      "exploration",
+                      "sql_workload"
                     ]
                   },
                   "description": {
@@ -8731,7 +8732,8 @@
                         "observed_load",
                         "http_scenario",
                         "browser_workflow",
-                        "exploration"
+                        "exploration",
+                        "sql_workload"
                       ]
                     },
                     "includeArchived": {

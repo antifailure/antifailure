@@ -37,14 +37,35 @@ import {
   retryRun,
   verdictContradiction,
   whatDecidedIt,
+  type Kind,
   type RunDetail,
 } from "@/lib/load";
 
 
-/** Whether this kind of run measures traffic, which decides whether a latency
- *  ladder and an error breakdown are tables that apply or tables of dashes. */
-function sendsTraffic(kind: string | null): boolean {
-  return kind === "observed_load" || kind === "http_scenario";
+/**
+ * Whether this kind of run measures a latency and a set of failure reasons,
+ * which decides whether the ladder and the error breakdown are tables that
+ * apply or tables of dashes.
+ *
+ * Typed as Kind rather than as string, and that is the whole fix. It took a
+ * string, so nothing made it grow when the enum did: a SQL workload, which
+ * measures a transaction latency and counts deadlocks by reason, fell through
+ * to false and had both of its tables hidden with no error anywhere. A union
+ * makes a new kind a decision somebody has to write down.
+ */
+function measuresLatency(kind: Kind | null): boolean {
+  switch (kind) {
+    case "observed_load":
+    case "http_scenario":
+    // A transaction rather than a request, and the ladder is the same ladder.
+    // The percentiles live in the same columns for the same reason.
+    case "sql_workload":
+      return true;
+    case "browser_workflow":
+    case "exploration":
+    case null:
+      return false;
+  }
 }
 
 /**
@@ -257,7 +278,8 @@ export function RunView({
   const result = detail.result;
   const contradiction = verdictContradiction(run.verdict, detail.thresholds);
   const decided = whatDecidedIt(run.verdict, detail.thresholds);
-  const traffic = sendsTraffic(run.kind);
+  const traffic = measuresLatency(run.kind);
+  const sql = run.kind === "sql_workload";
   const stopRequested = run.cancelRequestedAt !== null || stopping;
 
   return (
@@ -499,7 +521,14 @@ export function RunView({
           </Card>
 
           {traffic ? (
-            <Card title="Latency" note="The whole run together. The tail is what a user notices.">
+            <Card
+              title="Latency"
+              note={
+                sql
+                  ? "A committed transaction, end to end, think time excluded. The tail is what a queue notices."
+                  : "The whole run together. The tail is what a user notices."
+              }
+            >
               {hasLatency(result.latency) ? (
                 <LatencyLadder latency={result.latency} />
               ) : (
@@ -514,7 +543,11 @@ export function RunView({
           {traffic ? (
             <Card
               title="Errors"
-              note="By reason. A thousand timeouts and a thousand refused connections are the same number and different problems."
+              note={
+                sql
+                  ? "By reason. A thousand deadlocks and a thousand constraint violations are the same number and completely different problems."
+                  : "By reason. A thousand timeouts and a thousand refused connections are the same number and different problems."
+              }
             >
               <ErrorReasons result={result} />
             </Card>
@@ -546,7 +579,14 @@ export function RunView({
           </Card>
 
           {traffic || detail.routes.length > 0 ? (
-            <Card title="Routes" note="Against production's own p95, worst regression first.">
+            <Card
+              title={sql ? "Statements" : "Routes"}
+              note={
+                sql
+                  ? "Every statement the mix ran, slowest first, against the mean the statistics recorded for it where there was one."
+                  : "Against production's own p95, worst regression first."
+              }
+            >
               <Routes routes={detail.routes} />
             </Card>
           ) : null}

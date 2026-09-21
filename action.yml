@@ -92,7 +92,7 @@ runs:
         command=$(pick command)
         command="${command:-${AF_COMMAND_INPUT:-ci}}"
         case "$command" in
-          ci|up|down|agents|load|scenario|explore) ;;
+          ci|up|down|agents|load|scenario|explore|sql) ;;
           *) echo "::error::unknown command $command"; exit 2 ;;
         esac
         {

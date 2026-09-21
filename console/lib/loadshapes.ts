@@ -92,34 +92,46 @@ function pick(o: Record<string, unknown>, snake: string, camel: string): unknown
 }
 
 /* -------------------------------------------------------------------------
- * The four kinds
+ * The kinds
  * ---------------------------------------------------------------------- */
 
 /**
  * What a workload is, and the command a run of it becomes.
  *
- * Four kinds, and deliberately no shared shape between them. They measure
- * materially different things: a mix has no order, a journey has no browser, a
- * workflow has no request rate, and an exploration has no pass. The schema
- * carries a CHECK refusing a result of one kind wearing another's columns, and
- * this file keeps the same separation rather than flattening it back out.
+ * Deliberately no shared shape between them. They measure materially
+ * different things: a mix has no order, a journey has no browser, a workflow
+ * has no request rate, an exploration has no pass, and a SQL workload never
+ * touches the application. The schema carries a CHECK refusing a result of one
+ * kind wearing another's columns, and this file keeps the same separation
+ * rather than flattening it back out.
  */
-export type Kind = "observed_load" | "http_scenario" | "browser_workflow" | "exploration";
+export type Kind =
+  | "observed_load"
+  | "http_scenario"
+  | "browser_workflow"
+  | "exploration"
+  | "sql_workload";
 
 export const KINDS: readonly Kind[] = [
   "observed_load",
   "http_scenario",
   "browser_workflow",
   "exploration",
+  "sql_workload",
 ];
 
+/**
+ * A kind this build knows, or null.
+ *
+ * Built from KINDS rather than written out as a chain of comparisons. The
+ * chain was one line per kind and nothing made it grow when the enum did, so a
+ * kind the control plane sends and this function has not heard of decodes to
+ * null and vanishes from the page with no error anywhere. Reading the list
+ * makes the two impossible to disagree, and the test beside this file reads
+ * the migration, so the list itself cannot drift from the database.
+ */
 export function kindOf(v: unknown): Kind | null {
-  return v === "observed_load" ||
-    v === "http_scenario" ||
-    v === "browser_workflow" ||
-    v === "exploration"
-    ? v
-    : null;
+  return typeof v === "string" && (KINDS as readonly string[]).includes(v) ? (v as Kind) : null;
 }
 
 /**
@@ -170,6 +182,15 @@ export const KIND_FACTS: Record<
     what: "An agent choosing its own way through the application from a goal and a seed, which is the other way a route nobody wrote down gets found.",
     reproducible: "At the same seed, the same wander.",
     measures: "Which goals were reached, and what the agent found on the way.",
+  },
+  sql_workload: {
+    noun: "SQL workload",
+    command: "af load sql",
+    what: "Clients on their own connections running whole transactions against the database directly. Everything else here goes through the application, so its number is the application's latency with the database somewhere inside it. This is the one that answers what a change to an index, a lock or a query did.",
+    reproducible:
+      "Exactly, as a sequence. The same mix at the same seed picks the same transactions in the same order on every client. What it does not reproduce is the values a derived mix binds: the statistics normalise them away, so it generates values of the types the server reported.",
+    measures:
+      "Transactions per second and transaction latency, the cost of each statement, deadlocks and retries, and how many of its own backends the server had inside a transaction at once.",
   },
 };
 
@@ -409,7 +430,17 @@ export type Body =
        *  Never empty when it is present. */
       dropped: string[];
     }
-  | { kind: "exploration"; select: string[]; seed: string | null };
+  | { kind: "exploration"; select: string[]; seed: string | null }
+  | {
+      kind: "sql_workload";
+      select: string[];
+      durationSeconds: number | null;
+      seed: number | null;
+      /** How many clients run at once, each on its own connection. Spelled
+       *  concurrency because that is the knob's name everywhere else in this
+       *  system, including the flag the engine looks up by it. */
+      concurrency: number | null;
+    };
 
 export function readBody(kind: Kind, v: unknown): Body | null {
   const o = obj(v);
@@ -433,6 +464,14 @@ export function readBody(kind: Kind, v: unknown): Body | null {
       };
     case "exploration":
       return { kind, select, seed: str(o.seed) };
+    case "sql_workload":
+      return {
+        kind,
+        select,
+        durationSeconds: num(pick(o, "duration_seconds", "durationSeconds")),
+        seed: num(o.seed),
+        concurrency: num(o.concurrency),
+      };
   }
 }
 
@@ -464,6 +503,13 @@ export function bodyToInput(body: Body): Record<string, unknown> {
       };
     case "exploration":
       return { select: body.select, ...some("seed", body.seed) };
+    case "sql_workload":
+      return {
+        select: body.select,
+        ...some("durationSeconds", body.durationSeconds),
+        ...some("seed", body.seed),
+        ...some("concurrency", body.concurrency),
+      };
   }
 }
 
@@ -568,6 +614,23 @@ export const KNOBS: Record<Kind, Knobs> = {
         knob: "Duration, scale and concurrency",
         because:
           "af explore declares none of them. It walks one goal at a time from a seed rather than sending traffic.",
+      },
+    ],
+  },
+  sql_workload: {
+    duration: true,
+    scale: false,
+    seed: "number",
+    concurrency: true,
+    select: "optional",
+    selects: "transaction",
+    emptyMeans:
+      "Empty means every transaction in the mix, which is what af load sql with no --only does. The transactions of one mix are weighted against each other inside one run rather than being separate runs, so running all of them is the ordinary request.",
+    refused: [
+      {
+        knob: "Scale",
+        because:
+          "af load sql has no --scale flag. Scale multiplies production's arrival rate, and a SQL workload has no arrival rate to multiply: how much work it does is its client count and its length.",
       },
     ],
   },
@@ -751,7 +814,35 @@ export const REASON_NOTES: Record<string, string> = {
   "malformed request":
     "The request could not be built. This is the scenario or the mix, not the application.",
   "request failed": "A transport error the runner could not classify further.",
+
+  // A SQL workload's reasons, which are the SERVER'S answers rather than the
+  // transport's. Without these the console told a reader it had no note for a
+  // deadlock, which is the one outcome a concurrent workload exists to produce.
+  deadlock:
+    "Two transactions each held a row the other wanted, and Postgres broke the tie. It is retried, and a run with many of them is telling you about lock ordering rather than about a bug.",
+  "serialization failure":
+    "A transaction lost a race under a stricter isolation level than read committed. It is retried, and it is the expected cost of that isolation rather than a fault.",
+  "unique violation":
+    "A row the workload inserted was already there. Under concurrency that is usually two clients writing the same key rather than a broken statement.",
+  "cancelled by the server":
+    "The server ended the statement: a statement timeout, an administrator, or a shutdown.",
+  "too many connections":
+    "The server would give no more backends. Lower the client count, or raise max_connections on the branch.",
+  "connection lost":
+    "The backend went away mid transaction. The client that held it stops, and the run says how many stopped.",
+  "query failed": "A statement error the runner could not classify further.",
 };
+
+/**
+ * What a reason's count counts, which is not the same word for every kind.
+ *
+ * An HTTP mix counts requests and a SQL workload counts transaction attempts.
+ * Labelling the second "Requests" is a small lie that a reader either believes
+ * or trips over, and neither is worth saving a branch here.
+ */
+export function attemptNoun(kind: Kind): string {
+  return kind === "sql_workload" ? "Attempts" : "Requests";
+}
 
 export function readErrorReasons(v: unknown): { reason: string; count: number }[] {
   const o = obj(v);
@@ -804,6 +895,31 @@ export interface RunResult {
   findings: number | null;
   goals: number | null;
   goalsReached: number | null;
+  /** A concurrent SQL workload. sql_workload. Three transaction counts rather
+   *  than two, because a transaction that deadlocked and committed on its
+   *  second attempt is a success whose run is contended, and a page that could
+   *  only say committed or failed would draw it as a clean run. */
+  clients: number | null;
+  transactions: number | null;
+  transactionsFailed: number | null;
+  retries: number | null;
+  deadlocks: number | null;
+  serializationFailures: number | null;
+  statementsRun: number | null;
+  statementsFailed: number | null;
+  /** How many rows the statements returned or changed. It is what says whether
+   *  a derived mix's generated parameters matched anything: a run that touched
+   *  nothing measured the cost of finding nothing, which is a real measurement
+   *  of an index and is not a measurement of the result sets. */
+  rowsTouched: number | null;
+  tps: number | null;
+  /** What the server said about the run while it ran, read from
+   *  pg_stat_activity by a separate connection. Null means nobody watched,
+   *  which is a different answer from zero: zero overlap is a finding and an
+   *  unmeasured run is not, and a page that drew a null as a zero would report
+   *  the second as the first. */
+  peakOpenTransactions: number | null;
+  backendsSeen: number | null;
 
   durationMs: number | null;
   /** Where the traffic mix came from, so a reader can tell production's shape
@@ -844,6 +960,18 @@ export function readResult(v: unknown): RunResult | null {
     findings: num(o.findings),
     goals: num(o.goals),
     goalsReached: num(pick(o, "goals_reached", "goalsReached")),
+    clients: num(o.clients),
+    transactions: num(o.transactions),
+    transactionsFailed: num(pick(o, "transactions_failed", "transactionsFailed")),
+    retries: num(o.retries),
+    deadlocks: num(o.deadlocks),
+    serializationFailures: num(pick(o, "serialization_failures", "serializationFailures")),
+    statementsRun: num(pick(o, "statements_run", "statementsRun")),
+    statementsFailed: num(pick(o, "statements_failed", "statementsFailed")),
+    rowsTouched: num(pick(o, "rows_touched", "rowsTouched")),
+    tps: num(o.tps),
+    peakOpenTransactions: num(pick(o, "peak_open_transactions", "peakOpenTransactions")),
+    backendsSeen: num(pick(o, "backends_seen", "backendsSeen")),
     durationMs: num(pick(o, "duration_ms", "durationMs")),
     source: str(o.source),
     errorReasons: readErrorReasons(pick(o, "error_reasons", "errorReasons")),
@@ -870,6 +998,33 @@ export function nothingWasChecked(r: RunResult): boolean {
   if (r.kind !== "browser_workflow") return false;
   const attempted = (r.workflowsPassed ?? 0) + (r.workflowsFailed ?? 0) + (r.workflowsFlaky ?? 0);
   return (r.workflows ?? 0) > 0 && attempted === 0;
+}
+
+/**
+ * A SQL workload that committed nothing.
+ *
+ * The same defect as nothingWasChecked, one kind along. Every threshold passes
+ * trivially over an empty measurement, so a database that refused every
+ * transaction reports no breaches, a throughput of zero and a latency of zero,
+ * and a page that drew those three would show the fastest run it has ever
+ * rendered.
+ */
+export function committedNothing(r: RunResult): boolean {
+  if (r.kind !== "sql_workload") return false;
+  return (r.transactions ?? 0) === 0;
+}
+
+/**
+ * A SQL workload whose clients never overlapped inside the server.
+ *
+ * Distinct from "nobody watched", which is what a null means. A run that
+ * really did hold one transaction at a time measured latency under no
+ * contention, whatever its client count said, and that is worth saying out
+ * loud on a page whose whole subject is concurrency.
+ */
+export function neverOverlapped(r: RunResult): boolean {
+  if (r.kind !== "sql_workload") return false;
+  return r.peakOpenTransactions !== null && r.peakOpenTransactions <= 1 && (r.clients ?? 0) > 1;
 }
 
 /**

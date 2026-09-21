@@ -14,9 +14,20 @@
 //	                  steps and a verdict and no request rate.
 //	exploration       a seeded wander with a goal, which produces findings
 //	                  rather than a pass.
+//	sql_workload      clients on their own connections running transactions
+//	                  against the database directly. It has a throughput and a
+//	                  statement latency, and it never touches the application.
+//
+// The fifth arrived long after the other four and it is the clearest case for
+// the rule rather than an exception to it. Everything above sends HTTP, so
+// every one of them measures the application with the database somewhere
+// inside the number. A person changing an index wants transactions per second
+// and the cost of one statement, and no amount of compiling a browser workflow
+// into a common representation would produce those. It is a fifth kind because
+// it measures a fifth thing.
 //
 // The marketing site implies a single scenario intermediate representation
-// that all four compile into. There is no such thing, and building one here to
+// that all of them compile into. There is no such thing, and building one here to
 // make a console's job easier would make the claim structural rather than
 // merely wrong. So Kind is an enum, each kind parses its own knobs, each kind
 // executes through the command that already exists for it, and each kind
@@ -71,16 +82,18 @@ const (
 	BrowserWorkflow Kind = "browser_workflow"
 	// Exploration is a seeded wander with a goal.
 	Exploration Kind = "exploration"
+	// SQLWorkload is clients running transactions against the database.
+	SQLWorkload Kind = "sql_workload"
 )
 
 // Kinds is every kind, in the order the control plane's enum declares them.
 //
 // Exported so the command that takes a kind lists them from here rather than
-// from a string beside the flag. A help text that names three of four kinds is
+// from a string beside the flag. A help text that names four of five kinds is
 // the kind of drift nothing catches, because nothing compares prose with a
 // switch statement.
 func Kinds() []Kind {
-	return []Kind{ObservedLoad, HTTPScenario, BrowserWorkflow, Exploration}
+	return []Kind{ObservedLoad, HTTPScenario, BrowserWorkflow, Exploration, SQLWorkload}
 }
 
 // KindNames is Kinds as a comma separated list, for a flag description or an
@@ -105,6 +118,10 @@ var legacyKinds = map[string]Kind{
 	"scenario": HTTPScenario,
 	"agents":   BrowserWorkflow,
 	"explore":  Exploration,
+	// sql has no older spelling to be compatible with: the verb and the kind
+	// arrived in the same commit. It is listed so that the dispatch verb and
+	// the kind name resolve through one table rather than two.
+	"sql": SQLWorkload,
 }
 
 // parseKind reads a kind, accepting the legacy dispatch verbs.
@@ -298,6 +315,30 @@ func Parse(req Request) (*Plan, error) {
 		if trimmed(req.Concurrency) != "" {
 			p.Refusals = append(p.Refusals, refuse("concurrency", kind,
 				"af test has no --concurrency flag"))
+		}
+	case SQLWorkload:
+		// An empty selection is legal and means every transaction the mix
+		// holds, which is what af load sql with no --only does. Unlike a
+		// scenario or a goal, a mix's transactions are not separate runs: they
+		// are weighted against each other inside one run, so running all of
+		// them is the normal thing to ask for rather than a different run from
+		// the one that was saved.
+		p.SeedNumber, err = parseSeedNumber(req.Seed)
+		if err != nil {
+			return nil, err
+		}
+		p.Concurrency, err = parseConcurrency(req.Concurrency)
+		if err != nil {
+			return nil, err
+		}
+		p.Duration, err = parseDuration(req.Duration)
+		if err != nil {
+			return nil, err
+		}
+		if trimmed(req.Scale) != "" {
+			p.Refusals = append(p.Refusals, refuse("scale", kind,
+				"af load sql has no --scale flag; there is no production arrival rate to "+
+					"multiply, and how much work a run does is its client count and its length"))
 		}
 	case Exploration:
 		if len(names) == 0 {

@@ -26,13 +26,14 @@
 
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import {
   AVAILABILITY_FACTS,
   COMMAND_FACTS,
   KIND_FACTS,
   KINDS,
+  KNOBS,
   STATE_FACTS,
   VERDICT_FACTS,
   bodyToInput,
@@ -102,18 +103,58 @@ const studioSql = readOrFail('web/packages/db/migrations/0026_load_definitions_a
 const storeTs = readOrFail('web/apps/api/src/workloads/store.ts')
 
 /**
- * The values a Postgres enum declares, read out of the migration.
+ * Every migration, in the order the runner applies them.
  *
- * Anchored on the type name and the closing parenthesis rather than on a line,
- * because a `CREATE TYPE` here spans two lines and a line oriented pattern
- * would find nothing and report an empty set. An empty set is exactly what a
- * broken instrument prints, so this refuses to return one.
+ * Read from the directory rather than named one at a time, because an enum's
+ * values are not all in the file that created it. See enumValues.
  */
-function enumValues(sql: string | null, name: string): string[] {
-  assert.ok(sql, 'enumValues was called with no migration, which the skip above should have stopped')
-  const match = new RegExp(`CREATE TYPE ${name} AS ENUM \\(([^)]*)\\)`, 's').exec(sql)
-  assert.ok(match, `no CREATE TYPE ${name} in the migration, so this test is reading the wrong file`)
-  const values = [...match[1]!.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]!)
+const migrations: { file: string; sql: string }[] = readdirSync(
+  `${root}web/packages/db/migrations`,
+)
+  .filter((f) => f.endsWith('.sql'))
+  .sort()
+  .map((file) => ({ file, sql: readOrFail(`web/packages/db/migrations/${file}`) }))
+
+/**
+ * The values a Postgres enum has, read out of the migrations.
+ *
+ * CREATED IN ONE FILE AND GROWN IN OTHERS, and reading only the first is how
+ * this instrument would have lied. It read migration 0026 alone, which is
+ * where workload_kind was created with four values. A fifth arrives by
+ * `ALTER TYPE workload_kind ADD VALUE` in a later migration, so a console that
+ * correctly knew five kinds would have been told it knew one too many, and the
+ * only way to make the test green again would have been to delete a kind the
+ * database really has. A check that can only be satisfied by being wrong is
+ * worse than no check.
+ *
+ * So the whole directory is read, in filename order, which is the order the
+ * runner applies them: the CREATE establishes the set and every ALTER adds to
+ * it. Anchored on the type name and the closing parenthesis rather than on a
+ * line, because a `CREATE TYPE` here spans two lines and a line oriented
+ * pattern would find nothing and report an empty set. An empty set is exactly
+ * what a broken instrument prints, so this refuses to return one.
+ */
+function enumValues(_sql: string | null, name: string): string[] {
+  const values: string[] = []
+  let created = false
+  for (const { sql } of migrations) {
+    const match = new RegExp(`CREATE TYPE ${name} AS ENUM \\(([^)]*)\\)`, 's').exec(sql)
+    if (match) {
+      assert.equal(created, false, `${name} is created twice in the migrations`)
+      created = true
+      values.push(...[...match[1]!.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]!))
+    }
+    // IF NOT EXISTS is optional in the pattern because a migration may or may
+    // not carry it, and the value is what matters either way.
+    const added = sql.matchAll(
+      new RegExp(`ALTER TYPE ${name} ADD VALUE (?:IF NOT EXISTS )?'([a-z_]+)'`, 'g'),
+    )
+    for (const m of added) {
+      assert.ok(created, `${name} gains a value before it is created, so the order here is wrong`)
+      if (!values.includes(m[1]!)) values.push(m[1]!)
+    }
+  }
+  assert.ok(created, `no CREATE TYPE ${name} in any migration, so this test is reading nothing`)
   assert.ok(values.length > 0, `CREATE TYPE ${name} parsed to no values, which is an instrument fault`)
   return values.sort()
 }
@@ -237,9 +278,18 @@ describe('the console knows exactly the values the database can send', () => {
     }
   })
 
-  test('the four kinds', () => {
+  test('the kinds, including the ones a later migration added', () => {
     assert.deepEqual([...KINDS].sort(), enumValues(studioSql, 'workload_kind'))
     assert.deepEqual(Object.keys(KIND_FACTS).sort(), enumValues(studioSql, 'workload_kind'))
+    // The instrument's own arms. The first proves it reads past the file that
+    // created the type, which is the defect it was rewritten for: sql_workload
+    // is added by an ALTER in a later migration and is in no CREATE TYPE
+    // anywhere. The second proves it still reads the CREATE, so a version that
+    // only scanned ALTERs would be caught here rather than by passing.
+    const kinds = enumValues(studioSql, 'workload_kind')
+    assert.ok(kinds.includes('sql_workload'), 'a value added by ALTER TYPE was not read')
+    assert.ok(kinds.includes('observed_load'), 'a value from the CREATE TYPE was not read')
+    assert.ok(KNOBS.sql_workload, 'a kind with no knobs cannot be edited in this console')
   })
 
   test('the three evidence availabilities', () => {

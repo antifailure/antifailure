@@ -690,6 +690,7 @@ const defaultTuning = `{
         "explore.goals[].name": "explore-goal",
         "invariants[].sql": "SELECT id FROM orders WHERE id IS NULL",
         "load.source": "otel",
+        "load.sql.source": "statement_statistics",
         "load.traffic.max_age": "336h",
         "load.unsafe_routes": [
           "/admin"
@@ -722,6 +723,7 @@ const defaultTuning = `{
         "services[].schedule",
         "services[].resources",
         "load.thresholds.query_count_increase",
+        "load.sql.script",
         "services[].env[].from",
         "services[].env[].sandbox",
         "services[].env[].scope"
@@ -748,6 +750,8 @@ const defaultTuning = `{
         "explore.goals[].name": "explore-goal",
         "invariants[].sql": "SELECT id FROM orders WHERE id IS NULL",
         "load.source": "otel",
+        "load.sql.source": "declared",
+        "load.sql.script": "db/workload.yaml",
         "load.traffic.max_age": "336h",
         "load.unsafe_routes": [
           "/admin"
@@ -781,6 +785,9 @@ const defaultTuning = `{
         "services[].depends_on",
         "services[].resources",
         "load.thresholds.query_count_increase",
+        "load.sql.writes",
+        "load.sql.max_statements",
+        "load.sql.thresholds.mean_increase",
         "services[].env[].value"
       ]
     },
@@ -798,6 +805,7 @@ const defaultTuning = `{
         "explore.goals[].name": "explore-goal",
         "invariants[].sql": "SELECT id FROM orders WHERE id IS NULL",
         "load.source": "otel",
+        "load.sql.source": "statement_statistics",
         "load.traffic.max_age": "336h",
         "load.unsafe_routes": [
           "/admin"
@@ -829,6 +837,7 @@ const defaultTuning = `{
         "services[].schedule",
         "services[].resources",
         "load.thresholds.query_count_increase",
+        "load.sql.script",
         "services[].env[].from",
         "services[].env[].sandbox",
         "services[].env[].scope"
@@ -857,6 +866,7 @@ const defaultTuning = `{
         "explore.goals[].name": "explore-goal",
         "invariants[].sql": "SELECT id FROM orders WHERE id IS NULL",
         "load.source": "otel",
+        "load.sql.source": "statement_statistics",
         "load.unsafe_routes": [
           "/admin"
         ],
@@ -889,6 +899,7 @@ const defaultTuning = `{
         "services[].schedule",
         "services[].resources",
         "load.thresholds.query_count_increase",
+        "load.sql.script",
         "services[].env[].from",
         "services[].env[].sandbox",
         "services[].env[].scope"
@@ -1373,7 +1384,20 @@ func TestSchemaConstraintReport(t *testing.T) {
 // makes the expectation the same string the workflow types, so the tuning
 // above overrides all three in every base; without them the base is refused by
 // this feature's own two cross field rules, which is the #315 failure exactly.
-const wantConstraints = 743
+//
+// Then 770. load.sql, the concurrent SQL workload: the block's own type and
+// additionalProperties, the type and enum on source, the type and maxLength on
+// script, the type and range on clients, transactions and max_statements, the
+// type and pattern on duration and think_time, the type on writes, and under
+// thresholds the type, additionalProperties and the ranges on mean_increase
+// and error_rate. Four of its keys belong to one source and are read by
+// nothing under the other, so no single document can carry all of them: the
+// tuning above sets source to statement_statistics in three bases and prunes
+// script there, and to declared in the fourth, where it prunes writes,
+// max_statements and thresholds.mean_increase instead. Without that split the
+// base manifest is refused by this feature's own three cross field rules,
+// which is the #315 failure exactly.
+const wantConstraints = 770
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and

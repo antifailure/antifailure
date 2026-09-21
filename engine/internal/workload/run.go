@@ -11,6 +11,7 @@ import (
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/explore"
 	"github.com/antifailure/antifailure/engine/internal/load"
+	"github.com/antifailure/antifailure/engine/internal/sqlload"
 )
 
 // Runner is the part of the orchestrator this package drives.
@@ -33,7 +34,9 @@ type Runner interface {
 	Scenarios(ctx context.Context, opts env.ScenarioOptions) ([]load.ScenarioResult, error)
 	Test(ctx context.Context, opts env.TestOptions) (*env.TestReport, error)
 	Explore(ctx context.Context, opts env.ExploreOptions) (*explore.Report, error)
+	SQLLoad(ctx context.Context, opts env.SQLLoadOptions) (*sqlload.Result, *env.SQLLoadPlan, error)
 	Thresholds() (p95Increase, errorRate float64)
+	SQLThresholds() (meanIncrease, errorRate float64)
 	Down(ctx context.Context) (*env.Teardown, error)
 }
 
@@ -157,6 +160,8 @@ func Execute(ctx context.Context, opts Options) (*Result, error) {
 		runWorkflows(work, opts, res)
 	case Exploration:
 		runExploration(work, opts, res)
+	case SQLWorkload:
+		runSQLWorkload(work, opts, res)
 	}
 
 	tearDown(ctx, opts, res)

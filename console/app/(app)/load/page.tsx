@@ -274,7 +274,7 @@ function RecentRuns({ onOpen }: { onOpen: (runId: string) => void }) {
  * screen rather than a button, and putting the whole form on the index would
  * give the largest control on the page to the rarest action. The sentence is
  * here rather than only there because somebody arriving at Load and seeing
- * "exploration" will assume it is a fourth kind of traffic unless told
+ * "exploration" will assume it is another kind of traffic unless told
  * otherwise in the first line they read.
  */
 function ExplorationCard({ onPromote }: { onPromote: () => void }) {

@@ -539,6 +539,10 @@ var knownKeys = []string{
 	"traffic",
 	"scenarios", "iterations", "start_after",
 	"p95_increase", "error_rate", "query_count_increase",
+	// The SQL workload block. sql, source, duration, thresholds and enabled
+	// are already above, so these are the keys that appear nowhere else.
+	"script", "clients", "transactions", "think_time", "writes",
+	"max_statements", "mean_increase",
 	"migration_lock", "warn_ms", "fail_ms", "migration_failed", "migration_rewrite",
 	"migration_lint", "plan_regression", "load_regression", "egress_surprise",
 	"workflows_unverified",

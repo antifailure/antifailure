@@ -136,6 +136,34 @@ describe('what a workload version is allowed to say', () => {
     assert.equal(explore.inputs.command, 'explore')
     assert.equal(explore.inputs.seed, 'abc')
     assert.equal(explore.needsUpdatedWorkflow, true)
+
+    const sql = dispatchInputs('sql_workload', {
+      select: ['read one order'], durationSeconds: 120, seed: 9, concurrency: 16,
+    })
+    assert.deepEqual(sql.inputs, {
+      // The verb the customer's workflow dispatches on. `load` here would run
+      // the HTTP mix and report it as this workload's result, which is the
+      // quietest way for a run to measure the wrong thing.
+      command: 'sql',
+      workflows: 'read one order',
+      duration: '120s',
+      scale: '',
+      seed: '9',
+      concurrency: '16',
+    })
+    // The `sql` option is new on the command input, so a repository still
+    // carrying an older workflow file has no such choice and GitHub refuses
+    // the dispatch. Every other input it sends is one the newer file already
+    // declares.
+    assert.equal(sql.needsUpdatedWorkflow, true)
+
+    // And a workload that set nothing sends every input empty rather than
+    // omitting it, because GitHub keeps an omitted input's declared default
+    // and `up` arriving on a SQL dispatch would run the wrong command.
+    const bare = dispatchInputs('sql_workload', { select: [] })
+    assert.deepEqual(bare.inputs, {
+      command: 'sql', workflows: '', duration: '', scale: '', seed: '', concurrency: '',
+    })
   })
 })
 

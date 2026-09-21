@@ -2,7 +2,7 @@
 title: Verdicts
 description: The six answers a run can give, which of them fail the check, and how to change that.
 sidebar:
-  order: 17
+  order: 18
 ---
 
 Every run ends in one word. Six are possible, and only one of them fails the

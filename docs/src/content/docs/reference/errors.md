@@ -1136,6 +1136,78 @@ The p95_increase threshold proved nothing: {detail}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/load](/docs/concepts/load) |
 
+### AF-LOD-017
+
+The SQL workload could not be run: {detail}
+
+**What to do.** Bring the environment up with 'af up', then check the load.sql section of the manifest and the workload document it names.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/sql-workloads](/docs/concepts/sql-workloads) |
+
+### AF-LOD-018
+
+The SQL workload's clients could not all connect: {detail}
+
+**What to do.** Lower load.sql.clients, or raise max_connections on the database. A run at a concurrency nobody chose measures nothing, so this refuses rather than running with fewer.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [concepts/sql-workloads](/docs/concepts/sql-workloads) |
+
+### AF-LOD-019
+
+The statement statistics could not be read: {detail}
+
+**What to do.** A derived mix needs pg_stat_statements. Start the database with -c shared_preload_libraries=pg_stat_statements, or declare the workload with load.sql.source set to declared.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/sql-workloads](/docs/concepts/sql-workloads) |
+
+### AF-LOD-020
+
+No statement could be taken from the statistics: {detail}
+
+**What to do.** Send traffic at the environment first so the branch records what it ran, allow writes with load.sql.writes, or declare the workload instead.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/sql-workloads](/docs/concepts/sql-workloads) |
+
+### AF-LOD-021
+
+The SQL workload proved nothing: {detail}
+
+**What to do.** A run that committed no transaction has measured neither throughput nor latency. The errors above say why each attempt failed.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/sql-workloads](/docs/concepts/sql-workloads) |
+
+### AF-LOD-022
+
+{count} SQL workload thresholds were breached.
+
+**What to do.** Each one is listed above with what it measured. Fix the regression, or change what the manifest asks for.
+
+| | |
+| --- | --- |
+| Exit code | `8` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/sql-workloads](/docs/concepts/sql-workloads) |
+
 ## Manifest
 
 ### AF-MAN-001

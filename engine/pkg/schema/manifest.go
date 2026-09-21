@@ -1202,6 +1202,66 @@ type Load struct {
 	// Traffic names the committed profile of what production serves, which is
 	// the denominator every route in a load run is measured against.
 	Traffic *Traffic `json:"traffic,omitempty" yaml:"traffic,omitempty"`
+	// SQL is a concurrent workload run against the database directly rather
+	// than through the application.
+	//
+	// Inside load rather than beside it, because it is the same question asked
+	// one layer down: what does this change do under concurrency. Everything
+	// above sends requests and measures the application, with the database
+	// somewhere inside the number. This sends statements and measures the
+	// database. A person changing an index wants the second and can only reach
+	// it through the first, which is why it is here.
+	SQL *LoadSQL `json:"sql,omitempty" yaml:"sql,omitempty"`
+}
+
+// SQLWorkloadSource is where a SQL workload's statements come from.
+type SQLWorkloadSource string
+
+// The two sources, spelled as the schema spells them.
+const (
+	// SQLDeclared reads a workload document in the repository.
+	SQLDeclared SQLWorkloadSource = "declared"
+	// SQLStatementStatistics reads pg_stat_statements on the branch, so the
+	// mix is the traffic that really ran, weighted by how often it ran.
+	SQLStatementStatistics SQLWorkloadSource = "statement_statistics"
+)
+
+// LoadSQL configures a concurrent SQL workload.
+// No Enabled field, and the absence is a decision rather than an oversight.
+// load.enabled exists because af ci reads it to decide whether to send the
+// mix. Nothing runs a SQL workload except af load sql and the hosted kind that
+// reproduces through it, so an enabled flag here would be a knob the schema
+// publishes, the reference renders, and no code reads: the exact shape
+// tools/fieldsweep exists to catch. Declaring the block is what turns it on.
+type LoadSQL struct {
+	Source SQLWorkloadSource `json:"source,omitempty" yaml:"source,omitempty"`
+	// Script is the workload document, relative to the repository root.
+	Script string `json:"script,omitempty" yaml:"script,omitempty"`
+	// Clients is how many run at once, each on its own connection.
+	Clients int `json:"clients,omitempty" yaml:"clients,omitempty"`
+	// Duration and Transactions are the two ways to say how much work. A
+	// duration is what a check usually wants and a transaction count is what a
+	// comparison between two builds wants, because the same count on both
+	// sides is the same amount of work whatever the machines did.
+	Duration     string `json:"duration,omitempty" yaml:"duration,omitempty"`
+	Transactions int    `json:"transactions,omitempty" yaml:"transactions,omitempty"`
+	// ThinkTime is how long a client waits between transactions.
+	ThinkTime string `json:"think_time,omitempty" yaml:"think_time,omitempty"`
+	// Writes allows a derived mix to include statements that change data.
+	Writes bool `json:"writes,omitempty" yaml:"writes,omitempty"`
+	// MaxStatements caps how many statements a derived mix holds.
+	MaxStatements int                `json:"max_statements,omitempty" yaml:"max_statements,omitempty"`
+	Thresholds    *LoadSQLThresholds `json:"thresholds,omitempty" yaml:"thresholds,omitempty"`
+}
+
+// LoadSQLThresholds are what fail a SQL workload.
+type LoadSQLThresholds struct {
+	// MeanIncrease is how much slower a transaction may get than the mean the
+	// statistics recorded for it. It needs a baseline, so it applies under
+	// statement_statistics only.
+	MeanIncrease float64 `json:"mean_increase,omitempty" yaml:"mean_increase,omitempty"`
+	// ErrorRate is the share of attempts that may fail.
+	ErrorRate float64 `json:"error_rate,omitempty" yaml:"error_rate,omitempty"`
 }
 
 // Traffic names the committed record of what production actually serves.

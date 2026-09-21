@@ -29,14 +29,16 @@ import {
  *
  * The glyphs are not interchangeable decoration. A stepped profile for traffic
  * that was measured, a snaking path for a journey somebody wrote, a browser
- * frame for a workflow driven in one, and a compass for an agent choosing its
- * own way.
+ * frame for a workflow driven in one, a compass for an agent choosing its own
+ * way, and a stack of platters for the one that never leaves the database.
  */
 const MARKS: Record<Kind, string> = {
   observed_load: "M2.6 11.6h2.4V8.2h2.4V4.6h2.4v7h3.4",
   http_scenario: "M2.8 12.2c2.4 0 2.4-4.2 5.2-4.2s2.8-4 5.2-4",
   browser_workflow: "M2.8 3.8h10.4v8.4H2.8zM2.8 6.4h10.4M4.6 5.1h.01",
   exploration: "M8 2.6a5.4 5.4 0 1 0 0 10.8A5.4 5.4 0 0 0 8 2.6zM10.2 5.8 8.9 8.9 5.8 10.2 7.1 7.1z",
+  sql_workload:
+    "M3.2 4.1c0-.9 2.15-1.6 4.8-1.6s4.8.7 4.8 1.6-2.15 1.6-4.8 1.6S3.2 5 3.2 4.1zM3.2 4.1v7.8c0 .9 2.15 1.6 4.8 1.6s4.8-.7 4.8-1.6V4.1M3.2 8c0 .9 2.15 1.6 4.8 1.6s4.8-.7 4.8-1.6",
 };
 
 export function KindMark({ kind, className = "" }: { kind: Kind; className?: string }) {

@@ -326,6 +326,7 @@ Traffic shaped like production, compared between the base branch and this one. R
 | `scenarios` | list of [Load scenario](#load-scenario) | no | Declared journeys run against the environment beside the mix. Each entry names a scenario document in the repository. Max items 50. |
 | `source` | `none`, `otel`, `access_log` | no | Where the endpoint mix comes from. An OpenTelemetry trace export or a combined format access log, both read from a file named in source_config.path. Defaults to `none`. |
 | `source_config` | object | no | Adapter specific settings. Both sources take a path: the OTLP/JSON trace export, or the access log. Credentials come from the secrets subsystem. Max properties 20. |
+| `sql` | [SQL workload](#sql-workload) | no | A concurrent workload run directly against the branch's database, rather than through the application. |
 | `thresholds` | object | no | Deltas that fail the run. Applied to the difference against the base branch, never to absolute numbers. |
 | `traffic` | [Traffic](#traffic) | no | The committed record of what production actually serves, which is the denominator every route in a load run is measured against. |
 | `unsafe_routes` | list of string | no | Routes that mutate state destructively. They are included only against a fresh branch that is reset afterwards. Max items 500. |
@@ -340,6 +341,22 @@ One journey document and how hard to run it.
 | `path` | string | **yes** | The scenario document, relative to the repository root. Max length 512. |
 | `sessions` | integer | no | How many sessions walk the journey at once. Defaults to `1`. Minimum 1, maximum 1000. |
 | `start_after` | string | no | Delay before this scenario starts, so one journey can burst while another is already running. Matches `^[0-9]+(ms\|s\|m)$`. |
+
+## SQL workload
+
+A concurrent workload run directly against the branch's database, rather than through the application. N clients, each on its own connection, executing whole transactions, so a change to an index, a lock or a query is measured in transactions per second and statement latency rather than through whatever the application does on the route you can reach. Declaring the block is what turns it on: 'af load sql' runs it and nothing else does, so there is no enabled flag for a command to ignore.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `clients` | integer | no | How many clients run at once, each on its own connection. The run refuses rather than running short handed if the server will not give it this many. Defaults to `8`. Minimum 1, maximum 1000. |
+| `duration` | string | no | How long to run. Capped at fifteen minutes. Defaults to `60s`. Matches `^[0-9]+(s\|m)$`. |
+| `max_statements` | integer | no | How many statements a derived mix may hold. The tail of pg_stat_statements is one call apiece and taking it makes a mix that costs more to set up than to run. Defaults to `20`. Minimum 1, maximum 200. |
+| `script` | string | no | The workload document, relative to the repository root. Required under source declared and refused under statement_statistics, where the server supplies the statements. Max length 512. |
+| `source` | `declared`, `statement_statistics` | no | Where the statement mix comes from. declared reads the document named by script. statement_statistics reads pg_stat_statements on the branch, so the mix is the traffic that really ran, weighted by how often it ran. Defaults to `declared`. |
+| `think_time` | string | no | How long a client waits between transactions. Zero measures the server at saturation; a real wait measures it at the concurrency an application actually holds. Defaults to `0ms`. Matches `^[0-9]+(ms\|s)$`. |
+| `thresholds` | object | no | What fails the run. Applied to this run's own measurements, never to an absolute throughput claim. |
+| `transactions` | integer | no | How many transactions each client runs, the way pgbench's -t does. Set it instead of a duration for a run whose size is the same on every machine. Minimum 1, maximum 1e+06. |
+| `writes` | boolean | no | Whether a derived mix may include statements that change data. Off by default, because pg_stat_statements normalises the values away and replaying a write would write values nobody chose. It does not apply to a declared workload, whose author wrote the values. Defaults to `false`. |
 
 ## Migrations
 

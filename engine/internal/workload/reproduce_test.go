@@ -46,6 +46,7 @@ func TestTheEmittedArgvNamesARealCommandWithRealFlags(t *testing.T) {
 		{"http scenario", workload.Request{Kind: "http_scenario", Select: "checkout"}, "af load scenario"},
 		{"browser workflow", workload.Request{Kind: "browser_workflow"}, "af test"},
 		{"exploration", workload.Request{Kind: "exploration", Select: "upgrade"}, "af explore"},
+		{"sql workload", workload.Request{Kind: "sql_workload"}, "af load sql"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -141,6 +142,42 @@ func TestTheEmittedArgvSetsExactlyThePlansKnobs(t *testing.T) {
 		only, err := cmd.Flags().GetStringArray("only")
 		require.NoError(t, err)
 		require.Equal(t, []string{"sign-in", "place an order"}, only)
+		require.Equal(t, plan.Select, only)
+	})
+
+	t.Run("sql workload carries duration, seed, the client count and every selected name", func(t *testing.T) {
+		plan, err := workload.Parse(workload.Request{
+			Kind: "sql_workload", Select: "read one order, a merchant page",
+			Duration: "90s", Seed: "13", Concurrency: "24",
+		})
+		require.NoError(t, err)
+		cmd, rest := find(t, plan.Argv())
+		require.NoError(t, cmd.ParseFlags(rest))
+
+		d, err := cmd.Flags().GetDuration("duration")
+		require.NoError(t, err)
+		require.Equal(t, 90*time.Second, d)
+		require.Equal(t, plan.Duration, d)
+
+		seed, err := cmd.Flags().GetInt64("seed")
+		require.NoError(t, err)
+		require.Equal(t, int64(13), seed)
+		require.Equal(t, plan.SeedNumber, seed)
+
+		// The knob the control plane calls concurrency is a CLIENT count here,
+		// and the flag has to be spelled concurrency anyway: the refusal rule
+		// looks the flag up by the knob's own name, so a third spelling would
+		// mean a hosted SQL workload could never set how many clients it runs.
+		conc, err := cmd.Flags().GetInt("concurrency")
+		require.NoError(t, err)
+		require.Equal(t, 24, conc)
+		require.Equal(t, plan.Concurrency, conc)
+
+		// A StringArray, like test and explore, so a transaction name carrying
+		// a space survives.
+		only, err := cmd.Flags().GetStringArray("only")
+		require.NoError(t, err)
+		require.Equal(t, []string{"read one order", "a merchant page"}, only)
 		require.Equal(t, plan.Select, only)
 	})
 

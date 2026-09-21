@@ -231,6 +231,13 @@ func measureDifferences(baseline, candidate *Result) []MeasureDifference {
 	wffA, wffB := ints(baseline.Measured.WorkflowsFailed, candidate.Measured.WorkflowsFailed)
 	goalA, goalB := ints(baseline.Measured.GoalsReached, candidate.Measured.GoalsReached)
 	findA, findB := ints(baseline.Measured.Findings, candidate.Measured.Findings)
+	txA, txB := ints(baseline.Measured.Transactions, candidate.Measured.Transactions)
+	txfA, txfB := ints(baseline.Measured.TransactionsFailed, candidate.Measured.TransactionsFailed)
+	retA, retB := ints(baseline.Measured.Retries, candidate.Measured.Retries)
+	dlA, dlB := ints(baseline.Measured.Deadlocks, candidate.Measured.Deadlocks)
+	serA, serB := ints(baseline.Measured.SerializationFailures, candidate.Measured.SerializationFailures)
+	stmtA, stmtB := ints(baseline.Measured.StatementsRun, candidate.Measured.StatementsRun)
+	rowA, rowB := ints(baseline.Measured.RowsTouched, candidate.Measured.RowsTouched)
 
 	pairs := []pair{
 		{"requests", reqA, reqB, false},
@@ -244,6 +251,25 @@ func measureDifferences(baseline, candidate *Result) []MeasureDifference {
 		{"workflows_failed", wffA, wffB, true},
 		{"goals_reached", goalA, goalB, false},
 		{"findings", findA, findB, true},
+		// A concurrent SQL workload. Higher throughput is better and every
+		// count of something going wrong is worse, which is the same reading
+		// the rows above take and the reason direction is a field rather than
+		// something a console decides per measure.
+		//
+		// rows_touched is deliberately absent from this list and it is the
+		// interesting omission. More rows is not better and fewer is not
+		// worse: it is the number that says whether a derived mix's generated
+		// parameters matched anything, and a change in it between two runs is
+		// a change in what was measured rather than a change in the database.
+		// Labelling it better or worse would invite somebody to read a mix
+		// that started finding rows as a regression.
+		{"tps", baseline.Measured.TPS, candidate.Measured.TPS, false},
+		{"transactions", txA, txB, false},
+		{"transactions_failed", txfA, txfB, true},
+		{"retries", retA, retB, true},
+		{"deadlocks", dlA, dlB, true},
+		{"serialization_failures", serA, serB, true},
+		{"statements_run", stmtA, stmtB, false},
 	}
 
 	out := make([]MeasureDifference, 0, len(pairs))
@@ -264,7 +290,35 @@ func measureDifferences(baseline, candidate *Result) []MeasureDifference {
 		}
 		out = append(out, d)
 	}
+	// rows_touched last, and with no direction, because it has none. More rows
+	// is not better and fewer is not worse: it is the number that says whether
+	// a derived mix's generated parameters matched anything, so a change in it
+	// is a change in what was measured rather than in the database. Calling it
+	// worse would invite somebody to read a mix that started finding rows as a
+	// regression. Unmeasurable is what this file already means by "there is no
+	// comparison to make here".
+	if d, ok := undirected("rows_touched", rowA, rowB); ok {
+		out = append(out, d)
+	}
 	return out
+}
+
+// undirected differences two numbers and refuses to say which way is better.
+func undirected(name string, a, b *float64) (MeasureDifference, bool) {
+	if a == nil && b == nil {
+		return MeasureDifference{}, false
+	}
+	d := MeasureDifference{Measure: name, Baseline: a, Candidate: b,
+		Direction: DirectionUnmeasurable}
+	if a != nil && b != nil {
+		delta := *b - *a
+		d.Delta = &delta
+		if *a != 0 {
+			ratio := *b/(*a) - 1
+			d.Ratio = &ratio
+		}
+	}
+	return d, true
 }
 
 // directionOf reads a delta in the product's terms rather than arithmetic's.
