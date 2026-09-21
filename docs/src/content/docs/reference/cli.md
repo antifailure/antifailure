@@ -1059,13 +1059,25 @@ when you want to know whether a route is slower than the fleet. This one
 measures this build against the last one, which is the right question when you
 want to know whether your change made it slower.
 
-What it cannot control is printed with every report rather than left implied.
-The two runs are sequential, because two environments sending traffic at once
-on one host would contend with each other and measure that instead. The seed
-makes the request sequence identical; it does not make the machine, the
-neighbours on the host or the time of day identical. A difference is a
-difference, and a threshold under load.comparison.thresholds is what turns one
-into a verdict.
+Each side is first sent a short warm-up that is thrown away, which takes the
+first request of every route out of the numbers. Then each side is sent the mix
+in rounds, interleaved so that neither side always goes first, with the same
+seed for both sides in each round.
+
+Each route is judged ROUND AGAINST ROUND. Every round is a small comparison of
+its own, and the change is measured from how those comparisons agreed, with an
+interval as wide as the host's own noise between rounds. The intervals hold at
+ninety percent for every route together. A limit inside a route's interval is
+neither a pass nor a fail, and the report prints the smallest change that route
+could have shown on this host, so on a noisy machine the answer is "too close
+to say" rather than a regression that is not there. More rounds or a longer
+duration narrows it.
+
+What it still cannot control is printed with every report rather than left
+implied. The rounds are sequential, because two environments sending traffic
+at once on one host would contend with each other and measure that instead.
+A difference is a difference, and a threshold under load.comparison.thresholds
+is what turns one into a verdict.
 
 The base environment is torn down unless --keep says otherwise. The
 environment for this build is left running whether or not this brought it up.
@@ -1087,8 +1099,10 @@ af load compare --seed 7 --keep
 | `--duration` | `0s` | How long to send for on each side, overriding the manifest. |
 | `--keep` | `false` | Leave the base environment up, for looking at a difference. |
 | `--report` | - | Write the comparison here as well as to the terminal. |
+| `--rounds` | `0` | Interleaved rounds per side, 16 when not set. 1 measures each side once, base first. |
 | `--scale` | `0` | Fraction of production's arrival rate to send at each side, overriding the manifest. |
 | `--seed` | `0` | Seed for the request sequence. The same seed is used on both sides. |
+| `--warmup` | `0s` | Mix sent at each side and discarded before measuring, 5s when not set. 0s sends none. |
 
 ### `af load run`
 

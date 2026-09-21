@@ -15,12 +15,14 @@ correlated spikes, and two environments, or two runs a minute apart, differ by
 far more than that. The comparison was being decided by the noise between runs,
 and nothing measured it.
 
-Now each side is sent a short warm-up that is thrown away, and then eight short
-rounds, interleaved so that neither side always goes first, with round k sent
-under the same seed at both. Each route's change is measured round against
+Now each side is sent a short warm-up that is thrown away, and then sixteen
+short rounds, interleaved so that neither side always goes first, with round k
+sent under the same seed at both. Each route's change is measured round against
 round, and the interval around it comes from how much the rounds disagreed, so
-it is as wide as the host's own noise. The verdict then places that interval
-against the limit exactly as before: entirely above is a failure, entirely at
+it is as wide as the host's own noise. The intervals hold at ninety percent for
+every route together rather than for each alone, because a check that fails
+when any route breaches is making one claim about all of them. The verdict then
+places each interval against the limit exactly as before: entirely above is a failure, entirely at
 or below is a pass, and a limit inside it is neither, with the smallest change
 this host could have resolved on that route printed beside it. On a noisy
 machine the honest answer is now "too close to say", where it used to be a

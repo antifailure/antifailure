@@ -104,15 +104,15 @@ func TestTheChangeIsTheRatioOfTheColumnsAndAgreementHasNoWidth(t *testing.T) {
 // The interval is the t interval on the per round log ratios, computed here
 // independently of the implementation for three rounds: log ratios 0, 0.3 and
 // 0.6 have mean 0.3 and sample deviation 0.3, and t at two degrees of freedom
-// is 2.920, so the half width is 2.920 * 0.3 / sqrt(3).
+// is 2.919986, so the half width is 2.919986 * 0.3 / sqrt(3).
 func TestTheIntervalIsTheTIntervalOnTheLogRatios(t *testing.T) {
 	c := pooledThatTheSingleRunBandFails(t)
 	workload.ResolveByRounds(c, roundsWith(0, 0.3, 0.6))
-	h := 2.920 * 0.3 / math.Sqrt(3)
+	h := 2.919986 * 0.3 / math.Sqrt(3)
 	res := c.Routes[0].Resolution
-	require.InDelta(t, math.Exp(0.3-h)-1, *res.ChangeLow, 1e-9)
-	require.InDelta(t, math.Exp(0.3+h)-1, *res.ChangeHigh, 1e-9)
-	require.InDelta(t, math.Exp(h)-1, *res.SmallestVisible, 1e-9)
+	require.InDelta(t, math.Exp(0.3-h)-1, *res.ChangeLow, 1e-6)
+	require.InDelta(t, math.Exp(0.3+h)-1, *res.ChangeHigh, 1e-6)
+	require.InDelta(t, math.Exp(h)-1, *res.SmallestVisible, 1e-6)
 }
 
 // A roundsRoute that fewer than two rounds sent on both sides keeps its pooled
@@ -144,4 +144,57 @@ func TestAOneSidedRouteIsLeftAlone(t *testing.T) {
 	before := c.Routes[0]
 	workload.ResolveByRounds(c, roundsWith(0.1, 0.2, 0.3))
 	require.Equal(t, before, c.Routes[0])
+}
+
+// A route judged beside six others has to be surer of itself than a route
+// judged alone, or a table of seven will show a wrong arrow in about one run
+// in two. The same rounds, as the only route and then as one of seven, give a
+// wider interval the second time, by exactly the Bonferroni quantile.
+func TestAnIntervalWidensWithTheNumberOfRoutesJudgedTogether(t *testing.T) {
+	logs := []float64{0.2, -0.1, 0.4, 0.0, 0.3, -0.2, 0.1, 0.25}
+
+	alone := pooledThatTheSingleRunBandFails(t)
+	workload.ResolveByRounds(alone, roundsWith(logs...))
+	one := alone.Routes[0].Resolution
+
+	var rows []workload.RouteMetric
+	var names []string
+	for i := 0; i < 7; i++ {
+		name := roundsRoute
+		if i > 0 {
+			name = "GET /other/" + string(rune('a'+i))
+		}
+		names = append(names, name)
+		rows = append(rows, metric(name, 200, 4, 4.6, 4.9, 5.4, 6))
+	}
+	seven, err := workload.Compare(sideWith("main", rows...), sideWith("noise-floor", rows...))
+	require.NoError(t, err)
+	var rounds []workload.RoundP95
+	for _, l := range logs {
+		base, cand := map[string]float64{}, map[string]float64{}
+		for _, n := range names {
+			base[n], cand[n] = 10, 10*math.Exp(l)
+		}
+		rounds = append(rounds, workload.RoundP95{Base: base, Candidate: cand})
+	}
+	workload.ResolveByRounds(seven, rounds)
+	var together workload.RouteResolution
+	for _, r := range seven.Routes {
+		if r.Route == roundsRoute {
+			together = r.Resolution
+		}
+	}
+	require.Equal(t, 1, one.Family)
+	require.Equal(t, 7, together.Family)
+	require.Greater(t, *together.SmallestVisible, *one.SmallestVisible)
+
+	// 1 minus 0.10 over 2k: 0.95 for one route, 0.992857 for seven. At seven
+	// degrees of freedom those quantiles are 1.894579, the published value,
+	// and 3.238346, computed by Simpson integration of the t density rather
+	// than by the incomplete beta this package uses, a method first checked to
+	// six decimals against three published values. The first version of this
+	// line carried 3.249854, which was written down and never computed; the
+	// implementation was right and the check was not.
+	ratio := math.Log(1+*together.SmallestVisible) / math.Log(1+*one.SmallestVisible)
+	require.InDelta(t, 3.238346/1.894579, ratio, 1e-5)
 }

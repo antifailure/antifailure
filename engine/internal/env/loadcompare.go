@@ -47,7 +47,7 @@ import (
 //   - each side is first sent the same mix for a short warm-up that is
 //     discarded, which takes the first request of every route, the one that
 //     opens a connection and fills a cache, out of the numbers;
-//   - then each side is sent the mix in eight short rounds, interleaved so
+//   - then each side is sent the mix in sixteen short rounds, interleaved so
 //     that neither side always goes first, with round k sent under the same
 //     seed at both;
 //   - each route's change and its interval are measured ROUND AGAINST ROUND
@@ -293,22 +293,24 @@ func (o *Orchestrator) LoadCompare(
 
 // DefaultCompareRounds is how many interleaved rounds each side is sent.
 //
-// Eight, from a model rather than from taste. The comparison judges a p95 of
-// each side's POOLED samples, and a pooled p95 is dominated by whichever side
-// owns the latest, most drifted slot; no order can split one slot between two
-// sides, so the leftover shrinks only as the slots get shorter. Modelled with
-// an extreme drift, half a millisecond per second on a 10 to 30 millisecond
-// route over 32 seconds a side, the bias of this build against the base was:
+// Sixteen, from the width each count produced, measured rather than chosen.
+// Each route's change is judged on the scatter of its per round ratios, so
+// more rounds means more pairs to estimate that scatter from, even though
+// each round is shorter and its own p95 rests on fewer requests. On
+// 2026-09-21, identical code against main, 30 seconds a side, the median
+// route's resolvable change at ninety percent per route was:
 //
-//	one pass each, the old way   plus 39.7 percent
-//	4 rounds                     minus 6.6 (base, this build, this build,
-//	                             base, repeated) or plus 7.1 (Thue Morse)
-//	8 rounds                     plus 0.03, either order
+//	4 rounds    130 percent
+//	8 rounds    101, 134 and 141 percent across three runs
+//	16 rounds   50 percent
 //
-// At a realistic drift, a tenth of that, four rounds was already under a
-// quarter of a percent. Eight covers the drift nobody expects, and costs
-// nothing in traffic because the rounds split the same total.
-const DefaultCompareRounds = 8
+// and sixteen cost no measurable time over eight, 110 seconds a comparison
+// either way. Sixteen also kept a steady drift out of a pooled p95 in the
+// model: at four rounds either order left about seven percent, at eight about
+// three hundredths of one. Every route of that mix still met both sides in at
+// least two rounds at sixteen; a mix with more routes or less traffic reaches
+// the point where a route misses rounds sooner, and says so per route.
+const DefaultCompareRounds = 16
 
 // DefaultCompareWarmup is how long each side is sent the mix, and discarded,
 // before anything is recorded.
@@ -388,7 +390,7 @@ func (s compareSide) String() string {
 // build, base does: a p95 lives in the extremes, the latest slot has to go to
 // one side, and at four rounds the two orders left the same bias with opposite
 // signs. That leftover shrinks with the number of rounds, not with the order,
-// which is why the rounds are eight.
+// which is one reason the rounds are sixteen.
 func compareOrder(rounds int) []compareSide {
 	order := make([]compareSide, 0, 2*rounds)
 	for n := 0; n < 2*rounds; n++ {
@@ -469,7 +471,7 @@ func interleaved[R any](
 // loadCompareNotes says what the comparison could not control. Always at least
 // two, because there always are at least two, and written from how THIS run
 // was sent rather than from how runs are usually sent, so that a comparison
-// made with --rounds 1 or --warmup 0s does not borrow the sentences of one
+// made with `--rounds 1` or `--warmup 0s` does not borrow the sentences of one
 // that was interleaved and warmed.
 func loadCompareNotes(r *LoadCompareResult) []string {
 	var notes []string

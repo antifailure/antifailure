@@ -83,20 +83,25 @@ when you want to know whether a route is slower than the fleet. This one
 measures this build against the last one, which is the right question when you
 want to know whether your change made it slower.
 
-Each side is first sent the mix for a warm-up that is thrown away, so an
-environment brought up for the comparison is not measured answering from cold
-caches. Then each side is sent the mix in rounds, in the order base, this
-build, this build, base, this build, base, base, this build, with the same
-seed for both sides in each round. A host that warms or cools across the
-comparison therefore lands on both sides equally, where a single pass of each
-put it on whichever side went second.
+Each side is first sent a short warm-up that is thrown away, which takes the
+first request of every route out of the numbers. Then each side is sent the mix
+in rounds, interleaved so that neither side always goes first, with the same
+seed for both sides in each round.
+
+Each route is judged ROUND AGAINST ROUND. Every round is a small comparison of
+its own, and the change is measured from how those comparisons agreed, with an
+interval as wide as the host's own noise between rounds. The intervals hold at
+ninety percent for every route together. A limit inside a route's interval is
+neither a pass nor a fail, and the report prints the smallest change that route
+could have shown on this host, so on a noisy machine the answer is "too close
+to say" rather than a regression that is not there. More rounds or a longer
+duration narrows it.
 
 What it still cannot control is printed with every report rather than left
 implied. The rounds are sequential, because two environments sending traffic
 at once on one host would contend with each other and measure that instead.
-Interleaving cancels a steady drift and not a neighbour that spikes during one
-round. A difference is a difference, and a threshold under
-load.comparison.thresholds is what turns one into a verdict.
+A difference is a difference, and a threshold under load.comparison.thresholds
+is what turns one into a verdict.
 
 The base environment is torn down unless --keep says otherwise. The
 environment for this build is left running whether or not this brought it up.`),

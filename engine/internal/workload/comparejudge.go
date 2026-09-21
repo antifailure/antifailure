@@ -298,12 +298,13 @@ func roundsUnresolvableDetail(res RouteResolution, observed, limit float64) stri
 	}
 	return fmt.Sprintf(
 		"measured round against round across %d rounds, the change is %.1f percent and "+
-			"the true value lies between %.1f and %.1f percent; the limit of %.1f sits "+
-			"inside that, so neither a pass nor a breach would have meant anything. On "+
-			"this host, at this many rounds, this route can resolve a change of about "+
-			"%.0f percent. Send for longer, run more rounds, or use a quieter machine",
-		res.Rounds, observed*100, *res.ChangeLow*100, *res.ChangeHigh*100, limit*100,
-		*res.SmallestVisible*100)
+			"the true value lies between %.1f and %.1f percent, at ninety percent for all %d "+
+			"routes together; the limit of %.1f sits inside that, so neither a pass nor a "+
+			"breach would have meant anything. On this host, at this many rounds, this route "+
+			"can resolve a change of about %.0f percent. Send for longer, run more rounds, "+
+			"or use a quieter machine",
+		res.Rounds, observed*100, *res.ChangeLow*100, *res.ChangeHigh*100, res.Family,
+		limit*100, *res.SmallestVisible*100)
 }
 
 // bandOf is the wider of the two sides' half widths, which is the one a reader

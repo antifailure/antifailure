@@ -89,8 +89,12 @@ type RouteResolution struct {
 	// the ninety percent interval for the change, as fractions, which the
 	// verdict is decided on in place of the band. See
 	// compareresolution_rounds.go for why a single run's band is not enough.
-	Method     string   `json:"method,omitempty"`
-	Rounds     int      `json:"rounds,omitempty"`
+	Method string `json:"method,omitempty"`
+	Rounds int    `json:"rounds,omitempty"`
+	// Family is how many routes were judged together, which sets how wide
+	// each route's interval had to be for the table as a whole to hold at
+	// ninety percent.
+	Family     int      `json:"family,omitempty"`
 	ChangeLow  *float64 `json:"change_low,omitempty"`
 	ChangeHigh *float64 `json:"change_high,omitempty"`
 }

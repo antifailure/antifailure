@@ -29,10 +29,10 @@ import (
 // sides back to back, so a round's pair of p95s is a small comparison of its
 // own, and the scatter of those small comparisons IS the host's noise, in the
 // same units as the change. The change is the mean of the per round log ratios
-// and its interval is a t interval on them, at the same ninety percent the
-// single run band uses. The verdict is then the rule #540 settled and this file
-// does not touch: the interval is placed against the limit, and a limit inside
-// it is neither a pass nor a fail.
+// and its interval is a t interval on them, at ninety percent for the whole
+// table of routes together; see familyLevel. The verdict is then the rule #540
+// settled, which this file does not touch: the interval is placed against the
+// limit, and a limit inside it is neither a pass nor a fail.
 //
 // What this costs is honesty about the size of what can be seen. A host whose
 // rounds disagree by a factor of two cannot resolve a thirty percent change,
@@ -52,23 +52,97 @@ type RoundP95 struct {
 // answer rather than a reason to refuse.
 const minimumRoundPairs = 2
 
-// tQuantile95 is the 0.95 quantile of Student's t, which makes a two sided
-// ninety percent interval, the same level resolutionZ gives a single run.
-// Tabulated to thirty degrees of freedom and approximated past that with the
-// first term of the Cornish Fisher expansion, which is within 0.002 of the
-// table at thirty and converges on 1.645.
-func tQuantile95(df int) float64 {
-	table := []float64{0, 6.314, 2.920, 2.353, 2.132, 2.015, 1.943, 1.895, 1.860, 1.833,
-		1.812, 1.796, 1.782, 1.771, 1.761, 1.753, 1.746, 1.740, 1.734, 1.729,
-		1.725, 1.721, 1.717, 1.714, 1.711, 1.708, 1.706, 1.703, 1.701, 1.699, 1.697}
+// familyLevel is the confidence the comparison holds its WHOLE TABLE to.
+//
+// Ninety percent, the level the single run band uses, but for every route at
+// once rather than for each route alone. Each route's interval is widened by
+// Bonferroni to 1 minus 0.10 over the number of routes judged. Measured on
+// 2026-09-21: at ninety percent PER ROUTE, three comparisons of identical
+// code put a direction on 2 of their 21 route intervals, which is exactly the
+// ten percent a per route interval promises and one wrong arrow in every
+// other table. A gate that fails when ANY route breaches is making one claim
+// about all of them, so it is held to one level for all of them, and the
+// same nine comparisons recomputed that way put a direction on none.
+const familyLevel = 0.90
+
+// tQuantile is the p quantile of Student's t with df degrees of freedom,
+// found by bisection on the distribution function. A table stops at the
+// levels somebody tabulated, and a Bonferroni level depends on how many
+// routes a manifest has.
+func tQuantile(p float64, df int) float64 {
 	if df < 1 {
 		return math.Inf(1)
 	}
-	if df < len(table) {
-		return table[df]
+	lo, hi := 0.0, 1e4
+	for i := 0; i < 200; i++ {
+		mid := (lo + hi) / 2
+		if tCDF(mid, float64(df)) < p {
+			lo = mid
+		} else {
+			hi = mid
+		}
 	}
-	z := resolutionZ
-	return z + (z*z*z+z)/(4*float64(df))
+	return (lo + hi) / 2
+}
+
+// tCDF is Student's t distribution function, through the regularized
+// incomplete beta function.
+func tCDF(t, df float64) float64 {
+	x := df / (df + t*t)
+	tail := 0.5 * incompleteBeta(df/2, 0.5, x)
+	if t > 0 {
+		return 1 - tail
+	}
+	return tail
+}
+
+// incompleteBeta is the regularized incomplete beta function I_x(a, b), by
+// its continued fraction, taken from whichever side converges.
+func incompleteBeta(a, b, x float64) float64 {
+	if x <= 0 {
+		return 0
+	}
+	if x >= 1 {
+		return 1
+	}
+	la, _ := math.Lgamma(a)
+	lb, _ := math.Lgamma(b)
+	lab, _ := math.Lgamma(a + b)
+	front := math.Exp(lab - la - lb + a*math.Log(x) + b*math.Log(1-x))
+	if x < (a+1)/(a+b+2) {
+		return front * betaFraction(a, b, x) / a
+	}
+	return 1 - front*betaFraction(b, a, 1-x)/b
+}
+
+// betaFraction evaluates the continued fraction for the incomplete beta by
+// the modified Lentz method.
+func betaFraction(a, b, x float64) float64 {
+	const tiny = 1e-300
+	guard := func(v float64) float64 {
+		if math.Abs(v) < tiny {
+			return tiny
+		}
+		return v
+	}
+	c, d := 1.0, 1/guard(1-(a+b)*x/(a+1))
+	h := d
+	for m := 1; m <= 300; m++ {
+		fm := float64(m)
+		num := fm * (b - fm) * x / ((a + 2*fm - 1) * (a + 2*fm))
+		d = 1 / guard(1+num*d)
+		c = guard(1 + num/c)
+		h *= d * c
+		num = -(a + fm) * (a + b + fm) * x / ((a + 2*fm) * (a + 2*fm + 1))
+		d = 1 / guard(1+num*d)
+		c = guard(1 + num/c)
+		step := d * c
+		h *= step
+		if math.Abs(step-1) < 3e-14 {
+			break
+		}
+	}
+	return h
 }
 
 // ResolveByRounds replaces each route's pooled comparison with a round against
@@ -84,23 +158,37 @@ func ResolveByRounds(c *Comparison, rounds []RoundP95) {
 	if c == nil {
 		return
 	}
+	// First every route's log ratios, so that the number of routes judged is
+	// known before any interval is drawn: the family is every route this
+	// comparison will put a verdict on, and each interval's width depends on
+	// its size.
+	type pairs struct{ logBase, logCand, logRatio []float64 }
+	measured := map[int]pairs{}
+	family := 0
 	for i := range c.Routes {
 		r := &c.Routes[i]
 		if r.Scenario != "" || !r.InBaseline || !r.InCandidate {
 			continue
 		}
-		var logBase, logCand, logRatio []float64
+		var p pairs
 		for _, round := range rounds {
-			b, c := round.Base[r.Route], round.Candidate[r.Route]
-			if b <= 0 || c <= 0 {
+			b, cand := round.Base[r.Route], round.Candidate[r.Route]
+			if b <= 0 || cand <= 0 {
 				continue
 			}
-			logBase = append(logBase, math.Log(b))
-			logCand = append(logCand, math.Log(c))
-			logRatio = append(logRatio, math.Log(c/b))
+			p.logBase = append(p.logBase, math.Log(b))
+			p.logCand = append(p.logCand, math.Log(cand))
+			p.logRatio = append(p.logRatio, math.Log(cand/b))
 		}
-		n := len(logRatio)
-		res := RouteResolution{Method: ResolutionRounds, Rounds: n}
+		measured[i] = p
+		if len(p.logRatio) >= minimumRoundPairs {
+			family++
+		}
+	}
+	for i, p := range measured {
+		r := &c.Routes[i]
+		n := len(p.logRatio)
+		res := RouteResolution{Method: ResolutionRounds, Rounds: n, Family: family}
 		if n < minimumRoundPairs {
 			res.Detail = fmt.Sprintf("only %d of %d rounds sent this route on both sides, "+
 				"so the spread between rounds, which is the noise this comparison is judged "+
@@ -108,14 +196,14 @@ func ResolveByRounds(c *Comparison, rounds []RoundP95) {
 			r.Resolution = res
 			continue
 		}
-		m, s := meanAndSD(logRatio)
-		h := tQuantile95(n-1) * s / math.Sqrt(float64(n))
-		base, cand := math.Exp(mean(logBase)), math.Exp(mean(logCand))
-		ratio := cand/base - 1
-		delta := cand - base
+		m, s := meanAndSD(p.logRatio)
+		// Two sided, and shared across the family by Bonferroni.
+		q := 1 - (1-familyLevel)/(2*float64(family))
+		h := tQuantile(q, n-1) * s / math.Sqrt(float64(n))
+		base, cand := math.Exp(mean(p.logBase)), math.Exp(mean(p.logCand))
 		r.P95Baseline, r.P95Candidate = floatp(base), floatp(cand)
-		r.P95Delta, r.P95Ratio = floatp(delta), floatp(ratio)
-		r.Direction = directionOf(delta, true)
+		r.P95Delta, r.P95Ratio = floatp(cand-base), floatp(cand/base-1)
+		r.Direction = directionOf(cand-base, true)
 		res.ChangeLow = floatp(math.Exp(m-h) - 1)
 		res.ChangeHigh = floatp(math.Exp(m+h) - 1)
 		// The smallest change, either way, that this route could have shown
