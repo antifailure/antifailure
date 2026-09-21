@@ -43,6 +43,18 @@ func classify(f File, m *schema.Manifest, engine *policy.Engine) []Fact {
 	if readable(base) {
 		out = append(out, hostFacts(f, engine)...)
 	}
+
+	// The infrastructure content rules, gated on the file already being
+	// infrastructure rather than on a list of their own. That gate is what
+	// keeps `replicas` in a Go file from being read as a fleet size and
+	// `cpu` in a benchmark from being read as an instance size, and it is
+	// asserted rather than assumed: a test puts a line written for each of
+	// these rules into a file of every other surface and requires none of them
+	// to fire, with a control on an infrastructure file so that a rule which
+	// had stopped firing anywhere could not pass by refusing everything.
+	if base == SurfaceInfrastructure {
+		out = append(out, iacFacts(f, m)...)
+	}
 	return out
 }
 
@@ -57,10 +69,18 @@ func attributable(s Surface) bool {
 	return false
 }
 
-// readable reports whether the content rules should read a file's added
+// readable reports whether the OUTBOUND HOST rule should read a file's added
 // lines. A URL in a README is a link and not a call, and a URL in a lockfile
 // is a registry the build reaches rather than something the application does
 // at runtime.
+//
+// Infrastructure is deliberately absent, and it is the entry somebody will
+// want to add. A URL in a Terraform file is more often a module source or a
+// provider registry than a call the application makes, which is the lockfile
+// case again, so reading them would report the build's own downloads as this
+// change's new outbound hosts. What a Terraform file says about the network is
+// read instead by the network rule in iac.go, which matches a firewall rule
+// rather than a URL and so does not have to guess.
 func readable(s Surface) bool {
 	switch s {
 	case SurfaceCode, SurfaceConfig, SurfaceManifest:

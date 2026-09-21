@@ -71,6 +71,7 @@ behaviour rather than a bug to file.
 | `schema` | a migration directory, a `.sql` file, a schema a migration tool reads | environment, migration, invariants, load |
 | `service` | a file under a path a service in the manifest declares | environment, workflows |
 | `code` | application source | environment, workflows, load |
+| `auth` | who may do what: a guard, middleware, a session, a policy, an entitlement | environment, workflows |
 | `asset` | something the application serves: a stylesheet, an image, a template | environment, workflows |
 | `build` | a Dockerfile, a compose file, a build configuration | environment |
 | `dependency` | a package manifest or a lockfile | environment, egress |
@@ -78,15 +79,85 @@ behaviour rather than a bug to file.
 | `manifest` | `antifailure.yaml` itself | environment, egress |
 | `masking` | the masking rules file the manifest names | masking |
 | `egress` | an outbound host named in an added line | egress |
-| `infrastructure` | infrastructure as code | nothing |
+| `infrastructure` | infrastructure as code | environment, workflows |
+| `database_config` | a database engine version or a server parameter, in an added line of an infrastructure file | environment, migration |
+| `capacity` | a replica count, an instance size or an autoscaling bound, in an added line of an infrastructure file | environment, load |
+| `network_rule` | a firewall, security group or network policy rule, in an added line of an infrastructure file | environment, egress |
 | `pipeline` | continuous integration configuration | nothing |
 | `test` | your own test suite | nothing |
 | `docs` | prose | nothing |
 
-The four surfaces that select nothing are not oversights. The environment is
-built from `antifailure.yaml` rather than from your Terraform, nothing in a run
-reads your workflow files, and this product runs the workflows the manifest
-declares rather than your test suite.
+The three surfaces that select nothing are not oversights. Prose, your own test
+suite and your continuous integration configuration do not run in production:
+nothing in a run reads a README, a workflow file or a spec, and this product
+runs the workflows the manifest declares rather than your test suite.
+
+The table is not written twice. A test in the engine reads the rows above and
+requires them to equal the coverage table the analyser plans from, so a row
+here that disagrees with the engine fails the build rather than misleading a
+reader.
+
+## Infrastructure as code
+
+For most of this package's life, an infrastructure only pull request selected
+no check at all. Terraform sat in the same bucket as prose, your test suite and
+your continuous integration configuration, under one true sentence: the
+environment is built from `antifailure.yaml` rather than from your Terraform.
+
+That sentence is still true and it was never a reason for zero. Prose, a test
+file and a workflow file do not run in production. Your infrastructure as code
+does. It was the one of the four that is not inert, and the consequence was not
+a quieter plan: the published action gates the whole run on the environment
+output, so a pull request that changed production's database, its capacity or
+its firewall ran nothing.
+
+So an infrastructure change now brings the environment up and drives the
+application inside it, and the added lines are read for what they actually say.
+
+```
+4 files changed, touching infrastructure, the database's configuration, capacity and a network rule. 4 checks will run, and 1 more is selected and not configured.
+
+  run   environment  infra/ecs.tf: an added line sets desired_count, which is how much of the application is there to serve traffic, and load is the check that puts production shaped traffic through it (and 9 more)
+  run   migration    infra/rds.tf: an added line sets a database engine version of 16 and the manifest declares 15, so the migration rehearsal applies this change's migrations to 15 and not to 16. Whether this is the database the manifest means is not visible from a diff (and 1 more)
+  skip  invariants   nothing this change touches is exercised by it
+  run   workflows    infra/ecs.tf: it is infrastructure as code (and 3 more)
+  gap   load         load is off in the manifest, so af ci runs it only when it is handed --load
+  run   egress       infra/security.tf: an added line declares the network rule aws_security_group_rule, which decides what this application may reach and what may reach it, and the egress check is where an outbound request meets the policy and gets a decision (and 2 more)
+  skip  masking      nothing this change touches is exercised by it
+```
+
+That is the real output of `af change` over
+`engine/internal/change/testdata/infrastructure.diff`, against a manifest whose
+`database.version` is 15 and whose load is turned off. The `gap` line is load
+being selected by the replica count and not configured, which is the report
+saying that something changed and nothing is going to look at it.
+
+Read the claim precisely, because it is narrower than it looks and the report
+repeats the difference on every run that touches one of these files: nothing
+applies your infrastructure as code. The environment stands in for the runtime
+the change describes, and standing in for it is not being it.
+
+The version comparison is the sharpest line of the three. A pull request that
+moves production to Postgres 16 while `antifailure.yaml` still says 15 is
+rehearsed against 15, and nothing used to say so: the diff held one number, the
+manifest held the other, and no reader held both.
+
+Three limits, stated rather than discovered:
+
+- A bare `version` key is not read as a database version. Azure writes the
+  Postgres major that way, so a version bump there is missed. The alternative
+  is reading `version` on every provider pin, every Helm chart and every
+  Kubernetes API line, which would select the migration rehearsal on a chart
+  bump.
+- A URL inside an infrastructure file is not read as an outbound host. In
+  Terraform it is usually a module source or a provider registry, which is the
+  lockfile case: a download the build makes, not a call the application makes.
+  What a file says about the network is read instead from firewall and security
+  group rules, which do not have to guess.
+- Nothing here parses HCL. The same path rule claims Terraform, Bicep,
+  CloudFormation, Kubernetes manifests and Helm values, and a parser for one of
+  the five would answer nothing about the other four while reading in the
+  report exactly like a rule that works.
 
 ## Selected is not the same as available
 
@@ -136,8 +207,11 @@ matching pattern wins, so order does not decide and appending a rule cannot
 silently change what an existing one does.
 
 Three things a rule cannot do. It cannot assign `service`, `manifest`,
-`masking` or `egress`, which come from declarations already in the manifest and
-would be a second answer to disagree with the first. It cannot turn a check
+`masking`, `egress`, `auth`, `database_config`, `capacity` or `network_rule`.
+The first four come from declarations already in the manifest and would be a
+second answer to disagree with the first; the last four are conclusions drawn
+from reading a line rather than a path, so a rule that assigned one would be
+claiming to have read a file it never opened. It cannot turn a check
 off, because a rule says what a path is and the engine decides what that
 implies. And it cannot match every path: a catch all would classify everything
 and the fail safe above would never fire again, so the manifest refuses one.
@@ -181,6 +255,9 @@ coverage it does not have is worse than no report:
 - A rename is classified by the new path, so moving a file between categories
   changes the classification without changing a line of code.
 - A binary file has no added lines to read.
+- Nothing in a run applies your infrastructure as code. The environment stands
+  in for the runtime a Terraform change describes, so the checks it selects
+  exercise the application in that stand in and not the change itself.
 - The workflow agents drive a browser, so a change to a `worker` or a `cron`
   service is exercised only where the application's own interface reaches it,
   and a diff cannot say whether it does.

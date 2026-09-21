@@ -106,6 +106,13 @@ func surfaceNames(p *Profile) []string {
 		{SurfaceBuild, "the build"},
 		{SurfaceConfig, "configuration"},
 		{SurfaceInfrastructure, "infrastructure"},
+		// Named after infrastructure and separately from it, because "the
+		// database's configuration changed" is the sentence a reader of an
+		// infrastructure pull request wants and "infrastructure changed" is
+		// the one they already had.
+		{SurfaceDatabaseConfig, "the database's configuration"},
+		{SurfaceCapacity, "capacity"},
+		{SurfaceNetworkRule, "a network rule"},
 		{SurfacePipeline, "continuous integration"},
 		{SurfaceTest, "your test suite"},
 		{SurfaceAsset, "served assets"},

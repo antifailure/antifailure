@@ -112,6 +112,58 @@ fetches from it. That list is declared rather than enforced in this release:
 the engine validates it and shows it in `af explain`, and the local builder
 does not yet seal a build. Write it as the record of what your build needs.
 
+## The infrastructure, and what a change to it selects
+
+`infra/` holds the Terraform this service runs on in production: the database,
+its parameter group, how many copies of the API there are, and what may reach
+what. Nothing in a run applies it. The environment a rehearsal brings up is
+built from `antifailure.yaml`, and these files are here because `af change`
+reads them.
+
+Until it did, a pull request that touched only this directory selected no
+check, wrote `environment=false` into the job, and was not rehearsed at all.
+Prose and a test suite do not run in production, so selecting nothing for them
+is right. Terraform does.
+
+Move the database to Postgres 18 and give the service four more copies:
+
+```sh
+git diff --unified=0 main > pr.patch
+af change --diff pr.patch
+```
+
+```
+2 files changed, touching infrastructure, the database's configuration and capacity. 3 checks will run, and 1 more is selected and not configured.
+
+  run   environment  infra/rds.tf: an added line sets a database engine version of 18 and the manifest declares 17, so the migration rehearsal applies this change's migrations to 17 and not to 18. Whether this is the database the manifest means is not visible from a diff (and 3 more)
+  run   migration    infra/rds.tf: an added line sets a database engine version of 18 and the manifest declares 17, so the migration rehearsal applies this change's migrations to 17 and not to 18. Whether this is the database the manifest means is not visible from a diff
+  skip  invariants   nothing this change touches is exercised by it
+  run   workflows    infra/rds.tf: it is infrastructure as code (and 1 more)
+  gap   load         load is off in the manifest, so af ci runs it only when it is handed --load
+  skip  egress       nothing this change touches is exercised by it
+  skip  masking      nothing this change touches is exercised by it
+```
+
+The first line is the one to read twice. `infra/rds.tf` says 18 and
+`antifailure.yaml` says 17, they are a pair kept in two files, and nothing used
+to hold both: the rehearsal would have gone on proving these migrations against
+17 while production moved. Fix it by changing `database: version:` in the
+manifest, and the sentence becomes the quiet one that says the two agree.
+
+The `gap` line is the other half. The replica count selects load, this
+manifest declares no `load: enabled`, and so the report says that something
+changed and nothing is going to look at it, rather than leaving load off the
+page.
+
+Three limits worth knowing before you trust the plan. A bare `version` key is
+not read as a database version, because it is also how every provider pin and
+every chart states its own, so an Azure Postgres version lives in a key this
+cannot see. A URL inside a Terraform file is not read as an outbound host,
+because it is usually a module source, which is a download the build makes and
+not a call the service makes. And nothing here parses HCL: the added lines are
+read as text, so that Kubernetes manifests, Helm values and CloudFormation get
+the same reading rather than the one format a parser was written for.
+
 ## What it deliberately does not have
 
 No framework, no ORM, no configuration library. Everything in `main.go` is

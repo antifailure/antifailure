@@ -60,11 +60,39 @@ outputs:
   command:
     description: The command that ran.
     value: ${{ steps.plan.outputs.command }}
+  # One per check, which is what `af change` writes and what the concepts page
+  # promises a caller can read. Only `environment` and `selected` used to reach
+  # a job that calls this action directly, so a caller who wanted to skip its
+  # own database step on a change that selects no migration had the value
+  # computed for it and no way to see it. Every value is the check being both
+  # selected by the change AND configured in the manifest, because a step
+  # asking whether to do work needs both, and every one is written on every
+  # run including the false ones: a key that appears only when it is true reads
+  # as an empty string in a workflow expression, and an empty string is not
+  # false to somebody debugging at eleven at night.
   environment:
-    description: Whether `af change` selected an environment for this change.
+    description: Whether this change selects the environment, and the manifest configures it.
     value: ${{ steps.change.outputs.environment }}
+  migration:
+    description: Whether this change selects the migration rehearsal, and the manifest configures it.
+    value: ${{ steps.change.outputs.migration }}
+  invariants:
+    description: Whether this change selects the invariants, and the manifest declares any.
+    value: ${{ steps.change.outputs.invariants }}
+  workflows:
+    description: Whether this change selects the workflows, and the manifest declares any.
+    value: ${{ steps.change.outputs.workflows }}
+  load:
+    description: Whether this change selects load, and the manifest turns it on.
+    value: ${{ steps.change.outputs.load }}
+  egress:
+    description: Whether this change selects the egress decisions. Always configured, since the default is a policy.
+    value: ${{ steps.change.outputs.egress }}
+  masking:
+    description: Whether this change selects the masking scan, and the manifest names a rules file.
+    value: ${{ steps.change.outputs.masking }}
   selected:
-    description: The checks `af change` selected, comma separated.
+    description: The checks `af change` selected and the manifest configures, comma separated.
     value: ${{ steps.change.outputs.selected }}
   handled:
     description: Whether a control plane took the report.

@@ -54,6 +54,74 @@ index 1111111..2222222 100644
 +A sentence.
 `
 
+// An infrastructure only pull request: a database engine version, a server
+// parameter, a replica count and a security group rule, and not one line of
+// application source.
+const infraDiff = `diff --git a/infra/rds.tf b/infra/rds.tf
+index 1111111..2222222 100644
+--- a/infra/rds.tf
++++ b/infra/rds.tf
+@@ -6,0 +7,5 @@ resource "aws_db_instance" "primary" {
++  engine_version = "16.1"
++  parameter {
++    name  = "lock_timeout"
++    value = "5000"
++  }
+diff --git a/infra/ecs.tf b/infra/ecs.tf
+index 3333333..4444444 100644
+--- a/infra/ecs.tf
++++ b/infra/ecs.tf
+@@ -11,0 +12,1 @@ resource "aws_ecs_service" "api" {
++  desired_count = 6
+diff --git a/infra/security.tf b/infra/security.tf
+index 5555555..6666666 100644
+--- a/infra/security.tf
++++ b/infra/security.tf
+@@ -2,0 +3,2 @@ resource "aws_security_group" "api" {
++resource "aws_security_group_rule" "outbound" {
++  cidr_blocks = ["0.0.0.0/0"]
+`
+
+// The whole chain, at the boundary where it decides whether anything runs.
+//
+// The analyser selecting a check is half of a feature. The other half is the
+// GITHUB_OUTPUT line, because the published action gates the entire run on
+// steps.change.outputs.environment being 'true': while the infrastructure
+// surface selected nothing, that line said false and an infrastructure only
+// pull request was not rehearsed at all. So this reads the file the workflow
+// reads rather than the profile the test could reach more easily.
+func TestChange_AnInfrastructureOnlyDiffTellsTheJobToRunTheCheck(t *testing.T) {
+	t.Parallel()
+	dir := changeProject(t, infraDiff)
+	outputs := filepath.Join(dir, "outputs.txt")
+
+	res := runCLI(t, dir, map[string]string{"GITHUB_OUTPUT": outputs},
+		"change", "--diff", filepath.Join(dir, "pr.diff"))
+	require.Zero(t, res.code, res.stderr)
+
+	written, err := os.ReadFile(outputs)
+	require.NoError(t, err)
+	lines := strings.Split(strings.TrimSpace(string(written)), "\n")
+
+	assert.Contains(t, lines, "environment=true",
+		"this is the value action.yml gates the run on, so false here means nothing runs at all")
+	assert.Contains(t, lines, "workflows=true")
+	assert.Contains(t, lines, "migration=true",
+		"an added line moves the database engine version and another sets a server parameter")
+	assert.Contains(t, lines, "egress=true",
+		"an added line declares a security group rule")
+	assert.Contains(t, lines, "load=false",
+		"the replica count selects load and this manifest declares none, so the conjunction is false")
+	assert.Contains(t, lines, "masking=false")
+	assert.Contains(t, lines, "invariants=false")
+	assert.Contains(t, lines, "selected=egress,environment,migration,workflows")
+
+	// And the reasoning a reviewer reads, so that a true output is not the only
+	// thing standing behind the run.
+	assert.Contains(t, res.stdout, "an added line sets a database engine version of 16")
+	assert.Contains(t, res.stdout, "Nothing in a run applies infrastructure as code")
+}
+
 func TestChange_ExplainsTheDiffAndTheReasoning(t *testing.T) {
 	t.Parallel()
 	dir := changeProject(t, codeDiff)
