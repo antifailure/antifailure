@@ -122,7 +122,10 @@ type database struct {
 
 // startDatabase runs a Postgres container labelled as belonging to envID, and
 // waits until it answers.
-func startDatabase(t *testing.T, cli *client.Client, envID, kind, service string) database {
+//
+// extraEnv is appended to the container's environment, which is how a test
+// asks for a cluster initialised differently, with data checksums on.
+func startDatabase(t *testing.T, cli *client.Client, envID, kind, service string, extraEnv ...string) database {
 	t.Helper()
 	ctx := t.Context()
 
@@ -140,12 +143,12 @@ func startDatabase(t *testing.T, cli *client.Client, envID, kind, service string
 		Config: &container.Config{
 			Image:  pgImage,
 			Labels: labels,
-			Env: []string{
+			Env: append([]string{
 				"POSTGRES_PASSWORD=" + pgPass,
 				"POSTGRES_USER=" + pgUser,
 				"POSTGRES_DB=" + pgDB,
 				"PGDATA=" + pgData,
-			},
+			}, extraEnv...),
 			ExposedPorts: network.PortSet{hostPort: struct{}{}},
 		},
 		HostConfig: &container.HostConfig{
@@ -546,6 +549,82 @@ func TestVerify_ACleanStopDoesNoRecoveryAndSaysSo(t *testing.T) {
 	require.False(t, res.Verified(),
 		"a clean shutdown replays nothing, and the run reported itself as having verified a recovery")
 	require.Zero(t, res.Reconciliation.LostCount, "a clean shutdown lost acknowledged commits")
+}
+
+// TestCheckRelations_ATornPageOnAChecksummedClusterStopsTheReadBack is the
+// premise the terminal's pages line rests on. That line claims no page of the
+// writers' table failed its checksum whenever the cluster has checksums on and
+// the read back finished, which is only true if a page that DOES fail stops
+// the read back rather than being counted through. So a page is damaged on
+// disk, under a cluster initialised with checksums on, and the read back has
+// to stop at it and leave amcheck unasked, which is what makes the line say
+// not checked instead of a pass.
+//
+// The same table is read back once before the damage, and must pass, so the
+// refusal below is about the page and not about a read back that could never
+// have succeeded here.
+func TestCheckRelations_ATornPageOnAChecksummedClusterStopsTheReadBack(t *testing.T) {
+	cli := requireDocker(t)
+	envID := "pgt" + strconv.FormatInt(time.Now().UnixNano()%1_000_000, 36)
+	db := startDatabase(t, cli, envID, testKind, "", "POSTGRES_INITDB_ARGS=--data-checksums")
+	sh := shell(t, cli, db)
+	ctx := t.Context()
+
+	out, err := sh.Run(ctx, []string{"pg_controldata", "-D", pgData})
+	require.NoError(t, err)
+	control, err := pgcrash.ParseControl(out.Stdout)
+	require.NoError(t, err)
+	require.True(t, control.ChecksumsEnabled(),
+		"the cluster came up without data checksums, so nothing below tests a checksum")
+
+	// The writers' table, by the name the proof reads, filled past one page
+	// and frozen, then checkpointed. Frozen so that no later read sets a hint
+	// bit and dirties the page, and checkpointed so the page on disk is the
+	// one the damage lands on and nothing in memory writes over it.
+	conn, err := pgx.Connect(ctx, db.url)
+	require.NoError(t, err)
+	for _, stmt := range []string{
+		"CREATE SCHEMA antifailure_chaos",
+		"CREATE TABLE antifailure_chaos.commits (id bigint PRIMARY KEY, payload text NOT NULL)",
+		"INSERT INTO antifailure_chaos.commits SELECT g, repeat('x', 64) FROM generate_series(1, 2000) g",
+		"VACUUM (FREEZE) antifailure_chaos.commits",
+		"CHECKPOINT",
+	} {
+		_, err := conn.Exec(ctx, stmt)
+		require.NoError(t, err, stmt)
+	}
+	var path string
+	require.NoError(t, conn.QueryRow(ctx,
+		"SELECT pg_relation_filepath('antifailure_chaos.commits')").Scan(&path))
+	require.NoError(t, conn.Close(ctx))
+
+	intact := pgcrash.CheckRelationsForTest(ctx, db.url)
+	t.Logf("intact: checked=%v heap=%d index=%d amcheck=%q why=%q",
+		intact.Checked, intact.HeapRows, intact.IndexRows, intact.Amcheck, intact.Why)
+	require.True(t, intact.Checked, "the undamaged table could not be read back: %s", intact.Why)
+	require.EqualValues(t, 2000, intact.HeapRows)
+
+	// Eight bytes in the middle of the second page, written straight into the
+	// relation's file. The bytes are what a torn write leaves: a page whose
+	// contents no longer match the checksum Postgres stored in its header.
+	out, err = sh.Run(ctx, []string{"sh", "-c",
+		"printf 'TORNPAGE' | dd of=" + pgData + "/" + path + " bs=1 seek=12288 conv=notrunc"})
+	require.NoError(t, err)
+	require.Zero(t, out.ExitCode, "the page could not be damaged: %s", out.Stdout)
+
+	// A restart empties shared buffers, so the next read comes from the file.
+	_, err = cli.ContainerRestart(ctx, db.id, client.ContainerRestartOptions{})
+	require.NoError(t, err)
+	waitUntilAnswering(t, db.url, 2*time.Minute)
+
+	torn := pgcrash.CheckRelationsForTest(ctx, db.url)
+	t.Logf("torn: checked=%v heap=%d index=%d amcheck=%q why=%q",
+		torn.Checked, torn.HeapRows, torn.IndexRows, torn.Amcheck, torn.Why)
+	require.False(t, torn.Checked, "a table with a page that fails its checksum was read back as checked")
+	require.Empty(t, torn.Amcheck,
+		"amcheck was asked after the read back met a bad page, so the pages line would print a pass")
+	require.Contains(t, torn.Why, "invalid page",
+		"the read back stopped for a reason other than the damaged page")
 }
 
 // report prints what a run established, so a failing assertion is read beside

@@ -9222,6 +9222,14 @@ run establishes four things:
 4. **The relations survived.** A sequential scan and an index only scan count
    the same rows, and ` + "`" + `amcheck` + "`" + ` finds an index entry for every live heap tuple.
 
+The sequential scan also reads every page of the writers' table, and on a
+cluster with data checksums on, a page torn by the crash fails its checksum and
+stops that read. ` + "`" + `af chaos` + "`" + ` prints the result on each crash fault's ` + "`" + `pages` + "`" + `
+line. It covers the writers' table and no other, and it says the pages were
+not checked when checksums are off, when the control file could not be read
+after the fault, or when the read did not finish. The ` + "`" + `amcheck` + "`" + ` line beside it
+prints what the index verifier said, or that it did not run.
+
 The first two need something the database cannot give you, because they are
 claims about what the database *said* rather than about what it holds. The
 engine keeps a ledger on the client side of the wire: an identifier goes in
