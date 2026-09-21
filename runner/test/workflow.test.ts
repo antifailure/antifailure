@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DeterministicPlanner, answerFor, failureSentence, freshIdentity, judge, judgeAll,
+  keywords, unmatchable,
   type Action, type Snapshot, type Workflow,
 } from '../src/workflow.ts';
 
@@ -234,6 +235,74 @@ test('a quoted expectation is not satisfied by its own words being scattered abo
   assert.equal(judge(`"${sentence}"`, `Something. ${sentence} Try it again`), 'met');
   // And the unquoted form is exactly the reading that made this necessary.
   assert.equal(judge(sentence, scattered), 'met');
+});
+
+// THE CASE THAT FOUND THIS, and it is the one line that must never regress.
+//
+// `expect: ["total_cents"]` parses in YAML to the bare string, so it reaches
+// the word-ratio path. The path used to strip every character that is not a
+// letter or a digit out of the word, so it looked for `totalcents` on a page
+// showing `total_cents`, scored zero, and answered `unclear` forever. Reported
+// as UNVERIFIED, which exits zero: the expectation could not pass and could not
+// fail, whatever the application did.
+test('an expectation containing a separator is met by the page that shows it', () => {
+  assert.equal(judge('total_cents', '[{"id":1,"total_cents":2599}]'), 'met');
+  assert.equal(judge('order_id', 'Order order_id 42 was placed'), 'met');
+  assert.equal(judge('user-name', 'Your user-name is ada'), 'met');
+  assert.equal(judge('v1.2.3', 'Running release v1.2.3 now'), 'met');
+  assert.equal(judge('application/json', 'Content-Type: application/json'), 'met');
+  // This repository's own dogfood manifest was an instance. The workflow
+  // a-visitor-finds-the-operator-door expects "Operator sign-in" against the
+  // operator portal, whose title is those exact words, and `sign-in` became
+  // `signin`, so one of its two keywords could never hit and the workflow read
+  // unclear on the page it was written for.
+  assert.equal(judge('Operator sign-in', 'Operator sign-in\nEmail\nPassword'), 'met');
+  assert.equal(keywords('total_cents').join(','), 'total_cents');
+  assert.equal(keywords('Operator sign-in').join(','), 'operator,sign-in');
+});
+
+// A keyword may be NARROWED to a substring of the word it came from and never
+// REWRITTEN into a different string, because the page is searched with
+// `includes` against what the author wrote. Stripping the inner separator broke
+// that rule in both directions: it could not see its own literal, and it could
+// see one nobody asked for.
+test('a separator expectation does not match a different string that lost it', () => {
+  assert.equal(judge('user-name', 'Your username is ada'), 'unclear');
+  assert.equal(judge('order_id', 'Order orderid 42 was placed'), 'unclear');
+});
+
+// The stripping existed for prose, and that is the half a fix must not trade
+// away: a sentence's final full stop, a bracket, a comma must not cost a word.
+// Those are EDGE characters, so trimming the edges keeps every one of them.
+// Asserted one break per cell, because a single sentence carrying several kinds
+// of punctuation would stay green on a mutation that only handled one.
+test('punctuation around a word still does not cost the word', () => {
+  assert.equal(judge('the paid plan.', 'You are on the paid plan'), 'met');
+  assert.equal(judge('(reference)', 'Your reference is 4417'), 'met');
+  assert.equal(judge('subscribed,', 'You are subscribed to the list'), 'met');
+  assert.equal(keywords('the paid plan.').join(','), 'paid,plan');
+});
+
+// The quoted form is what a customer was told to use when they needed a string
+// exactly, and it is the workaround anybody who hit the bug will already have
+// in their manifest. It must keep saying yes, keep saying no, and not have been
+// loosened into matching the stripped shape on the way past.
+test('the exact path is untouched by the word-ratio fix', () => {
+  assert.equal(judge('"total_cents"', '[{"total_cents":2599}]'), 'met');
+  assert.equal(judge('"total_cents"', '[]'), 'unmet');
+  assert.equal(judge('"total_cents"', 'totalcents'), 'unmet');
+});
+
+// Silent unmatchability is the defect; the wrong answer was only its symptom.
+// An expectation whose every word is a stop word or shorter than three
+// characters still reaches the ratio path with nothing to look for and answers
+// unclear forever, so the run says which sentence it could not read rather than
+// leaving a reader to blame the page.
+test('an expectation with no word to look for is named, not left silent', () => {
+  assert.deepEqual(unmatchable(['is it up']), ['is it up']);
+  assert.deepEqual(unmatchable(['total_cents']), []);
+  // A quoted string always has an answer, so it is never listed.
+  assert.deepEqual(unmatchable(['"x"']), []);
 });
 
 test('a quoted expectation is met across a line break and a run of spaces', () => {
