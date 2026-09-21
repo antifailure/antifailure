@@ -569,6 +569,9 @@ var knownKeys = []string{
 	"project", "api_key_env", "max_branches", "to",
 	"migrations", "dir", "format",
 	"surface",
+	// The desktop application a workflow with surface: desktop is driven in.
+	// kind and args are already above.
+	"desktop", "application", "process",
 	"oracle", "baseline", "base_ref", "fail_on", "probes", "method", "body",
 	"compare_timestamps", "compare_uuids", "ignore", "headers", "fields",
 	"tables", "exclude",

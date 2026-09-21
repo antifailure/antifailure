@@ -173,5 +173,6 @@ Android is declared in the surface abstraction and is not built. A manifest may
 still name it, in a `workflows` entry's
 [`surface`](/docs/guides/workflows): it is refused by name, against the
 surfaces this build does carry, rather than returning a green verdict that
-tested nothing. Desktop and iOS are built and driveable, so naming either one
-runs it.
+tested nothing. [Desktop](/docs/guides/desktop) and iOS are built and
+driveable, so naming either one runs it; a desktop workflow also needs a
+`desktop` block saying which application it is driven in.

@@ -17,6 +17,7 @@ This page is generated from `schemas/manifest.v1.json`. Edit the schema, then ru
 | `change` | [Change](#change) | no | How a pull request's diff is classified. |
 | `database` | [Database](#database) | no | Where the environment's Postgres comes from, and how the production copy is made safe before anyone can branch from it. |
 | `datastores` | list of [Datastore](#datastore) | no | Every store the environment holds, and what is done about each one's contents. The database: block above normalizes into the entry named primary, so a manifest that declares only database: already has this list and does not have to write it. A stance is declared rather than defaulted, because an empty ClickHouse nobody chose looks exactly like an empty ClickHouse somebody decided on. Max items 25. |
+| `desktop` | [Desktop application](#desktop-application) | no | Which application the desktop workflows drive, declared once because a manifest describes one product. |
 | `diversity` | [Diversity](#diversity) | no | Behavioral variance for the agents that drive the workflows. |
 | `egress` | [Egress](#egress) | no | What the environment may reach on the network. |
 | `explore` | [Explore](#explore) | no | Agents that pursue a goal with no declared workflow, discover the paths an application offers, and report where it costs somebody effort without failing. |
@@ -182,6 +183,21 @@ One topic a topics_only broker is created with. An empty broker is not a twin of
 | `consumer_groups` | list of string | no | The groups created against this topic, with their offsets committed to the earliest message and nothing behind them. Created rather than left to appear on their own, because a consumer joining a group nobody created reads from the END by default, so the twin's first run of a consumer silently skips everything the twin's own producers wrote before it started. Max items 100. |
 | `name` | string | **yes** | The topic, named the way production names it. Unique within the store. Max length 249, matches `^[a-zA-Z0-9._-]{1,249}$`. |
 | `partitions` | integer | no | How many partitions the topic is created with. Not cosmetic: ordering is per partition and a consumer group with more members than partitions leaves members idle, so a twin whose topic has one partition where production has twelve cannot reproduce a reordering bug at all. Defaults to `1`. Minimum 1, maximum 10000. |
+
+## Desktop application
+
+Which application the desktop workflows drive, declared once because a manifest describes one product. It is what `base_url` is to a browser run: a workflow says what to do and this says what to do it to.
+
+Required by a manifest that has one. A workflow whose `surface` is `desktop` names no application of its own, because a list whose entries each name their own would be a list of unrelated runs sharing one report, with nothing in it saying which of them the change under review was about. So the application is declared here, once, and a manifest that asks for the desktop surface without it is refused while the manifest is read, before an environment is built for a run that could never open anything.
+
+The application is driven through its ACCESSIBILITY TREE, the same thing a screen reader reads, which is why a desktop workflow is written exactly like a browser one: a goal, a persona, and what proves it happened. Nothing here names a coordinate, a window position or a control's internal id.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `application` | string | **yes** | What to launch. For `electron`, the Electron binary itself, which inside a packaged application is the executable in Contents/MacOS and in a project under development is the one in node_modules. For `macos`, the .app bundle. Relative paths are resolved against the directory holding the manifest, because the runner is a subprocess started from somewhere the manifest never mentions and a path resolved there would name a different file. Min length 1, max length 512. |
+| `args` | list of string | no | The arguments, one per entry. Passed as written and never through a shell, so a space in a value is part of that value. An Electron project under development is usually launched by passing the directory holding its package.json. A native application is given these after its bundle is opened. Max items 64. |
+| `kind` | `electron`, `macos` | **yes** | Which kind of application this is, and so which accessibility tree it publishes.  `electron` covers anything built on Electron, which is most of the desktop software a team would want rehearsed: VS Code, Slack, Discord. Underneath one is Chromium, so it publishes the same accessibility tree a web page does.  `macos` covers a native application, read through the platform's own accessibility API. It needs the macOS Accessibility permission, which a person grants in System Settings and which nothing in software can grant. A run without it is reported as blocked with that step named, never as an application with no controls on it.  Stated rather than guessed from the path, because guessing would mean an application that is driven the wrong way reports as an application that does not work. |
+| `process` | string | no | What macOS calls the running application, when that is not the bundle's own name. Only for `macos`, and refused on `electron`, which is launched directly and never looked up.  It exists because opening a bundle returns before the application is ready, so the process still has to be found by name, and the two names are not always the same: Visual Studio Code.app runs as Code. Defaults to the bundle's name without .app, which is right for most applications. Min length 1, max length 128. |
 
 ## Diversity
 

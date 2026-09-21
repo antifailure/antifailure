@@ -702,6 +702,8 @@ const defaultTuning = `{
         "diversity.personalities[].id": "skeptic",
         "workflows[].personality": "skeptic",
         "terminal_workflows[].name": "deploy-plan",
+        "desktop.kind": "macos",
+        "workflows[].surface": "desktop",
         "terminal_workflows[].expect[]": "\"Applied 3 changes\"",
         "terminal_workflows[].input[]": "y",
         "security.access.objects[].route": "/api/orders/{id}",
@@ -764,6 +766,8 @@ const defaultTuning = `{
         "diversity.personalities[].id": "skeptic",
         "workflows[].personality": "skeptic",
         "terminal_workflows[].name": "deploy-plan",
+        "desktop.kind": "macos",
+        "workflows[].surface": "desktop",
         "terminal_workflows[].expect[]": "\"Applied 3 changes\"",
         "terminal_workflows[].input[]": "y",
         "security.access.objects[].route": "/api/orders/{id}",
@@ -819,6 +823,8 @@ const defaultTuning = `{
         "diversity.personalities[].id": "skeptic",
         "workflows[].personality": "skeptic",
         "terminal_workflows[].name": "deploy-plan",
+        "desktop.kind": "macos",
+        "workflows[].surface": "desktop",
         "terminal_workflows[].expect[]": "\"Applied 3 changes\"",
         "terminal_workflows[].input[]": "y",
         "security.access.objects[].route": "/api/orders/{id}",
@@ -880,6 +886,8 @@ const defaultTuning = `{
         "diversity.personalities[].id": "skeptic",
         "workflows[].personality": "skeptic",
         "terminal_workflows[].name": "deploy-plan",
+        "desktop.kind": "macos",
+        "workflows[].surface": "desktop",
         "terminal_workflows[].expect[]": "\"Applied 3 changes\"",
         "terminal_workflows[].input[]": "y",
         "security.access.objects[].route": "/api/orders/{id}",
@@ -1401,7 +1409,7 @@ func TestSchemaConstraintReport(t *testing.T) {
 // max_statements and thresholds.mean_increase instead. Without that split the
 // base manifest is refused by this feature's own three cross field rules,
 // which is the #315 failure exactly.
-const wantConstraints = 800
+const wantConstraints = 815
 
 // Then 755. The three keys that say what the Postgres a golden is built in
 // actually is: database.image, which declares a type and a maxLength;
@@ -1458,6 +1466,45 @@ const wantConstraints = 800
 // default worth writing, so the comparison reports until somebody declares a
 // limit. The generator fills every field here with a value the validator
 // accepts, so no tuning override was needed.
+// Then 799, read from this gate's own count of the tree. It was read TWICE,
+// which is the part worth recording: this branch measured 787 against the base
+// it was written on, and 799 after a rebase onto a main that had moved, and
+// neither figure was arrived at by adding fifteen to the one before it. The
+// arithmetic would have agreed both times, which is exactly why doing the
+// arithmetic feels safe and is not.
+//
+// The `desktop` block arrived: which application a workflow driving
+// that surface is driven in, without which the surface above is a name the
+// runner refuses after an environment has been built. Its own type and
+// additionalProperties, the two required keys, the type and enum on kind, the
+// type and both lengths on application, the type and maxItems on args with the
+// type and maxLength on their items, and the type and both lengths on process.
+//
+// TWO TUNING OVERRIDES, and each answers a cross field rule rather than
+// weakening one. `desktop.kind` has an enum and no type, so the generator
+// cannot infer a value and the base was refused for a missing required key; it
+// is set to macos rather than electron because the generator also fills
+// `process`, which is refused on an Electron application that is launched
+// directly and never looked up. And `workflows[].surface` is set to desktop,
+// because a declared application that no workflow drives is refused in the
+// other direction: the block would be a setting somebody believes they have
+// made and nothing reads. Both are the #315 shape, caught here by the gate
+// saying in its own words that the base was refused and every cell had
+// measured nothing.
+//
+// Then 815, and this one is the case the recount rule exists for. Two branches
+// raised this number at once against the same main: the base branch comparison
+// measured 800 on its tree and the desktop block measured 799 on its tree, and
+// BOTH were right about the tree each was counted on. Whichever landed second
+// would have inherited a constant that described neither. It was read from
+// this gate's own failure message on the merged tree, which is the only
+// reading anybody has verified against the repository it describes.
+//
+// The arithmetic HAPPENS to agree here, 784 plus sixteen plus fifteen, and
+// that is worth writing down rather than leaving out: it agreed on both of the
+// previous recounts too. A method that gives the right answer whenever you
+// check it and no answer you can check is not evidence, which is why the
+// number above comes from the gate every time and not from a sum.
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and

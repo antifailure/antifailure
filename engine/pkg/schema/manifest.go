@@ -29,18 +29,24 @@ type Manifest struct {
 	// schema's terminal_workflow description for why that is a list and not
 	// a conditional.
 	TerminalWorkflows []TerminalWorkflow `json:"terminal_workflows,omitempty" yaml:"terminal_workflows,omitempty"`
-	Invariants        []Invariant        `json:"invariants,omitempty" yaml:"invariants,omitempty"`
-	Insights          *Insights          `json:"insights,omitempty" yaml:"insights,omitempty"`
-	Change            *Change            `json:"change,omitempty" yaml:"change,omitempty"`
-	Oracle            *Oracle            `json:"oracle,omitempty" yaml:"oracle,omitempty"`
-	Explore           *Explore           `json:"explore,omitempty" yaml:"explore,omitempty"`
-	Diversity         *Diversity         `json:"diversity,omitempty" yaml:"diversity,omitempty"`
-	Fidelity          *Fidelity          `json:"fidelity,omitempty" yaml:"fidelity,omitempty"`
-	Load              *Load              `json:"load,omitempty" yaml:"load,omitempty"`
-	Policy            *Policy            `json:"policy,omitempty" yaml:"policy,omitempty"`
-	Runtime           *Runtime           `json:"runtime,omitempty" yaml:"runtime,omitempty"`
-	GitHub            *GitHub            `json:"github,omitempty" yaml:"github,omitempty"`
-	Security          *Security          `json:"security,omitempty" yaml:"security,omitempty"`
+	// Desktop is which application the workflows driving SurfaceDesktop are
+	// driven in. Declared once rather than per workflow, because a manifest
+	// describes one product, and required by a manifest that names the
+	// surface at all: without it the run reaches the runner and is refused
+	// there for want of something to open.
+	Desktop    *DesktopApplication `json:"desktop,omitempty" yaml:"desktop,omitempty"`
+	Invariants []Invariant         `json:"invariants,omitempty" yaml:"invariants,omitempty"`
+	Insights   *Insights           `json:"insights,omitempty" yaml:"insights,omitempty"`
+	Change     *Change             `json:"change,omitempty" yaml:"change,omitempty"`
+	Oracle     *Oracle             `json:"oracle,omitempty" yaml:"oracle,omitempty"`
+	Explore    *Explore            `json:"explore,omitempty" yaml:"explore,omitempty"`
+	Diversity  *Diversity          `json:"diversity,omitempty" yaml:"diversity,omitempty"`
+	Fidelity   *Fidelity           `json:"fidelity,omitempty" yaml:"fidelity,omitempty"`
+	Load       *Load               `json:"load,omitempty" yaml:"load,omitempty"`
+	Policy     *Policy             `json:"policy,omitempty" yaml:"policy,omitempty"`
+	Runtime    *Runtime            `json:"runtime,omitempty" yaml:"runtime,omitempty"`
+	GitHub     *GitHub             `json:"github,omitempty" yaml:"github,omitempty"`
+	Security   *Security           `json:"security,omitempty" yaml:"security,omitempty"`
 }
 
 // ServiceKind is what a service is.
@@ -819,6 +825,42 @@ const (
 // names no budget. It matches the runner's own default, so a workflow with no
 // budget and one that writes this duration down behave identically.
 const DefaultTerminalDuration = "30s"
+
+// DesktopApplication is which application the desktop workflows drive.
+//
+// It is the piece without which SurfaceDesktop is a name and nothing else. A
+// workflow says it drives the desktop; this says what the desktop is, and the
+// runner cannot open a window without it. Declared once per manifest rather
+// than per workflow, because a manifest describes one product: a list whose
+// entries each named their own application would be unrelated runs sharing one
+// report, with nothing in it saying which of them the change under review was
+// about.
+type DesktopApplication struct {
+	// Kind is DesktopElectron or DesktopMacOS, and it is stated rather than
+	// inferred from the path. Inferring it would mean an application driven
+	// the wrong way reports as an application that does not work.
+	Kind string `json:"kind" yaml:"kind"`
+	// Application is the Electron binary, or the .app bundle for a native
+	// application. Relative paths are resolved against the directory holding
+	// the manifest before the runner is told, because the runner is started
+	// from somewhere the manifest never mentions.
+	Application string `json:"application" yaml:"application"`
+	// Args are passed as written and never through a shell.
+	Args []string `json:"args,omitempty" yaml:"args,omitempty"`
+	// Process is what macOS calls the running application when that is not
+	// the bundle's own name: Visual Studio Code.app runs as Code. Only for
+	// DesktopMacOS, and refused on DesktopElectron, which is launched
+	// directly and never looked up. Empty is filled in by normalisation with
+	// the bundle's name without .app.
+	Process string `json:"process,omitempty" yaml:"process,omitempty"`
+}
+
+// The kinds of desktop application, which is which accessibility tree the
+// runner reads: Chromium's over the DevTools protocol, or the platform's own.
+const (
+	DesktopElectron = "electron"
+	DesktopMacOS    = "macos"
+)
 
 // Budget caps what one workflow may consume.
 type Budget struct {

@@ -41,6 +41,7 @@ func validate(m *schema.Manifest, doc *yaml.Node, root string) []Problem {
 	v.auth(m)
 	v.workflows(m)
 	v.terminalWorkflows(m)
+	v.desktop(m)
 	v.diversity(m)
 	v.invariants(m)
 	v.oracle(m)
@@ -1624,6 +1625,58 @@ func (v *validator) terminalWorkflows(m *schema.Manifest) {
 				}
 			}
 		}
+	}
+}
+
+// desktop ties the surface a workflow names to the application it is driven
+// in, which the schema cannot do because the two facts are in different parts
+// of the document.
+//
+// THE DEFECT THIS EXISTS FOR, and it is the last hop of the one this whole
+// seam was built to close. A workflow could say `surface: desktop`, the schema
+// accepted it, the validator passed it, the engine selected the desktop driver
+// and the runner refused the job for want of an application to open, AFTER an
+// environment had been built and paid for. The surface was nameable and the
+// run was dead. The bounds pass refuses a missing kind, an unknown kind and a
+// missing path straight from the published schema; what is here is the pair of
+// facts neither half can see alone.
+func (v *validator) desktop(m *schema.Manifest) {
+	drives := false
+	for i := range m.Workflows {
+		if m.Workflows[i].Surface == schema.SurfaceDesktop {
+			drives = true
+			break
+		}
+	}
+
+	// The two halves of the pairing, and they are different mistakes told
+	// apart on purpose. A workflow with no application cannot run at all. An
+	// application with no workflow is a block that will never be read, which
+	// is the quieter of the two and the one that looks like a working setting:
+	// somebody writes it, the run opens a browser instead, and nothing says
+	// the application they named was never launched.
+	if drives && m.Desktop == nil {
+		v.add("desktop",
+			"A workflow drives the desktop and no desktop application is declared.",
+			"Add a `desktop` block naming the application: its kind, electron or macos, and the path to it. There is no default the way there is a default address for a browser run.")
+	}
+	if m.Desktop == nil {
+		return
+	}
+	if !drives {
+		v.add("desktop",
+			"A desktop application is declared and no workflow drives it.",
+			"Give a workflow `surface: desktop`, or remove the `desktop` block: an application nothing opens is a setting somebody will believe they have made.")
+	}
+
+	// `process` belongs to a native application and nothing reads it for an
+	// Electron one, which is launched directly by its binary and never looked
+	// up by name. A field in the manifest that nothing reads is the same kind
+	// of dead promise as a surface nothing drives, one field wide.
+	if m.Desktop.Kind == schema.DesktopElectron && m.Desktop.Process != "" {
+		v.add("desktop.process",
+			"An Electron application carries a process name.",
+			"Remove it. `process` is how a native application is found after its bundle is opened, and an Electron application is launched directly, so nothing reads this.")
 	}
 }
 

@@ -9050,6 +9050,164 @@ that is not also available to a script reading that file.
 That also means the dashboard is honest about gaps. A pane that stays empty is
 a pane whose events nothing is emitting yet, not a pane that is broken.
 `,
+	"guides/desktop.md": `---
+title: Desktop workflows
+description: Driving a native macOS or Electron application through its accessibility tree, from the same manifest and the same run as the browser workflows.
+sidebar:
+  order: 27
+---
+
+A desktop workflow is one thing a person does in an application on their
+machine, written exactly the way a [browser workflow](/docs/guides/workflows)
+is: a goal, who does it, and what proves it happened.
+
+` + "`" + "`" + "`" + `yaml
+desktop:
+  kind: electron
+  application: ./node_modules/electron/dist/Electron.app/Contents/MacOS/Electron
+  args: ["./desktop"]
+
+workflows:
+  - name: sign-in
+    surface: desktop
+    persona: ada
+    description: >
+      Sign in to the ledger with the account's address and password, accept
+      the terms, and confirm you land on the signed in screen.
+    expect:
+      - "Welcome back"
+` + "`" + "`" + "`" + `
+
+Two blocks, because they answer two questions. ` + "`" + `surface: desktop` + "`" + ` on a
+workflow says what it drives. ` + "`" + `desktop` + "`" + ` says what the application is, once,
+because a manifest describes one product. A workflow that names the surface
+without the block is refused while the manifest is read, before an environment
+is built for a run that could never open anything.
+
+They run inside ` + "`" + `af test` + "`" + `, against the same environment the browser workflows
+run against, and their results are counted in the same verdict. A desktop
+workflow that fails is a failed check, exactly as a browser one is.
+
+## The accessibility tree is what is driven
+
+The application is read through its accessibility tree, the same thing a screen
+reader reads: the roles, the names, the labels and the values a person would be
+told about. Nothing in a workflow names a coordinate, a window position or a
+control's internal id, so a workflow survives a layout being redesigned and
+stops working only when the application stops saying what its controls are.
+
+That is why a desktop workflow looks like a browser one rather than like a
+macro. Underneath, the planner, the expectations, the retries and the verdict
+are the browser's, with a different tree under them.
+
+It also means an application that is hard for a screen reader to use is hard
+for Antifailure to drive, and the symptom is honest: a control with no
+accessible name is counted and reported as one nothing can reach.
+
+## ` + "`" + `kind` + "`" + `
+
+` + "`" + `electron` + "`" + ` covers anything built on Electron, which is most of the desktop
+software a team would want rehearsed. Underneath one is Chromium, so it
+publishes the same accessibility tree a web page does. ` + "`" + `application` + "`" + ` is the
+Electron binary itself: inside a packaged application that is the executable in
+` + "`" + `Contents/MacOS` + "`" + `, and in a project under development it is the one in
+` + "`" + `node_modules` + "`" + `. ` + "`" + `args` + "`" + ` is what it is given, usually the directory holding the
+project's ` + "`" + `package.json` + "`" + `.
+
+` + "`" + `macos` + "`" + ` covers a native application, read through the platform's own
+accessibility API. ` + "`" + `application` + "`" + ` is the ` + "`" + `.app` + "`" + ` bundle.
+
+` + "`" + "`" + "`" + `yaml
+desktop:
+  kind: macos
+  application: /Applications/Ledger.app
+  process: Ledger
+` + "`" + "`" + "`" + `
+
+` + "`" + `process` + "`" + ` is what macOS calls the running application when that is not the
+bundle's own name: Visual Studio Code.app runs as Code. It defaults to the
+bundle's name without ` + "`" + `.app` + "`" + `, which is right for most applications, and ` + "`" + `af
+explain` + "`" + ` prints the name that will actually be looked for. It exists because
+opening a bundle returns before the application is ready, so the process still
+has to be found afterwards. It belongs to a native application only, and an
+Electron one carrying it is refused rather than quietly ignored.
+
+The kind is stated rather than guessed from the path, because a wrong guess
+means an application driven the wrong way reports as an application that does
+not work.
+
+A native application needs the macOS Accessibility permission, which a person
+grants in System Settings and which nothing in software can grant for them. A
+run without it is reported as blocked, with that step named, and never as an
+application with no controls on it. A locked screen is the same answer for the
+same reason: macOS withholds every accessibility tree while the screen is
+locked, so the run says the screen was locked rather than guessing.
+
+## Signing in is a workflow
+
+There is no address bar to open and no cookie to set, so a desktop application
+is not signed into before the workflow starts. Signing in is itself a workflow:
+it types into the fields the application shows and presses what it says, the
+way a person does.
+
+The persona still names who is acting, so a report says which account a run was
+about and a manifest reads the same on both surfaces.
+
+## What to expect
+
+` + "`" + `expect` + "`" + ` is judged against the accessible text of the window: the headings,
+labels and static text a screen reader would announce. A quoted sentence is
+required on screen character for character.
+
+It is not judged against what the agent typed. A field's own value is left out
+of that text deliberately, because an expectation a workflow can satisfy by
+filling a box with its own answer is a check that cannot say no. An expectation
+naming an answer is still worth writing: with the value excluded it can only be
+met when the application rendered those words, which is exactly what a
+confirmation screen reading back an address is evidence of.
+
+## Budget
+
+The browser's own, because a desktop workflow is planned rather than written
+down: something decides what to press next, and a plan that never finishes has
+to be stopped by a count as well as by a clock.
+
+` + "`" + "`" + "`" + `yaml
+budget:
+  steps: 12
+` + "`" + "`" + "`" + `
+
+A workflow that runs out of steps is judged on the screen it reached, and
+blocked if that screen shows nothing either way, because running out of steps
+is not the application failing.
+
+## One run drives one surface
+
+The runner starts one driver and hands it the whole list, so the workflows in
+one manifest name one surface between them. A manifest whose workflows
+disagree is refused, naming both, rather than driving them all as whichever one
+won. Terminal workflows are the exception and live in their own list, because
+nothing is opened for them.
+
+` + "`" + `af test --only sign-in` + "`" + ` selects by name across every list, and names are
+unique across all of them for that reason.
+
+## What the report shows
+
+Each step is a step, in the order the agent took it, so the run's own report
+carries what was pressed and what was typed, and ` + "`" + `af watch` + "`" + ` prints them as they
+happen.
+
+There is no live video frame for this surface, and that is a decision rather
+than an omission. Recording a window on macOS goes through ScreenCaptureKit,
+whose stop path can lose the index a player needs and write a file that will
+not open. Shipping a recorder that sometimes produces an unplayable artifact is
+worse than shipping none, so the steps are the live cast here, exactly as they
+are for a [terminal workflow](/docs/guides/terminal).
+
+Related: [workflows](/docs/guides/workflows), [terminal
+workflows](/docs/guides/terminal), [personas](/docs/guides/personas).
+`,
 	"guides/django.md": `---
 title: Django
 description: Running Django's own migrations against a branch, and the three settings that decide whether it works.
@@ -13075,8 +13233,9 @@ Android is declared in the surface abstraction and is not built. A manifest may
 still name it, in a ` + "`" + `workflows` + "`" + ` entry's
 [` + "`" + `surface` + "`" + `](/docs/guides/workflows): it is refused by name, against the
 surfaces this build does carry, rather than returning a green verdict that
-tested nothing. Desktop and iOS are built and driveable, so naming either one
-runs it.
+tested nothing. [Desktop](/docs/guides/desktop) and iOS are built and
+driveable, so naming either one runs it; a desktop workflow also needs a
+` + "`" + `desktop` + "`" + ` block saying which application it is driven in.
 `,
 	"guides/webhooks.md": `---
 title: Webhooks
@@ -13427,6 +13586,13 @@ built. The runner says it again before it drives anything, so a surface nothing
 drove can never come back green. A workflow refused that way is blocked, which
 counts against nobody, and the workflows beside it still run.
 
+` + "`" + `surface: desktop` + "`" + ` also needs a
+[` + "`" + `desktop` + "`" + `](/docs/guides/desktop) block saying which application the workflow
+is driven in, because there is no default the way there is a default address
+for a browser run. A workflow that names the surface without one is refused
+while the manifest is read, rather than after an environment has been built for
+a run that could never open anything.
+
 Write a terminal workflow in
 [` + "`" + `terminal_workflows` + "`" + `](/docs/guides/terminal) rather than here. It needs a
 program to run where a browser workflow needs a persona to sign in as, so the
@@ -13437,6 +13603,7 @@ This is not ` + "`" + `change.rules[].surface` + "`" + `, which says what a chan
 says what a workflow DRIVES.
 
 Related: [agents](/docs/concepts/agents), [personas](/docs/guides/personas),
+[desktop workflows](/docs/guides/desktop),
 [terminal workflows](/docs/guides/terminal).
 `,
 	"index.md": `---
@@ -22914,6 +23081,7 @@ what it deliberately does not cover.
 | ` + "`" + `personas` + "`" + ` | list | Users the agents sign in as. |
 | ` + "`" + `workflows` + "`" + ` | list | What the agents do. |
 | ` + "`" + `terminal_workflows` + "`" + ` | list | What the agents do at a command line. |
+| ` + "`" + `desktop` + "`" + ` | block | The application the workflows driving the desktop surface are driven in. |
 | ` + "`" + `invariants` + "`" + ` | list | Statements about the data that must stay true. |
 | ` + "`" + `insights` + "`" + ` | block | The Postgres native checks. |
 | ` + "`" + `change` + "`" + ` | block | Path rules for [change analysis](/docs/concepts/change-analysis), for a layout the built in rules do not predict. |
@@ -23159,6 +23327,25 @@ A ` + "`" + `workflows` + "`" + ` entry names what it drives with
 [` + "`" + `surface` + "`" + `](/docs/guides/workflows), one of ` + "`" + `web` + "`" + `, ` + "`" + `terminal` + "`" + `, ` + "`" + `desktop` + "`" + `, ` + "`" + `ios` + "`" + `
 or ` + "`" + `android` + "`" + `, defaulting to ` + "`" + `web` + "`" + `. All five may be written; a build refuses the
 ones it carries no driver for, by name.
+
+## ` + "`" + `desktop` + "`" + `
+
+Which application the workflows driving the desktop surface are driven in,
+declared once because a manifest describes one product. It is what ` + "`" + `base_url` + "`" + `
+is to a browser run: the workflows say what to do and this says what to do it
+to. A workflow with ` + "`" + `surface: desktop` + "`" + ` and no block here is refused, and so is
+a block here that no workflow drives.
+
+| Key | Type | Notes |
+| --- | --- | --- |
+| ` + "`" + `kind` + "`" + ` | string | Required. ` + "`" + `electron` + "`" + ` or ` + "`" + `macos` + "`" + `, which decides which accessibility tree is read. Stated rather than guessed from the path. |
+| ` + "`" + `application` + "`" + ` | string | Required. The Electron binary, or the ` + "`" + `.app` + "`" + ` bundle for a native application. Relative to the directory holding the manifest. |
+| ` + "`" + `args` + "`" + ` | list | Its arguments, one per entry, passed as written and never through a shell. |
+| ` + "`" + `process` + "`" + ` | string | What macOS calls the running application when that is not the bundle's name. Native only, and refused on ` + "`" + `electron` + "`" + `. Defaults to the bundle's name without ` + "`" + `.app` + "`" + `. |
+
+[Desktop workflows](/docs/guides/desktop) is the guide, including what a
+native application needs granted, why signing in is a workflow, and what the
+report carries instead of video.
 
 ## ` + "`" + `database` + "`" + `
 
@@ -24750,6 +24937,7 @@ This page is generated from ` + "`" + `schemas/manifest.v1.json` + "`" + `. Edit
 | ` + "`" + `change` + "`" + ` | [Change](#change) | no | How a pull request's diff is classified. |
 | ` + "`" + `database` + "`" + ` | [Database](#database) | no | Where the environment's Postgres comes from, and how the production copy is made safe before anyone can branch from it. |
 | ` + "`" + `datastores` + "`" + ` | list of [Datastore](#datastore) | no | Every store the environment holds, and what is done about each one's contents. The database: block above normalizes into the entry named primary, so a manifest that declares only database: already has this list and does not have to write it. A stance is declared rather than defaulted, because an empty ClickHouse nobody chose looks exactly like an empty ClickHouse somebody decided on. Max items 25. |
+| ` + "`" + `desktop` + "`" + ` | [Desktop application](#desktop-application) | no | Which application the desktop workflows drive, declared once because a manifest describes one product. |
 | ` + "`" + `diversity` + "`" + ` | [Diversity](#diversity) | no | Behavioral variance for the agents that drive the workflows. |
 | ` + "`" + `egress` + "`" + ` | [Egress](#egress) | no | What the environment may reach on the network. |
 | ` + "`" + `explore` + "`" + ` | [Explore](#explore) | no | Agents that pursue a goal with no declared workflow, discover the paths an application offers, and report where it costs somebody effort without failing. |
@@ -24915,6 +25103,21 @@ One topic a topics_only broker is created with. An empty broker is not a twin of
 | ` + "`" + `consumer_groups` + "`" + ` | list of string | no | The groups created against this topic, with their offsets committed to the earliest message and nothing behind them. Created rather than left to appear on their own, because a consumer joining a group nobody created reads from the END by default, so the twin's first run of a consumer silently skips everything the twin's own producers wrote before it started. Max items 100. |
 | ` + "`" + `name` + "`" + ` | string | **yes** | The topic, named the way production names it. Unique within the store. Max length 249, matches ` + "`" + `^[a-zA-Z0-9._-]{1,249}$` + "`" + `. |
 | ` + "`" + `partitions` + "`" + ` | integer | no | How many partitions the topic is created with. Not cosmetic: ordering is per partition and a consumer group with more members than partitions leaves members idle, so a twin whose topic has one partition where production has twelve cannot reproduce a reordering bug at all. Defaults to ` + "`" + `1` + "`" + `. Minimum 1, maximum 10000. |
+
+## Desktop application
+
+Which application the desktop workflows drive, declared once because a manifest describes one product. It is what ` + "`" + `base_url` + "`" + ` is to a browser run: a workflow says what to do and this says what to do it to.
+
+Required by a manifest that has one. A workflow whose ` + "`" + `surface` + "`" + ` is ` + "`" + `desktop` + "`" + ` names no application of its own, because a list whose entries each name their own would be a list of unrelated runs sharing one report, with nothing in it saying which of them the change under review was about. So the application is declared here, once, and a manifest that asks for the desktop surface without it is refused while the manifest is read, before an environment is built for a run that could never open anything.
+
+The application is driven through its ACCESSIBILITY TREE, the same thing a screen reader reads, which is why a desktop workflow is written exactly like a browser one: a goal, a persona, and what proves it happened. Nothing here names a coordinate, a window position or a control's internal id.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| ` + "`" + `application` + "`" + ` | string | **yes** | What to launch. For ` + "`" + `electron` + "`" + `, the Electron binary itself, which inside a packaged application is the executable in Contents/MacOS and in a project under development is the one in node_modules. For ` + "`" + `macos` + "`" + `, the .app bundle. Relative paths are resolved against the directory holding the manifest, because the runner is a subprocess started from somewhere the manifest never mentions and a path resolved there would name a different file. Min length 1, max length 512. |
+| ` + "`" + `args` + "`" + ` | list of string | no | The arguments, one per entry. Passed as written and never through a shell, so a space in a value is part of that value. An Electron project under development is usually launched by passing the directory holding its package.json. A native application is given these after its bundle is opened. Max items 64. |
+| ` + "`" + `kind` + "`" + ` | ` + "`" + `electron` + "`" + `, ` + "`" + `macos` + "`" + ` | **yes** | Which kind of application this is, and so which accessibility tree it publishes.  ` + "`" + `electron` + "`" + ` covers anything built on Electron, which is most of the desktop software a team would want rehearsed: VS Code, Slack, Discord. Underneath one is Chromium, so it publishes the same accessibility tree a web page does.  ` + "`" + `macos` + "`" + ` covers a native application, read through the platform's own accessibility API. It needs the macOS Accessibility permission, which a person grants in System Settings and which nothing in software can grant. A run without it is reported as blocked with that step named, never as an application with no controls on it.  Stated rather than guessed from the path, because guessing would mean an application that is driven the wrong way reports as an application that does not work. |
+| ` + "`" + `process` + "`" + ` | string | no | What macOS calls the running application, when that is not the bundle's own name. Only for ` + "`" + `macos` + "`" + `, and refused on ` + "`" + `electron` + "`" + `, which is launched directly and never looked up.  It exists because opening a bundle returns before the application is ready, so the process still has to be found by name, and the two names are not always the same: Visual Studio Code.app runs as Code. Defaults to the bundle's name without .app, which is right for most applications. Min length 1, max length 128. |
 
 ## Diversity
 
