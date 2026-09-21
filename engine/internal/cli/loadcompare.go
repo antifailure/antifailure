@@ -13,6 +13,7 @@ import (
 
 	"github.com/antifailure/antifailure/engine/internal/env"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/internal/load"
 	"github.com/antifailure/antifailure/engine/internal/manifest"
 	"github.com/antifailure/antifailure/engine/internal/workload"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
@@ -45,6 +46,10 @@ type LoadCompareJSON struct {
 	BaselineTornDown bool     `json:"baseline_torn_down"`
 	BaselineBranch   string   `json:"baseline_branch,omitempty"`
 	Notes            []string `json:"notes"`
+	// Rounds is every round's p95 per route on both sides, which is what each
+	// route's change and interval were computed from. Published so that the
+	// interval can be recomputed by hand, rather than taken on trust.
+	Rounds []workload.RoundP95 `json:"rounds,omitempty"`
 }
 
 type loadCompareSideJSON struct {
@@ -179,6 +184,13 @@ af load compare --seed 7 --keep`),
 			if err != nil {
 				return err
 			}
+			// Round against round wherever there are rounds to pair. The
+			// pooled comparison above is kept only for the run wide measures
+			// and for a single pass, whose notes say what it cannot see.
+			rounds := roundP95s(res)
+			if len(rounds) >= 2 {
+				workload.ResolveByRounds(comparison, rounds)
+			}
 			comparison.Notes = append(comparison.Notes, res.Notes...)
 
 			thresholds := comparisonThresholds(cfg)
@@ -194,6 +206,7 @@ af load compare --seed 7 --keep`),
 					BaselineTornDown: res.BaselineTornDown,
 					BaselineBranch:   res.BaselineBranch,
 					Notes:            comparison.Notes,
+					Rounds:           rounds,
 				}
 				if err := e.Out.JSON(doc); err != nil {
 					return err
@@ -209,6 +222,7 @@ af load compare --seed 7 --keep`),
 					Candidate: loadCompareSideJSON{Rev: res.CandidateRev},
 					Golden:    res.Golden, BaselineTornDown: res.BaselineTornDown,
 					BaselineBranch: res.BaselineBranch, Notes: comparison.Notes,
+					Rounds: rounds,
 				}
 				body, merr := json.MarshalIndent(doc, "", "  ")
 				if merr != nil {
@@ -244,6 +258,36 @@ af load compare --seed 7 --keep`),
 	// file literally named json.
 	cmd.Flags().StringVar(&output, "report", "", "Write the comparison here as well as to the terminal")
 	return cmd
+}
+
+// roundP95s pairs the two sides' rounds, round k with round k, as each route's
+// p95 in that round. A route a round did not send, or sent only failures to,
+// is absent from that round rather than recorded as zero, because a zero
+// would enter the log ratio as an infinitely fast round.
+func roundP95s(res *env.LoadCompareResult) []workload.RoundP95 {
+	n := len(res.BaselineRounds)
+	if len(res.CandidateRounds) < n {
+		n = len(res.CandidateRounds)
+	}
+	perRoute := func(r *load.Result) map[string]float64 {
+		out := map[string]float64{}
+		if r == nil {
+			return out
+		}
+		for _, rr := range r.Routes {
+			if rr.Latency.P95Ms > 0 {
+				out[rr.Route] = rr.Latency.P95Ms
+			}
+		}
+		return out
+	}
+	out := make([]workload.RoundP95, 0, n)
+	for k := 0; k < n; k++ {
+		out = append(out, workload.RoundP95{
+			Base: perRoute(res.BaselineRounds[k]), Candidate: perRoute(res.CandidateRounds[k]),
+		})
+	}
+	return out
 }
 
 // noWarmup is whether the person asked for no warm-up.

@@ -229,6 +229,12 @@ func judgeRouteP95(c *Comparison, limit float64) []ComparisonVerdict {
 					"p95 went from %.3gms on the base branch to %.3gms on this one, "+
 						"%.1f percent slower against a limit of %.1f percent",
 					*r.P95Baseline, *r.P95Candidate, ratio*100, limit*100)
+				if r.Resolution.hasInterval() {
+					v.Detail += fmt.Sprintf(", and across %d rounds the change lies between "+
+						"%.1f and %.1f percent, all of it above the limit",
+						r.Resolution.Rounds, *r.Resolution.ChangeLow*100,
+						*r.Resolution.ChangeHigh*100)
+				}
 			}
 		}
 		rows = append(rows, v)
@@ -252,6 +258,9 @@ func judgeRouteP95(c *Comparison, limit float64) []ComparisonVerdict {
 // are a longer run and a quieter machine. The sample count is named because it
 // is the lever the reader actually has.
 func unresolvableDetail(r RouteDifference, observed, limit float64) string {
+	if r.Resolution.Method == ResolutionRounds {
+		return roundsUnresolvableDetail(r.Resolution, observed, limit)
+	}
 	sent := 0
 	if r.SentBaseline != nil {
 		sent = *r.SentBaseline
@@ -278,6 +287,23 @@ func unresolvableDetail(r RouteDifference, observed, limit float64) string {
 		detail += ". " + r.Resolution.Detail
 	}
 	return detail + ". Send for longer, or on a quieter machine"
+}
+
+// roundsUnresolvableDetail says the same for a change measured round against
+// round, with the number a reader can act on: the smallest change this host
+// could have resolved on this route at this many rounds.
+func roundsUnresolvableDetail(res RouteResolution, observed, limit float64) string {
+	if !res.hasInterval() {
+		return res.Detail + ". Send for longer, so every route reaches every round"
+	}
+	return fmt.Sprintf(
+		"measured round against round across %d rounds, the change is %.1f percent and "+
+			"the true value lies between %.1f and %.1f percent; the limit of %.1f sits "+
+			"inside that, so neither a pass nor a breach would have meant anything. On "+
+			"this host, at this many rounds, this route can resolve a change of about "+
+			"%.0f percent. Send for longer, run more rounds, or use a quieter machine",
+		res.Rounds, observed*100, *res.ChangeLow*100, *res.ChangeHigh*100, limit*100,
+		*res.SmallestVisible*100)
 }
 
 // bandOf is the wider of the two sides' half widths, which is the one a reader

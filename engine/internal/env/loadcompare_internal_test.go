@@ -204,11 +204,13 @@ func TestComparePlanFor(t *testing.T) {
 func TestTheNotesDescribeHowTheRunWasSent(t *testing.T) {
 	single := loadCompareNotes(&LoadCompareResult{Rounds: 1, Golden: "gv_x"})
 	require.Contains(t, single[0], "measured once each")
-	require.Contains(t, single[1], "no warm-up was sent")
+	require.Contains(t, single[1], "cannot see the noise between two runs")
+	require.Contains(t, single[2], "no warm-up was sent")
 
 	many := loadCompareNotes(&LoadCompareResult{Rounds: 8, RoundDuration: 4 * time.Second,
 		Warmup: 10 * time.Second, Golden: "gv_x"})
 	require.Contains(t, many[0], "8 rounds of 4s")
 	require.NotContains(t, many[0], "measured once each")
-	require.Contains(t, many[1], "10s of the same mix and that was discarded")
+	require.Contains(t, many[1], "measured round against round")
+	require.Contains(t, many[2], "10s of the same mix and that was discarded")
 }

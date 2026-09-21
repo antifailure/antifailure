@@ -33,29 +33,29 @@ import (
 // that its golden is the one to pin, which also means a scheduled golden
 // refresh landing mid comparison cannot separate the two sides.
 //
-// ORDER AND COLD START, and why each side is sent in rounds. The first version
-// sent the whole mix at the base branch and then the whole mix at this build.
-// On 2026-09-21 that reported GET /health, identical code on both sides, as 93
-// percent FASTER on the branch, beyond the resolution gate's own band of 51
-// percent, and every other route the same way. The resolution gate models the
-// noise inside one run and it modelled it correctly; this was not noise. The
-// base environment had just been brought up for the comparison and was
-// measured first and cold, while this build's environment had been serving for
-// an hour. A bias that lands on one side every time cannot be averaged away by
-// sending for longer. So now:
+// ROUNDS, AND WHAT THEY WERE FOR. The first version sent the whole mix at the
+// base branch and then the whole mix at this build. On 2026-09-21 that
+// reported GET /health, identical code on both sides, as 93 percent faster on
+// the branch, beyond the resolution band's 51 percent. The first explanation
+// was a cold base measured first, and it did not survive measurement: a
+// freshly brought up environment answered GET /health at a 4 millisecond
+// median in its first five seconds, and ten comparisons on identical and on
+// regressed code moved routes in BOTH directions by up to four fold. The cause
+// was the noise between runs, which the single run band cannot see; see
+// workload/compareresolution_rounds.go. So now:
 //
-//   - each side is first sent the same mix for a warm-up that is discarded,
-//     so a freshly branched database and a freshly started service are not
-//     measured answering from cold caches and an empty connection pool;
+//   - each side is first sent the same mix for a short warm-up that is
+//     discarded, which takes the first request of every route, the one that
+//     opens a connection and fills a cache, out of the numbers;
 //   - then each side is sent the mix in eight short rounds, interleaved so
-//     that neither side always goes first, and a host warming or cooling
-//     across the comparison lands on both sides instead of on whichever went
-//     second. See DefaultCompareRounds for why eight;
-//   - round k uses the same seed on both sides, so the two sides are still
-//     sent the same request sequence round for round;
-//   - each side's rounds are pooled back into one result by load.Merge, from
-//     the samples and never by averaging percentiles, and everything after
-//     that, the difference, the resolution and the verdict, is unchanged.
+//     that neither side always goes first, with round k sent under the same
+//     seed at both;
+//   - each route's change and its interval are measured ROUND AGAINST ROUND
+//     from those pairs, so the interval is as wide as the host's own noise
+//     between rounds, and the verdict places that interval against the limit
+//     by the rule #540 settled;
+//   - each side's rounds are also pooled by load.Merge, from the samples and
+//     never by averaging percentiles, for the run wide measures.
 //
 // WHAT IT STILL CANNOT CONTROL, said here rather than left for a reader to
 // discover. The rounds are sequential, not simultaneous, because two
@@ -142,6 +142,12 @@ type LoadCompareResult struct {
 	// BaselineTornDown reports the base environment was removed. False with no
 	// error is a leak the caller names, with the exact command to finish it.
 	BaselineTornDown bool
+	// BaselineRounds and CandidateRounds are each side's rounds before they
+	// were pooled, in round order, so that round k of each is a pair sent the
+	// same request sequence back to back. The per route change and its
+	// interval are measured on these pairs, not on the pooled results.
+	BaselineRounds  []*load.Result
+	CandidateRounds []*load.Result
 	// Rounds, RoundDuration and Warmup are how each side was sent, for the
 	// notes and for a reader deciding whether to believe a difference.
 	Rounds        int
@@ -280,6 +286,7 @@ func (o *Orchestrator) LoadCompare(
 	}
 
 	result.Baseline, result.Candidate = got.base, got.cand
+	result.BaselineRounds, result.CandidateRounds = got.baseRounds, got.candRounds
 	result.Notes = loadCompareNotes(result)
 	return result, nil
 }
@@ -304,8 +311,19 @@ func (o *Orchestrator) LoadCompare(
 const DefaultCompareRounds = 8
 
 // DefaultCompareWarmup is how long each side is sent the mix, and discarded,
-// before anything is recorded. See the evidence in comparePlanFor.
-const DefaultCompareWarmup = 10 * time.Second
+// before anything is recorded.
+//
+// Five seconds, from a probe rather than from taste. A freshly brought up
+// environment was sent GET /health and GET /accounts/7/balance every hundred
+// milliseconds for a minute from the moment `af up` returned. Its median in
+// the first five seconds was 4.0 and 3.9 milliseconds, no slower than any
+// later five, so there was no cold start to wait out. The one reading that
+// stood out was the slowest single request of the first five seconds, 96.8
+// milliseconds on the balance route against 21 to 80 in every later window:
+// the first request of a route, the one that opens a connection and fills a
+// cache. Five seconds sends every route of a small mix at least once and
+// discards it. A longer warm-up measured nothing further worth discarding.
+const DefaultCompareWarmup = 5 * time.Second
 
 // defaultLoadDuration is what load.Run sends for when nothing names a
 // duration, restated here because the comparison has to split a known total
@@ -390,6 +408,7 @@ type compareSender[R any] func(ctx context.Context, side compareSide, d time.Dur
 // interleavedResult is each side's rounds, pooled.
 type interleavedResult[R any] struct {
 	base, cand               R
+	baseRounds, candRounds   []R
 	baseRefused, candRefused []load.Route
 }
 
@@ -436,6 +455,7 @@ func interleaved[R any](
 		}
 		rounds[side] = append(rounds[side], res)
 	}
+	out.baseRounds, out.candRounds = rounds[sideBase], rounds[sideCandidate]
 	var err error
 	if out.base, err = merge(rounds[sideBase]...); err != nil {
 		return out, fmt.Errorf("pooling the base branch's rounds: %w", err)
@@ -470,6 +490,18 @@ func loadCompareNotes(r *LoadCompareResult) []string {
 			"spikes during one round, and the rounds are sequential rather than simultaneous "+
 			"because two environments sending at once would contend with each other",
 			r.Rounds, r.RoundDuration))
+	}
+	if r.Rounds >= 2 {
+		notes = append(notes, "each route's change is measured round against round: the "+
+			"p95 columns are each side's per round p95s averaged on a log scale, and the "+
+			"interval around the change comes from how much the rounds disagreed with each "+
+			"other, which includes the host's own noise between rounds; a route that too few "+
+			"rounds sent on both sides is left unresolved rather than judged")
+	} else {
+		notes = append(notes, "with one round each, the only resolution available is the "+
+			"single run band, which models how far a p95 could land from itself inside one "+
+			"run and cannot see the noise between two runs; on the host this change was "+
+			"measured on, that band labelled a build that differed by a comment as regressed")
 	}
 	if r.Warmup > 0 {
 		notes = append(notes, fmt.Sprintf("each side was first sent %s of the same mix and "+
