@@ -77,3 +77,22 @@ func TestParse_AMobileApplicationAndItsWorkflowAreAccepted(t *testing.T) {
 	require.Equal(t, "./build/Ledger.app", m.Mobile.App)
 	require.Equal(t, schema.SurfaceIOS, m.Workflows[0].Surface)
 }
+
+// Android is a phone too, and the pairing has to say so on the day this build
+// can drive it. Today it cannot, so the manifest is also refused for naming a
+// surface with no driver, and the validator reports every problem it finds:
+// both refusals are asserted, so the pairing is proved alive for android now
+// rather than discovered missing when the driver lands.
+func TestParse_AnAndroidWorkflowWithNoApplicationIsRefusedForThatToo(t *testing.T) {
+	t.Parallel()
+	_, err := parse(t, withPersonas+`workflows:
+  - name: read-the-journal-on-android
+    surface: android
+    description: Open the journal on the phone and check that it lists transfers.
+    persona: alice
+    expect: ["transfer.posted"]
+`)
+	msg := messages(problems(t, err))
+	require.Contains(t, msg, "A workflow drives a phone and no mobile application is declared.")
+	require.Contains(t, msg, `drives "android", and this build has no driver for it`)
+}

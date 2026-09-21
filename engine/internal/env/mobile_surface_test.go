@@ -122,3 +122,14 @@ func TestTest_APhoneRunIsBuiltWithItsApplication(t *testing.T) {
 	require.Contains(t, string(body), "Mobile:    o.mobileApp(workflows),",
 		"Orchestrator.Test no longer fills the phone application, so a phone run reaches the runner with no application")
 }
+
+// Android is a phone as far as the document is concerned: the runner's
+// MobileDoc serves both, reading the package name from the same `id`.
+func TestMobileApp_AnAndroidRunCarriesItsApplicationToo(t *testing.T) {
+	w := aPhoneWorkflow("read")
+	w.Surface = schema.SurfaceAndroid
+	o := orchestratorFor(t, t.TempDir(), mobileManifest(&schema.MobileApplication{ID: "com.example.ledger"}, w))
+	app := o.mobileApp(o.workflowDocs(nil))
+	require.NotNil(t, app, "an android workflow sent no application")
+	require.Equal(t, "com.example.ledger", app.ID)
+}
