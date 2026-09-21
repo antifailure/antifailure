@@ -2659,7 +2659,7 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 128,
-          "description": "Which device to drive: a simulator's UDID, or a device's serial on Android. Leave it out to use the booted one, or the newest one available. `xcrun simctl list devices available` lists the simulators on a Mac."
+          "description": "Which device to drive: a simulator's identifier, as `xcrun simctl list devices available` prints it, or a device's serial on Android. Leave it out to use the booted one, or the newest one available."
         }
       }
     },

@@ -26207,7 +26207,7 @@ Required by a manifest that names a phone surface at all, and refused by one tha
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | ` + "`" + `app` + "`" + ` | string | no | The built application to install before it is driven: a ` + "`" + `.app` + "`" + ` built for the simulator on iOS, or an ` + "`" + `.apk` + "`" + ` on Android. Relative paths are resolved against the directory holding the manifest, because the runner is started from somewhere the manifest never mentions. Leave it out to drive an application already installed on the device. Min length 1, max length 512. |
-| ` + "`" + `device` + "`" + ` | string | no | Which device to drive: a simulator's UDID, or a device's serial on Android. Leave it out to use the booted one, or the newest one available. ` + "`" + `xcrun simctl list devices available` + "`" + ` lists the simulators on a Mac. Min length 1, max length 128. |
+| ` + "`" + `device` + "`" + ` | string | no | Which device to drive: a simulator's identifier, as ` + "`" + `xcrun simctl list devices available` + "`" + ` prints it, or a device's serial on Android. Leave it out to use the booted one, or the newest one available. Min length 1, max length 128. |
 | ` + "`" + `id` + "`" + ` | string | **yes** | The application's identifier: its bundle identifier on iOS, such as ` + "`" + `com.example.ledger` + "`" + `, or its package name on Android. The one thing that cannot be guessed, so the one thing required. Min length 1, max length 255. |
 
 ## Oracle
