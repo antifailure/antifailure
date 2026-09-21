@@ -484,6 +484,21 @@ export const MCP_TOOLS: readonly McpToolFact[] = [
     servedBy: 'engine/internal/mcp/tools_sqlload.go:newRunSQLWorkloadTool',
   },
   {
+    name: 'run_chaos_faults',
+    does:
+      'Answer what this system does when it stops working rather than what it does when it ' +
+      'works. It injects the faults the project\'s manifest declares into the running ' +
+      'environment, one at a time and each undone before the next, and around a fault aimed at ' +
+      'the database it proves that every acknowledged commit survived, that no row appeared ' +
+      'that no client wrote, and that the write ahead log really replayed.',
+    refuses:
+      'Its arguments name no fault kind, target, process, signal or duration, so a caller ' +
+      'cannot choose what to break: the faults come from the manifest\'s chaos block, nothing ' +
+      'is aimed anywhere but at the containers the environment created, and an unknown field ' +
+      'is refused rather than ignored.',
+    servedBy: 'engine/internal/mcp/tools_chaos.go:newRunChaosFaultsTool',
+  },
+  {
     name: 'search_documentation',
     does:
       'Search the 92 pages this build ships and return the few lines that answer the question, ' +

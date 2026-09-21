@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/antifailure/antifailure/engine/internal/egress"
+	"github.com/antifailure/antifailure/engine/internal/env"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/gate"
 	"github.com/antifailure/antifailure/engine/internal/insights"
@@ -255,7 +256,7 @@ func gateError(f report.Finding) error {
 		// have found something it never looked at.
 		if strings.HasPrefix(f.Rule, chaosPrefix) {
 			code := aferrors.AFCHS008
-			if unverifiedRule(f.Rule) {
+			if env.UnverifiedRule(f.Rule) {
 				code = aferrors.AFCHS009
 			}
 			return aferrors.Coded(code, "fault", f.Where, "detail", f.Title)

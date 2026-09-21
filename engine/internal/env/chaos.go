@@ -307,6 +307,55 @@ const (
 	RuleFaultNotUndone = "chaos.fault.not_undone"
 )
 
+// Holds reads a run's findings for the two answers a caller needs.
+//
+// Two answers rather than one, and the second is not the negation of the
+// first. Held says nothing was found to be wrong. Verified says the run
+// established what it set out to. A run that is held and not verified has not
+// passed, it has not looked, and collapsing the two is the exact defect this
+// whole feature exists to catch in somebody else's system.
+//
+// It lives beside the run rather than on a surface because there is more than
+// one surface now. A run that fails at a terminal and passes through an agent
+// would be worse than one that fails in both places, and two copies of this
+// loop is all it would take.
+func (r *ChaosRun) Holds() (held, verified bool) {
+	held, verified = true, true
+	for _, f := range r.Findings {
+		if f.Level == report.LevelFail {
+			held = false
+		}
+		// Read from the rule and not from the level, deliberately. A project
+		// that set chaos_unverified to ignore has chosen not to be stopped by
+		// an unverified run; it has not thereby made the run verified, and
+		// every surface says so either way.
+		if UnverifiedRule(f.Rule) {
+			verified = false
+		}
+	}
+	return held, verified
+}
+
+// UnverifiedRule reports whether a rule means "I could not look" rather than
+// "I looked and it is wrong".
+//
+// A list rather than a level, because the level is a policy choice: a project
+// that raised chaos_unverified to fail has not thereby turned an unverified
+// run into a verified one.
+//
+// The names come from the packages that own them rather than from string
+// literals. A literal here and a constant there drift silently, and the drift
+// would read as a run that could not look reporting itself as one that did.
+func UnverifiedRule(rule string) bool {
+	switch rule {
+	case pgcrash.RuleNoCrash, pgcrash.RuleNoReplay, pgcrash.RuleControlUnreadable,
+		pgcrash.RuleAmcheckUnavailable, pgcrash.RuleChecksumsOff,
+		pgcrash.RuleInconsistentLedger, RuleFaultRefused, RuleFaultNotUndone:
+		return true
+	}
+	return false
+}
+
 // faultFrom turns a manifest fault into the one the injector runs.
 func faultFrom(f schema.Fault) fault.Fault {
 	target := fault.Target{Role: fault.RoleDatabase}

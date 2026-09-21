@@ -440,6 +440,54 @@ is about `load.thresholds` over HTTP routes, and `af load sql` exits non zero on
 a SQL breach regardless of it, so a tool that ranked one at that level would
 pass a run the command line fails.
 
+### `run_chaos_faults`
+
+Injects the faults the manifest's [`chaos` block](/docs/guides/chaos) declares
+into the running environment, one at a time and each undone before the next
+begins, and reports what the system did about each one. This is `af chaos` on
+this surface.
+
+Every other tool here rehearses a change against a system that WORKS. A
+migration runs, traffic is sent, a browser is driven, an invariant is checked,
+and each of them measures a healthy environment doing what it does. Use this one
+for a change whose whole value is what happens during a failure: a storage
+parameter, a checkpoint or fsync setting, a replication option, a retry path.
+
+The faults are real. A process is killed with SIGKILL, a container is stopped,
+frozen or detached from the network, a data directory is made read only, a
+filesystem is filled. Nothing is simulated, and nothing is aimed anywhere but at
+the containers this environment created: the target is resolved from the labels
+the runtime stamped at create time, the ownership is proved again from the
+daemon at the instant of the act, and the egress sidecar is refused whatever a
+fault asks for.
+
+This call cannot choose what gets broken, and that is the point rather than an
+omission. Its arguments carry no fault kind, no target, no process name, no
+signal and no duration. The faults are the ones the manifest declares, which is
+a document a person wrote and committed, and they run in the order it lists
+them. The same rule the rest of this server runs on matters most on the one tool
+whose job is to break something.
+
+Around a fault aimed at the database, the durability proof runs. Concurrent
+writers commit while the fault lands, and afterwards every commit the client was
+TOLD was committed has to still be there, nothing may be there that no client
+ever wrote, and the write ahead log has to show it really replayed, read from
+the server's own log, its control file and its WAL positions. A database that
+came back up is not a database that kept your commits, and "it recovered" is
+true of both.
+
+HELD and VERIFIED are two answers and the result carries both. Held says nothing
+was found to be wrong. Verified says the run established what it set out to. A
+run that could not establish its claim is `INCONCLUSIVE` and never a pass: a
+crash that could not be shown to have happened, a replay that could not be read,
+checksums that are off so a torn page would not have been noticed, a fault that
+would not go in or would not come out. A project that declares no `chaos` block
+is `INCONCLUSIVE` too, rather than a pass over faults that do not exist, and so
+is a declared block that injected nothing.
+
+The verdict comes from the same classifier `af chaos` calls, so a run that fails
+at a terminal cannot pass through an agent.
+
 ### `run_browser_workflows`
 
 Drives the manifest's declared workflows, the browser ones through a real
