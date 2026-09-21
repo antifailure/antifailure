@@ -23990,14 +23990,27 @@ and four modules under it names one. The modules a stack calls are building
 blocks, and naming them here points the comparison at a library rather than at
 the thing built from it.
 
-**A directory that exists and holds no Terraform is refused.** Mistyping the
-last segment of a deep path usually lands on a directory that is really there,
-because the parent and its siblings are real, so an existence check alone says
-yes. "There is a directory here" and "there is a stack here" are different
-facts. Terraform counts ` + "`" + `.tf` + "`" + ` and ` + "`" + `.tf.json` + "`" + `, and only in the directory itself:
-a ` + "`" + `.tf` + "`" + ` file three levels down belongs to a module the stack calls, and
-accepting a parent because something nested under it has Terraform in it would
-accept the repository root of every repository that has any.
+**A directory that exists and holds nothing the source can read is refused.**
+Mistyping the last segment of a deep path usually lands on a directory that is
+really there, because the parent and its siblings are real, so an existence
+check alone says yes. "There is a directory here" and "there is a stack here"
+are different facts.
+
+It looks only in the directory itself: a ` + "`" + `.tf` + "`" + ` file three levels down belongs to
+a module the stack calls, and accepting a parent because something nested under
+it has Terraform in it would accept the repository root of every repository that
+has any.
+
+For ` + "`" + `terraform` + "`" + ` it counts ` + "`" + `.tf` + "`" + ` and any ` + "`" + `.json` + "`" + `. The second is deliberate and
+generous. The reader's best input is the output of ` + "`" + `terraform show -json` + "`" + `, which
+is the fully resolved form, so a stack directory may legitimately hold a plan
+and no configuration at all, and a ` + "`" + `.tf` + "`" + ` only rule would refuse exactly the
+input that produces the best answer. Telling a plan from a state file somebody
+renamed needs the file's own contents, which is the reader's job rather than
+this check's, so a directory holding an unrelated JSON file is accepted here and
+the reader reports honestly that it found nothing in it. That is the direction
+to be wrong in: accepting a directory the reader finds nothing in costs one
+empty answer, and refusing one it would have read blocks correct work.
 
 **The list of sources carries exactly the tools a reader exists for.** A value
 the manifest accepted and nothing could read would look like a configured
@@ -25463,7 +25476,7 @@ One directory that declares part of production, and how it is read. Every key be
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| ` + "`" + `path` + "`" + ` | string | **yes** | The stack's directory, relative to the repository root. It must exist, must be a directory, and must hold at least one file the named source can read, because a directory that is there and a stack that is there are different facts and a mistyped deep path usually satisfies the first. Min length 1, max length 512. |
+| ` + "`" + `path` + "`" + ` | string | **yes** | The stack's directory, relative to the repository root. It must exist, must be a directory, and must hold at least one file the named source can read, because a directory that is there and a stack that is there are different facts and a mistyped deep path usually satisfies the first. For terraform that is a .tf file or any .json, the second because a fully resolved plan is the best input there is and a stack may hold one and no configuration at all. Min length 1, max length 512. |
 | ` + "`" + `source` + "`" + ` | ` + "`" + `terraform` + "`" + ` | **yes** | Which tool declares this stack. The list carries exactly the tools a reader exists for, because a source accepted here that nothing can read would look like a configured feature and behave like a missing one. OpenTofu writes the same language and is read by the same reader, so terraform is the value for both. |
 | ` + "`" + `var_files` + "`" + ` | list of string | no | The variable files that describe production, relative to the repository root, in the order they would be passed. Every entry must exist. They are what turns a variable with no default from a value decided outside the configuration into one that can be read here. Max items 20. |
 | ` + "`" + `workspace` + "`" + ` | string | no | Which workspace holds production, for a stack that separates its environments that way. It is read rather than selected: nothing here runs Terraform, and the name is what lets an expression mentioning terraform.workspace resolve to a value instead of being reported as unreadable. Max length 128, matches ` + "`" + `^[A-Za-z0-9_-]+$` + "`" + `. |

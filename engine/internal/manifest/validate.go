@@ -2403,10 +2403,29 @@ func (v *validator) infraStackIsEmpty(p string, source schema.InfraSource) (stri
 //
 // A source with no entry here is never reported empty rather than always
 // reported empty, so a source whose reader lands before this list is updated
-// costs a check rather than refusing every manifest that names it.
+// costs a check rather than refusing every manifest that names it. That is the
+// direction this whole function errs in, deliberately: a check here that
+// refuses a directory the reader would have read blocks correct work, while
+// one that accepts a directory the reader finds nothing in costs a reader one
+// honest empty answer.
+//
+// WHY TERRAFORM ACCEPTS A BARE .json AND NOT ONLY .tf. The reader's primary
+// input is the output of `terraform show -json`, which is the fully resolved
+// form and the one that leaves nothing unreadable, so a stack directory may
+// legitimately hold a plan and no configuration at all: a CI job that writes
+// one beside the configuration, or a directory somebody keeps a captured plan
+// in on purpose. A .tf only rule would refuse exactly the input that produces
+// the best answer.
+//
+// Telling a plan from a state file somebody renamed, or from an unrelated
+// .json, needs the top level keys, and that is the reader's job rather than
+// this one's: it refuses a state file by content and records what it did. So
+// this asks the cheap question it can answer honestly, "is there anything here
+// this source could read", and leaves "what is it" to the thing that opens it.
+// .tf.json is a generated configuration and is covered by the same suffix.
 func infraSourceFiles(source schema.InfraSource) ([]string, string) {
 	if source == schema.InfraTerraform {
-		return []string{".tf", ".tf.json"}, "Terraform file"
+		return []string{".tf", ".json"}, "Terraform file or plan"
 	}
 	return nil, ""
 }
