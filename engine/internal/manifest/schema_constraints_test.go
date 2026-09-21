@@ -1409,8 +1409,6 @@ func TestSchemaConstraintReport(t *testing.T) {
 // max_statements and thresholds.mean_increase instead. Without that split the
 // base manifest is refused by this feature's own three cross field rules,
 // which is the #315 failure exactly.
-const wantConstraints = 815
-
 // Then 755. The three keys that say what the Postgres a golden is built in
 // actually is: database.image, which declares a type and a maxLength;
 // database.extensions and database.preload_libraries, each of which declares a
@@ -1505,6 +1503,40 @@ const wantConstraints = 815
 // previous recounts too. A method that gives the right answer whenever you
 // check it and no answer you can check is not evidence, which is why the
 // number above comes from the gate every time and not from a sum.
+// Then 840. The infrastructure section, which says where the infrastructure
+// as code lives. The block's own type, additionalProperties and its one
+// required field, then on the stacks list the type, minItems, maxItems and
+// uniqueItems, and on a stack the type, additionalProperties and two required
+// fields, the type and enum on source, the type and both lengths on path, the
+// type, maxLength and pattern on workspace, and the type, maxItems and
+// uniqueItems on var_files with the type and both lengths on its items.
+//
+// This one needed NO tuning entry at all, which is worth saying because every
+// feature above it needed several: the generator's first string candidate
+// satisfies every field here, and the enum has one member so its first value
+// is the only value.
+//
+// The number is what the gate counted on THIS tree, read from its own failure
+// message, and it has now been read four times on four different bases as this
+// branch was rebased across the surface enum, the base branch comparison, the
+// desktop block and the emulator seeding: 792, 795, 809 and 840. Not one of
+// those was reached by adding anything to the one before it, and the last two
+// bases each carried two other lanes' keys. A branch that added its own delta
+// would have been wrong by the width of whatever landed while it waited.
+//
+// The shape cost three more constraints than the flat one this section was
+// built as first, where source, workspace and var_files sat over a list of
+// paths. That shape needed a cross field rule to hold it together, a workspace
+// may be given only beside exactly one path, and per stack there is no such
+// rule: three constraints for one less thing anybody has to know. The flat
+// version's own note is worth keeping for the reason it gave, because it
+// applies to whatever is added next: that rule fired only ABOVE one path, on
+// purpose, because a rule that fired at one would have made the all fields
+// base manifest impossible to build. That is the #315 failure from the other
+// direction, not a value the fixture cannot invent but a fixture the rule
+// cannot permit, and it is the thing to check before adding any cross field
+// rule to a section the generator fills.
+const wantConstraints = 840
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and

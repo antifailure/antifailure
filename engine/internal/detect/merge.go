@@ -51,6 +51,7 @@ func Merge(findings []Finding, root string) (*schema.Manifest, []Question, Propo
 	m.Personas = defaultPersonas(findings)
 	m.Auth = mergeAuth(findings)
 	m.Workflows = suggestedWorkflows(findings)
+	m.Infrastructure = mergeInfrastructure(findings)
 
 	// Sorted so that two runs over the same tree produce byte identical YAML.
 	sort.SliceStable(m.Services, func(i, j int) bool {
@@ -1095,4 +1096,35 @@ func appendUnique(s []string, v string) []string {
 		}
 	}
 	return append(s, v)
+}
+
+// mergeInfrastructure writes the section that says where the infrastructure as
+// code lives.
+//
+// Nil when the repository has none, and nil is the answer: the section is
+// optional, its absence is what the fidelity report reads to say "this
+// application declared no infrastructure", and an empty section would turn
+// that honest silence into a manifest af up refuses for naming no stack.
+//
+// Only source and path are written per stack. Which workspace and which
+// variable files describe production is not stated anywhere in a repository,
+// so guessing either would put a value that cannot be checked into the one
+// section that describes production rather than the copy. See the head of
+// infra.go.
+func mergeInfrastructure(findings []Finding) *schema.Infrastructure {
+	var paths []string
+	for _, f := range OfKind(findings, KindInfra) {
+		paths = appendUnique(paths, f.Subject)
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	// Sorted, because two runs over one tree have to produce byte identical
+	// YAML and a manifest that shuffles on every run cannot be reviewed.
+	sort.Strings(paths)
+	stacks := make([]schema.InfraStack, 0, len(paths))
+	for _, p := range paths {
+		stacks = append(stacks, schema.InfraStack{Source: schema.InfraTerraform, Path: p})
+	}
+	return &schema.Infrastructure{Stacks: stacks}
 }

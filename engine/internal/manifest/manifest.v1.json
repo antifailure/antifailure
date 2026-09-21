@@ -107,6 +107,9 @@
     "runtime": {
       "$ref": "#/$defs/runtime"
     },
+    "infrastructure": {
+      "$ref": "#/$defs/infrastructure"
+    },
     "github": {
       "$ref": "#/$defs/github"
     },
@@ -2125,6 +2128,69 @@
             "$ref": "#/$defs/runtimeTarget"
           },
           "description": "The places an environment may be placed, in preference order. Empty means the single runtime the provider names, which is every manifest written before placement existed."
+        }
+      }
+    },
+    "infrastructure": {
+      "title": "Infrastructure",
+      "description": "Where this application's infrastructure as code lives. Nothing here changes what the environment builds. It names the stacks that declare production, so that a copy can be compared against what production is declared to be rather than against what somebody remembers it being. A manifest that leaves this section out is never measured against its infrastructure, and the report says so rather than passing that dimension quietly.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stacks"
+      ],
+      "properties": {
+        "stacks": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/infrastructure_stack"
+          },
+          "description": "The stacks that declare production, one entry each. A stack is a directory that is deployed on its own, so a repository with a stack per concern names one entry for each, and a repository that declares its cloud in one tool and its workloads in another names one entry per tool."
+        }
+      }
+    },
+    "infrastructure_stack": {
+      "title": "Infrastructure stack",
+      "description": "One directory that declares part of production, and how it is read. Every key belongs to this directory alone, which is why the workspace and the variable files sit here rather than beside the list: both are arguments to a single stack, and one of either spread across several would be a statement nobody could act on.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "path"
+      ],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": [
+            "terraform"
+          ],
+          "description": "Which tool declares this stack. The list carries exactly the tools a reader exists for, because a source accepted here that nothing can read would look like a configured feature and behave like a missing one. OpenTofu writes the same language and is read by the same reader, so terraform is the value for both."
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "description": "The stack's directory, relative to the repository root. It must exist, must be a directory, and must hold at least one file the named source can read, because a directory that is there and a stack that is there are different facts and a mistyped deep path usually satisfies the first. For terraform that is a .tf file or any .json, the second because a fully resolved plan is the best input there is and a stack may hold one and no configuration at all."
+        },
+        "workspace": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "description": "Which workspace holds production, for a stack that separates its environments that way. It is read rather than selected: nothing here runs Terraform, and the name is what lets an expression mentioning terraform.workspace resolve to a value instead of being reported as unreadable."
+        },
+        "var_files": {
+          "type": "array",
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "description": "The variable files that describe production, relative to the repository root, in the order they would be passed. Every entry must exist. They are what turns a variable with no default from a value decided outside the configuration into one that can be read here."
         }
       }
     },

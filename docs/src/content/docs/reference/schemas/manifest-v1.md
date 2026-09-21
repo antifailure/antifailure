@@ -23,6 +23,7 @@ This page is generated from `schemas/manifest.v1.json`. Edit the schema, then ru
 | `explore` | [Explore](#explore) | no | Agents that pursue a goal with no declared workflow, discover the paths an application offers, and report where it costs somebody effort without failing. |
 | `fidelity` | [Fidelity](#fidelity) | no | The component inventory: what the environment reproduces, what stands in for something, and what it could not reproduce at all. |
 | `github` | [GitHub](#github) | no | How Antifailure appears on a pull request: what runs it, whether it comments, what it does with forks, and when it tears the environment down. |
+| `infrastructure` | [Infrastructure](#infrastructure) | no | Where this application's infrastructure as code lives. |
 | `insights` | [Insights](#insights) | no | The Postgres native checks that turn a preview environment into a database review. |
 | `invariants` | list of [Invariant](#invariant) | no | Read only statements that must hold after every workflow. They are the assertions a test cannot make from the outside: no orphaned rows, no negative balances, no subscription without a customer. Max items 100. |
 | `load` | [Load](#load) | no | Traffic shaped like production, sent at an environment. |
@@ -306,6 +307,25 @@ The masked, verified copy every environment branches from.
 | `schedule` | string | no | Cron expression for automatic refreshes, with an optional CRON_TZ prefix. A refresh that would overlap a running one is skipped with an event rather than queued. Max length 128. |
 | `storage` | `local`, `azure_blob`, `s3`, `gcs` | no | Where dumps and attestations live. Defaults to `local`. |
 | `storage_url` | string | no | Container or bucket URL for a remote store. Credentials come from the secrets subsystem, never from this URL. Max length 1024. |
+
+## Infrastructure
+
+Where this application's infrastructure as code lives. Nothing here changes what the environment builds. It names the stacks that declare production, so that a copy can be compared against what production is declared to be rather than against what somebody remembers it being. A manifest that leaves this section out is never measured against its infrastructure, and the report says so rather than passing that dimension quietly.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `stacks` | list of [Infrastructure stack](#infrastructure-stack) | **yes** | The stacks that declare production, one entry each. A stack is a directory that is deployed on its own, so a repository with a stack per concern names one entry for each, and a repository that declares its cloud in one tool and its workloads in another names one entry per tool. Min items 1, max items 50. |
+
+## Infrastructure stack
+
+One directory that declares part of production, and how it is read. Every key belongs to this directory alone, which is why the workspace and the variable files sit here rather than beside the list: both are arguments to a single stack, and one of either spread across several would be a statement nobody could act on.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `path` | string | **yes** | The stack's directory, relative to the repository root. It must exist, must be a directory, and must hold at least one file the named source can read, because a directory that is there and a stack that is there are different facts and a mistyped deep path usually satisfies the first. For terraform that is a .tf file or any .json, the second because a fully resolved plan is the best input there is and a stack may hold one and no configuration at all. Min length 1, max length 512. |
+| `source` | `terraform` | **yes** | Which tool declares this stack. The list carries exactly the tools a reader exists for, because a source accepted here that nothing can read would look like a configured feature and behave like a missing one. OpenTofu writes the same language and is read by the same reader, so terraform is the value for both. |
+| `var_files` | list of string | no | The variable files that describe production, relative to the repository root, in the order they would be passed. Every entry must exist. They are what turns a variable with no default from a value decided outside the configuration into one that can be read here. Max items 20. |
+| `workspace` | string | no | Which workspace holds production, for a stack that separates its environments that way. It is read rather than selected: nothing here runs Terraform, and the name is what lets an expression mentioning terraform.workspace resolve to a value instead of being reported as unreadable. Max length 128, matches `^[A-Za-z0-9_-]+$`. |
 
 ## Insights
 

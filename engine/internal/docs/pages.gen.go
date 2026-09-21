@@ -499,11 +499,27 @@ describes itself, in the files you use to run it.
 | Dependency lists | Third party APIs, which become egress rules |
 | Migration directories | The migrate command |
 | Cron and schedule files | Scheduled services |
+| ` + "`" + `*.tf` + "`" + ` files | The Terraform root modules, which become [` + "`" + `infrastructure.stacks` + "`" + `](/docs/reference/manifest#infrastructure) |
 
 The dependency list is the one that surprises people. A ` + "`" + `stripe` + "`" + ` dependency
 produces an egress rule for ` + "`" + `api.stripe.com` + "`" + ` in sandbox mode, a ` + "`" + `resend` + "`" + `
 dependency produces one for ` + "`" + `api.resend.com` + "`" + ` in capture mode, and a ` + "`" + `sentry` + "`" + `
 dependency produces a block with a sentence saying why.
+
+Terraform is the one source where finding the files is not the whole job.
+Every directory holding a ` + "`" + `.tf` + "`" + ` file is a module and most of them are not root
+modules, so detection reads the ` + "`" + `module` + "`" + ` blocks, takes out the directories
+something calls with a local source, and drafts what is left: the units that
+are planned and applied on their own. A repository that only publishes modules
+gets no section and a sentence saying why, because "we found no infrastructure"
+and "we found only building blocks" are different facts.
+
+It never drafts a stack's ` + "`" + `workspace` + "`" + ` or ` + "`" + `var_files` + "`" + `, and it says so under its
+own heading. Which workspace holds production, and which
+of ` + "`" + `production.tfvars` + "`" + `, ` + "`" + `staging.tfvars` + "`" + ` and ` + "`" + `dev.tfvars` + "`" + ` describes it, is not
+stated anywhere in a repository. A file name is not a fact, and this is the one
+section of the manifest that describes production rather than the copy, so
+nothing downstream could catch a wrong answer.
 
 ## What it says it is unsure about
 
@@ -23297,6 +23313,7 @@ what it deliberately does not cover.
 | ` + "`" + `load` + "`" + ` | block | Production shaped traffic. |
 | ` + "`" + `policy` + "`" + ` | block | What each class of finding does to the check. |
 | ` + "`" + `runtime` + "`" + ` | block | Where and how long environments run. |
+| ` + "`" + `infrastructure` + "`" + ` | block | Where your infrastructure as code lives, one stack at a time. The one section that describes production rather than the copy. |
 | ` + "`" + `github` + "`" + ` | block | The pull request integration. |
 
 ## ` + "`" + `services` + "`" + `
@@ -24003,6 +24020,92 @@ none cannot be. See [policy](/docs/enterprise/policy).
 see [multiple runtimes](/docs/enterprise/runtimes). One target needs no license.
 It decides nothing, it only says where the runtime you already had is, which is
 what a residency policy reads.
+
+## ` + "`" + `infrastructure` + "`" + `
+
+| Key | Type | Notes |
+| --- | --- | --- |
+| ` + "`" + `stacks` + "`" + ` | list | The stacks that declare production, at least one, at most fifty. |
+
+Each entry:
+
+| Key | Type | Notes |
+| --- | --- | --- |
+| ` + "`" + `source` + "`" + ` | string | ` + "`" + `terraform` + "`" + `, which is the only value today. It covers OpenTofu, which writes the same language. |
+| ` + "`" + `path` + "`" + ` | string | The stack's directory, relative to the repository root. It must exist, be a directory, and hold at least one file the source can read. |
+| ` + "`" + `workspace` + "`" + ` | string | Which workspace holds production, for this stack. |
+| ` + "`" + `var_files` + "`" + ` | list | The variable files that describe production, in the order they would be passed. |
+
+` + "`" + "`" + "`" + `yaml
+infrastructure:
+  stacks:
+    - source: terraform
+      path: infra/terraform/stacks/control-plane
+      workspace: production
+      var_files:
+        - infra/terraform/stacks/control-plane/production.tfvars
+` + "`" + "`" + "`" + `
+
+Every other section of the manifest describes the **copy**: what to build, what
+to run, what it may reach. This one describes **production**, and it is the only
+one that does. Nothing in it changes what an environment builds or starts. It
+says where the declaration of production lives, so that a copy can be compared
+against what production is declared to be rather than against what somebody
+remembers it being.
+
+**Every key belongs to one stack.** A workspace is selected inside a single root
+module and a variable file is passed to a single invocation, so both sit beside
+the directory they are arguments to rather than over the list. ` + "`" + `source` + "`" + ` is per
+stack for a second reason: a repository that declares its cloud in one tool and
+its workloads in another is the ordinary case, not the exotic one, and one
+source over the whole list could not describe it.
+
+**` + "`" + `path` + "`" + ` names a stack, not every directory with configuration in it.** A stack
+is the unit that is deployed on its own. A repository that splits its
+infrastructure by concern names one entry for each; a repository with one stack
+and four modules under it names one. The modules a stack calls are building
+blocks, and naming them here points the comparison at a library rather than at
+the thing built from it.
+
+**A directory that exists and holds nothing the source can read is refused.**
+Mistyping the last segment of a deep path usually lands on a directory that is
+really there, because the parent and its siblings are real, so an existence
+check alone says yes. "There is a directory here" and "there is a stack here"
+are different facts.
+
+It looks only in the directory itself: a ` + "`" + `.tf` + "`" + ` file three levels down belongs to
+a module the stack calls, and accepting a parent because something nested under
+it has Terraform in it would accept the repository root of every repository that
+has any.
+
+For ` + "`" + `terraform` + "`" + ` it counts ` + "`" + `.tf` + "`" + ` and any ` + "`" + `.json` + "`" + `. The second is deliberate and
+generous. The reader's best input is the output of ` + "`" + `terraform show -json` + "`" + `, which
+is the fully resolved form, so a stack directory may legitimately hold a plan
+and no configuration at all, and a ` + "`" + `.tf` + "`" + ` only rule would refuse exactly the
+input that produces the best answer. Telling a plan from a state file somebody
+renamed needs the file's own contents, which is the reader's job rather than
+this check's, so a directory holding an unrelated JSON file is accepted here and
+the reader reports honestly that it found nothing in it. That is the direction
+to be wrong in: accepting a directory the reader finds nothing in costs one
+empty answer, and refusing one it would have read blocks correct work.
+
+**The list of sources carries exactly the tools a reader exists for.** A value
+the manifest accepted and nothing could read would look like a configured
+feature and behave like a missing one, so a new source arrives in the same
+change as the reader that gives it meaning rather than ahead of it.
+
+**` + "`" + `af init` + "`" + ` drafts ` + "`" + `source` + "`" + ` and ` + "`" + `path` + "`" + ` and never ` + "`" + `workspace` + "`" + ` or ` + "`" + `var_files` + "`" + `.**
+It reads the stacks out of the tree, which is a fact the repository states.
+Which workspace holds production, and which of ` + "`" + `production.tfvars` + "`" + `,
+` + "`" + `staging.tfvars` + "`" + ` and ` + "`" + `dev.tfvars` + "`" + ` describes it, is stated nowhere, and this is
+the one section nothing downstream can check: a wrong variable file would
+compare your copy against staging and report a number that looks right. So both
+are left for you, and ` + "`" + `af init` + "`" + ` says that it left them.
+
+**A path that is not in the repository is refused here.** Unlike a service path
+or a Dockerfile, nothing downstream would report it: a directory that is not
+there declares no resources, and no resources is the same answer an application
+with no infrastructure gives. The refusal names the entry and the line.
 
 ## ` + "`" + `github` + "`" + `
 
@@ -25151,6 +25254,7 @@ This page is generated from ` + "`" + `schemas/manifest.v1.json` + "`" + `. Edit
 | ` + "`" + `explore` + "`" + ` | [Explore](#explore) | no | Agents that pursue a goal with no declared workflow, discover the paths an application offers, and report where it costs somebody effort without failing. |
 | ` + "`" + `fidelity` + "`" + ` | [Fidelity](#fidelity) | no | The component inventory: what the environment reproduces, what stands in for something, and what it could not reproduce at all. |
 | ` + "`" + `github` + "`" + ` | [GitHub](#github) | no | How Antifailure appears on a pull request: what runs it, whether it comments, what it does with forks, and when it tears the environment down. |
+| ` + "`" + `infrastructure` + "`" + ` | [Infrastructure](#infrastructure) | no | Where this application's infrastructure as code lives. |
 | ` + "`" + `insights` + "`" + ` | [Insights](#insights) | no | The Postgres native checks that turn a preview environment into a database review. |
 | ` + "`" + `invariants` + "`" + ` | list of [Invariant](#invariant) | no | Read only statements that must hold after every workflow. They are the assertions a test cannot make from the outside: no orphaned rows, no negative balances, no subscription without a customer. Max items 100. |
 | ` + "`" + `load` + "`" + ` | [Load](#load) | no | Traffic shaped like production, sent at an environment. |
@@ -25434,6 +25538,25 @@ The masked, verified copy every environment branches from.
 | ` + "`" + `schedule` + "`" + ` | string | no | Cron expression for automatic refreshes, with an optional CRON_TZ prefix. A refresh that would overlap a running one is skipped with an event rather than queued. Max length 128. |
 | ` + "`" + `storage` + "`" + ` | ` + "`" + `local` + "`" + `, ` + "`" + `azure_blob` + "`" + `, ` + "`" + `s3` + "`" + `, ` + "`" + `gcs` + "`" + ` | no | Where dumps and attestations live. Defaults to ` + "`" + `local` + "`" + `. |
 | ` + "`" + `storage_url` + "`" + ` | string | no | Container or bucket URL for a remote store. Credentials come from the secrets subsystem, never from this URL. Max length 1024. |
+
+## Infrastructure
+
+Where this application's infrastructure as code lives. Nothing here changes what the environment builds. It names the stacks that declare production, so that a copy can be compared against what production is declared to be rather than against what somebody remembers it being. A manifest that leaves this section out is never measured against its infrastructure, and the report says so rather than passing that dimension quietly.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| ` + "`" + `stacks` + "`" + ` | list of [Infrastructure stack](#infrastructure-stack) | **yes** | The stacks that declare production, one entry each. A stack is a directory that is deployed on its own, so a repository with a stack per concern names one entry for each, and a repository that declares its cloud in one tool and its workloads in another names one entry per tool. Min items 1, max items 50. |
+
+## Infrastructure stack
+
+One directory that declares part of production, and how it is read. Every key belongs to this directory alone, which is why the workspace and the variable files sit here rather than beside the list: both are arguments to a single stack, and one of either spread across several would be a statement nobody could act on.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| ` + "`" + `path` + "`" + ` | string | **yes** | The stack's directory, relative to the repository root. It must exist, must be a directory, and must hold at least one file the named source can read, because a directory that is there and a stack that is there are different facts and a mistyped deep path usually satisfies the first. For terraform that is a .tf file or any .json, the second because a fully resolved plan is the best input there is and a stack may hold one and no configuration at all. Min length 1, max length 512. |
+| ` + "`" + `source` + "`" + ` | ` + "`" + `terraform` + "`" + ` | **yes** | Which tool declares this stack. The list carries exactly the tools a reader exists for, because a source accepted here that nothing can read would look like a configured feature and behave like a missing one. OpenTofu writes the same language and is read by the same reader, so terraform is the value for both. |
+| ` + "`" + `var_files` + "`" + ` | list of string | no | The variable files that describe production, relative to the repository root, in the order they would be passed. Every entry must exist. They are what turns a variable with no default from a value decided outside the configuration into one that can be read here. Max items 20. |
+| ` + "`" + `workspace` + "`" + ` | string | no | Which workspace holds production, for a stack that separates its environments that way. It is read rather than selected: nothing here runs Terraform, and the name is what lets an expression mentioning terraform.workspace resolve to a value instead of being reported as unreadable. Max length 128, matches ` + "`" + `^[A-Za-z0-9_-]+$` + "`" + `. |
 
 ## Insights
 

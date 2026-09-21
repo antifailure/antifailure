@@ -34,19 +34,20 @@ type Manifest struct {
 	// describes one product, and required by a manifest that names the
 	// surface at all: without it the run reaches the runner and is refused
 	// there for want of something to open.
-	Desktop    *DesktopApplication `json:"desktop,omitempty" yaml:"desktop,omitempty"`
-	Invariants []Invariant         `json:"invariants,omitempty" yaml:"invariants,omitempty"`
-	Insights   *Insights           `json:"insights,omitempty" yaml:"insights,omitempty"`
-	Change     *Change             `json:"change,omitempty" yaml:"change,omitempty"`
-	Oracle     *Oracle             `json:"oracle,omitempty" yaml:"oracle,omitempty"`
-	Explore    *Explore            `json:"explore,omitempty" yaml:"explore,omitempty"`
-	Diversity  *Diversity          `json:"diversity,omitempty" yaml:"diversity,omitempty"`
-	Fidelity   *Fidelity           `json:"fidelity,omitempty" yaml:"fidelity,omitempty"`
-	Load       *Load               `json:"load,omitempty" yaml:"load,omitempty"`
-	Policy     *Policy             `json:"policy,omitempty" yaml:"policy,omitempty"`
-	Runtime    *Runtime            `json:"runtime,omitempty" yaml:"runtime,omitempty"`
-	GitHub     *GitHub             `json:"github,omitempty" yaml:"github,omitempty"`
-	Security   *Security           `json:"security,omitempty" yaml:"security,omitempty"`
+	Desktop        *DesktopApplication `json:"desktop,omitempty" yaml:"desktop,omitempty"`
+	Invariants     []Invariant         `json:"invariants,omitempty" yaml:"invariants,omitempty"`
+	Insights       *Insights           `json:"insights,omitempty" yaml:"insights,omitempty"`
+	Change         *Change             `json:"change,omitempty" yaml:"change,omitempty"`
+	Oracle         *Oracle             `json:"oracle,omitempty" yaml:"oracle,omitempty"`
+	Explore        *Explore            `json:"explore,omitempty" yaml:"explore,omitempty"`
+	Diversity      *Diversity          `json:"diversity,omitempty" yaml:"diversity,omitempty"`
+	Fidelity       *Fidelity           `json:"fidelity,omitempty" yaml:"fidelity,omitempty"`
+	Load           *Load               `json:"load,omitempty" yaml:"load,omitempty"`
+	Policy         *Policy             `json:"policy,omitempty" yaml:"policy,omitempty"`
+	Runtime        *Runtime            `json:"runtime,omitempty" yaml:"runtime,omitempty"`
+	Infrastructure *Infrastructure     `json:"infrastructure,omitempty" yaml:"infrastructure,omitempty"`
+	GitHub         *GitHub             `json:"github,omitempty" yaml:"github,omitempty"`
+	Security       *Security           `json:"security,omitempty" yaml:"security,omitempty"`
 }
 
 // ServiceKind is what a service is.
@@ -1703,6 +1704,72 @@ const (
 	ForkLabel  ForkPolicy = "label"
 	ForkAlways ForkPolicy = "always"
 )
+
+// InfraSource names the tool that declares one stack of an application's
+// infrastructure.
+//
+// A closed vocabulary, on the same reasoning LoadSource states a few hundred
+// lines up: a value the schema accepts and nothing can read is worse than a
+// value that is not offered, because the first looks like a configured feature
+// and behaves like a missing one. It carries exactly the tools a reader exists
+// for, and a new member lands in the same commit as the reader it names rather
+// than being reserved ahead of one.
+//
+// OpenTofu is deliberately not a second member. It writes the same language
+// and is read by the same reader, so a second spelling would be two names for
+// one behaviour and a manifest could then disagree with itself about which
+// one it meant.
+type InfraSource string
+
+// InfraTerraform is Terraform, and OpenTofu, which is the same language.
+const InfraTerraform InfraSource = "terraform"
+
+// Infrastructure says where this application's infrastructure as code lives.
+//
+// It is the only section of the manifest that describes PRODUCTION rather than
+// the copy. Everything else here says what to build; this says what the thing
+// being copied is declared to be, which is what makes a comparison possible at
+// all. Nothing in it changes what an environment builds or runs.
+//
+// The section is absent from most manifests, and its absence is reported
+// rather than assumed: a copy nobody compared against its own infrastructure
+// has not been shown to reproduce it.
+type Infrastructure struct {
+	// Stacks are the directories that declare production, one entry each.
+	Stacks []InfraStack `json:"stacks" yaml:"stacks"`
+}
+
+// InfraStack is one directory that declares part of production, and how it is
+// read.
+//
+// WHY EVERY KEY IS ON THE STACK AND NOT ON THE LIST, because the first draft
+// of this had source, workspace and var_files one level up and it was wrong
+// twice over. A workspace is selected inside ONE root module and a variable
+// file is passed to ONE invocation, so either of them beside three directories
+// is a statement nobody can act on; that shape needed a cross field refusal
+// whose existence was a symptom rather than a rule, and the first person it
+// refuses is the one with the most infrastructure. And a real repository
+// declares its cloud in one tool and its workloads in another, so a single
+// source for the whole list cannot describe the ordinary case either. Per
+// stack, every key means exactly one thing and there is no rule left to write.
+type InfraStack struct {
+	// Source is the tool that declares this stack.
+	Source InfraSource `json:"source" yaml:"source"`
+	// Path is the stack's directory, relative to the repository root.
+	Path string `json:"path" yaml:"path"`
+	// Workspace is which workspace holds production, for a stack that
+	// separates its environments that way.
+	//
+	// Read rather than selected. Nothing here runs Terraform, and the name is
+	// what lets an expression mentioning terraform.workspace resolve to a
+	// value instead of being reported as unreadable.
+	Workspace string `json:"workspace,omitempty" yaml:"workspace,omitempty"`
+	// VarFiles are the variable files that describe production, in the order
+	// they would be passed. They are what turns a variable with no default
+	// from a value decided outside the configuration into one that can be
+	// read here.
+	VarFiles []string `json:"var_files,omitempty" yaml:"var_files,omitempty"`
+}
 
 // GitHub configures the pull request integration.
 type GitHub struct {
