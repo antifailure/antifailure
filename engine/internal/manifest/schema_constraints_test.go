@@ -1401,8 +1401,6 @@ func TestSchemaConstraintReport(t *testing.T) {
 // max_statements and thresholds.mean_increase instead. Without that split the
 // base manifest is refused by this feature's own three cross field rules,
 // which is the #315 failure exactly.
-const wantConstraints = 784
-
 // Then 755. The three keys that say what the Postgres a golden is built in
 // actually is: database.image, which declares a type and a maxLength;
 // database.extensions and database.preload_libraries, each of which declares a
@@ -1442,7 +1440,7 @@ const wantConstraints = 784
 // each with its own sentence. The generator fills the field with the first
 // enum value, which is `web`, so no base is refused and no tuning override is
 // needed.
-// Then 795. The infrastructure section, which says where the infrastructure
+// Then 809. The infrastructure section, which says where the infrastructure
 // as code lives. The block's own type, additionalProperties and its one
 // required field, then on the stacks list the type, minItems, maxItems and
 // uniqueItems, and on a stack the type, additionalProperties and two required
@@ -1454,6 +1452,11 @@ const wantConstraints = 784
 // feature above it needed several: the generator's first string candidate
 // satisfies every field here, and the enum has one member so its first value
 // is the only value.
+//
+// The number is what the gate counted on this tree after the rebase across
+// the surface enum landing, never 784 plus anything: two features measured
+// their own delta against different totals tonight and both happened to be
+// right, which is exactly why adding feels safe and is not.
 //
 // The shape cost three more constraints than the flat one this section was
 // built as first, where source, workspace and var_files sat over a list of
@@ -1467,7 +1470,7 @@ const wantConstraints = 784
 // direction, not a value the fixture cannot invent but a fixture the rule
 // cannot permit, and it is the thing to check before adding any cross field
 // rule to a section the generator fills.
-const wantConstraints = 784
+const wantConstraints = 809
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and
