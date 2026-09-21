@@ -25,7 +25,7 @@ import { assertAvailable, type Surface } from './drivers/driver.ts';
 import { runTerminal, type TerminalWorkflow } from './drivers/terminal.ts';
 import { runDesktop, type DesktopApp } from './drivers/desktop.ts';
 import { runMobile, type MobilePlatform } from './drivers/mobile.ts';
-import { iosPlatform, listSimulators, prepareSimulator } from './drivers/ios.ts';
+import { iosPlatform, listSimulators, prepareSimulator, iosTargetFor } from './drivers/ios.ts';
 import {
   androidPlatform, avds, bootEmulator, devices, installApk, toolsPresent,
 } from './drivers/android.ts';
@@ -155,7 +155,7 @@ function sdkHint(): string {
  *  application.
  */
 async function mobilePlatformFor(
-  surface: 'ios' | 'android', doc: MobileDoc | undefined,
+  surface: 'ios' | 'android', doc: MobileDoc | undefined, baseURL?: string,
 ): Promise<MobilePlatform> {
   if (!doc?.id) {
     throw new Error(
@@ -172,7 +172,9 @@ async function mobilePlatformFor(
         'device with mobile.device. "xcrun simctl list devices available" lists them.',
       );
     }
-    const target = { udid, bundleId: doc.id, ...(doc.app ? { app: doc.app } : {}) };
+    // Where the environment is travels in the target, for an application that
+    // talks to one. The terminal and desktop branches send the same address.
+    const target = iosTargetFor(udid, doc, baseURL);
     await prepareSimulator(target);
     return iosPlatform(target);
   }
@@ -407,7 +409,7 @@ async function main(): Promise<number> {
     // it, so a run that also declared a deploy command keeps both sets of
     // results instead of the later one erasing the earlier.
     results = [...results, ...await runMobile({
-      platform: await mobilePlatformFor(surface, doc.mobile),
+      platform: await mobilePlatformFor(surface, doc.mobile, doc.base_url),
       workflows,
       serverURL: doc.mobile?.server ?? DEFAULT_APPIUM_SERVER,
       artifacts: doc.artifacts,

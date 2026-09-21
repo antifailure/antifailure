@@ -19,6 +19,9 @@ import { isPlayable, mobileSnapshot, xpathLiteral, runMobile } from '../src/driv
 import { judgeAll } from '../src/workflow.ts';
 import { driverFor, surfaces } from '../src/drivers/driver.ts';
 import { androidPlatform } from '../src/drivers/android.ts';
+import { iosPlatform, iosTargetFor } from '../src/drivers/ios.ts';
+import type { WebDriverSession } from '../src/drivers/webdriver.ts';
+import { readFileSync } from 'node:fs';
 
 // The XML scanner.
 
@@ -451,4 +454,49 @@ test('a long mobile label is reachable, and is counted rather than vanishing whe
   const capped = snapshotFrom(tree, { url: 'ios://probe', title: 'Probe' }, { maxNameLength: 10 });
   assert.deepEqual(capped.controls, []);
   assert.equal(capped.unnamed, 1, 'an over long label vanished without being counted');
+});
+
+
+// The address, for a phone client of a service. Without it an app driven under
+// a rehearsal can only reach its own configured backend, which is either
+// nothing or production: the hazard the terminal and desktop drivers carry
+// AF_BASE_URL for. What is tested is the one place the app is LAUNCHED, which
+// is restart, because restart runs before every workflow and an address set
+// anywhere else would be discarded by it each time.
+function recordingSession(): { session: WebDriverSession; calls: [string, unknown[]][] } {
+  const calls: [string, unknown[]][] = [];
+  const session = { execute: async (m: string, a: unknown[]) => { calls.push([m, a]); return null; } };
+  return { session: session as unknown as WebDriverSession, calls };
+}
+
+test('an iOS app is relaunched with the environment address before every workflow', async () => {
+  const { session, calls } = recordingSession();
+  await iosPlatform(iosTargetFor('UDID', { id: 'com.example.ledger' }, 'http://127.0.0.1:39000')).restart(session);
+  assert.deepEqual(calls.map((c) => c[0]), ['mobile: terminateApp', 'mobile: launchApp']);
+  assert.deepEqual(calls[1]![1], [{ bundleId: 'com.example.ledger', environment: { AF_BASE_URL: 'http://127.0.0.1:39000' } }]);
+});
+
+test('an iOS app with no environment behind the run is activated exactly as before', async () => {
+  const { session, calls } = recordingSession();
+  await iosPlatform(iosTargetFor('UDID', { id: 'com.example.ledger' })).restart(session);
+  assert.deepEqual(calls.map((c) => c[0]), ['mobile: terminateApp', 'mobile: activateApp']);
+});
+
+test('the iOS target carries the run address and the installed app', () => {
+  const t = iosTargetFor('UDID', { id: 'com.example.ledger', app: '/builds/Ledger.app' }, 'http://127.0.0.1:39000');
+  assert.equal(t.bundleId, 'com.example.ledger');
+  assert.equal(t.app, '/builds/Ledger.app');
+  assert.deepEqual(t.environment, { AF_BASE_URL: 'http://127.0.0.1:39000' });
+  assert.equal(iosTargetFor('UDID', { id: 'x' }).environment, undefined);
+});
+
+// The call in main.ts is asserted on its source, because the path it sits on
+// boots a real simulator and no unit test can reach it. The behavioural proof
+// of that hop is `af test` against a real simulator.
+test('main.ts hands the phone run its address', () => {
+  const src = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+  assert.ok(src.includes('mobilePlatformFor(surface, doc.mobile, doc.base_url)'),
+    'main.ts no longer passes the run address to the phone platform');
+  assert.ok(src.includes('iosTargetFor(udid, doc, baseURL)'),
+    'main.ts no longer builds the iOS target with the run address');
 });
