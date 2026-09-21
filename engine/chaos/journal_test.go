@@ -73,12 +73,42 @@ services:
 // precisely when nobody is watching.
 func requireDocker(t *testing.T) *client.Client {
 	t.Helper()
+	// AF_REQUIRE_DOCKER beats AF_SKIP_DOCKER, and the precedence is the point
+	// rather than an arbitrary tie break. Refusing to be silent has to beat
+	// asking for silence, or the variable that turns skips into failures can
+	// itself be switched off by the variable it exists to override.
+	//
+	// The roster in main_test.go catches ONE scenario skipping while others
+	// run. It cannot catch all of them skipping together, because the thing
+	// that would notice is the thing that skipped: with no daemon reachable,
+	// every scenario here takes the branch below, the roster sees a package
+	// where nothing ran rather than one where something was missed, and the
+	// package prints ok. That is the exact shape this suite's own opening
+	// comment says it was written to catch, in the suite itself.
+	//
+	// It matters most where it is least visible. These scenarios exist to
+	// prove that FAILURE paths work. A run that skipped every one of them and
+	// a run that exercised every one of them and found them sound are
+	// indistinguishable from the outside, and the second is what a green here
+	// is read as meaning.
+	required := os.Getenv("AF_REQUIRE_DOCKER") != ""
+	unavailable := func(format string, args ...any) {
+		t.Helper()
+		if required {
+			t.Fatalf("AF_REQUIRE_DOCKER is set and "+format, args...)
+		}
+		t.Skipf("skipped: "+format, args...)
+	}
 	if os.Getenv("AF_SKIP_DOCKER") != "" {
+		if required {
+			t.Fatalf("AF_SKIP_DOCKER and AF_REQUIRE_DOCKER are both set. Refusing to be " +
+				"silent beats asking for silence, so this is a failure rather than a skip")
+		}
 		t.Skip("skipped: AF_SKIP_DOCKER is set")
 	}
 	cli, err := dockerutil.Client()
 	if err != nil {
-		t.Skipf("skipped: no Docker daemon is configured: %v", err)
+		unavailable("no Docker daemon is configured: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
@@ -91,7 +121,7 @@ func requireDocker(t *testing.T) *client.Client {
 			t.Fatalf("the Docker daemon is configured and did not answer a ping in three "+
 				"minutes; this is a failure rather than a skip, because the daemon exists: %v", err)
 		}
-		t.Skipf("skipped: no Docker daemon is reachable: %v", err)
+		unavailable("no Docker daemon is reachable: %v", err)
 	}
 	t.Cleanup(func() { _ = cli.Close() })
 	return cli
