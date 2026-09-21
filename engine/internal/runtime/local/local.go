@@ -264,6 +264,12 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 		// sidecar here would name two things that no longer exist.
 		return provider.Env{EnvID: spec.EnvID}, r.tearDownAfterEmulator(ctx, spec.EnvID, err)
 	}
+	// After the emulators are listening, because this talks to them, and
+	// BEFORE any service, because the service is who a missing bucket is
+	// served to. An application that reads its own bucket on startup is the
+	// case this closes, and seeding after it had started would be seeding
+	// after it had already failed.
+	r.seedCloudResources(ctx, spec, nets, journal, progress)
 	// Reserved before anything starts, because a service has to be told its
 	// own public address before it runs, and the ingress that publishes it is
 	// created after the service it forwards to.

@@ -97,6 +97,7 @@ const (
 	SiteCloudAuth       Site = "the cloud credential path"
 	SiteAuditSink       Site = "the audit stream sink"
 	SiteConformance     Site = "the runtime conformance suite"
+	SiteEmulatorSeeding Site = "the emulator seeding"
 	SiteImagePull       Site = "the container image pull"
 	SiteImageBuild      Site = "the container image build"
 )
