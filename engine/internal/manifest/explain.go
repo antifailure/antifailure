@@ -350,6 +350,31 @@ func Explain(m *schema.Manifest, width int) string {
 	fmt.Fprintf(&b, "  forks        %s\n", value(forkWord(m.GitHub.ForkPolicy), 15, width))
 	fmt.Fprintf(&b, "  teardown on  %s\n", value(teardownWord(m.GitHub.TeardownOn), 15, width))
 
+	// Printed only when the block is there, for the same reason the oracle
+	// below is, and with one addition of its own: every other section of this
+	// page describes the COPY, and this one describes production. A line
+	// saying "no infrastructure declared" under every manifest in the world
+	// would read as a missing feature rather than as a choice, and the place
+	// that has to say it is the fidelity report, where the absence is a
+	// measurement and carries its reason.
+	if in := m.Infrastructure; in != nil {
+		b.WriteString("\nInfrastructure\n")
+		fmt.Fprintf(&b, "  declared by  %s\n", value(string(in.Source), 15, width))
+		for _, p := range in.Paths {
+			fmt.Fprintf(&b, "  root module  %s\n", value(p, 15, width))
+		}
+		// Both printed unconditionally once the section exists, and printed as
+		// "none" rather than omitted when empty. Which workspace and which
+		// variable files production is read through is the difference between
+		// comparing against production and comparing against a module's
+		// defaults, and a page that showed the second only when somebody had
+		// already thought of it would hide exactly the case worth catching.
+		fmt.Fprintf(&b, "  workspace    %s\n",
+			value(orNone(in.Workspace, "none, so the default workspace"), 15, width))
+		fmt.Fprintf(&b, "  var files    %s\n",
+			value(orNone(strings.Join(in.VarFiles, ", "), "none, so the module's own defaults"), 15, width))
+	}
+
 	// Printed only when the block is there, because the oracle is the one
 	// subsystem that does not run unless a manifest asks for it. A section
 	// saying "off" on every manifest in the world would be noise in the one

@@ -39,6 +39,7 @@ type Manifest struct {
 	Load              *Load              `json:"load,omitempty" yaml:"load,omitempty"`
 	Policy            *Policy            `json:"policy,omitempty" yaml:"policy,omitempty"`
 	Runtime           *Runtime           `json:"runtime,omitempty" yaml:"runtime,omitempty"`
+	Infrastructure    *Infrastructure    `json:"infrastructure,omitempty" yaml:"infrastructure,omitempty"`
 	GitHub            *GitHub            `json:"github,omitempty" yaml:"github,omitempty"`
 	Security          *Security          `json:"security,omitempty" yaml:"security,omitempty"`
 }
@@ -1610,6 +1611,54 @@ const (
 	ForkLabel  ForkPolicy = "label"
 	ForkAlways ForkPolicy = "always"
 )
+
+// InfraSource names the tool that declares an application's infrastructure.
+//
+// A closed vocabulary with one member, on the same reasoning LoadSource states
+// a few hundred lines up: a value the schema accepts and nothing can read is
+// worse than a value that is not offered, because the first looks like a
+// configured feature and behaves like a missing one. The list grows when a
+// reader for the next tool exists, and not before.
+//
+// OpenTofu is deliberately not a second member. It writes the same language
+// and is read by the same reader, so a second spelling would be two names for
+// one behaviour and a manifest could then disagree with itself about which
+// one it meant.
+type InfraSource string
+
+// InfraTerraform is Terraform, and OpenTofu, which is the same language.
+const InfraTerraform InfraSource = "terraform"
+
+// Infrastructure says where this application's infrastructure as code lives.
+//
+// It is the only section of the manifest that describes PRODUCTION rather than
+// the copy. Everything else here says what to build; this says what the thing
+// being copied is declared to be, which is what makes a comparison possible at
+// all. Nothing in it changes what an environment builds or runs.
+//
+// The section is absent from most manifests, and its absence is reported
+// rather than assumed: a copy nobody compared against its own infrastructure
+// has not been shown to reproduce it.
+type Infrastructure struct {
+	// Source is the tool that declares the infrastructure.
+	Source InfraSource `json:"source" yaml:"source"`
+	// Paths are the root module directories, relative to the repository root.
+	//
+	// A list because a root module is the unit that is planned and applied on
+	// its own, and an application whose infrastructure is split by concern has
+	// several. Every entry is checked to exist and to be a directory.
+	Paths []string `json:"paths" yaml:"paths"`
+	// Workspace is which workspace holds production.
+	//
+	// Only meaningful alongside a single root module, because a workspace is
+	// selected inside one, and validation refuses it beside several rather
+	// than picking one of them.
+	Workspace string `json:"workspace,omitempty" yaml:"workspace,omitempty"`
+	// VarFiles are the variable files that describe production, in the order
+	// they would be passed. Refused beside several root modules for the same
+	// reason Workspace is: a variable file is an argument to one.
+	VarFiles []string `json:"var_files,omitempty" yaml:"var_files,omitempty"`
+}
 
 // GitHub configures the pull request integration.
 type GitHub struct {

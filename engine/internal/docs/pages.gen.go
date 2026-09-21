@@ -22665,6 +22665,7 @@ what it deliberately does not cover.
 | ` + "`" + `load` + "`" + ` | block | Production shaped traffic. |
 | ` + "`" + `policy` + "`" + ` | block | What each class of finding does to the check. |
 | ` + "`" + `runtime` + "`" + ` | block | Where and how long environments run. |
+| ` + "`" + `infrastructure` + "`" + ` | block | Where your infrastructure as code lives. The one section that describes production rather than the copy. |
 | ` + "`" + `github` + "`" + ` | block | The pull request integration. |
 
 ## ` + "`" + `services` + "`" + `
@@ -23352,6 +23353,59 @@ none cannot be. See [policy](/docs/enterprise/policy).
 see [multiple runtimes](/docs/enterprise/runtimes). One target needs no license.
 It decides nothing, it only says where the runtime you already had is, which is
 what a residency policy reads.
+
+## ` + "`" + `infrastructure` + "`" + `
+
+| Key | Type | Notes |
+| --- | --- | --- |
+| ` + "`" + `source` + "`" + ` | string | ` + "`" + `terraform` + "`" + `, which is the only value. It covers OpenTofu, which writes the same language. |
+| ` + "`" + `paths` + "`" + ` | list | The root module directories, relative to the repository root. At least one, at most fifty, each one a directory that exists. |
+| ` + "`" + `workspace` + "`" + ` | string | Which workspace holds production. Only alongside a single root module. |
+| ` + "`" + `var_files` + "`" + ` | list | The variable files that describe production, in the order they would be passed. Only alongside a single root module. |
+
+` + "`" + "`" + "`" + `yaml
+infrastructure:
+  source: terraform
+  paths:
+    - infra/terraform
+  workspace: production
+  var_files:
+    - infra/terraform/production.tfvars
+` + "`" + "`" + "`" + `
+
+Every other section of the manifest describes the **copy**: what to build, what
+to run, what it may reach. This one describes **production**, and it is the only
+one that does. Nothing in it changes what an environment builds or starts. It
+says where the declaration of production lives, so that a copy can be compared
+against what production is declared to be rather than against what somebody
+remembers it being.
+
+**` + "`" + `paths` + "`" + ` names root modules, not every directory with Terraform in it.** A root
+module is the unit that is planned and applied on its own. A repository that
+splits its infrastructure by concern has several and names one entry for each; a
+repository with a stack and four modules under it has one. The modules a stack
+calls are building blocks, and naming them here points the comparison at a
+library rather than at the thing built from it.
+
+**` + "`" + `workspace` + "`" + ` and ` + "`" + `var_files` + "`" + ` may only be given alongside a single root
+module.** A workspace is selected inside one root module, and a variable file is
+an argument to one. Beside three there is no way to say which, so the manifest
+is refused rather than one of them being picked. If your stacks need different
+variable files, they are different declarations of production and the manifest
+is not yet able to say so.
+
+**` + "`" + `af init` + "`" + ` drafts ` + "`" + `source` + "`" + ` and ` + "`" + `paths` + "`" + ` and never ` + "`" + `workspace` + "`" + ` or ` + "`" + `var_files` + "`" + `.**
+It reads the root modules out of the tree, which is a fact the repository
+states. Which workspace holds production, and which of ` + "`" + `production.tfvars` + "`" + `,
+` + "`" + `staging.tfvars` + "`" + ` and ` + "`" + `dev.tfvars` + "`" + ` describes it, is stated nowhere, and this is
+the one section nothing downstream can check: a wrong variable file would
+compare your copy against staging and report a number that looks right. So both
+are left for you, and ` + "`" + `af init` + "`" + ` says that it left them.
+
+**A path that is not in the repository is refused here.** Unlike a service path
+or a Dockerfile, nothing downstream would report it: a directory that is not
+there declares no resources, and no resources is the same answer an application
+with no infrastructure gives. The refusal names the entry and the line.
 
 ## ` + "`" + `github` + "`" + `
 
@@ -24499,6 +24553,7 @@ This page is generated from ` + "`" + `schemas/manifest.v1.json` + "`" + `. Edit
 | ` + "`" + `explore` + "`" + ` | [Explore](#explore) | no | Agents that pursue a goal with no declared workflow, discover the paths an application offers, and report where it costs somebody effort without failing. |
 | ` + "`" + `fidelity` + "`" + ` | [Fidelity](#fidelity) | no | The component inventory: what the environment reproduces, what stands in for something, and what it could not reproduce at all. |
 | ` + "`" + `github` + "`" + ` | [GitHub](#github) | no | How Antifailure appears on a pull request: what runs it, whether it comments, what it does with forks, and when it tears the environment down. |
+| ` + "`" + `infrastructure` + "`" + ` | [Infrastructure](#infrastructure) | no | Where this application's infrastructure as code lives. |
 | ` + "`" + `insights` + "`" + ` | [Insights](#insights) | no | The Postgres native checks that turn a preview environment into a database review. |
 | ` + "`" + `invariants` + "`" + ` | list of [Invariant](#invariant) | no | Read only statements that must hold after every workflow. They are the assertions a test cannot make from the outside: no orphaned rows, no negative balances, no subscription without a customer. Max items 100. |
 | ` + "`" + `load` + "`" + ` | [Load](#load) | no | Traffic shaped like production, compared between the base branch and this one. |
@@ -24767,6 +24822,17 @@ The masked, verified copy every environment branches from.
 | ` + "`" + `schedule` + "`" + ` | string | no | Cron expression for automatic refreshes, with an optional CRON_TZ prefix. A refresh that would overlap a running one is skipped with an event rather than queued. Max length 128. |
 | ` + "`" + `storage` + "`" + ` | ` + "`" + `local` + "`" + `, ` + "`" + `azure_blob` + "`" + `, ` + "`" + `s3` + "`" + `, ` + "`" + `gcs` + "`" + ` | no | Where dumps and attestations live. Defaults to ` + "`" + `local` + "`" + `. |
 | ` + "`" + `storage_url` + "`" + ` | string | no | Container or bucket URL for a remote store. Credentials come from the secrets subsystem, never from this URL. Max length 1024. |
+
+## Infrastructure
+
+Where this application's infrastructure as code lives. Nothing here changes what the environment builds. It names the root modules that declare production, so that a copy can be compared against what production is declared to be rather than against what somebody remembers it being. A manifest that leaves this section out is never measured against its infrastructure, and the report says so rather than passing that dimension quietly.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| ` + "`" + `paths` + "`" + ` | list of string | **yes** | The root module directories, relative to the repository root. A root module is a directory that is planned and applied on its own, so a repository with a stack per concern names one entry for each. Every entry must exist in the repository and must be a directory. Min items 1, max items 50. |
+| ` + "`" + `source` + "`" + ` | ` + "`" + `terraform` + "`" + ` | **yes** | Which tool declares the infrastructure. There is one value because there is one reader, and a source accepted here that nothing can read would look like a configured feature and behave like a missing one. OpenTofu writes the same language and is read by the same reader, so terraform is the value for both. |
+| ` + "`" + `var_files` + "`" + ` | list of string | no | The variable files that describe production, relative to the repository root, in the order they would be passed. Every entry must exist. Like the workspace it may only be given alongside a single root module, because a variable file is an argument to one. Max items 20. |
+| ` + "`" + `workspace` + "`" + ` | string | no | Which workspace holds production, for a repository that separates its environments that way. It may only be given alongside a single root module, because a workspace is selected inside one root module and one name spread across several is a statement nobody can act on. Max length 128, matches ` + "`" + `^[A-Za-z0-9_-]+$` + "`" + `. |
 
 ## Insights
 

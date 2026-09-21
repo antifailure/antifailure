@@ -50,6 +50,7 @@ func validate(m *schema.Manifest, doc *yaml.Node, root string) []Problem {
 	v.insights(m)
 	v.fidelity(m)
 	v.runtime(m)
+	v.infrastructure(m)
 	v.change(m)
 	v.github(m)
 	v.security(m)
@@ -98,6 +99,23 @@ func (v *validator) pathExists(p string) bool {
 	}
 	_, err := os.Stat(filepath.Join(v.root, filepath.FromSlash(p)))
 	return err == nil
+}
+
+// dirIsAFile reports that a repository relative path exists and is not a
+// directory.
+//
+// Written as the positive of the wrong answer rather than as "is a directory",
+// so that the three states stay distinct: absent is pathExists' business and
+// carries its own message, present and a directory is fine, and present and a
+// file is the one case this names. With no root, which the schema example
+// tests use, nothing is a file, for the same reason pathExists treats
+// everything as present: there is no tree to ask.
+func (v *validator) dirIsAFile(p string) bool {
+	if v.root == "" || p == "" {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(v.root, filepath.FromSlash(p)))
+	return err == nil && !info.IsDir()
 }
 
 func (v *validator) services(m *schema.Manifest) {
@@ -2130,6 +2148,141 @@ var changeSurfaces = map[string]bool{
 // that fail safe would never fire again. Somebody would write it to quiet the
 // report, and the report would go quiet for the right reason and the wrong
 // one at once.
+// infrastructure checks the section that says where the infrastructure as
+// code lives.
+//
+// It is the only section that describes production rather than the copy, and
+// that is what shapes every refusal below. A path here is not a build input:
+// nothing is compiled from it and no container is started by it, so a wrong
+// one produces no error anywhere downstream. It produces a comparison against
+// a directory that is not there, which reads as "your copy reproduces nothing"
+// rather than as "you pointed at the wrong place". So the mistakes are caught
+// here, where the line number is, rather than left to a report that cannot
+// tell the two apart.
+//
+// The bounds the schema declares are enforced by boundsPass and are not
+// repeated here. What this adds is the four things a JSON Schema cannot say:
+// that a path is inside this repository, that it is there, that it is a
+// directory rather than a file, and that a workspace or a variable file has
+// exactly one root module to belong to.
+func (v *validator) infrastructure(m *schema.Manifest) {
+	in := m.Infrastructure
+	if in == nil {
+		return
+	}
+
+	// Guarded on the key being WRITTEN, both here and for paths below. The
+	// schema makes both required and boundsPass enforces that at the section,
+	// so an omitted key already has a sentence; speaking again about the same
+	// omission would report one mistake twice, which is the thing boundsPass'
+	// spoken set exists to prevent one level down. What is left for these two
+	// is the key that is present and says nothing.
+	switch {
+	case strings.TrimSpace(string(in.Source)) == "":
+		if declaredAt(v.doc, "infrastructure.source") {
+			v.add("infrastructure.source",
+				"The infrastructure section does not say what declares the infrastructure.",
+				"Write source: terraform, which is the only one this engine reads.")
+		}
+	case in.Source != schema.InfraTerraform:
+		v.add("infrastructure.source",
+			fmt.Sprintf("%q is not an infrastructure source this engine can read.", string(in.Source)),
+			"terraform is the only value, and it covers OpenTofu, which writes the same language.")
+	}
+
+	if len(in.Paths) == 0 && declaredAt(v.doc, "infrastructure.paths") {
+		v.add("infrastructure.paths",
+			"The infrastructure section names no root module, so it says where nothing is.",
+			"Name the directory that is planned and applied on its own, such as infra/terraform.")
+	}
+	v.infraPaths("infrastructure.paths", in.Paths, "root module", true)
+	v.infraPaths("infrastructure.var_files", in.VarFiles, "variable file", false)
+
+	// A workspace and a variable file are both arguments to ONE root module: a
+	// workspace is selected inside one, and a variable file is passed to one.
+	// With several named there is no way to say which, and picking the first
+	// would be an engine deciding something its user did not. Refused only
+	// above one, so that a section naming none is told about its paths rather
+	// than about a key that is not the mistake.
+	if len(in.Paths) > 1 {
+		if in.Workspace != "" {
+			v.add("infrastructure.workspace",
+				fmt.Sprintf("The workspace %q is given beside %d root modules, and a workspace belongs to one.",
+					in.Workspace, len(in.Paths)),
+				"A workspace is selected inside a single root module. Name one path here, or drop the workspace.")
+		}
+		if len(in.VarFiles) > 0 {
+			v.add("infrastructure.var_files",
+				fmt.Sprintf("Variable files are given beside %d root modules, and a variable file is passed to one.",
+					len(in.Paths)),
+				"Name one path here, or drop the variable files.")
+		}
+	}
+}
+
+// infraPaths checks a list of repository relative paths the infrastructure
+// section names.
+//
+// what names the thing in the message, because "root module" and "variable
+// file" are what the reader wrote rather than the field name, and dir says
+// whether the entry has to be a directory.
+//
+// The duplicate check reports at the LIST rather than at the entry, which is
+// deliberate: the schema declares uniqueItems on both lists and boundsPass
+// enforces it at that same path, so a message here at the list suppresses the
+// generic one and the reader sees the specific sentence once instead of two
+// sentences about one mistake.
+func (v *validator) infraPaths(base string, paths []string, what string, dir bool) {
+	seen := map[string]int{}
+	for i, p := range paths {
+		at := fmt.Sprintf("%s[%d]", base, i)
+		trimmed := strings.TrimSpace(p)
+		switch {
+		case trimmed == "":
+			v.add(at, fmt.Sprintf("The %s at position %d is empty.", what, i),
+				"Remove the entry, or give it a path relative to the repository root.")
+			continue
+		case strings.HasPrefix(trimmed, "/"):
+			v.add(at, fmt.Sprintf("The %s %q is an absolute path.", what, p),
+				"Paths here are relative to the repository root, because the machine that reads them is not this one.")
+			continue
+		case hasParentSegment(trimmed):
+			v.add(at, fmt.Sprintf("The %s %q leaves the repository.", what, p),
+				"Paths here are relative to the repository root and stay inside it.")
+			continue
+		case !v.pathExists(trimmed):
+			v.add(at, fmt.Sprintf("The %s %q is not in this repository.", what, p),
+				"Check the spelling. Nothing downstream will report this: a path that is not there is read as production having nothing in it.")
+			continue
+		case dir && v.dirIsAFile(trimmed):
+			v.add(at, fmt.Sprintf("The %s %q is a file, and a root module is a directory.", what, p),
+				"Name the directory that holds the files, not one of the files in it.")
+			continue
+		}
+		if prev, dup := seen[trimmed]; dup {
+			v.add(base, fmt.Sprintf("The %s %q is named twice, at positions %d and %d.", what, p, prev, i),
+				"Remove one. Reading the same place twice measures it twice and says nothing more.")
+			continue
+		}
+		seen[trimmed] = i
+	}
+}
+
+// hasParentSegment reports whether a slash separated path contains a segment
+// that climbs out of the tree.
+//
+// Segment by segment rather than by substring, because a directory legitimately
+// named "..data", which is what Kubernetes calls a projected volume's current
+// revision, contains the two characters and climbs nowhere.
+func hasParentSegment(p string) bool {
+	for _, seg := range strings.Split(filepath.ToSlash(p), "/") {
+		if seg == ".." {
+			return true
+		}
+	}
+	return false
+}
+
 func (v *validator) change(m *schema.Manifest) {
 	c := m.Change
 	if c == nil {
