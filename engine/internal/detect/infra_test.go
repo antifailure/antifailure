@@ -140,6 +140,14 @@ func TestInfra_DraftsARootModuleThatCallsPublishedModules(t *testing.T) {
 	// answer is the same either way. That distinction is made inside
 	// localModuleTargets and is asserted there, in infra_internal_test.go,
 	// which is the only place it is visible.
+	//
+	// THE LOCAL CALL BELOW IS LOAD BEARING and was not here at first. With
+	// only the registry and Git calls, localModuleTargets returns nothing at
+	// all, so the line that records a callee never executes and the mutation
+	// aimed at it, marking the CALLER rather than the callee, could not reach
+	// the behaviour: the cell came back SURVIVED against a test that reads as
+	// though it covered exactly that. A fixture whose every module call is
+	// non local cannot hold a rule about what calling a module does.
 	files := map[string]string{
 		"package.json": infraWeb,
 		"infra/main.tf": `
@@ -151,7 +159,12 @@ module "consul" {
 module "vpc" {
   source = "git::https://example.com/vpc.git?ref=v1"
 }
+
+module "network" {
+  source = "./network"
+}
 `,
+		"infra/network/main.tf": `resource "aws_vpc" "this" {}`,
 	}
 	res := run(t, "shopfront", files)
 	require.NotNil(t, res.Draft.Infrastructure)
