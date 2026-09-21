@@ -137,6 +137,19 @@ func (o *Orchestrator) runOneFault(
 	return entry, nil
 }
 
+// sentence ends an error's text with a full stop unless it already ends a
+// sentence, so the next sentence of a finding does not run straight on from
+// it. The catalog's messages carry no closing punctuation, and joining one
+// onto "It was turned down" produced "every other container on this machine
+// with it It was turned down", on the frame the demo film is built around.
+func sentence(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" || strings.HasSuffix(s, ".") || strings.HasSuffix(s, "!") || strings.HasSuffix(s, "?") {
+		return s
+	}
+	return s + "."
+}
+
 // refusedAsUnsafe reports whether err is the injector turning a fault down
 // because its effect would reach past this environment, which it decides
 // before it writes anything.
@@ -304,7 +317,7 @@ func ChaosFindings(f report.ChaosFault, proof *pgcrash.Result, gate report.Polic
 	case f.Injected && !f.Undone:
 		detail := fmt.Sprintf("%s was injected and its undo did not run, so this environment is still broken.", where)
 		if f.Error != "" {
-			detail = fmt.Sprintf("%s was injected and its undo failed, so this environment is still broken: %s", where, f.Error)
+			detail = fmt.Sprintf("%s was injected and its undo failed, so this environment is still broken: %s", where, sentence(f.Error))
 		}
 		out = append(out, report.Finding{
 			Rule:   RuleFaultNotUndone,
@@ -329,7 +342,7 @@ func ChaosFindings(f report.ChaosFault, proof *pgcrash.Result, gate report.Polic
 			Detail: fmt.Sprintf("%s was not applied: %s It was turned down by the guard that keeps a fault "+
 				"inside this environment, before it acted, so it left this environment as it was and changed "+
 				"nothing the other faults in this run measured. What this fault was declared to establish "+
-				"was not established.", where, f.Error),
+				"was not established.", where, sentence(f.Error)),
 			Fix: "Read the refusal, which names what would have reached past this environment. Change the fault " +
 				"or the environment so the effect stays inside it, or remove the fault: while it is declared, " +
 				"every run reports its claim as not established.",
@@ -340,7 +353,7 @@ func ChaosFindings(f report.ChaosFault, proof *pgcrash.Result, gate report.Polic
 			Rule:   RuleFaultRefused,
 			Level:  gate.ChaosUnverified,
 			Title:  "A fault could not be injected",
-			Detail: fmt.Sprintf("%s was not applied: %s Nothing measured after it means anything.", where, f.Error),
+			Detail: fmt.Sprintf("%s was not applied: %s Nothing measured after it means anything.", where, sentence(f.Error)),
 			Fix:    "Read what the container said, and correct the fault or the environment it is aimed at.",
 			Where:  where,
 		}}

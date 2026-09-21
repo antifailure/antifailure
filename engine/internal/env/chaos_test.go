@@ -1,6 +1,7 @@
 package env_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -118,6 +119,40 @@ func TestChaosFindings_AnUndoThatFailedIsLeftInPlaceNotRefused(t *testing.T) {
 	require.Contains(t, got[0].Detail, "could not start the container",
 		"the finding dropped why the undo failed")
 	require.NotContains(t, got[0].Detail, "was not applied")
+}
+
+func TestChaosFindings_TheErrorEndsItsSentenceBeforeTheNextOneStarts(t *testing.T) {
+	// Filmed on the centrepiece frame: "...every other container on this
+	// machine with it It was turned down by the guard". The catalog's
+	// messages carry no closing punctuation and every branch below joins a
+	// sentence onto one, so each is checked with an error that ends bare, the
+	// shape the real one has, and with one that already ends a sentence, so
+	// the fix cannot double the full stop.
+	const bare = "AF-CHS-005: filling it would fill every other container on this machine with it"
+	const done = "AF-CHS-003: the daemon said no."
+	cases := []struct {
+		name  string
+		fault report.ChaosFault
+		next  string
+	}{
+		{"refused as unsafe", report.ChaosFault{Name: "f", Refused: true}, " It was turned down"},
+		{"could not be injected", report.ChaosFault{Name: "f"}, " Nothing measured after it"},
+	}
+	for _, tc := range cases {
+		for _, said := range []string{bare, done} {
+			f := tc.fault
+			f.Error = said
+			got := env.ChaosFindings(f, nil, gate())
+			require.Len(t, got, 1, tc.name)
+			stem := strings.TrimSuffix(said, ".")
+			require.Contains(t, got[0].Detail, stem+"."+tc.next,
+				"%s: the error runs straight on into the next sentence", tc.name)
+			require.NotContains(t, got[0].Detail, "..", "%s: the full stop was doubled", tc.name)
+		}
+	}
+	// And the one that ends on the error, which a reader sees last.
+	got := env.ChaosFindings(report.ChaosFault{Name: "f", Injected: true, Error: bare}, nil, gate())
+	require.True(t, strings.HasSuffix(got[0].Detail, "with it."), "the left in place detail ends mid sentence: %q", got[0].Detail)
 }
 
 func TestRefusedAsUnsafe_ReadsTheCodeNotTheSentence(t *testing.T) {
