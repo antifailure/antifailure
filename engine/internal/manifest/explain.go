@@ -359,20 +359,34 @@ func Explain(m *schema.Manifest, width int) string {
 	// measurement and carries its reason.
 	if in := m.Infrastructure; in != nil {
 		b.WriteString("\nInfrastructure\n")
-		for _, st := range in.Stacks {
+		for i, st := range in.Stacks {
+			if i > 0 {
+				// A blank line between stacks, because three facts repeated
+				// with no break between them read as one six line block rather
+				// than as two stacks.
+				b.WriteString("\n")
+			}
 			fmt.Fprintf(&b, "  stack        %s\n",
 				value(fmt.Sprintf("%s, declared by %s", st.Path, st.Source), 15, width))
-			// Both printed under every stack, and printed as "none" rather
+			// The labels sit IN the gutter, the way every other section on
+			// this page puts them, rather than being indented a second time
+			// under the stack. The second indent was the first thing written
+			// and it was wrong twice: it did not line up with anything else on
+			// the page, and it pushed the value to column 25, where textwrap
+			// refuses to wrap into the twenty columns left at a forty column
+			// terminal and prints a line past the edge instead.
+			//
+			// Both are printed under every stack, and printed as "none" rather
 			// than omitted when empty. Which workspace and which variable
-			// files production is read through is the difference between
-			// reading production's own numbers and reading a module's
+			// files this stack is read through is the difference between
+			// reading production's own numbers and reading the stack's
 			// defaults, and a page that showed the second only when somebody
 			// had already thought of it would hide exactly the case worth
 			// catching.
-			fmt.Fprintf(&b, "  %-*s workspace %s\n", 15, "",
-				value(orNone(st.Workspace, "none, so the default workspace"), 26, width))
-			fmt.Fprintf(&b, "  %-*s var files %s\n", 15, "",
-				value(orNone(strings.Join(st.VarFiles, ", "), "none, so the stack's own defaults"), 26, width))
+			fmt.Fprintf(&b, "  workspace    %s\n",
+				value(orNone(st.Workspace, "none, so the default workspace"), 15, width))
+			fmt.Fprintf(&b, "  var files    %s\n",
+				value(orNone(strings.Join(st.VarFiles, ", "), "none, so the stack's own defaults"), 15, width))
 		}
 	}
 

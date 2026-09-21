@@ -164,18 +164,10 @@ func initDatastores(proposed []detect.ProposedDatastore) []InitDatastore {
 	return out
 }
 
-// cloudGaps collects the cloud services a dependency names that no catalog
-// entry claims.
-//
-// The finding exists because a missing egress rule is invisible by
-// construction: the manifest lists what was recognised and says nothing at all
-// about what was not, so the gap only surfaces as a refusal nobody can read,
-// in an environment, at the moment the call is made. This is the one place it
-// can be read before then.
 // renderInfrastructure says what was found about the infrastructure as code,
 // and what was deliberately left blank.
 //
-// Its own section rather than a row under Assumed, because the paths are not
+// Its own section rather than a row under Assumed, because the stacks are not
 // assumed: they were read out of the tree, and the sentence under Assumed says
 // the opposite. What IS worth saying is the half that was left out on purpose.
 // Which workspace holds production, and which variable file describes it, is
@@ -224,6 +216,14 @@ func infraNotes(findings []detect.Finding) []string {
 	return out
 }
 
+// cloudGaps collects the cloud services a dependency names that no catalog
+// entry claims.
+//
+// The finding exists because a missing egress rule is invisible by
+// construction: the manifest lists what was recognised and says nothing at all
+// about what was not, so the gap only surfaces as a refusal nobody can read,
+// in an environment, at the moment the call is made. This is the one place it
+// can be read before then.
 func cloudGaps(findings []detect.Finding) []string {
 	var out []string
 	for _, f := range detect.OfKind(findings, detect.KindNote) {
