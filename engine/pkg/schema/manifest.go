@@ -203,8 +203,8 @@ type Database struct {
 	// where it sits.
 	PreloadLibraries []string `json:"preload_libraries,omitempty" yaml:"preload_libraries,omitempty"`
 	SourceURLEnv     string   `json:"source_url_env,omitempty" yaml:"source_url_env,omitempty"`
-	URLEnv       string     `json:"url_env,omitempty" yaml:"url_env,omitempty"`
-	MaskingRules string     `json:"masking_rules,omitempty" yaml:"masking_rules,omitempty"`
+	URLEnv           string   `json:"url_env,omitempty" yaml:"url_env,omitempty"`
+	MaskingRules     string   `json:"masking_rules,omitempty" yaml:"masking_rules,omitempty"`
 	// Project identifies the account-side project for a hosted provider, such
 	// as a Neon project. It is not a secret and belongs in the manifest; the
 	// credential that reaches it does not, which is what APIKeyEnv is for.

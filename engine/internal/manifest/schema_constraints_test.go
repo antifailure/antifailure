@@ -1402,6 +1402,7 @@ func TestSchemaConstraintReport(t *testing.T) {
 // base manifest is refused by this feature's own three cross field rules,
 // which is the #315 failure exactly.
 const wantConstraints = 782
+
 // Then 755. The three keys that say what the Postgres a golden is built in
 // actually is: database.image, which declares a type and a maxLength;
 // database.extensions and database.preload_libraries, each of which declares a
