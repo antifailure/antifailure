@@ -417,6 +417,112 @@ test('a screen shows the last rows, and the scrollback behind it is still read',
     `the rendered screen is showing rows that scrolled away:\n${last}`);
 });
 
+test('a burst still being parsed is drawn before the screen is judged', async () => {
+  // The forty line version above is the same claim at a size that hides the
+  // defect. The driver stops waiting the MOMENT the program exits, and the
+  // emulator parses what it was sent in chunks across later ticks, so a
+  // program that prints a lot and exits at once is judged with its last
+  // redraw still queued. The expectation then fails about output the program
+  // certainly wrote, and it fails more often the busier the host is, which is
+  // how it reads as a flake rather than as the race it is.
+  //
+  // Ten thousand lines is past the point where the parse outlives the exit:
+  // measured on this driver, the unwaited version missed the last line 18
+  // times out of 18 at this size and 8 times out of 10 at two thousand, while
+  // forty lines passed every time.
+  const lines = 10_000;
+  const burst = ['-e', String.raw`for (let i = 1; i <= 10000; i++) process.stdout.write("line " + i + "\n")`];
+  const results = await runTerminal({
+    workflows: [{
+      name: 'burst',
+      command: execPath,
+      args: burst,
+      screen: { rows: 10, cols: 40 },
+      expect: [`"line ${lines}"`],
+      maxMs: 20_000,
+    }],
+  });
+  // One assertion on purpose. A verdict of pass is reached only through the
+  // succeeded cause, so a second assertion about the cause would be a line
+  // this defect can never reach: assert.equal stops the test at the first
+  // failure, so the extra claim would look alive while measuring nothing.
+  assert.equal(results[0]!.outcome.verdict, 'pass', results[0]!.outcome.detail);
+});
+
+test('the first screen recorded as evidence is one the program had finished drawing', async () => {
+  // The verdict and the EVIDENCE come from two different reads, and the test
+  // above covers only the verdict. A screen is recorded when the driver
+  // captures one that CHANGED, so a capture taken while the emulator is still
+  // parsing records a grid the program had already moved past, and the report
+  // shows its reader a screen that was never the program's last word.
+  //
+  // This is the assertion that tells the two waits apart. Waiting before the
+  // capture is what makes the FIRST recorded screen honest. Waiting before
+  // the transcript is read cannot help here, because by then the stale screen
+  // has already been recorded and the later honest one is only appended
+  // behind it.
+  //
+  // Say plainly how strong this one is. Dropping the wait before the capture
+  // failed it 5 times out of 6, not 6 out of 6, and raising the burst to
+  // twenty thousand did not change that ratio. The residual is inherent
+  // rather than a matter of sizing: the staleness is observable only when the
+  // parse is still outstanding at the first capture, and sometimes it is not.
+  // So this gate can say no, and it is not a deterministic one.
+  const lines = 10_000;
+  const burst = ['-e', String.raw`for (let i = 1; i <= 10000; i++) process.stdout.write("line " + i + "\n")`];
+  const results = await runTerminal({
+    workflows: [{
+      name: 'evidence',
+      command: execPath,
+      args: burst,
+      screen: { rows: 10, cols: 40 },
+      expect: [`"line ${lines}"`],
+      maxMs: 20_000,
+    }],
+  });
+  const screens = results[0]!.steps.filter((s) => s.includes('\n'));
+  assert.ok(screens.length > 0, 'the run recorded no screen at all, so there is no evidence to judge');
+  assert.match(screens[0]!, new RegExp(`line ${lines}`),
+    `the first screen recorded as evidence was captured mid parse:\n${screens[0]}`);
+});
+
+test('a burst that arrives while the driver waits for the exit is still drawn', async () => {
+  // The third arrival order, and the one neither test above reaches. A
+  // program that answers a key, falls quiet, and only THEN prints and exits
+  // leaves the driver waiting on the process rather than on the emulator:
+  // the settle is long over, so waiting before the capture cannot help, and
+  // the only thing standing between the burst and the verdict is the wait
+  // before the transcript is read.
+  //
+  // Twenty thousand lines is what makes this certain rather than likely.
+  // Measured on this driver, dropping the wait before the transcript failed
+  // this 6 times out of 6 at this size and 4 times out of 6 at ten thousand.
+  const lines = 20_000;
+  const quiet = String.raw`
+process.stdout.write("ready\n");
+process.stdin.setRawMode && process.stdin.setRawMode(true);
+process.stdin.once("data", () => {
+  process.stdout.write("ack\n");
+  setTimeout(() => {
+    for (let i = 1; i <= 20000; i++) process.stdout.write("line " + i + "\n");
+    process.exit(0);
+  }, 250);
+});
+`;
+  const results = await runTerminal({
+    workflows: [{
+      name: 'late-burst',
+      command: execPath,
+      args: ['-e', quiet],
+      screen: { rows: 10, cols: 40 },
+      input: ['<enter>'],
+      expect: [`"line ${lines}"`],
+      maxMs: 20_000,
+    }],
+  });
+  assert.equal(results[0]!.outcome.verdict, 'pass', results[0]!.outcome.detail);
+});
+
 test('the job environment reaches the program on both paths', async () => {
   // How a command line tool under test learns where the rehearsal environment
   // is. A variable assembled and sent nowhere is the dead wiring this

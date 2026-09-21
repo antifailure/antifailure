@@ -414,10 +414,24 @@ async function driveOnAScreen(
   // the whole ceiling, because a program that has not printed its first screen
   // yet has not started; a keystroke is given far less, because a key a
   // program ignores must not cost the ceiling.
+  // `drawn` waits until everything RECEIVED so far has been parsed, which is
+  // not what awaiting the chain once does. The chain grows while it is
+  // awaited, because the program keeps writing during the await and every
+  // chunk appends another link, so a single `await parsed` proves only that
+  // the chunks queued at the instant of the call are on the grid. Awaiting
+  // until the chain stops changing is the fixed point that makes a snapshot
+  // mean what the comment above claims it means.
+  const drawn = async () => {
+    for (;;) {
+      const chain = parsed;
+      await chain;
+      if (parsed === chain) return;
+    }
+  };
   const settle = async (since: number, responseMs: number) => {
     const ceiling = Date.now() + SETTLE_CEILING_MS;
     for (;;) {
-      await parsed;
+      await drawn();
       if (exited) return;
       if (Date.now() >= ceiling || Date.now() >= deadline) return;
       const answered = lastDataAt > since;
@@ -464,6 +478,11 @@ async function driveOnAScreen(
     await waitForExit(() => exited !== undefined, Math.min(600, Math.max(0, deadline - Date.now())));
   }
 
+  // The program's last bytes are what the expectation is usually about, and
+  // waiting for the exit above waits for the PROCESS rather than for the
+  // emulator. Draining here is what stops the transcript being judged with
+  // the final redraw still queued.
+  await drawn();
   const everything = screen.everything();
   const transcript = [...shown, everything].join('\n');
   capture();
