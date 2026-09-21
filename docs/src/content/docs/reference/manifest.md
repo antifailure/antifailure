@@ -31,6 +31,7 @@ what it deliberately does not cover.
 | `personas` | list | Users the agents sign in as. |
 | `workflows` | list | What the agents do. |
 | `terminal_workflows` | list | What the agents do at a command line. |
+| `desktop` | block | The application the workflows driving the desktop surface are driven in. |
 | `invariants` | list | Statements about the data that must stay true. |
 | `insights` | block | The Postgres native checks. |
 | `change` | block | Path rules for [change analysis](/docs/concepts/change-analysis), for a layout the built in rules do not predict. |
@@ -276,6 +277,25 @@ A `workflows` entry names what it drives with
 [`surface`](/docs/guides/workflows), one of `web`, `terminal`, `desktop`, `ios`
 or `android`, defaulting to `web`. All five may be written; a build refuses the
 ones it carries no driver for, by name.
+
+## `desktop`
+
+Which application the workflows driving the desktop surface are driven in,
+declared once because a manifest describes one product. It is what `base_url`
+is to a browser run: the workflows say what to do and this says what to do it
+to. A workflow with `surface: desktop` and no block here is refused, and so is
+a block here that no workflow drives.
+
+| Key | Type | Notes |
+| --- | --- | --- |
+| `kind` | string | Required. `electron` or `macos`, which decides which accessibility tree is read. Stated rather than guessed from the path. |
+| `application` | string | Required. The Electron binary, or the `.app` bundle for a native application. Relative to the directory holding the manifest. |
+| `args` | list | Its arguments, one per entry, passed as written and never through a shell. |
+| `process` | string | What macOS calls the running application when that is not the bundle's name. Native only, and refused on `electron`. Defaults to the bundle's name without `.app`. |
+
+[Desktop workflows](/docs/guides/desktop) is the guide, including what a
+native application needs granted, why signing in is a workflow, and what the
+report carries instead of video.
 
 ## `database`
 

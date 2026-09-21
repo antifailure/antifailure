@@ -393,7 +393,10 @@ func TestParse_RefusesWorkflowsThatDriveDifferentSurfaces(t *testing.T) {
 // caught by the rule above.
 func TestParse_AcceptsSeveralWorkflowsOnOneSurface(t *testing.T) {
 	t.Parallel()
-	m := mustParse(t, withPersonas+`workflows:
+	m := mustParse(t, withPersonas+`desktop:
+  kind: electron
+  application: ./node_modules/.bin/electron
+workflows:
   - name: checkout
     surface: desktop
     description: Buy one item and see the order confirmed on the screen.

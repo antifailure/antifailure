@@ -124,6 +124,7 @@ func normalize(m *schema.Manifest, root string) {
 	normalizeAuth(m)
 	normalizeWorkflows(m)
 	normalizeTerminalWorkflows(m)
+	normalizeDesktop(m)
 	normalizeInsights(m)
 	normalizeOracle(m)
 	normalizeExplore(m)
@@ -421,6 +422,21 @@ func normalizeTerminalWorkflows(m *schema.Manifest) {
 			w.Budget.Duration = schema.DefaultTerminalDuration
 		}
 	}
+}
+
+// normalizeDesktop fills in the one thing a desktop application leaves unsaid.
+//
+// The process name is derived from the bundle rather than left empty, because
+// the runner has to FIND the application after opening it: opening a bundle
+// returns before the application is ready, so a name is needed either way.
+// Deriving it here rather than in the runner means `af explain` prints the
+// name that will actually be looked for, instead of a blank the runner fills
+// in privately and nobody can see.
+func normalizeDesktop(m *schema.Manifest) {
+	if m.Desktop == nil || m.Desktop.Kind != schema.DesktopMacOS || m.Desktop.Process != "" {
+		return
+	}
+	m.Desktop.Process = strings.TrimSuffix(filepath.Base(m.Desktop.Application), ".app")
 }
 
 func normalizeWorkflows(m *schema.Manifest) {

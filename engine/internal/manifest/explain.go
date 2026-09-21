@@ -237,8 +237,38 @@ func Explain(m *schema.Manifest, width int) string {
 		b.WriteString("\n")
 	}
 
+	if m.Desktop != nil {
+		// Printed once, above the workflows, because it is declared once. A
+		// reader deciding whether those workflows prove what their names say
+		// needs to know what they were driven against, and repeating it on
+		// every line would say it is per workflow when it is not.
+		b.WriteString("Desktop application\n")
+		invocation := strings.TrimSpace(m.Desktop.Application + " " + strings.Join(m.Desktop.Args, " "))
+		fmt.Fprintf(&b, "  %-24s %s\n", m.Desktop.Kind, value(invocation, 27, width))
+		if m.Desktop.Kind == schema.DesktopMacOS {
+			// The name the runner will look the application up by after
+			// opening its bundle, which is derived when the manifest leaves
+			// it out. Shown rather than left implicit, because a launch that
+			// finds no such process is reported as an application that never
+			// drew a window, and the name it looked for is the first thing
+			// somebody reading that needs.
+			fmt.Fprintf(&b, "  %-24s %s\n", "found as", m.Desktop.Process)
+		}
+		b.WriteString("\n")
+	}
+
 	if len(m.Workflows) > 0 {
-		b.WriteString("Workflows\n")
+		// Which surface they drive, said once in the heading rather than on
+		// every line, because a manifest whose workflows name more than one
+		// is refused at validation: the runner starts one driver for the
+		// whole list. Only when it is not a browser, because every workflow
+		// in every manifest written before surfaces existed is a browser one
+		// and a heading that started saying so would be noise.
+		if s := m.Workflows[0].Surface; s != "" && s != schema.SurfaceWeb {
+			fmt.Fprintf(&b, "Workflows, on the %s\n", s)
+		} else {
+			b.WriteString("Workflows\n")
+		}
 		for _, w := range m.Workflows {
 			mode := "serial"
 			if w.Independent {

@@ -212,6 +212,13 @@ built. The runner says it again before it drives anything, so a surface nothing
 drove can never come back green. A workflow refused that way is blocked, which
 counts against nobody, and the workflows beside it still run.
 
+`surface: desktop` also needs a
+[`desktop`](/docs/guides/desktop) block saying which application the workflow
+is driven in, because there is no default the way there is a default address
+for a browser run. A workflow that names the surface without one is refused
+while the manifest is read, rather than after an environment has been built for
+a run that could never open anything.
+
 Write a terminal workflow in
 [`terminal_workflows`](/docs/guides/terminal) rather than here. It needs a
 program to run where a browser workflow needs a persona to sign in as, so the
@@ -222,4 +229,5 @@ This is not `change.rules[].surface`, which says what a changed FILE is. This
 says what a workflow DRIVES.
 
 Related: [agents](/docs/concepts/agents), [personas](/docs/guides/personas),
+[desktop workflows](/docs/guides/desktop),
 [terminal workflows](/docs/guides/terminal).

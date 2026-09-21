@@ -172,6 +172,12 @@ type jobDocument struct {
 	// runner not to open a browser, consult the goals or probe access: none of
 	// those mean anything without a page. Absent means the ordinary web run.
 	Surface string `json:"surface,omitempty"`
+	// Desktop is the application a desktop run opens, and it is the whole
+	// reason that surface is reachable rather than merely nameable. The
+	// runner refuses a desktop run that carries no application, because
+	// there is no default the way there is a default address. Absent for
+	// every run whose workflows drive a browser, which is most runs.
+	Desktop *desktopAppDoc `json:"desktop,omitempty"`
 	// Diversity is the resolved per-agent personality plan. Absent means one
 	// neutral agent per workflow, today's behavior. The engine resolves it so
 	// the runner stays a mechanism that consumes a fixed plan rather than
@@ -234,6 +240,24 @@ type terminalDoc struct {
 type terminalScreenDoc struct {
 	Rows int `json:"rows"`
 	Cols int `json:"cols"`
+}
+
+// desktopAppDoc is the application a desktop run drives, in the shape
+// runner/src/drivers/desktop.ts reads rather than the shape the manifest
+// writes: the path is already absolute and the process name already derived by
+// the time it is sent.
+//
+// The field names are the RUNNER's, not the manifest's, because this document
+// IS the driver's input. executablePath is what ElectronTarget reads and
+// bundlePath and name are what MacTarget reads, and naming them after the
+// manifest's `application` would mean a translation living in the one place
+// that cannot be tested from either side.
+type desktopAppDoc struct {
+	Kind           string   `json:"kind"`
+	ExecutablePath string   `json:"executablePath,omitempty"`
+	Args           []string `json:"args,omitempty"`
+	BundlePath     string   `json:"bundlePath,omitempty"`
+	Name           string   `json:"name,omitempty"`
 }
 
 // accessProbeDoc is one declared object the runner reaches as each persona. The
@@ -352,6 +376,7 @@ func (o *Orchestrator) Test(ctx context.Context, opts TestOptions) (*TestReport,
 		Runner: runner, BaseURL: status.URL, Artifacts: artifacts,
 		Workflows: workflows, Personas: o.personaDocs(provisioned),
 		Terminal: terminals, Surface: surfaceFor(workflows, terminals),
+		Desktop:   o.desktopApp(workflows),
 		Diversity: divPtr,
 		WorkDir:   o.opts.Root, Attempts: opts.Attempts, Headless: !opts.Headed,
 		LiveSocket: opts.LiveSocket,
@@ -584,6 +609,11 @@ type runnerJob struct {
 	Workflows []workflowDoc
 	Terminal  []terminalDoc
 	Surface   string
+	// Desktop is the application a desktop run opens, nil for every other
+	// run. Built by desktopApp from the workflows this run will actually
+	// drive, so a --only that selects no desktop workflow sends no
+	// application and the runner is never asked to launch one for nothing.
+	Desktop   *desktopAppDoc
 	Personas  []personaDoc
 	Diversity *personality.Resolved
 	Attempts  int
@@ -616,6 +646,7 @@ func (o *Orchestrator) driveRunner(ctx context.Context, job runnerJob) (*TestRep
 		BaseURL: job.BaseURL, Artifacts: job.Artifacts,
 		Workflows: job.Workflows, Personas: job.Personas,
 		Terminal: job.Terminal, Surface: job.Surface,
+		Desktop:   job.Desktop,
 		Diversity: job.Diversity,
 		AF:        self, WorkDir: job.WorkDir,
 		Attempts: job.Attempts, Headless: job.Headless,
@@ -770,6 +801,59 @@ func (o *Orchestrator) terminalDocs(only []string) []terminalDoc {
 		out = append(out, doc)
 	}
 	return out
+}
+
+// desktopApp is the application this run opens, or nil when nothing in it
+// drives the desktop.
+//
+// THE HOP THAT DID NOT EXIST. A workflow could name the desktop surface, the
+// engine could select the desktop driver, and the runner had nothing to open:
+// `runDesktop` is given an application or it refuses the run, and no manifest
+// could name one. The surface was reachable and the run was dead one field
+// short of working.
+//
+// Read from the workflows this run will actually drive rather than from the
+// manifest alone, so a --only that selects no desktop workflow sends no
+// application. A document carrying an application nothing opens would invite
+// the runner to launch something for a run with no use for it, and the
+// validator's refusal of that manifest is the answer to the question this
+// keeps honest rather than a reason to stop asking it.
+//
+// The path is made absolute HERE. The runner is a subprocess started from
+// somewhere the manifest never mentions, so a relative path resolved there
+// would name a different file, and the symptom would be an application that
+// could not be found for a reason nothing in the report could name.
+func (o *Orchestrator) desktopApp(workflows []workflowDoc) *desktopAppDoc {
+	app := o.opts.Manifest.Desktop
+	if app == nil {
+		return nil
+	}
+	drives := false
+	for _, w := range workflows {
+		if w.surface == string(schema.SurfaceDesktop) {
+			drives = true
+			break
+		}
+	}
+	if !drives {
+		return nil
+	}
+
+	resolved := app.Application
+	if !filepath.IsAbs(resolved) {
+		resolved = filepath.Join(o.opts.Root, resolved)
+	}
+	if app.Kind == schema.DesktopMacOS {
+		// Name rather than Process, because this document is MacTarget's
+		// input and that is what MacTarget calls it. Normalisation has
+		// already derived it from the bundle when the manifest left it out,
+		// so this never sends an empty one for a native application.
+		return &desktopAppDoc{
+			Kind: app.Kind, Args: app.Args,
+			BundlePath: resolved, Name: app.Process,
+		}
+	}
+	return &desktopAppDoc{Kind: app.Kind, Args: app.Args, ExecutablePath: resolved}
 }
 
 // surfaceFor is which surface the runner is told this run drives, which is
