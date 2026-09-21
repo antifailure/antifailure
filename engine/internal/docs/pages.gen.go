@@ -5241,6 +5241,7 @@ recorded with the site that made it.
 | the cloud credential path | AWS, GCP, Azure or Vault, for every secret store and every managed database provider |
 | the audit stream sink | your syslog receiver, your webhook endpoint, or the object store the audit stream is dropped into |
 | the runtime conformance suite | the internet, on purpose, which is why it is here |
+| the emulator seeding | the environment's own sidecar on loopback, to create the cloud resources production declares inside the emulators. Nothing outside this machine |
 | the container image pull | the registry the image reference names, which for the sidecar is ` + "`" + `ghcr.io` + "`" + ` unless ` + "`" + `AF_PROXY_IMAGE` + "`" + ` names your own |
 | the container image build | Docker Hub, for the sidecar's base image |
 
@@ -8339,6 +8340,67 @@ What that means in practice:
 LocalStack is licensed under the Apache License 2.0 and is recorded in
 ` + "`" + `THIRD_PARTY_NOTICES.md` + "`" + `, which is generated from the same declaration the
 engine starts the container from.
+
+## The emulator starts empty, and what fills it
+
+LocalStack is started with ` + "`" + `PERSISTENCE` + "`" + ` off, so nothing an environment does to
+it survives that environment. That is deliberate: a twin that inherited the last
+twin's buckets would be reproducible only by accident. It also means a bucket, a
+queue, a topic, a table, a stream, a parameter or a secret that exists in
+production exists nowhere in the twin until something puts it there, and an
+application that reads its own bucket on startup meets an emulator that has
+none.
+
+` + "`" + `af up` + "`" + ` creates the resources production's infrastructure as code declares,
+inside the emulator, before any service starts. The requests go through the
+environment's own sidecar at the provider's own hostname, so what is exercised
+is the route the application has. A hostname the egress policy does not route to
+this emulator is reported refused rather than created somewhere else, because
+the application would be refused at that hostname too.
+
+These are the AWS resource types it creates:
+
+| Resource type | What is created |
+| --- | --- |
+| ` + "`" + `aws_s3_bucket` + "`" + ` | the bucket, and versioning when it is declared |
+| ` + "`" + `aws_sqs_queue` + "`" + ` | the queue, FIFO, visibility timeout, retention, delay, maximum message size, receive wait |
+| ` + "`" + `aws_sns_topic` + "`" + ` | the topic, FIFO |
+| ` + "`" + `aws_dynamodb_table` + "`" + ` | the table, its partition key and its sort key |
+| ` + "`" + `aws_kinesis_stream` + "`" + ` | the stream and its shard count |
+| ` + "`" + `aws_ssm_parameter` + "`" + ` | the parameter, holding a placeholder |
+| ` + "`" + `aws_secretsmanager_secret` + "`" + ` | the secret, holding a placeholder |
+| ` + "`" + `aws_cloudwatch_event_bus` + "`" + ` | the event bus |
+
+Nothing is called reproduced until it has been read back out of the emulator. A
+create the emulator answered is not evidence that anything exists, so every one
+of the rows above ends with a read that finds it, and a read that does not find
+it reports the resource absent with what the emulator said.
+
+### What it does not reproduce is named
+
+Every attribute a declaration carries is accounted for, and the accounting is by
+subtraction: an attribute this build does not put into the emulator is reported
+with the reason, whether or not anybody anticipated it. So a run says which of
+these it met, and a run in which everything reproduced prints no caveat at all.
+
+- **A secret and a parameter hold a placeholder**, and are reported as
+  substituted rather than reproduced. Production's value must never be copied
+  into a container running a third party image, and reading "the secret is in
+  the twin" as "the secret says what production says" is the most dangerous
+  sentence this could produce.
+- **A ` + "`" + `SecureString` + "`" + ` parameter is created as a plain ` + "`" + `String` + "`" + `.** The surface does
+  not answer for KMS, so a ` + "`" + `SecureString` + "`" + ` here would be a parameter the
+  application cannot decrypt.
+- **Anything encrypted with a KMS key** is created without one, for the same
+  reason.
+- **A lifecycle rule is not created.** LocalStack stores a lifecycle
+  configuration and never expires an object, so a rule reproduced here would be a
+  rule that does nothing.
+- **A secondary index is not created**, so a query against one does not find it.
+- **The region is a hostname here and a property in production.** One LocalStack
+  answers for every region at once, so a declaration's region decides which
+  hostname the request goes to and therefore which egress rule must route it. It
+  is not a property the twin holds.
 `,
 	"guides/azure-container-apps.md": `---
 title: Why there is no Azure Container Apps runtime
@@ -8648,6 +8710,42 @@ be covered by something that is. A **Service Bus queue is not a Queue Storage
 queue**, and the **Cosmos DB Table API** is not Table Storage: it speaks the
 same protocol on ` + "`" + `table.cosmos.azure.com` + "`" + ` but its partitioning and throughput
 behaviour is what a Cosmos user is testing, and Azurite is not that.
+
+## Declared storage resources are not created in the twin, and a run says so
+
+` + "`" + `af up` + "`" + ` creates the cloud resources production's infrastructure as code declares
+inside the emulators, before any service starts. It does not do that for Azure,
+and this is where a reader finds that out rather than from a twin that is
+quietly missing a container.
+
+Azurite validates the Shared Key signature on every request. A request to create
+a blob container, addressed the way an environment addresses one, is refused:
+
+` + "`" + "`" + "`" + `
+PUT /afprobe?restype=container
+Host: devstoreaccount1.blob.core.windows.net
+x-ms-version: 2021-08-06
+
+HTTP/1.1 403 Server failed to authenticate the request.
+x-ms-error-code: AuthorizationFailure
+` + "`" + "`" + "`" + `
+
+Signing needs the storage account's key, and the account credential an
+application receives is a substituted credential the manifest decides, so
+nothing in the engine holds one to sign with. LocalStack and both Google
+emulators answer an unsigned request, which is why those are seeded and this is
+not.
+
+So ` + "`" + `azurerm_storage_container` + "`" + `, ` + "`" + `azurerm_storage_queue` + "`" + ` and
+` + "`" + `azurerm_storage_table` + "`" + ` are reported as unmeasured, each carrying that reason,
+and the emulator itself is still started and still answers the application. The
+container the application expects is the thing that is missing, and a run names
+it.
+
+One trap is worth recording for whoever closes this. With production style
+addressing the account is in the hostname, and Azurite then refuses a path that
+also names the account, with a bare ` + "`" + `400` + "`" + ` and an empty body. The path is
+` + "`" + `/<container>` + "`" + ` and not ` + "`" + `/devstoreaccount1/<container>` + "`" + `.
 `,
 	"guides/build.md": `---
 title: Building services
@@ -9304,6 +9402,39 @@ the image rather than from a page about installing it. Its second clause is
 worth knowing: using the CLI against a Google Cloud product is additionally
 governed by that product's own terms. Nothing here reaches a Google Cloud
 product, because the emulator has no route out.
+
+## The emulators start empty, and what fills them
+
+The storage emulator keeps its backend in memory and the Pub/Sub emulator keeps
+nothing across a run, so a bucket, a topic or a subscription that exists in
+production exists nowhere in the twin until something puts it there. ` + "`" + `af up` + "`" + `
+creates the resources production's infrastructure as code declares, inside the
+emulators, before any service starts, and it sends those requests through the
+environment's own sidecar at the provider's own hostname, so what is exercised
+is the route the application has.
+
+| Resource type | What is created |
+| --- | --- |
+| ` + "`" + `google_storage_bucket` + "`" + ` | the bucket, and versioning when it is declared |
+| ` + "`" + `google_pubsub_topic` + "`" + ` | the topic |
+| ` + "`" + `google_pubsub_subscription` + "`" + ` | the subscription, its topic and its acknowledgement deadline |
+
+Nothing is called reproduced until it has been read back out of the emulator.
+
+### The bucket location is not reproduced, and that was measured
+
+A bucket created asking for ` + "`" + `EUROPE-WEST1` + "`" + ` comes back from the storage emulator
+as ` + "`" + `US-CENTRAL1` + "`" + `, with a ` + "`" + `200` + "`" + ` and no warning. The emulator accepts the field
+and does not hold it. So the location is reported as unmeasured with that
+reason, rather than passed over: a twin whose bucket claimed a region it does
+not have is the kind of quiet difference this product exists to prevent, and the
+first thing tested against it would be a latency or a residency assumption the
+twin cannot support.
+
+The storage class, a lifecycle rule, uniform bucket level access and a customer
+managed encryption key are reported the same way, each with what the emulator
+actually does. A subscription's push configuration, dead letter policy and retry
+policy are reported too: an emulator with no route out cannot deliver to a URL.
 `,
 	"guides/github.md": `---
 title: GitHub

@@ -168,7 +168,7 @@ func (e *Emulator) Container() extension.EmulatorContainer {
 func (e *Emulator) ServiceFor(host string) (Service, bool) {
 	for _, s := range e.Services {
 		for _, pattern := range s.Hosts {
-			if hostMatches(pattern, host) {
+			if HostMatches(pattern, host) {
 				return s, true
 			}
 		}
@@ -176,7 +176,7 @@ func (e *Emulator) ServiceFor(host string) (Service, bool) {
 	return Service{}, false
 }
 
-// hostMatches is the same rule the policy engine compiles, in the small.
+// HostMatches is the same rule the policy engine compiles, in the small.
 //
 // A star stands for exactly one label anywhere in the pattern, EXCEPT a
 // leading one, which stands for one or more. That asymmetry is not a detail:
@@ -190,7 +190,14 @@ func (e *Emulator) ServiceFor(host string) (Service, bool) {
 // is checked against that engine rather than trusted to agree with it: host
 // matching already lives in more than one place in this repository, and what
 // holds those places together is a corpus of vectors, never a shared belief.
-func hostMatches(pattern, host string) bool {
+//
+// Exported for one caller outside this package. The runtime decides, before it
+// seeds an emulator, whether the environment's egress policy routes a hostname
+// to that emulator, and it has to decide it EXACTLY as the sidecar will. A
+// second implementation there would be a third host matcher in this repository,
+// and its drift would show up as a seeding request the plan believed was routed
+// and the sidecar refused, reported as a missing bucket.
+func HostMatches(pattern, host string) bool {
 	pattern = strings.ToLower(strings.TrimSuffix(pattern, "."))
 	anyPrefix := strings.HasPrefix(pattern, "*.")
 	if anyPrefix {

@@ -187,3 +187,64 @@ What that means in practice:
 LocalStack is licensed under the Apache License 2.0 and is recorded in
 `THIRD_PARTY_NOTICES.md`, which is generated from the same declaration the
 engine starts the container from.
+
+## The emulator starts empty, and what fills it
+
+LocalStack is started with `PERSISTENCE` off, so nothing an environment does to
+it survives that environment. That is deliberate: a twin that inherited the last
+twin's buckets would be reproducible only by accident. It also means a bucket, a
+queue, a topic, a table, a stream, a parameter or a secret that exists in
+production exists nowhere in the twin until something puts it there, and an
+application that reads its own bucket on startup meets an emulator that has
+none.
+
+`af up` creates the resources production's infrastructure as code declares,
+inside the emulator, before any service starts. The requests go through the
+environment's own sidecar at the provider's own hostname, so what is exercised
+is the route the application has. A hostname the egress policy does not route to
+this emulator is reported refused rather than created somewhere else, because
+the application would be refused at that hostname too.
+
+These are the AWS resource types it creates:
+
+| Resource type | What is created |
+| --- | --- |
+| `aws_s3_bucket` | the bucket, and versioning when it is declared |
+| `aws_sqs_queue` | the queue, FIFO, visibility timeout, retention, delay, maximum message size, receive wait |
+| `aws_sns_topic` | the topic, FIFO |
+| `aws_dynamodb_table` | the table, its partition key and its sort key |
+| `aws_kinesis_stream` | the stream and its shard count |
+| `aws_ssm_parameter` | the parameter, holding a placeholder |
+| `aws_secretsmanager_secret` | the secret, holding a placeholder |
+| `aws_cloudwatch_event_bus` | the event bus |
+
+Nothing is called reproduced until it has been read back out of the emulator. A
+create the emulator answered is not evidence that anything exists, so every one
+of the rows above ends with a read that finds it, and a read that does not find
+it reports the resource absent with what the emulator said.
+
+### What it does not reproduce is named
+
+Every attribute a declaration carries is accounted for, and the accounting is by
+subtraction: an attribute this build does not put into the emulator is reported
+with the reason, whether or not anybody anticipated it. So a run says which of
+these it met, and a run in which everything reproduced prints no caveat at all.
+
+- **A secret and a parameter hold a placeholder**, and are reported as
+  substituted rather than reproduced. Production's value must never be copied
+  into a container running a third party image, and reading "the secret is in
+  the twin" as "the secret says what production says" is the most dangerous
+  sentence this could produce.
+- **A `SecureString` parameter is created as a plain `String`.** The surface does
+  not answer for KMS, so a `SecureString` here would be a parameter the
+  application cannot decrypt.
+- **Anything encrypted with a KMS key** is created without one, for the same
+  reason.
+- **A lifecycle rule is not created.** LocalStack stores a lifecycle
+  configuration and never expires an object, so a rule reproduced here would be a
+  rule that does nothing.
+- **A secondary index is not created**, so a query against one does not find it.
+- **The region is a hostname here and a property in production.** One LocalStack
+  answers for every region at once, so a declaration's region decides which
+  hostname the request goes to and therefore which egress rule must route it. It
+  is not a property the twin holds.
