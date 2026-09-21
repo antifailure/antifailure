@@ -30,7 +30,7 @@ import {
   locate, normalizeRole, snapshotFrom, walk, filledOf, chosen, type AxNode,
 } from '../src/drivers/ax.ts';
 import { treeFrom } from '../src/drivers/electron.ts';
-import { runDesktop, desktop, type DesktopApp } from '../src/drivers/desktop.ts';
+import { runDesktop, desktop, withEnvironmentAddress, type DesktopApp } from '../src/drivers/desktop.ts';
 import {
   AxError, trusted, screenIsLocked, GRANT_INSTRUCTION, LOCKED_SCREEN,
 } from '../src/drivers/macax.ts';
@@ -346,6 +346,61 @@ test('runDesktop passes when the screen shows what the workflow expected', async
   assert.ok(surface.acted.some((a) => a.startsWith('click ^Sign in$')),
     `the control was never pressed: ${surface.acted.join(' | ')}`);
   assert.ok(results[0]!.steps.some((s) => s.startsWith('Fill Email address')));
+});
+
+// The address tests. A desktop client of a service has to be told which
+// service to talk to, and before this it never was: an Electron application
+// under a rehearsal reached whatever its own configuration named. These drive
+// the SHIPPED runDesktop and read the application it actually handed to open,
+// so they are about what launches and not about a helper in isolation.
+test('runDesktop launches an Electron application with the environment address as AF_BASE_URL', async () => {
+  let opened: DesktopApp | undefined;
+  const results = await runDesktop({
+    app: { kind: 'electron', executablePath: 'unused' },
+    baseURL: 'http://127.0.0.1:39000',
+    open: async (app) => { opened = app; return scripted([screen({ text: 'transfer.posted' })]); },
+    workflows: [{ name: 'read', description: 'Read the journal.', expect: ['transfer.posted'] }],
+  });
+  assert.equal(results[0]!.outcome.verdict, 'pass');
+  assert.ok(opened, 'open was never called');
+  assert.equal(opened.kind, 'electron');
+  assert.equal(opened.kind === 'electron' ? opened.env?.['AF_BASE_URL'] : undefined, 'http://127.0.0.1:39000');
+});
+
+test('the address is merged over the runner environment, not substituted for it', async () => {
+  // Playwright REPLACES a child's whole environment when it is handed one, so
+  // an Electron process given only AF_BASE_URL would start with no PATH and no
+  // HOME and fail in a way that reads as the application's fault.
+  const app = withEnvironmentAddress({ kind: 'electron', executablePath: 'unused' }, 'http://127.0.0.1:39000');
+  assert.ok(app.kind === 'electron');
+  assert.equal(app.env?.['PATH'], process.env['PATH']);
+  assert.equal(app.env?.['HOME'], process.env['HOME']);
+});
+
+test('the environment address wins over one the developer shell exported', () => {
+  // The run's own environment is the only address a rehearsal may send an
+  // application to. A stale export in somebody's shell pointing at production
+  // must not survive into the launch.
+  const app = withEnvironmentAddress(
+    { kind: 'electron', executablePath: 'unused', env: { AF_BASE_URL: 'https://ledger.example.com' } },
+    'http://127.0.0.1:39000',
+  );
+  assert.ok(app.kind === 'electron');
+  assert.equal(app.env?.['AF_BASE_URL'], 'http://127.0.0.1:39000');
+});
+
+test('a native application is not handed an address it could never receive', () => {
+  // Launch Services starts a macOS application with the session's environment,
+  // so a variable set here would be dropped. Returning the target untouched is
+  // the honest answer; appearing to pass it would be dead wiring.
+  const mac: DesktopApp = { kind: 'macos', name: 'Notes' };
+  assert.equal(withEnvironmentAddress(mac, 'http://127.0.0.1:39000'), mac);
+});
+
+test('with no environment behind the run, the application is launched as it was', () => {
+  const app: DesktopApp = { kind: 'electron', executablePath: 'unused' };
+  assert.equal(withEnvironmentAddress(app, undefined), app);
+  assert.equal(withEnvironmentAddress(app, ''), app);
 });
 
 test('runDesktop fails when the screen does not show what the workflow expected', async () => {

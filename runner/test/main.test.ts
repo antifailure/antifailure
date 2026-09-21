@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -143,6 +143,34 @@ test('a desktop run that names no application is refused, not reported as a clea
   });
   assert.notEqual(code, 0, `a desktop run with no application exited cleanly: ${stdout}`);
   assert.match(stderr, /names no application to drive/);
+});
+
+test('a desktop run launches the application with the environment address', async () => {
+  // Proved at the entry point, through the job document the engine sends,
+  // because the defect this guards lived in the wiring and not in a helper:
+  // main.ts handed runDesktop the application and never the address, so an
+  // Electron client under test could only reach its own configured backend.
+  //
+  // The "application" is a script that writes the AF_BASE_URL it was started
+  // with to a file and exits. That is not Electron, so the launch then fails
+  // and the run is blocked, which is fine: the file is written by the child
+  // process the runner really spawned, so it says exactly what that process
+  // was given, and nothing else in this test could have written it.
+  const dir = mkdtempSync(join(tmpdir(), 'af-runner-desktop-address-'));
+  const seen = join(dir, 'seen');
+  const fake = join(dir, 'electron');
+  writeFileSync(fake, `#!/bin/sh\nprintf '%s' "$AF_BASE_URL" > '${seen}'\n`, { mode: 0o755 });
+  const { stdout } = await runMain({
+    base_url: 'http://127.0.0.1:39000',
+    surface: 'desktop',
+    desktop: { kind: 'electron', executablePath: fake, timeoutMs: 5000 },
+    workflows: [{ name: 'reads the address', description: 'Do something.', expect: ['anything'] }],
+    personas: [],
+  }, { ...process.env, AF_BASE_URL: 'https://ledger.example.com' });
+  assert.ok(existsSync(seen), `the application was never started, so this proved nothing: ${stdout}`);
+  // The environment's address, and NOT the one the runner's own environment
+  // carried, which stands in for a stale export in a developer's shell.
+  assert.equal(readFileSync(seen, 'utf8'), 'http://127.0.0.1:39000');
 });
 
 test('a desktop run reaches the desktop driver rather than returning nothing', async () => {

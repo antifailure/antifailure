@@ -378,6 +378,9 @@ async function main(): Promise<number> {
     // earlier.
     results = [...results, ...await runDesktop({
       app: doc.desktop,
+      // Where the environment is, for an application that talks to one. The
+      // terminal branch above sends the same address for the same reason.
+      baseURL: doc.base_url,
       workflows,
       live,
       ...(doc.attempts === undefined ? {} : { attempts: doc.attempts }),

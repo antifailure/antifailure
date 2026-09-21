@@ -55,15 +55,28 @@ export type DesktopApp =
 
 /** Everything one desktop run needs.
  *
- * No baseURL and no personas. A desktop application is not signed into over
- * HTTP by a cookie the runner can set, so the sign-in a workflow needs is a
- * workflow: it types into the fields the application shows and presses what it
- * says. Pretending otherwise, by carrying a persona field nothing reads, would
- * be exactly the dead wiring this repository keeps finding in itself.
+ * No personas. A desktop application is not signed into over HTTP by a cookie
+ * the runner can set, so the sign-in a workflow needs is a workflow: it types
+ * into the fields the application shows and presses what it says. Pretending
+ * otherwise, by carrying a persona field nothing reads, would be exactly the
+ * dead wiring this repository keeps finding in itself.
+ *
+ * But an ADDRESS, yes. The reasoning above is about signing in and says
+ * nothing about where the application's own backend is, and those are two
+ * different questions. A desktop client of a service has to be told which
+ * service to talk to, and until it was told, an Electron application under a
+ * rehearsal could only reach whatever its own configuration pointed at, which
+ * is either nothing or production. That is the same hazard the terminal
+ * workflows were given AF_BASE_URL for, and the answer here is the same one.
  */
 export interface DesktopJob {
   readonly app: DesktopApp;
   readonly workflows: readonly Workflow[];
+  /** baseURL is the address of the environment this run is rehearsing. An
+   *  Electron application is launched with it as AF_BASE_URL, exactly as a
+   *  terminal workflow is. Absent leaves the application's environment as it
+   *  was, which is what a run with no environment behind it should do. */
+  readonly baseURL?: string;
   /** planner overrides the decision maker, as it does for a browser run. */
   readonly planner?: Planner;
   readonly model?: import('../model.ts').ModelConfig;
@@ -98,6 +111,28 @@ export const desktop: SurfaceDriver = {
  *  registry has always used for it. */
 export async function drive(job: DesktopJob): Promise<WorkflowResult[]> {
   return runDesktop(job);
+}
+
+/** withEnvironmentAddress gives an Electron application the address of the
+ *  environment it is being rehearsed against, as AF_BASE_URL.
+ *
+ *  Merged over the runner's own environment rather than replacing it, the way
+ *  the terminal driver does it, because Playwright replaces the child's whole
+ *  environment when it is handed one, and an Electron process with no PATH or
+ *  HOME fails in ways that read as the application's fault. The address is
+ *  written LAST so it wins over anything the developer's shell happened to
+ *  export under the same name: the run's own environment is the only address
+ *  a rehearsal may send an application to.
+ *
+ *  Native macOS applications are returned untouched. They are opened through
+ *  Launch Services, which starts them with the user session's environment and
+ *  not with one a caller supplies, so a variable set here would be silently
+ *  dropped. Saying nothing is better than appearing to pass it. */
+export function withEnvironmentAddress(app: DesktopApp, baseURL: string | undefined): DesktopApp {
+  if (app.kind !== 'electron' || !baseURL) return app;
+  const inherited: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) if (v !== undefined) inherited[k] = v;
+  return { ...app, env: { ...inherited, ...(app.env ?? {}), AF_BASE_URL: baseURL } };
 }
 
 /** openFor launches the application a job named. */
@@ -137,7 +172,7 @@ async function runOneDesktop(
     let surface: AxSurface | undefined;
     try {
       sink.agent(desc, 'connecting');
-      surface = await (job.open ?? openFor)(job.app);
+      surface = await (job.open ?? openFor)(withEnvironmentAddress(job.app, job.baseURL));
       sink.agent(desc, 'live');
       const result = await attemptOnce(job, workflow, surface, attempt, taken, (text, url, action) =>
         sink.step(desc.id, { text, ...(url ? { url } : {}), ...(action ? { action } : {}) }));
