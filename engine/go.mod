@@ -18,12 +18,12 @@ require (
 	go.opentelemetry.io/otel/trace v1.46.0
 	go.uber.org/goleak v1.3.0
 	golang.org/x/crypto v0.57.0
-	golang.org/x/net v0.58.0
+	golang.org/x/net v0.59.0
 	golang.org/x/sys v0.48.0
 	golang.org/x/term v0.46.0
-	google.golang.org/grpc v1.83.2
+	google.golang.org/grpc v1.84.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.58.0
+	modernc.org/sqlite v1.59.0
 	pgregory.net/rapid v1.3.0
 )
 
@@ -117,7 +117,7 @@ require (
 	k8s.io/api v0.37.0
 	k8s.io/apimachinery v0.37.0
 	k8s.io/client-go v0.37.0
-	modernc.org/libc v1.75.6 // indirect
+	modernc.org/libc v1.75.7 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
