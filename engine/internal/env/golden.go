@@ -355,26 +355,7 @@ func (o *Orchestrator) refreshWithin(ctx context.Context, s *session) (*GoldenRe
 			"variable", o.opts.Manifest.Database.SourceURLEnv)
 	}
 
-	spec := provider.GoldenSpec{
-		Version:    databaseVersion(o.opts.Manifest),
-		RulesHash:  hash,
-		Provenance: prov.digest(),
-		SourceURL:  source,
-		Mask: func(ctx context.Context, url secrets.Value) error {
-			rows, tables, maskErr := o.maskDatabase(ctx, s, url, key, rules, hash)
-			result.Rows, result.Tables = rows, tables
-			return maskErr
-		},
-		Verify: func(ctx context.Context, url secrets.Value) (string, error) {
-			report, att, verifyErr := o.verifyDatabase(ctx, s, url, hash, prov.digest())
-			result.Report = report
-			result.Attestation = att
-			if verifyErr != nil {
-				return "", verifyErr
-			}
-			return att, nil
-		},
-	}
+	spec := o.refreshGoldenSpec(s, key, rules, hash, prov, source, result)
 
 	if cfg, wanted := o.subsetConfig(); wanted {
 		switch {
@@ -452,6 +433,70 @@ func (o *Orchestrator) refreshWithin(ctx context.Context, s *session) (*GoldenRe
 	}
 	result.Duration = o.opts.Clock.Since(started)
 	return result, nil
+}
+
+// refreshGoldenSpec is what a refresh asks the provider to build.
+//
+// Extracted from refreshWithin so that the two hooks can be reached by a test,
+// which is the same reason seedGoldenSpec is a function and was written on the
+// same discovery: the hooks are the whole of the guarantee, and both of
+// seedGoldenSpec's were wrong for months while every caller of the path around
+// them was green. These two were wrong in the other direction. Mask ran the
+// masker and not the seed, so `af golden refresh` on a project whose only
+// source of data is database.seed published a golden with nothing in it, and
+// Verify then signed an attestation saying so and called it verified.
+//
+// result is written through rather than returned because the caller needs the
+// counts whether or not the refresh finishes: a refresh that fails in
+// verification still reports what masking did.
+func (o *Orchestrator) refreshGoldenSpec(
+	s *session, key *masking.Key, rules *masking.RuleSet, hash string,
+	prov provenance, source secrets.Value, result *GoldenResult,
+) provider.GoldenSpec {
+	return provider.GoldenSpec{
+		Version:    databaseVersion(o.opts.Manifest),
+		RulesHash:  hash,
+		Provenance: prov.digest(),
+		SourceURL:  source,
+		Mask: func(ctx context.Context, url secrets.Value) error {
+			// The seed, on the path that exists to make goldens.
+			//
+			// `af up` ran it and `af golden refresh` did not, and the two are
+			// the same operation reached through different doors. A project
+			// with no production database declares database.seed and nothing
+			// else; running `af golden refresh` on one published a golden
+			// holding no tables at all, reported "0 rows across 0 tables
+			// masked", exited 0, printed "Bring an environment up from it
+			// with: af up", and the next `af up` found a golden whose
+			// provenance matched this project exactly and branched it. The
+			// seed command was validated, refused alongside source_url_env,
+			// printed by `af explain`, and executed by nothing.
+			//
+			// In the Mask hook rather than in Load because Load is reached
+			// only when a source URL is configured, and a manifest that names
+			// a seed may not name one: the validator refuses the two keys
+			// together. seedGoldenSpec puts it here for that reason, and this
+			// is the same call, so the two paths now seed identically.
+			if seedErr := o.runSeed(ctx, s, prov.Seed, url); seedErr != nil {
+				return seedErr
+			}
+			rows, tables, maskErr := o.maskDatabase(ctx, s, url, key, rules, hash)
+			result.Rows, result.Tables = rows, tables
+			return maskErr
+		},
+		Verify: func(ctx context.Context, url secrets.Value) (string, error) {
+			report, att, verifyErr := o.verifyDatabase(ctx, s, url, hash, prov.digest())
+			result.Report = report
+			result.Attestation = att
+			if verifyErr != nil {
+				return "", verifyErr
+			}
+			if emptyErr := refuseEmptyGolden(prov, report); emptyErr != nil {
+				return "", emptyErr
+			}
+			return att, nil
+		},
+	}
 }
 
 // lastRefreshMeta is when a refresh last finished, so that a schedule can be

@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 
+	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/internal/verify"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -164,6 +166,56 @@ func (p provenance) describe() string {
 // data: nothing named a source and nothing seeded it, so it is the schema the
 // migrations built and no rows.
 func (p provenance) empty() bool { return p.Source == "" && p.Seed == "" }
+
+// origin names the manifest key that says where this golden's data comes from,
+// and is empty when the manifest names neither.
+//
+// The source is named first because the two cannot both be set: the validator
+// refuses database.source_url_env beside database.seed.
+func (p provenance) origin() string {
+	switch {
+	case p.Source != "":
+		return "database.source_url_env"
+	case p.Seed != "":
+		return "database.seed"
+	default:
+		return ""
+	}
+}
+
+// refuseEmptyGolden stops a golden that holds nothing from being published as
+// verified, when the manifest said where its contents were supposed to come
+// from.
+//
+// The second, independent guard. The bug it was written beside was one route
+// to an empty golden: `af golden refresh` never ran database.seed, so a
+// project with no production database published a golden with no tables in it,
+// called it verified, and `af up` branched it. Making the refresh run the seed
+// closes that route. It closes only that route. A seed script that exits 0
+// having written nothing, a source database that is empty because the variable
+// points at the wrong one, and whatever the next one turns out to be, all
+// arrive here looking exactly the same, and the product's own answer to all of
+// them was the word verified.
+//
+// Tables rather than rows, and that distinction is the whole of why this can
+// be a refusal rather than a warning. The masker's count is rows it rewrote,
+// which is legitimately 0 for a database with data and no rules, so it cannot
+// tell empty from unmasked. The verification's Tables is the count of tables
+// its catalog read carried, which is 0 only when there is not one user table
+// in the database. A seed that creates tables and inserts no rows is a
+// judgement nobody should make for the person who wrote it; a seed that
+// creates nothing at all is not a judgement.
+//
+// A project that declares neither key is never refused: an empty golden is
+// what it asked for, it is documented as what it gets, and provenance.empty
+// already names that state.
+func refuseEmptyGolden(p provenance, report verify.Report) error {
+	origin := p.origin()
+	if origin == "" || report.Tables > 0 {
+		return nil
+	}
+	return aferrors.Coded(aferrors.AFDB041, "origin", origin)
+}
 
 // provenanceOf is the identity of the golden this project may branch.
 func (o *Orchestrator) provenanceOf() (provenance, error) {

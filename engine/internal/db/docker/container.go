@@ -297,6 +297,13 @@ func (p *Provider) versionMatches(ctx context.Context, conn secrets.Value, want 
 
 // createExtensions creates what the manifest declared, in the order given.
 //
+// Two callers, and they are not alternatives. RefreshGolden runs it against
+// the candidate, and Branch runs it against every branch: the first is the
+// only order in which a restore can succeed, and the second is the only place
+// that can see a manifest which gained an extension after its golden was
+// built. Neither covers the other, and having only the first meant the check
+// fired once per project and the ordinary `af up` was never measured at all.
+//
 // Before the source is copied in, which is the only order that works: a dump
 // of a schema using an extension's types carries `CREATE EXTENSION` of its
 // own, and a restore of one the image does not have stops on it with a message

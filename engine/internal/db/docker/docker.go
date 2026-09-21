@@ -539,9 +539,37 @@ func (p *Provider) Branch(ctx context.Context, version, envID string) (provider.
 	b := provider.Branch{
 		EnvID: envID, From: version, ProviderRef: c.id, CreatedAt: p.clock.Now().UTC(),
 	}
-	if err := p.waitReady(ctx, p.connString(c.port)); err != nil {
+	conn := p.connString(c.port)
+	if err := p.waitReady(ctx, conn); err != nil {
 		// The container exists and is recorded, so the caller can tear it
 		// down. Leaving it running and unusable would be worse.
+		return b, err
+	}
+	// The manifest's extensions, on the path everybody is actually on.
+	//
+	// Creating them in the candidate is necessary and is not sufficient, and
+	// the gap between those two was the whole of this bug. A project builds
+	// one golden and branches it for the rest of its life, the golden's
+	// identity does not depend on the extension list, and `extensions:` is
+	// added on the branch where the migration that needs it is being written.
+	// So the ordinary sequence was: golden exists, manifest gains postgis,
+	// `af up` branches the golden it already had, and the environment came up
+	// green with the extension simply absent. AF-DB-040 fired on the first
+	// golden, which is the run nobody takes twice, and never again.
+	//
+	// It names the image the MANIFEST declares rather than the golden's own
+	// tag, because that is the one in the remedy and the only one anybody can
+	// act on: antifailure/golden:gv_... is a commit of it and changing it is
+	// not a thing a person can do.
+	//
+	// IF NOT EXISTS carries the cost of the ordinary case, which is a golden
+	// that already has every one of them: one statement each that finds the
+	// extension present and writes nothing.
+	if err := p.createExtensions(ctx, conn, p.imageFor(p.version)); err != nil {
+		// The branch is returned with the error for the same reason the
+		// readiness failure above returns it: the container exists, and a
+		// refusal that leaks the container it refused on is a leak nobody is
+		// holding an identifier for.
 		return b, err
 	}
 	return b, nil
