@@ -929,6 +929,18 @@
           "maxLength": 4000,
           "description": "What a person would do, in sentences. Say the goal and what proves it happened, not the selectors."
         },
+        "surface": {
+          "type": "string",
+          "enum": [
+            "web",
+            "terminal",
+            "desktop",
+            "ios",
+            "android"
+          ],
+          "default": "web",
+          "description": "What this workflow drives. Defaults to `web`, which is a browser.\n\nEvery surface the product knows is named here, including the ones a given build cannot drive yet, and that is the same decision `runtime.provider` documents. A build registers the drivers it carries, so a manifest naming a surface this build has no driver for is refused BY NAME, against the surfaces that build actually has, which tells a person far more than a schema saying the value is unknown. The refusal happens twice on purpose: the engine says it at validation, so the answer is immediate, and the runner says it again before it drives anything, so a surface nothing drove can never come back green.\n\nWrite `terminal` in `terminal_workflows` rather than here. A terminal workflow needs a program to run where this one needs a persona to sign in as, so the two do not share an entry; naming it here is refused with that sentence rather than treated as a typo.\n\nThis is not `change.rules[].surface`, which says what a changed FILE is. This says what a workflow DRIVES."
+        },
         "persona": {
           "type": "string",
           "maxLength": 40,

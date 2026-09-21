@@ -11,15 +11,20 @@
 // as a sentence, "press Continue", "expect Welcome", ports from surface to
 // surface, and only the driver underneath changes.
 //
-// Today web, terminal and ios are available, and the terminal one drives a
-// full screen program through a real pseudo terminal, which is where that
+// THE REGISTRY BELOW IS THE SOURCE OF TRUTH FOR WHAT THIS BUILD CAN DRIVE, and
+// the engine reads it rather than keeping a second opinion. A surface is
+// reachable from a manifest the moment it appears here, and the engine refuses
+// one whose `available` is false by name; schema.DriveableSurfaces on the Go
+// side must list exactly the available ones, and a test compares the two so a
+// driver that is finished in one place and not the other fails the build
+// instead of shipping a surface a manifest can ask for and nothing drives.
+//
+// Today web, terminal, desktop and ios are available. The terminal one drives
+// a full screen program through a real pseudo terminal, which is where that
 // design stops being a claim: a curses program's rendered grid of cells IS the
 // tree, and matching against the bytes it wrote would be matching against the
-// HTML. Desktop is scaffolded and has no implementation: its driver conforms
-// to this interface and FAILS LOUDLY rather than silently passing, so a job
-// that targets it is refused with a clear reason instead of returning a green
-// verdict that tested nothing. Android is implemented and NOT available, which
-// is the interesting case and the reason the rest of this paragraph exists.
+// HTML. Android is implemented and NOT available, which is the interesting
+// case and the reason the rest of this paragraph exists.
 //
 // `available` IS A CLAIM THAT A DRIVER HAS BEEN DRIVEN, never that its code
 // exists. Android's code is written, typechecked and unit tested against the

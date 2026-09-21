@@ -186,4 +186,40 @@ Where to begin. Defaults to `/`. Worth setting for a workflow that starts deep
 in the application, so the agent does not spend its budget navigating to the
 starting line.
 
-Related: [agents](/docs/concepts/agents), [personas](/docs/guides/personas).
+## `surface`
+
+What the workflow drives. Defaults to `web`, which is a browser.
+
+```yaml
+workflows:
+  - name: subscribe
+    surface: web
+    persona: owner
+    description: ...
+```
+
+The product knows five surfaces: `web`, `terminal`, `desktop`, `ios` and
+`android`. All five may be written here, including the ones a build has no
+driver for, and that is deliberate. A build registers the drivers it carries,
+so a manifest naming a surface this build cannot drive is refused by name,
+against the surfaces that build actually has, which tells you far more than a
+schema saying the value is unknown. It is the same decision `runtime.provider`
+documents for runtimes.
+
+The refusal happens twice, and neither half is redundant. The engine says it
+when it reads the manifest, so the answer arrives before an environment is
+built. The runner says it again before it drives anything, so a surface nothing
+drove can never come back green. A workflow refused that way is blocked, which
+counts against nobody, and the workflows beside it still run.
+
+Write a terminal workflow in
+[`terminal_workflows`](/docs/guides/terminal) rather than here. It needs a
+program to run where a browser workflow needs a persona to sign in as, so the
+two do not share an entry; `surface: terminal` written here is refused with
+that sentence rather than treated as a typo.
+
+This is not `change.rules[].surface`, which says what a changed FILE is. This
+says what a workflow DRIVES.
+
+Related: [agents](/docs/concepts/agents), [personas](/docs/guides/personas),
+[terminal workflows](/docs/guides/terminal).

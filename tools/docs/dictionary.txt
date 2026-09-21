@@ -27,6 +27,7 @@ dbname
 dedupe
 depguard
 DMARC
+driveable
 dualstack
 eastus
 Firestore
