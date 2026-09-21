@@ -9269,7 +9269,9 @@ looking for the real host.
 ` + "`" + `disk_fill` + "`" + ` carries a fourth refusal. A container's writable layer is the
 daemon's own disk, so filling a directory on it fills the machine and every
 other container running on it. The fault checks that the directory is a mount
-of its own and refuses when it is not.
+of its own and refuses when it is not. That refusal is reported as
+` + "`" + `chaos.fault.unsafe` + "`" + `: the claim the fault was declared to establish was not
+established, and nothing else in the run was touched by it.
 
 ## Nothing that changed nothing counts as survived
 
@@ -9300,9 +9302,12 @@ what it set out to is reported as unverified and never as a pass:
 | ` + "`" + `chaos.integrity.checksums_off` + "`" + ` | Data page checksums are off, so a torn page would not be seen. |
 | ` + "`" + `chaos.integrity.amcheck_unavailable` + "`" + ` | The index could not be verified. |
 | ` + "`" + `chaos.durability.inconsistent_ledger` + "`" + ` | The engine's own bookkeeping does not add up. |
+| ` + "`" + `chaos.fault.refused` + "`" + ` | A fault tried to go in and failed, so it established nothing. |
+| ` + "`" + `chaos.fault.unsafe` + "`" + ` | A fault was refused before it acted, because its effect would reach past this environment. It changed nothing the other faults measured. |
+| ` + "`" + `chaos.fault.not_undone` + "`" + ` | A fault went in and its undo failed, so the environment is still broken and anything measured after it is suspect. |
 
 The first five are failures and carry ` + "`" + `policy.chaos_failure` + "`" + `, which defaults to
-` + "`" + `fail` + "`" + `. The last five are the ones the run could not look at, and they carry
+` + "`" + `fail` + "`" + `. The last eight are the ones the run could not look at, and they carry
 ` + "`" + `policy.chaos_unverified` + "`" + `, which defaults to ` + "`" + `warn` + "`" + `. They are two keys because
 a check that found a problem and a check that could not look are different
 facts, and reporting the second as the first teaches a project to ignore both.
