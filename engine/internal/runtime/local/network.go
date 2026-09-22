@@ -104,9 +104,96 @@ func (r *Runtime) ensureOneNetwork(
 				return existing.Network.ID, nil
 			}
 		}
+		if addressPoolsExhausted(err) {
+			return "", r.addressPoolsError(ctx, err)
+		}
 		return "", aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
 	}
 	return res.ID, nil
+}
+
+// addressPoolsExhausted reports the daemon refusing a network because every
+// subnet it is allowed to hand out is already taken.
+//
+// Two spellings, because Docker has used both. Current releases say the
+// predefined pools have been fully subnetted; older ones said they could not
+// find an available, non-overlapping address pool. Either way it is not the
+// environment that is wrong, it is the daemon that is full, and the remedy for
+// that is nothing AF-RUN-040 names: af doctor reports the runtime healthy and
+// af down removes only the checked out branch's environment.
+func addressPoolsExhausted(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "fully subnetted") ||
+		strings.Contains(msg, "non-overlapping IPv4 address pool")
+}
+
+// addressPoolsError says how full the daemon is and how much of that is ours
+// to give back.
+//
+// Measured on 2026-09-22: the default pools hold about thirty one bridge
+// networks, the daemon held thirty, and fourteen were Antifailure networks
+// that nothing was attached to, left by test runs that were killed before
+// their teardown ran. The count is read at the moment of failure because it is
+// the number that decides what to do next: a daemon full of our orphans wants
+// af env prune --orphaned, one full of somebody else's networks wants a wider
+// default-address-pools setting, and a message that cannot tell the two apart
+// sends half its readers to the wrong one.
+func (r *Runtime) addressPoolsError(ctx context.Context, cause error) error {
+	detail := "Docker has handed out every address range it is allowed to"
+	if total, orphaned, uncounted, err := r.countNetworks(ctx); err == nil {
+		detail = fmt.Sprintf("%s. The daemon holds %d %s, and %d of them %s Antifailure %s with no container attached",
+			detail, total, plural(total, "network", "networks"),
+			orphaned, plural(orphaned, "is an", "are"), plural(orphaned, "network", "networks"))
+		if uncounted > 0 {
+			detail += fmt.Sprintf("; %d more Antifailure %s could not be inspected, so %s not counted",
+				uncounted, plural(uncounted, "network", "networks"), plural(uncounted, "it was", "they were"))
+		}
+	}
+	return aferrors.Wrap(cause, aferrors.AFRUN052, "detail", detail)
+}
+
+// countNetworks counts every network on the daemon, and the Antifailure ones
+// that no container is attached to.
+//
+// Attached means an endpoint, which only a container that is running, paused
+// or restarting has. A container that was created and never started holds no
+// endpoint, so a network it names still reads as unattached here, which is the
+// truth about the address range: that range is held by the network, not by the
+// container, and removing the network is what frees it.
+func (r *Runtime) countNetworks(ctx context.Context) (total, orphaned, uncounted int, err error) {
+	all, err := r.cli.NetworkList(ctx, client.NetworkListOptions{})
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	total = len(all.Items)
+	for _, n := range all.Items {
+		if !dockerutil.IsOurs(n.Labels) {
+			continue
+		}
+		attached, ok := r.networkEndpoints(ctx, n.ID)
+		switch {
+		case !ok:
+			uncounted++
+		case attached == 0:
+			orphaned++
+		}
+	}
+	return total, orphaned, uncounted, nil
+}
+
+// networkEndpoints is how many containers are attached to a network, and
+// whether that could be read at all.
+//
+// The list endpoint never fills in Containers, only inspect does, so a count
+// taken off the list would report every network as empty. That is the one
+// wrong answer this must never give, because an empty network is one a sweep
+// is allowed to remove.
+func (r *Runtime) networkEndpoints(ctx context.Context, id string) (int, bool) {
+	insp, err := r.cli.NetworkInspect(ctx, id, client.NetworkInspectOptions{})
+	if err != nil {
+		return 0, false
+	}
+	return len(insp.Network.Containers), true
 }
 
 // disconnectForeign detaches anything still on a network that this teardown is

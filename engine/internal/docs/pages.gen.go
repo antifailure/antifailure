@@ -11773,6 +11773,32 @@ absolute URLs from ` + "`" + `AF_PUBLIC_URL` + "`" + ` or ` + "`" + `AF_ENV_URL`
 Bringing the environment up again after freeing the port gives every container
 the same answer.
 
+## Networks
+
+` + "`" + "`" + "`" + `
+AF-RUN-052 The environment's network could not be created, because Docker has
+no address range left to give it: Docker has handed out every address range it
+is allowed to. The daemon holds 30 networks, and 14 of them are Antifailure
+networks with no container attached
+` + "`" + "`" + "`" + `
+
+Every environment gets two networks, and every network takes one address range
+from a fixed set Docker hands out. The defaults hold about thirty one, and
+Docker counts every network on the machine against them, whoever made it. The
+usual cause is environments whose run was killed before its teardown: their
+networks stay behind with nothing attached, each still holding a range.
+
+` + "`" + `af env prune --orphaned` + "`" + ` lists exactly those, the environments that hold
+networks with nothing attached and nothing running, and removes nothing.
+` + "`" + `af env prune --orphaned --yes` + "`" + ` removes what it listed. An environment counts
+only once nothing has been created in it for an hour, so one being brought up
+right now is never taken, and a network without the Antifailure label is never
+considered at all. ` + "`" + `af doctor` + "`" + ` counts them in its leftover environments check.
+
+If the message counts few networks of ours, the daemon is full of another
+tool's. ` + "`" + `docker network ls` + "`" + ` names them, and widening ` + "`" + `default-address-pools` + "`" + ` in
+Docker's daemon settings makes room for more.
+
 ## Size
 
 ` + "`" + "`" + "`" + `
@@ -18084,6 +18110,15 @@ the daemon does not record which repository made what, so a cutoff from here
 reaches every project's environments. For a sweep that reads each
 environment's own lifetime instead, see af env reap.
 
+--orphaned narrows it to environments that hold networks with nothing attached
+and nothing running, which is what a run killed before its teardown leaves.
+Each such network still holds one of the thirty or so address ranges Docker's
+default pools can hand out, and when they run out no environment can be
+created at all. With --orphaned the cutoff is an hour unless --older-than says
+otherwise, measured from the environment's newest resource, so one that is
+being brought up right now is never taken. Networks without the Antifailure
+label are never considered.
+
 ` + "`" + "`" + "`" + `
 af env prune [flags]
 ` + "`" + "`" + "`" + `
@@ -18102,6 +18137,7 @@ af env prune --older-than 0s --yes
 | --- | --- | --- |
 | ` + "`" + `--dry-run` + "`" + ` | ` + "`" + `false` + "`" + ` | List what would be removed and stop, which is also what running bare does. |
 | ` + "`" + `--older-than` + "`" + ` | ` + "`" + `24h0m0s` + "`" + ` | Only consider environments older than this. |
+| ` + "`" + `--orphaned` + "`" + ` | ` + "`" + `false` + "`" + ` | Only environments holding networks with nothing attached and nothing running. |
 | ` + "`" + `--yes` + "`" + ` | ` + "`" + `false` + "`" + ` | Remove what the plan lists. Without it nothing is removed. |
 
 ### ` + "`" + `af env pull` + "`" + `
@@ -23466,6 +23502,18 @@ The manifest declares no service called {service}, so there is no output by that
 | Exit code | ` + "`" + `2` + "`" + ` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [reference/manifest](/docs/reference/manifest) |
+
+### AF-RUN-052
+
+The environment's network could not be created, because Docker has no address range left to give it: {detail}
+
+**What to do.** Run 'af env prune --orphaned' to list the Antifailure environments nothing is attached to, and 'af env prune --orphaned --yes' to remove exactly those. 'af doctor' counts them too. Networks another tool made are never touched: if the daemon is full of those, 'docker network ls' names them, and widening default-address-pools in Docker's daemon settings makes room for more.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `1` + "`" + ` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [guides/local-runtime](/docs/guides/local-runtime) |
 
 ## Scheduling
 

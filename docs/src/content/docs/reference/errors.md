@@ -2012,6 +2012,18 @@ The manifest declares no service called {service}, so there is no output by that
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [reference/manifest](/docs/reference/manifest) |
 
+### AF-RUN-052
+
+The environment's network could not be created, because Docker has no address range left to give it: {detail}
+
+**What to do.** Run 'af env prune --orphaned' to list the Antifailure environments nothing is attached to, and 'af env prune --orphaned --yes' to remove exactly those. 'af doctor' counts them too. Networks another tool made are never touched: if the daemon is full of those, 'docker network ls' names them, and widening default-address-pools in Docker's daemon settings makes room for more.
+
+| | |
+| --- | --- |
+| Exit code | `1` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [guides/local-runtime](/docs/guides/local-runtime) |
+
 ## Scheduling
 
 ### AF-SCH-001

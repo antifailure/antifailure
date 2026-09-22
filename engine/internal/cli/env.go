@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -175,6 +176,33 @@ type environment struct {
 	Services  []string
 	Oldest    time.Time
 	Running   int
+	// Newest is when its most recent resource was made, which is the last
+	// sign anything was working on it.
+	Newest time.Time
+	// Networks counts its networks, and Attached the containers attached to
+	// them. Uncounted is how many networks the runtime could not count, and
+	// any at all means the environment cannot be called orphaned.
+	Networks  int
+	Attached  int
+	Uncounted int
+}
+
+// orphaned reports an environment that holds networks and nothing on them.
+//
+// This is what a test binary killed mid run leaves: the two networks it made
+// first, and at most a sidecar that was created and never started, which holds
+// no endpoint. Nothing is running and nothing is attached, so removing it
+// takes nothing from anybody, and each of its networks still holds one of the
+// thirty or so address ranges Docker has to give out.
+//
+// Every condition is required. A running container is somebody's environment.
+// An attached one, the database branch mostly, which the inventory does not
+// list as a container because the database provider owns it, is an
+// environment somebody is bringing up. A network whose attachments could not
+// be counted is not known to be empty, and an environment with no networks is
+// not what this is about.
+func (e environment) orphaned() bool {
+	return e.Networks > 0 && e.Uncounted == 0 && e.Attached == 0 && e.Running == 0
 }
 
 func listEnvironments(ctx context.Context, e *Env) ([]environment, error) {
@@ -207,12 +235,23 @@ func groupEnvironments(items []provider.Resource) []environment {
 		}
 		env, ok := byEnv[id]
 		if !ok {
-			env = &environment{ID: id, Oldest: item.CreatedAt}
+			env = &environment{ID: id, Oldest: item.CreatedAt, Newest: item.CreatedAt}
 			byEnv[id] = env
 		}
 		env.Resources++
 		if item.CreatedAt.Before(env.Oldest) {
 			env.Oldest = item.CreatedAt
+		}
+		if item.CreatedAt.After(env.Newest) {
+			env.Newest = item.CreatedAt
+		}
+		if item.Kind == "network" {
+			env.Networks++
+			if n, err := strconv.Atoi(item.Labels["attached"]); err == nil && n >= 0 {
+				env.Attached += n
+			} else {
+				env.Uncounted++
+			}
 		}
 		if name := item.Labels["service"]; name != "" && !contains(env.Services, name) {
 			env.Services = append(env.Services, name)
@@ -315,6 +354,10 @@ type PruneJSON struct {
 	// Proceed is the command that removes exactly what would_remove lists,
 	// present only when there is something to remove and nothing was.
 	Proceed string `json:"proceed,omitempty"`
+	// Orphaned reports that only environments holding networks with nothing
+	// attached were considered, and older_than was measured from each one's
+	// newest resource rather than its oldest.
+	Orphaned bool `json:"orphaned,omitempty"`
 }
 
 // pruner is what af env prune reads and what it destroys through.
@@ -352,6 +395,9 @@ func (p runtimePruner) close() error { return p.rt.Close() }
 // pruneOptions is what the flags decided.
 type pruneOptions struct {
 	olderThan time.Duration
+	// orphaned narrows the plan to environments that hold networks and
+	// nothing attached to them. See environment.orphaned.
+	orphaned bool
 	// remove is true only when --yes was given and --dry-run was not. Every
 	// other combination plans and stops.
 	remove bool
@@ -359,7 +405,7 @@ type pruneOptions struct {
 
 func newEnvPruneCommand(e *Env) *cobra.Command {
 	var olderThan time.Duration
-	var dryRun, yes bool
+	var dryRun, yes, orphaned bool
 	cmd := &cobra.Command{
 		Use:   "prune",
 		Short: "List the environments older than a cutoff, and remove them with --yes",
@@ -379,7 +425,16 @@ the default is never something a reader has to remember. The scope is the
 whole machine on purpose: this is the command for a laptop that is full, and
 the daemon does not record which repository made what, so a cutoff from here
 reaches every project's environments. For a sweep that reads each
-environment's own lifetime instead, see af env reap.`),
+environment's own lifetime instead, see af env reap.
+
+--orphaned narrows it to environments that hold networks with nothing attached
+and nothing running, which is what a run killed before its teardown leaves.
+Each such network still holds one of the thirty or so address ranges Docker's
+default pools can hand out, and when they run out no environment can be
+created at all. With --orphaned the cutoff is an hour unless --older-than says
+otherwise, measured from the environment's newest resource, so one that is
+being brought up right now is never taken. Networks without the Antifailure
+label are never considered.`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			rt, err := inventoryRuntime(cmd.Context(), e)
@@ -387,10 +442,13 @@ environment's own lifetime instead, see af env reap.`),
 				return err
 			}
 			return runPrune(cmd.Context(), e, pruneOptions{
-				olderThan: olderThan, remove: pruneRemoves(dryRun, yes),
+				olderThan: pruneCutoffFor(olderThan, orphaned, cmd.Flags().Changed("older-than")),
+				orphaned:  orphaned, remove: pruneRemoves(dryRun, yes),
 			}, runtimePruner{rt: rt})
 		},
 	}
+	cmd.Flags().BoolVar(&orphaned, "orphaned", false,
+		"Only environments holding networks with nothing attached and nothing running")
 	cmd.Flags().DurationVar(&olderThan, "older-than", pruneCutoff,
 		"Only consider environments older than this")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false,
@@ -398,6 +456,29 @@ environment's own lifetime instead, see af env reap.`),
 	cmd.Flags().BoolVar(&yes, "yes", false,
 		"Remove what the plan lists. Without it nothing is removed")
 	return cmd
+}
+
+// orphanCutoff is how long an orphaned environment must have been left alone
+// before af env prune --orphaned takes it.
+//
+// Not zero, because an environment being brought up passes through exactly the
+// orphaned state: its networks are created first, and nothing is attached to
+// them until the sidecar image is ready and the first container starts, which
+// on a machine compiling that image is minutes. The per environment lock would
+// be the better guard and cannot be used here: it lives in the state directory
+// of the repository that took it, and this command reaches every repository on
+// the machine. An hour is long past any bring up, and short enough that the
+// fourteen networks that filled a daemon on 2026-09-22, the youngest twelve
+// hours old, would all have been listed.
+const orphanCutoff = time.Hour
+
+// pruneCutoffFor is the cutoff the flags mean. --orphaned has its own default,
+// an hour, and an --older-than somebody actually typed beats it.
+func pruneCutoffFor(olderThan time.Duration, orphaned, typed bool) time.Duration {
+	if orphaned && !typed {
+		return orphanCutoff
+	}
+	return olderThan
 }
 
 // pruneRemoves is the one decision the flags make. --dry-run beats --yes,
@@ -418,16 +499,25 @@ func runPrune(ctx context.Context, e *Env, opts pruneOptions, p pruner) error {
 	}
 	var stale []environment
 	for _, env := range envs {
-		if e.Clock.Since(env.Oldest) > opts.olderThan {
+		if pruneSelects(e.Clock.Now(), env, opts) {
 			stale = append(stale, env)
 		}
 	}
 	cutoff := pruneCutoffLabel(opts.olderThan)
 	proceed := fmt.Sprintf("af env prune --older-than %s --yes", cutoff)
+	nothing := fmt.Sprintf("Nothing on this machine is older than %s. Nothing was removed.\n", cutoff)
+	heading := fmt.Sprintf("Older than %s on this machine, from every repository that has built here:\n\n", cutoff)
+	if opts.orphaned {
+		proceed = fmt.Sprintf("af env prune --orphaned --older-than %s --yes", cutoff)
+		nothing = fmt.Sprintf("Nothing on this machine has been orphaned for longer than %s. Nothing was removed.\n", cutoff)
+		heading = fmt.Sprintf("Orphaned on this machine for longer than %s, networks with nothing attached "+
+			"and nothing running, from every repository that has built here:\n\n", cutoff)
+	}
 
 	doc := PruneJSON{
 		OlderThan: cutoff, Scope: "machine", DryRun: !opts.remove,
 		WouldRemove: []PruneEnvJSON{}, Removed: []PruneEnvJSON{},
+		Orphaned: opts.orphaned,
 	}
 	for _, env := range stale {
 		doc.WouldRemove = append(doc.WouldRemove, pruneEnvJSON(e, env))
@@ -441,10 +531,10 @@ func runPrune(ctx context.Context, e *Env, opts pruneOptions, p pruner) error {
 			return e.Out.JSON(doc)
 		}
 		if len(stale) == 0 {
-			e.Out.Printf("Nothing on this machine is older than %s. Nothing was removed.\n", cutoff)
+			e.Out.Printf("%s", nothing)
 			return nil
 		}
-		e.Out.Printf("Older than %s on this machine, from every repository that has built here:\n\n", cutoff)
+		e.Out.Printf("%s", heading)
 		printPrunePlan(e, stale)
 		e.Out.Println("")
 		e.Out.Printf("  %s would be removed, %d resources. Nothing has been removed.\n",
@@ -457,7 +547,7 @@ func runPrune(ctx context.Context, e *Env, opts pruneOptions, p pruner) error {
 		if e.Out.Format == FormatJSON {
 			return e.Out.JSON(doc)
 		}
-		e.Out.Printf("Nothing on this machine is older than %s. Nothing was removed.\n", cutoff)
+		e.Out.Printf("%s", nothing)
 		return nil
 	}
 
@@ -493,6 +583,18 @@ func runPrune(ctx context.Context, e *Env, opts pruneOptions, p pruner) error {
 		return aferrors.Coded(aferrors.AFRUN030, "count", fmt.Sprint(pending))
 	}
 	return nil
+}
+
+// pruneSelects is whether one environment is in the plan.
+//
+// Without --orphaned the age is from the oldest resource, which is what an
+// environment's age has always meant here. With it, the age is from the newest,
+// because the question is how long it has been since anything worked on it.
+func pruneSelects(now time.Time, env environment, opts pruneOptions) bool {
+	if !opts.orphaned {
+		return now.Sub(env.Oldest) > opts.olderThan
+	}
+	return env.orphaned() && now.Sub(env.Newest) > opts.olderThan
 }
 
 // printPrunePlan is the table a bare run shows. It is the same shape as

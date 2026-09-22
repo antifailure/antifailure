@@ -724,13 +724,20 @@ func (r *Runtime) Inventory(ctx context.Context) ([]provider.Resource, error) {
 		return nil, aferrors.Wrap(err, aferrors.AFRUN002, "endpoint", dockerutil.Host())
 	}
 	for _, n := range nets.Items {
+		labels := map[string]string{
+			"name":    n.Name,
+			"expires": n.Labels[dockerutil.LabelExpires],
+		}
+		// How many containers are attached, so that af env prune --orphaned
+		// can tell a network nothing uses from one an environment is running
+		// on. Absent when the inspect failed, and absent is read as "in use":
+		// a count nobody could take is never evidence that a network is empty.
+		if attached, ok := r.networkEndpoints(ctx, n.ID); ok {
+			labels["attached"] = strconv.Itoa(attached)
+		}
 		out = append(out, provider.Resource{
 			Kind: "network", ID: n.ID, EnvID: n.Labels[dockerutil.LabelEnv],
-			CreatedAt: n.Created.UTC(),
-			Labels: map[string]string{
-				"name":    n.Name,
-				"expires": n.Labels[dockerutil.LabelExpires],
-			},
+			CreatedAt: n.Created.UTC(), Labels: labels,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
