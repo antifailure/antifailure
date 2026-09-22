@@ -157,6 +157,9 @@ func node(
     if boolAttribute(element, "AXEnabled") == false { out["enabled"] = false }
     if boolAttribute(element, "AXFocused") == true { out["focused"] = true }
     if boolAttribute(element, "AXRequired") == true { out["required"] = true }
+    // AXElementBusy is macOS's "still loading", the native twin of aria-busy.
+    // The runner refuses to judge a busy screen as finished (settle.ts).
+    if boolAttribute(element, "AXElementBusy") == true { out["busy"] = true }
     if let checked = checkedState(element, role: role) { out["checked"] = checked }
     if let button = defaultButton, CFEqual(button, element) { out["isDefault"] = true }
 

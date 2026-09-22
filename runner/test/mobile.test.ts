@@ -537,3 +537,232 @@ test('main.ts hands the phone run its address', () => {
   assert.ok(src.includes('iosTargetFor(udid, doc, baseURL)'),
     'main.ts no longer builds the iOS target with the run address');
 });
+
+// Loading, on a phone. The desktop loop judged an Electron client on its
+// loading screen; this loop had the same shape, and an iOS run passed only
+// because the app happened to finish loading before the first read of the
+// tree. These drive the SHIPPED runMobile against an Appium stand in that
+// answers the source endpoint from a script, so what is tested is the loop
+// and not a copy of it. See runner/src/drivers/settle.ts.
+
+/** An iOS tree with one static text per line, the shape the probe app's
+ *  journal screen reads as. */
+function iosScreen(...lines: string[]): string {
+  const texts = lines.map((line, i) =>
+    `<XCUIElementTypeStaticText type="XCUIElementTypeStaticText" value="${line}" name="${line}" label="${line}" enabled="true" x="16" y="${100 + i * 24}" width="300" height="20" index="${i}"/>`);
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<AppiumAUT>
+  <XCUIElementTypeApplication type="XCUIElementTypeApplication" name="Ledger" label="Ledger" enabled="true" x="0" y="0" width="402" height="874" index="0">
+    <XCUIElementTypeWindow type="XCUIElementTypeWindow" enabled="true" x="0" y="0" width="402" height="874" index="0">
+      ${texts.join('\n      ')}
+    </XCUIElementTypeWindow>
+  </XCUIElementTypeApplication>
+</AppiumAUT>`;
+}
+
+/** appium stands in for an Appium server: a session that opens, a source that
+ *  answers `loading` for its first `reads` requests and `loaded` after, and a
+ *  quit. Everything else a workflow could ask for is refused, so a loop that
+ *  tried to press something on a journal would say so. */
+async function appium(reads: number, loading: string, loaded: string) {
+  const { createServer } = await import('node:http');
+  let sources = 0;
+  const server = createServer((req, res) => {
+    const answer = (value: unknown, status = 200) => {
+      res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify({ value }));
+    };
+    if (req.method === 'GET' && req.url === '/status') return answer({ ready: true });
+    if (req.method === 'POST' && req.url === '/session') return answer({ sessionId: 'fixture' });
+    if (req.method === 'GET' && req.url === '/session/fixture/source') {
+      sources++;
+      return answer(sources <= reads ? loading : loaded);
+    }
+    if (req.method === 'DELETE' && req.url === '/session/fixture') return answer(null);
+    return answer({ error: 'unknown command', message: `${req.method} ${req.url}` }, 404);
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+  const port = (server.address() as { port: number }).port;
+  return { url: `http://127.0.0.1:${port}`, sources: () => sources, close: () => server.close() };
+}
+
+const fixturePhone = {
+  surface: 'ios' as const,
+  capabilities: () => ({}),
+  parse: fromIOS,
+  locator: (name: string) => ({ using: 'accessibility id', value: name }),
+  context: () => ({ url: 'ios://ledger', title: 'Ledger' }),
+  record: async () => undefined,
+  restart: async () => undefined,
+};
+
+const PHONE_LOADING = iosScreen('Journal', 'Reading the ledger');
+const phoneJournal = (event: string) => iosScreen('Journal', '2 entries, newest first', event, event);
+const READ_ON_PHONE = {
+  name: 'read the journal',
+  description: 'Open the journal and confirm posted transfers are listed.',
+  expect: ['"transfer.posted"'],
+};
+
+test('a phone screen that is still loading is judged once it has loaded', async () => {
+  const server = await appium(6, PHONE_LOADING, phoneJournal('transfer.posted'));
+  try {
+    const results = await runMobile({
+      platform: fixturePhone, serverURL: server.url,
+      artifacts: mkdtempSync(join(tmpdir(), 'af-mob-')),
+      settle: { budgetMs: 500, quietMs: 10 },
+      workflows: [READ_ON_PHONE],
+    });
+    assert.equal(results[0]!.outcome.verdict, 'pass', results[0]!.outcome.detail);
+    assert.ok(server.sources() > 6, `the screen was never read after it loaded: ${server.sources()} reads`);
+  } finally {
+    server.close();
+  }
+});
+
+test('a phone screen that loads without the expectation still fails, on the loaded screen', async () => {
+  const server = await appium(6, PHONE_LOADING, phoneJournal('transfer.reversed'));
+  try {
+    const results = await runMobile({
+      platform: fixturePhone, serverURL: server.url,
+      artifacts: mkdtempSync(join(tmpdir(), 'af-mob-')),
+      settle: { budgetMs: 500, quietMs: 10 },
+      workflows: [READ_ON_PHONE],
+    });
+    const { verdict, cause, detail } = results[0]!.outcome;
+    assert.equal(verdict, 'fail', detail);
+    assert.equal(cause, 'expectation-not-met');
+    assert.ok(detail.includes('transfer.reversed'), `the loaded screen is not the one judged: ${detail}`);
+    assert.ok(!detail.includes('Reading the ledger'), `the loading screen was judged: ${detail}`);
+    assert.match(detail, /had stopped changing, so it was judged finished\.$/);
+  } finally {
+    server.close();
+  }
+});
+
+test('a phone screen that never stops changing is judged on its last read, and says so', async () => {
+  // Every read a different tick. The stand in counts its reads, and the tick
+  // quoted in the verdict has to be the last one it served.
+  const { createServer } = await import('node:http');
+  let n = 0;
+  const server = createServer((req, res) => {
+    const answer = (value: unknown) => res.writeHead(200, { 'content-type': 'application/json' })
+      .end(JSON.stringify({ value }));
+    if (req.url === '/status') return answer({ ready: true });
+    if (req.url === '/session') return answer({ sessionId: 'fixture' });
+    // Still for two reads, so the first look settles on the loading screen,
+    // then moving forever.
+    if (req.url === '/session/fixture/source') {
+      n++;
+      return answer(n <= 2 ? PHONE_LOADING : iosScreen('Journal', `Tick ${n}`));
+    }
+    return answer(null);
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+  try {
+    const results = await runMobile({
+      platform: fixturePhone,
+      serverURL: `http://127.0.0.1:${(server.address() as { port: number }).port}`,
+      artifacts: mkdtempSync(join(tmpdir(), 'af-mob-')),
+      settle: { budgetMs: 300, quietMs: 10 },
+      workflows: [READ_ON_PHONE],
+    });
+    const { verdict, detail } = results[0]!.outcome;
+    assert.equal(verdict, 'fail', detail);
+    assert.match(detail, /The screen was still changing when it was judged/);
+    assert.ok(detail.includes(`Tick ${n}"`), `judged a read other than the last (${n}): ${detail}`);
+  } finally {
+    server.close();
+  }
+});
+
+test('a phone screen that is already still is read once more, then decided about', async () => {
+  // The first look is watched until it stops moving, which on a still screen
+  // is one more read and nothing else: two sources before the first decision.
+  const server = await appium(0, PHONE_LOADING, phoneJournal('transfer.posted'));
+  try {
+    const results = await runMobile({
+      platform: fixturePhone, serverURL: server.url,
+      artifacts: mkdtempSync(join(tmpdir(), 'af-mob-')),
+      settle: { budgetMs: 10_000, quietMs: 10 },
+      workflows: [READ_ON_PHONE],
+    });
+    assert.equal(results[0]!.outcome.verdict, 'pass', results[0]!.outcome.detail);
+    assert.equal(server.sources(), 2);
+  } finally {
+    server.close();
+  }
+});
+
+test('the last tap of a spent phone step budget is judged on what it loaded', async () => {
+  // One step: tap "Open journal", and the budget is gone. The loop reads the
+  // screen once more, and that read gets the same patience as any verdict.
+  const { createServer } = await import('node:http');
+  let tapped = false;
+  let after = 0;
+  const server = createServer((req, res) => {
+    const answer = (value: unknown) => res.writeHead(200, { 'content-type': 'application/json' })
+      .end(JSON.stringify({ value }));
+    if (req.url === '/status') return answer({ ready: true });
+    if (req.url === '/session') return answer({ sessionId: 'fixture' });
+    if (req.url === '/session/fixture/element') return answer({ 'element-6066-11e4-a52e-4f735466cecf': 'open' });
+    if (req.url === '/session/fixture/element/open/click') { tapped = true; return answer(null); }
+    if (req.url === '/session/fixture/source') {
+      if (!tapped) {
+        return answer(iosScreen('Ledger').replace('</XCUIElementTypeWindow>',
+          '<XCUIElementTypeButton type="XCUIElementTypeButton" name="Open journal" label="Open journal" enabled="true" x="16" y="400" width="120" height="44" index="9"/></XCUIElementTypeWindow>'));
+      }
+      after++;
+      return answer(after <= 4 ? PHONE_LOADING : phoneJournal('transfer.posted'));
+    }
+    return answer(null);
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+  try {
+    const results = await runMobile({
+      platform: fixturePhone,
+      serverURL: `http://127.0.0.1:${(server.address() as { port: number }).port}`,
+      artifacts: mkdtempSync(join(tmpdir(), 'af-mob-')),
+      settle: { budgetMs: 500, quietMs: 10 },
+      workflows: [{ ...READ_ON_PHONE, description: 'Press Open journal.', maxSteps: 1 }],
+    });
+    assert.ok(tapped, 'the control was never tapped');
+    assert.equal(results[0]!.outcome.verdict, 'pass', results[0]!.outcome.detail);
+  } finally {
+    server.close();
+  }
+});
+
+test('a phone screen that loads into something to tap is driven, not judged', async () => {
+  const { createServer } = await import('node:http');
+  let tapped = false;
+  let reads = 0;
+  const server = createServer((req, res) => {
+    const answer = (value: unknown) => res.writeHead(200, { 'content-type': 'application/json' })
+      .end(JSON.stringify({ value }));
+    if (req.url === '/status') return answer({ ready: true });
+    if (req.url === '/session') return answer({ sessionId: 'fixture' });
+    if (req.url === '/session/fixture/element') return answer({ 'element-6066-11e4-a52e-4f735466cecf': 'show' });
+    if (req.url === '/session/fixture/element/show/click') { tapped = true; return answer(null); }
+    if (req.url === '/session/fixture/source') {
+      if (tapped) return answer(phoneJournal('transfer.posted'));
+      reads++;
+      return answer(reads <= 4 ? PHONE_LOADING : iosScreen('Journal', '3000 entries').replace('</XCUIElementTypeWindow>',
+        '<XCUIElementTypeButton type="XCUIElementTypeButton" name="Show posted transfers" label="Show posted transfers" enabled="true" x="16" y="400" width="200" height="44" index="9"/></XCUIElementTypeWindow>'));
+    }
+    return answer(null);
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+  try {
+    const results = await runMobile({
+      platform: fixturePhone,
+      serverURL: `http://127.0.0.1:${(server.address() as { port: number }).port}`,
+      artifacts: mkdtempSync(join(tmpdir(), 'af-mob-')),
+      settle: { budgetMs: 500, quietMs: 10 },
+      workflows: [{ ...READ_ON_PHONE, description: 'Press Show posted transfers.' }],
+    });
+    assert.equal(results[0]!.outcome.verdict, 'pass', results[0]!.outcome.detail);
+    assert.ok(tapped, 'the loaded screen was judged instead of driven');
+  } finally {
+    server.close();
+  }
+});

@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+<title>Journal</title>
+<!--
+  "Reading the ledger" is the loading screen and "transfer.posted" or whatever
+  the ledger answered is the loaded one. runner/test/desktop.test.ts reads both
+  by their words, so a change to either is a change to that test.
+-->
+<style>
+  :root {
+    --paper: #f6f3ec; --ink: #1f1d1a; --muted: #625d53;
+    --rule: #d3ccbd; --hairline: #e2dccf; --skeleton: #ebe6db;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #171613; --ink: #ece8df; --muted: #a29c8f;
+      --rule: #3a3630; --hairline: #2d2a25; --skeleton: #26231f;
+      color-scheme: dark;
+    }
+  }
+  body {
+    margin: 0; padding: 28px 32px; background: var(--paper); color: var(--ink);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  }
+  h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.02em; }
+  #status { margin: 6px 0 18px; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    text-align: left; font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--muted);
+    padding: 8px 12px; border-bottom: 1px solid var(--rule);
+  }
+  td { padding: 9px 12px; border-bottom: 1px solid var(--hairline); }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .event { font: 13px/1.4 ui-monospace, "SF Mono", Menlo, monospace; }
+  .skeleton span { display: inline-block; height: 10px; width: 120px; border-radius: 3px; background: var(--skeleton); }
+</style>
+</head>
+<body>
+<h1>Journal</h1>
+<p id="status">Reading the ledger</p>
+<table>
+  <thead><tr><th scope="col" class="num">Seq</th><th scope="col">Event</th></tr></thead>
+  <tbody id="rows">
+    <tr class="skeleton" aria-hidden="true"><td class="num"><span></span></td><td><span></span></td></tr>
+    <tr class="skeleton" aria-hidden="true"><td class="num"><span></span></td><td><span></span></td></tr>
+    <tr class="skeleton" aria-hidden="true"><td class="num"><span></span></td><td><span></span></td></tr>
+  </tbody>
+</table>
+<script>
+  window.journal.read().then((result) => {
+    const rows = document.getElementById('rows');
+    const status = document.getElementById('status');
+    rows.replaceChildren();
+    if (result.state !== 'ok') {
+      status.textContent = result.state === 'unconfigured'
+        ? 'No ledger address, so nothing was read.'
+        : 'The ledger could not be read.';
+      return;
+    }
+    status.textContent = result.rows.length + (result.rows.length === 1 ? ' entry' : ' entries') + ', newest first';
+    for (const r of result.rows) {
+      const tr = document.createElement('tr');
+      const seq = document.createElement('td');
+      seq.className = 'num';
+      seq.textContent = String(r.seq);
+      const event = document.createElement('td');
+      event.className = 'event';
+      event.textContent = r.event;
+      tr.append(seq, event);
+      rows.append(tr);
+    }
+  });
+</script>
+</body>
+</html>

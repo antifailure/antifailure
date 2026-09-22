@@ -23,6 +23,7 @@ import { finalJudgement, stepsExhausted, type WorkflowResult } from '../execute.
 import { readFile } from 'node:fs/promises';
 import { nullSink, type LiveSink } from '../live.ts';
 import { snapshotFrom, type AxLocation, type AxNode } from './ax.ts';
+import { Patience, withSettling, type SettleOptions } from './settle.ts';
 import {
   WebDriverSession, WebDriverUnreachable, ping,
   type Locator,
@@ -76,6 +77,9 @@ export interface MobileJob {
    *  builds WebDriverAgent with xcodebuild, which is minutes, not seconds. */
   readonly sessionTimeoutMs?: number;
   readonly maxSteps?: number;
+  /** settle tunes how long a screen is watched before it is judged, exactly
+   *  as DesktopJob.settle does. A run leaves it out. */
+  readonly settle?: SettleOptions;
 }
 
 /** The name cap for a mobile accessibility tree.
@@ -205,7 +209,6 @@ async function runOneMobile(
   let recorder: Recorder | undefined;
   let video: string | undefined;
   let outcome: { cause: Cause; detail: string };
-  let lastSnapshot: Snapshot | undefined;
 
   try {
     session = await WebDriverSession.create(
@@ -227,10 +230,16 @@ async function runOneMobile(
     const history: Action[] = [];
     let stopped: { cause: Cause; detail: string } | undefined;
 
-    for (let step = 0; step < limit; step += 1) {
-      const snapshot = mobileSnapshot(platform.parse(await session.source()), platform.context());
-      lastSnapshot = snapshot;
+    // The same patience the desktop loop has, for the same reason: an app
+    // with a loading state was judged on it. On iOS the first end to end run
+    // passed only because the app happened to finish before the first read.
+    // See runner/src/drivers/settle.ts.
+    const opened = session;
+    const read = async () => mobileSnapshot(platform.parse(await opened.source()), platform.context());
+    const patience = new Patience(job.settle);
+    let snapshot = (await patience.first(read)).snapshot;
 
+    for (let step = 0; step < limit; step += 1) {
       const action = await planner.next(workflow, snapshot, history);
       history.push(action);
 
@@ -257,7 +266,17 @@ async function runOneMobile(
         // agent would be reported as the agent's own confusion, and the run
         // would exit zero. finalJudgement returns a failure when the screen
         // shows one and unverified when it genuinely proved nothing.
-        stopped = finalJudgement(workflow, snapshot, action.why, steps);
+        //
+        // And not judged YET. Nothing to press is also what a screen that has
+        // not finished drawing offers, so given what patience is left, a
+        // screen that becomes something else is decided about afresh, and one
+        // that holds still is judged as it is.
+        const settled = await patience.beforeVerdict(read, snapshot);
+        if (settled.changed && settled.still) {
+          snapshot = settled.snapshot;
+          continue;
+        }
+        stopped = withSettling(finalJudgement(workflow, settled.snapshot, action.why, steps), settled);
         break;
       }
 
@@ -312,18 +331,20 @@ async function runOneMobile(
         await session.click(element);
         record(`Press ${target}`, action.kind === 'check' ? 'check' : 'click');
       }
+      snapshot = await read();
     }
 
-    outcome = stopped ?? stepsExhausted(
-      workflow,
+    if (stopped) {
+      outcome = stopped;
+    } else {
       // Read once more rather than reusing the snapshot the last action was
       // decided from: the last thing the agent did is exactly the thing whose
       // effect has not been looked at yet, and judging without looking would
-      // miss a workflow that succeeded on its final press.
-      lastSnapshot = mobileSnapshot(platform.parse(await session.source()), platform.context()),
-      limit,
-      steps,
-    );
+      // miss a workflow that succeeded on its final press. The loop's last
+      // read is that read, and it gets the same patience as any verdict.
+      const settled = await patience.beforeVerdict(read, snapshot);
+      outcome = withSettling(stepsExhausted(workflow, settled.snapshot, limit, steps), settled);
+    }
   } catch (err) {
     outcome = {
       cause: err instanceof WebDriverUnreachable ? 'runner-failure' : 'runner-failure',

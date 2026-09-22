@@ -1,0 +1,7 @@
+{
+  "name": "af-journal-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "description": "An Electron client that loads its journal in the main process, for the desktop driver's loading tests.",
+  "main": "main.js"
+}

@@ -44,6 +44,7 @@ import { NotImplementedError, type SurfaceDriver } from './driver.ts';
 import { openElectron, ElectronError, type ElectronTarget } from './electron.ts';
 import { openMac, AxError, type MacTarget } from './macax.ts';
 import type { AxSurface } from './surface.ts';
+import { Patience, withSettling, type SettleOptions } from './settle.ts';
 
 export { NotImplementedError };
 export type { AxSurface };
@@ -93,6 +94,11 @@ export interface DesktopJob {
    *  which is the failure runner/src/explore.ts documents on its own Surface
    *  interface for the same reason. */
   readonly open?: (app: DesktopApp) => Promise<AxSurface>;
+  /** settle tunes how long a screen is watched before it is judged. A run
+   *  leaves it out and gets SETTLE_BUDGET_MS; a test shortens it, because a
+   *  failing case otherwise spends the whole budget proving the screen is
+   *  finished. See runner/src/drivers/settle.ts. */
+  readonly settle?: SettleOptions;
 }
 
 /** The most actions one attempt may take, matching the browser's own default. */
@@ -236,7 +242,13 @@ async function attemptOnce(
   job: DesktopJob, workflow: Workflow, surface: AxSurface,
   attempt: number, taken: string[], emit: EmitStep,
 ): Promise<AttemptResult> {
-  let snapshot: Snapshot = await surface.snapshot();
+  // The first read is watched until it stops moving, and every verdict that
+  // is not a pass is preceded by watching for a change. Both draw on one
+  // budget per attempt. settle.ts has the failure this answers: an Electron
+  // client judged on its loading screen, 3.7 seconds after launch.
+  const patience = new Patience(job.settle);
+  const read = () => surface.snapshot();
+  let snapshot: Snapshot = (await patience.first(read)).snapshot;
   const record = (text: string, action?: string) => {
     taken.push(text);
     emit(text, snapshot.url, action);
@@ -260,8 +272,19 @@ async function attemptOnce(
     switch (action.kind) {
       case 'done':
         return { cause: 'succeeded', detail: action.why };
-      case 'stuck':
-        return finalJudgement(workflow, snapshot, action.why, taken);
+      case 'stuck': {
+        // Not yet a verdict. A planner that finds nothing to press may be
+        // looking at a screen that has not finished drawing, and that looks
+        // exactly like a screen that offers nothing. Given what patience is
+        // left, a screen that becomes something else is decided about afresh,
+        // and one that holds still is judged as it is.
+        const settled = await patience.beforeVerdict(read, snapshot);
+        if (settled.changed && settled.still) {
+          snapshot = settled.snapshot;
+          continue;
+        }
+        return withSettling(finalJudgement(workflow, settled.snapshot, action.why, taken), settled);
+      }
       case 'fill':
         await surface.fill(action.field, action.value);
         record(`Fill ${action.field.source.replace(/[\^$]/g, '')}: ${action.why}`, 'fill');
@@ -290,5 +313,8 @@ async function attemptOnce(
     snapshot = await surface.snapshot();
   }
 
-  return stepsExhausted(workflow, snapshot, limit, taken);
+  // The same patience before the budget's verdict: the last press is the one
+  // whose effect has had the least time to draw.
+  const settled = await patience.beforeVerdict(read, snapshot);
+  return withSettling(stepsExhausted(workflow, settled.snapshot, limit, taken), settled);
 }
