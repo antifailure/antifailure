@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/antifailure/antifailure/engine/internal/env"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/internal/load"
 	"github.com/antifailure/antifailure/engine/internal/manifest"
 	"github.com/antifailure/antifailure/engine/internal/workload"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
@@ -44,6 +46,10 @@ type LoadCompareJSON struct {
 	BaselineTornDown bool     `json:"baseline_torn_down"`
 	BaselineBranch   string   `json:"baseline_branch,omitempty"`
 	Notes            []string `json:"notes"`
+	// Rounds is every round's p95 per route on both sides, which is what each
+	// route's change and interval were computed from. Published so that the
+	// interval can be recomputed by hand, rather than taken on trust.
+	Rounds []workload.RoundP95 `json:"rounds,omitempty"`
 }
 
 type loadCompareSideJSON struct {
@@ -59,6 +65,8 @@ func newLoadCompareCommand(e *Env) *cobra.Command {
 	var scale float64
 	var seed int64
 	var keep bool
+	var rounds int
+	var warmup time.Duration
 	cmd := &cobra.Command{
 		Use:   "compare",
 		Short: "Run the same traffic against the base branch too, and report what moved",
@@ -75,13 +83,25 @@ when you want to know whether a route is slower than the fleet. This one
 measures this build against the last one, which is the right question when you
 want to know whether your change made it slower.
 
-What it cannot control is printed with every report rather than left implied.
-The two runs are sequential, because two environments sending traffic at once
-on one host would contend with each other and measure that instead. The seed
-makes the request sequence identical; it does not make the machine, the
-neighbours on the host or the time of day identical. A difference is a
-difference, and a threshold under load.comparison.thresholds is what turns one
-into a verdict.
+Each side is first sent a short warm-up that is thrown away, which takes the
+first request of every route out of the numbers. Then each side is sent the mix
+in rounds, interleaved so that neither side always goes first, with the same
+seed for both sides in each round.
+
+Each route is judged ROUND AGAINST ROUND. Every round is a small comparison of
+its own, and the change is measured from how those comparisons agreed, with an
+interval as wide as the host's own noise between rounds. The intervals hold at
+ninety percent for every route together. A limit inside a route's interval is
+neither a pass nor a fail, and the report prints the smallest change that route
+could have shown on this host, so on a noisy machine the answer is "too close
+to say" rather than a regression that is not there. More rounds or a longer
+duration narrows it.
+
+What it still cannot control is printed with every report rather than left
+implied. The rounds are sequential, because two environments sending traffic
+at once on one host would contend with each other and measure that instead.
+A difference is a difference, and a threshold under load.comparison.thresholds
+is what turns one into a verdict.
 
 The base environment is torn down unless --keep says otherwise. The
 environment for this build is left running whether or not this brought it up.`),
@@ -121,6 +141,8 @@ af load compare --seed 7 --keep`),
 				Baseline: cfg.Baseline,
 				BaseRef:  orDefaultString(baseRef, cfg.BaseRef),
 				Duration: duration, Scale: scale, Seed: seed, Keep: keep,
+				Rounds: rounds, Warmup: warmup,
+				NoWarmup: noWarmup(cmd.Flags(), warmup),
 				Progress: func(line string) { e.Out.Printf("  %s\n", line) },
 			})
 			if errors.Is(err, env.ErrLoadBaselineSameCommit) {
@@ -167,6 +189,13 @@ af load compare --seed 7 --keep`),
 			if err != nil {
 				return err
 			}
+			// Round against round wherever there are rounds to pair. The
+			// pooled comparison above is kept only for the run wide measures
+			// and for a single pass, whose notes say what it cannot see.
+			rounds := roundP95s(res)
+			if len(rounds) >= 2 {
+				workload.ResolveByRounds(comparison, rounds)
+			}
 			comparison.Notes = append(comparison.Notes, res.Notes...)
 
 			thresholds := comparisonThresholds(cfg)
@@ -182,6 +211,7 @@ af load compare --seed 7 --keep`),
 					BaselineTornDown: res.BaselineTornDown,
 					BaselineBranch:   res.BaselineBranch,
 					Notes:            comparison.Notes,
+					Rounds:           rounds,
 				}
 				if err := e.Out.JSON(doc); err != nil {
 					return err
@@ -197,6 +227,7 @@ af load compare --seed 7 --keep`),
 					Candidate: loadCompareSideJSON{Rev: res.CandidateRev},
 					Golden:    res.Golden, BaselineTornDown: res.BaselineTornDown,
 					BaselineBranch: res.BaselineBranch, Notes: comparison.Notes,
+					Rounds: rounds,
 				}
 				body, merr := json.MarshalIndent(doc, "", "  ")
 				if merr != nil {
@@ -218,6 +249,12 @@ af load compare --seed 7 --keep`),
 		"Fraction of production's arrival rate to send at each side, overriding the manifest")
 	cmd.Flags().Int64Var(&seed, "seed", 0,
 		"Seed for the request sequence. The same seed is used on both sides")
+	cmd.Flags().IntVar(&rounds, "rounds", 0, fmt.Sprintf(
+		"Interleaved rounds per side, %d when not set. 1 measures each side once, base first",
+		env.DefaultCompareRounds))
+	cmd.Flags().DurationVar(&warmup, "warmup", 0, fmt.Sprintf(
+		"Mix sent at each side and discarded before measuring, %s when not set. 0s sends none",
+		env.DefaultCompareWarmup))
 	cmd.Flags().BoolVar(&keep, "keep", false,
 		"Leave the base environment up, for looking at a difference")
 	// --report rather than --output, for the reason af oracle and af ci both
@@ -226,6 +263,47 @@ af load compare --seed 7 --keep`),
 	// file literally named json.
 	cmd.Flags().StringVar(&output, "report", "", "Write the comparison here as well as to the terminal")
 	return cmd
+}
+
+// roundP95s pairs the two sides' rounds, round k with round k, as each route's
+// p95 in that round. A route a round did not send, or sent only failures to,
+// is absent from that round rather than recorded as zero, because a zero
+// would enter the log ratio as an infinitely fast round.
+func roundP95s(res *env.LoadCompareResult) []workload.RoundP95 {
+	n := len(res.BaselineRounds)
+	if len(res.CandidateRounds) < n {
+		n = len(res.CandidateRounds)
+	}
+	perRoute := func(r *load.Result) map[string]float64 {
+		out := map[string]float64{}
+		if r == nil {
+			return out
+		}
+		for _, rr := range r.Routes {
+			if rr.Latency.P95Ms > 0 {
+				out[rr.Route] = rr.Latency.P95Ms
+			}
+		}
+		return out
+	}
+	out := make([]workload.RoundP95, 0, n)
+	for k := 0; k < n; k++ {
+		out = append(out, workload.RoundP95{
+			Base: perRoute(res.BaselineRounds[k]), Candidate: perRoute(res.CandidateRounds[k]),
+		})
+	}
+	return out
+}
+
+// noWarmup is whether the person asked for no warm-up.
+//
+// Typed and zero is "none"; not typed is "the default". The two cannot share a
+// value, because the flag's zero is also its unset state, so whether the flag
+// was set on the command line is what tells them apart. Reading the value
+// alone would make `--warmup 0s`, the arm that shows what the warm-up is for,
+// silently send the default warm-up instead.
+func noWarmup(flags *pflag.FlagSet, warmup time.Duration) bool {
+	return flags.Changed("warmup") && warmup <= 0
 }
 
 // loadComparisonConfig reads the block, treating an absent load block and an

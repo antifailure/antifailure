@@ -83,7 +83,25 @@ type RouteResolution struct {
 	TooFewSamples bool `json:"too_few_samples"`
 	// Detail says in one sentence why, and is empty when the route resolved.
 	Detail string `json:"detail,omitempty"`
+	// Method is "rounds" when the change was measured round against round,
+	// and empty for a single run judged by the band above. Rounds is how many
+	// rounds sent this route on both sides, and ChangeLow and ChangeHigh are
+	// the ninety percent interval for the change, as fractions, which the
+	// verdict is decided on in place of the band. See
+	// compareresolution_rounds.go for why a single run's band is not enough.
+	Method string `json:"method,omitempty"`
+	Rounds int    `json:"rounds,omitempty"`
+	// Family is how many routes were judged together, which sets how wide
+	// each route's interval had to be for the table as a whole to hold at
+	// ninety percent.
+	Family     int      `json:"family,omitempty"`
+	ChangeLow  *float64 `json:"change_low,omitempty"`
+	ChangeHigh *float64 `json:"change_high,omitempty"`
 }
+
+// ResolutionRounds is RouteResolution.Method for a change measured round
+// against round.
+const ResolutionRounds = "rounds"
 
 // Verdict decides a threshold against an observed difference, or refuses.
 //
@@ -108,6 +126,11 @@ type RouteResolution struct {
 // interval runs from minus 438 to plus 1610 percent, so the limit sits inside
 // it and neither a pass nor a breach would have meant anything.
 func (r RouteResolution) Verdict(observed, limit float64) (value string, ok bool) {
+	if r.hasInterval() {
+		// The same rule, on the interval the rounds measured rather than on
+		// a band placed around the observed number.
+		return r.intervalVerdict(limit)
+	}
 	if r.SmallestVisible == nil {
 		return VerdictUnverified, false
 	}
@@ -131,6 +154,9 @@ func (r RouteResolution) Verdict(observed, limit float64) (value string, ok bool
 // the arrow was as wrong as the number. A table that prints a direction it
 // cannot support teaches a reader to trust the next one.
 func (r RouteResolution) DirectionResolved(observed float64) bool {
+	if r.hasInterval() {
+		return *r.ChangeLow > 0 || *r.ChangeHigh < 0
+	}
 	if r.SmallestVisible == nil {
 		return false
 	}

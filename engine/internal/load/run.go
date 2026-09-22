@@ -86,6 +86,20 @@ type Result struct {
 	// Baselines says where the per route p95 comparisons came from, empty when
 	// they came from the shape itself.
 	Baselines string `json:"baselines,omitempty"`
+
+	// raw is every latency this run measured, per route, kept so that two
+	// runs can be combined into one distribution by Merge. Unexported and so
+	// never in a document: a result read back from JSON carries percentiles
+	// and nothing else, and Merge refuses one rather than averaging
+	// percentiles, which is not a percentile of anything.
+	raw *rawSamples
+}
+
+// rawSamples is what finish had in hand before it reduced it to percentiles.
+type rawSamples struct {
+	byRoute  map[string][]float64
+	all      []float64
+	baseline map[string]float64
 }
 
 // RouteResult is one route's measurement.
@@ -368,12 +382,28 @@ func finish(m *meter, opts Options, started time.Time) *Result {
 	for _, r := range opts.Shape.Routes {
 		baselines[r.String()] = r.P95Ms
 	}
-	for route, count := range m.counts {
+	raw := &rawSamples{byRoute: map[string][]float64{}, baseline: baselines,
+		all: append([]float64(nil), m.all...)}
+	for route, v := range m.samples {
+		raw.byRoute[route] = append([]float64(nil), v...)
+	}
+	res.raw = raw
+	res.Routes = routeResults(raw, m.counts, m.errsBy)
+	return res
+}
+
+// routeResults builds the per route table from raw samples. One function for
+// a single run and for a merged one, so that the two cannot round, sort or
+// compute a ratio differently and produce two tables that disagree about the
+// same numbers.
+func routeResults(raw *rawSamples, counts, errsBy map[string]int) []RouteResult {
+	var out []RouteResult
+	for route, count := range counts {
 		rr := RouteResult{
-			Route: route, Sent: count, Errors: m.errsBy[route],
-			Latency: Percentiles(m.samples[route]),
+			Route: route, Sent: count, Errors: errsBy[route],
+			Latency: Percentiles(raw.byRoute[route]),
 		}
-		if base := baselines[route]; base > 0 {
+		if base := raw.baseline[route]; base > 0 {
 			rr.BaselineP95Ms = base
 			rr.HasBaseline = true
 			// A ratio rather than a difference, because a route that takes
@@ -381,17 +411,87 @@ func finish(m *meter, opts Options, started time.Time) *Result {
 			// and four milliseconds of absolute change is not.
 			rr.P95Increase = rr.Latency.P95Ms/base - 1
 		}
-		res.Routes = append(res.Routes, rr)
+		out = append(out, rr)
 	}
-	sort.Slice(res.Routes, func(i, j int) bool {
+	sort.Slice(out, func(i, j int) bool {
 		// Worst regression first, because that is the line somebody is
 		// looking for and scrolling to find it is the same as not showing it.
-		if res.Routes[i].P95Increase != res.Routes[j].P95Increase {
-			return res.Routes[i].P95Increase > res.Routes[j].P95Increase
+		if out[i].P95Increase != out[j].P95Increase {
+			return out[i].P95Increase > out[j].P95Increase
 		}
-		return res.Routes[i].Route < res.Routes[j].Route
+		return out[i].Route < out[j].Route
 	})
-	return res
+	return out
+}
+
+// ErrNoSamples is returned by Merge for a result that carries percentiles and
+// no samples, which is every result that has been through a document.
+var ErrNoSamples = errors.New(
+	"this result carries percentiles and not the samples they were taken from, " +
+		"and percentiles cannot be combined into a percentile")
+
+// Merge combines several runs of the same shape into one result, as though the
+// samples had all been taken in one run.
+//
+// It pools the SAMPLES and takes percentiles of the pool. It never averages
+// percentiles: the mean of four p95s is not the p95 of anything, and it would
+// hand the resolution gate a distribution that no run produced. Counts and
+// errors add, the duration is the time actually spent sending, and the rate is
+// what was sent over that time rather than any one run's rate.
+//
+// This exists for the base branch comparison, which sends each side in several
+// short rounds interleaved with the other side's so that the order two
+// environments are measured in cannot land on one side only. Each side's
+// rounds are pooled back into one result here, and everything downstream,
+// the difference, the resolution and the verdict, reads it exactly as it reads
+// a single run.
+func Merge(parts ...*Result) (*Result, error) {
+	if len(parts) == 0 {
+		return nil, errors.New("there are no runs to merge")
+	}
+	first := parts[0]
+	out := &Result{
+		Source: first.Source, Baselines: first.Baselines, TargetRate: first.TargetRate,
+		Errors: map[string]int{},
+	}
+	raw := &rawSamples{byRoute: map[string][]float64{}, baseline: map[string]float64{}}
+	counts, errsBy := map[string]int{}, map[string]int{}
+	failed := 0.0
+	for _, p := range parts {
+		if p == nil {
+			return nil, errors.New("one of the runs to merge is missing")
+		}
+		if p.raw == nil {
+			return nil, ErrNoSamples
+		}
+		out.Sent += p.Sent
+		out.Duration += p.Duration
+		failed += p.ErrorRate * float64(p.Sent)
+		for k, v := range p.Errors {
+			out.Errors[k] += v
+		}
+		raw.all = append(raw.all, p.raw.all...)
+		for route, v := range p.raw.byRoute {
+			raw.byRoute[route] = append(raw.byRoute[route], v...)
+		}
+		for route, b := range p.raw.baseline {
+			raw.baseline[route] = b
+		}
+		for _, r := range p.Routes {
+			counts[r.Route] += r.Sent
+			errsBy[r.Route] += r.Errors
+		}
+	}
+	out.Overall = Percentiles(raw.all)
+	if out.Duration > 0 {
+		out.Rate = float64(out.Sent) / out.Duration.Seconds()
+	}
+	if out.Sent > 0 {
+		out.ErrorRate = math.Round(failed) / float64(out.Sent)
+	}
+	out.raw = raw
+	out.Routes = routeResults(raw, counts, errsBy)
+	return out, nil
 }
 
 // Percentiles computes a distribution from samples.
