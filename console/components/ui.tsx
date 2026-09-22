@@ -275,6 +275,46 @@ export function Row({ children, onClick }: { children: ReactNode; onClick?: () =
 }
 
 /**
+ * A full width line under the row above it, for the one value in a row that is
+ * too long to be a column.
+ *
+ * The runs page carried a reproduction as the seventh column of its verdicts
+ * table. A reproduction is several sentences, so the column asked for the width
+ * of its longest line, the table was given a minimum of 860px to hold it, and
+ * every window whose content area was narrower than that, which is every laptop
+ * width from 640 to 1279 once the 236px rail is taken off, scrolled the table
+ * sideways and cut the column off at the card's edge. Above that it fitted and
+ * was a 259px box scrolling a 780px sentence, so the reproduction was cut off
+ * inside its own box at every width instead. Under the row it has the table's
+ * whole width and the columns keep theirs.
+ *
+ * `span` is the number of columns in the table, so the line covers all of them.
+ * The rule that joins it to its row, with no hairline between the two, is in
+ * globals.css beside the other table rules, because it is a selector on the row
+ * ABOVE this one and no class on this element can reach it.
+ */
+export function RowDetail({
+  span,
+  label,
+  children,
+}: {
+  span: number;
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <tr className="af-detail">
+      <td colSpan={span} className="border-b border-rule px-4 pb-3.5 pt-0 text-ink">
+        <div className="af-cell">
+          <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-dim">{label}</p>
+          <div className="mt-1.5">{children}</div>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+/**
  * The primary cell of a row that opens something.
  *
  * A `<tr onClick>` is invisible to a keyboard: it is not focusable, Enter does
@@ -359,10 +399,20 @@ export function Badge({ tone = "neutral", children }: { tone?: Tone; children: R
  * ignoring the rule the rest of the console follows, and a reproduction payload
  * of any length would have pushed the whole document sideways. `max-sm` and not
  * a media query of its own so the two thresholds cannot drift apart.
+ *
+ * `wrap` is for text that is read rather than copied as one line: the steps of
+ * a reproduction are sentences, and a box that scrolls a sentence sideways
+ * shows the first forty characters of it and hides the rest behind a scroll
+ * nobody finds. Wrapped, the whole of it is on screen at every width.
  */
-export function Machine({ children }: { children: string }) {
+export function Machine({ children, wrap = false }: { children: string; wrap?: boolean }) {
+  const flow = wrap
+    ? "whitespace-pre-wrap [overflow-wrap:anywhere]"
+    : "scroll-x overflow-x-auto max-sm:whitespace-pre-wrap max-sm:break-all";
   return (
-    <pre className="scroll-x max-w-full overflow-x-auto rounded-md border border-rule bg-paper px-3 py-2.5 font-mono text-[12px] leading-5 text-ink max-sm:whitespace-pre-wrap max-sm:break-all">
+    <pre
+      className={`max-w-full rounded-md border border-rule bg-paper px-3 py-2.5 font-mono text-[12px] leading-5 text-ink ${flow}`}
+    >
       {children}
     </pre>
   );

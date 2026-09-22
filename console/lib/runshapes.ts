@@ -219,10 +219,24 @@ export function nothingWasVerifiedNotice(values: readonly unknown[]): string | n
  * A JSON `null` is treated as nothing recorded, which is what it means here and
  * is also the only reading that cannot print the word "null" at a customer as
  * if it were a command.
+ *
+ * AN ARRAY OF STRINGS IS THE SHAPE THAT ACTUALLY ARRIVES, and it is printed as
+ * its lines. The runner records a reproduction as steps a person follows,
+ * `readonly string[]` in runner/src/verdict.ts; the engine forwards them as a
+ * JSON array (`jsonStrings` in engine/internal/env/reporting.go); ingest stores
+ * that array as jsonb. Stringifying it printed every step in quotes, with a
+ * trailing comma and a bracket above and below, so the one thing a customer
+ * reads to act on a failure read as a payload rather than as instructions. An
+ * empty array is nothing recorded, the same as null. Anything else still falls
+ * back to the JSON, because a shape this does not know is printed whole rather
+ * than guessed at.
  */
 export function reproductionText(reproduction: unknown): string | null {
   if (reproduction === null || reproduction === undefined) return null;
   if (typeof reproduction === "string") return reproduction.trim() === "" ? null : reproduction;
+  if (Array.isArray(reproduction) && reproduction.every((line) => typeof line === "string")) {
+    return reproduction.length === 0 ? null : reproduction.join("\n");
+  }
   return JSON.stringify(reproduction, null, 2);
 }
 

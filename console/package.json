@@ -8,7 +8,8 @@
     "dev": "next dev -p 3100",
     "build": "next build",
     "test": "ls lib/*.test.ts > /dev/null && node --test lib/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:layout": "node test/layout.mjs"
   },
   "dependencies": {
     "geist": "^1.7.2",
