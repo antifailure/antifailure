@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
 
@@ -120,11 +121,28 @@ func (i *Injector) containerPause(ctx context.Context, c Container, f Fault) (st
 			"detail", "the daemon accepted the pause and the container is not paused")
 	}
 	undo := func(ctx context.Context) error {
-		if !i.paused(ctx, c.ID) {
-			return nil
-		}
-		if _, err := i.cli.ContainerUnpause(ctx, c.ID, client.ContainerUnpauseOptions{}); err != nil {
+		// The thaw is asked for unconditionally, and its effect is read back
+		// afterwards. This used to ask first whether the container was
+		// paused and return success when the answer was no, and paused()
+		// answers no for an inspect that FAILED as well as for a container
+		// that is thawed. So a daemon that stumbled once turned the undo into
+		// a success that left the database frozen: on 2026-09-22 CI reported
+		// "the undo ran and the container is still frozen" on a pull request
+		// that did not touch this package. A container that is not paused,
+		// not running or gone answers the thaw with a conflict or not found,
+		// and that is the state the undo wants, so neither is an error.
+		if _, err := i.cli.ContainerUnpause(ctx, c.ID, client.ContainerUnpauseOptions{}); err != nil &&
+			!cerrdefs.IsConflict(err) && !cerrdefs.IsNotFound(err) {
 			return fmt.Errorf("fault: thawing %s: %w", name(c), err)
+		}
+		state, err := i.inspect(ctx, c.ID)
+		switch {
+		case cerrdefs.IsNotFound(err):
+			return nil
+		case err != nil:
+			return fmt.Errorf("fault: the thaw of %s was sent and could not be confirmed: %w", name(c), err)
+		case state.State != nil && state.State.Paused:
+			return fmt.Errorf("fault: %s is still frozen after the daemon accepted the thaw", name(c))
 		}
 		return nil
 	}
