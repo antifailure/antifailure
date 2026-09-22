@@ -9594,6 +9594,24 @@ naming an answer is still worth writing: with the value excluded it can only be
 met when the application rendered those words, which is exactly what a
 confirmation screen reading back an address is evidence of.
 
+## Loading screens
+
+An application that fetches its data after its window opens is not judged on
+its loading screen. The runner cannot see that fetch, because it often runs in
+Electron's main process, so it watches the accessibility tree instead. The
+first screen is read again until it stops changing. Before any verdict that is
+not a pass, the screen gets up to ten seconds to change. A screen that changes
+goes back to the planner, and a screen that holds still is judged as it is.
+
+A screen marked ` + "`" + `aria-busy` + "`" + `, or ` + "`" + `AXElementBusy` + "`" + ` on macOS, never counts as still.
+Marking a loading region busy is the most direct way to tell the runner, and a
+screen reader, that it is not finished.
+
+A screen that finishes loading without the expectation still fails, and the
+verdict quotes the loaded screen. A screen that never stops changing is judged
+on its last read, and the verdict says it was still changing. Phone workflows
+are judged the same way.
+
 ## Budget
 
 The browser's own, because a desktop workflow is planned rather than written
