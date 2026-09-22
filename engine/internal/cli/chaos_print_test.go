@@ -123,3 +123,14 @@ func TestPrintChaos_SaysHowLongAFaultWasInPlace(t *testing.T) {
 	require.Contains(t, out, "It was in place for 5.001s (declared 5s), then undone.\n",
 		"the terminal did not say how long the partition was in place")
 }
+
+// TestPrintChaos_SaysWhatTheProbeMeasured is the terminal line the film
+// quoted: "unreachable 3155ms" for a database that was back in under a second.
+func TestPrintChaos_SaysWhatTheProbeMeasured(t *testing.T) {
+	run := crashRun("in production", true, amcheckPassed)
+	rec := run.Report.Faults[0].Recovery
+	rec.DowntimeMs, rec.Unreachable, rec.Recovered, rec.ProbeIntervalMs = 110, true, true, 100
+	out := printed(t, run)
+	require.Contains(t, out, "      unreachable    110ms, probed every 100ms\n",
+		"the terminal did not print the probe's measurement")
+}

@@ -312,3 +312,19 @@ func TestRecoveryOf_SaysWhereReplayEndedNotWhereItsLastRecordBegan(t *testing.T)
 	require.Equal(t, "0/19723A8", env.RecoveryOfForTest(res).RedoEnd,
 		"with no established end the report printed no end at all")
 }
+
+// The probe's findings cross into the report whole: a zero outage from a
+// database that never stopped answering must not arrive looking like one
+// that was down for no time.
+func TestRecoveryOf_CarriesWhatTheProbeSaw(t *testing.T) {
+	got := env.RecoveryOfForTest(pgcrash.Result{
+		Downtime: 110 * time.Millisecond,
+		Availability: pgcrash.Availability{
+			Unreachable: true, Recovered: true, For: 110 * time.Millisecond, Interval: 100 * time.Millisecond,
+		},
+	})
+	require.Equal(t, int64(110), got.DowntimeMs)
+	require.True(t, got.Unreachable)
+	require.True(t, got.Recovered)
+	require.Equal(t, int64(100), got.ProbeIntervalMs)
+}

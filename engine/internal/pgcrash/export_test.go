@@ -1,6 +1,9 @@
 package pgcrash
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // JudgeForTest drives the judgement from values, the way the rest of this
 // package's tests drive its parsers, so a branch that only a broken cluster
@@ -22,4 +25,27 @@ func JudgeCrashForTest(r *Result) { r.judge(Options{ExpectCrash: true}, nil, nil
 // test that crashes a database by hand rather than through Verify.
 func ReadControlForTest(ctx context.Context, r Runner, dataDir string) (Control, error) {
 	return readControl(ctx, Options{Runner: r, DataDir: dataDir})
+}
+
+// ProbeForTest runs the availability probe against a fake attempt for a
+// span, the way Verify runs it beside a fault, and says what it saw.
+func ProbeForTest(attempt func(context.Context) error, interval, timeout, run time.Duration) Availability {
+	p := startProbe(context.Background(), attempt, interval, timeout)
+	time.Sleep(run)
+	return p.stop()
+}
+
+// ProbeSample is one attempt, for driving availabilityOf from values.
+type ProbeSample struct {
+	At, Done time.Time
+	OK       bool
+}
+
+// AvailabilityOfForTest reads an outage out of attempts given as values.
+func AvailabilityOfForTest(samples []ProbeSample, interval time.Duration) Availability {
+	in := make([]probeSample, 0, len(samples))
+	for _, s := range samples {
+		in = append(in, probeSample{at: s.At, done: s.Done, ok: s.OK})
+	}
+	return availabilityOf(in, interval)
 }
