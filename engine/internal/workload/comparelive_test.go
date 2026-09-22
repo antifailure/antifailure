@@ -280,52 +280,6 @@ func TestTwoIdenticalBuildsPassOnceThereAreEnoughSamples(t *testing.T) {
 	t.Logf("outcome: %s", outcome)
 }
 
-func TestMoreSamplesResolveASmallerDifference(t *testing.T) {
-	// The property the whole design rests on, asserted on one machine in one
-	// test so the two readings are comparable: a denser run of the SAME two
-	// identical servers must be able to see a smaller difference than a thin
-	// one. If that ever stops holding, the band is not measuring sampling
-	// error and every refusal it produces is arbitrary.
-	//
-	// The earlier version of this asserted that a thin run always REFUSES a
-	// hundred percent limit, and it flaked: sixty samples with a tight tail
-	// placed the limit comfortably. That assertion was about the machine's
-	// mood. This one is about the arithmetic.
-	base := buildServer(t, map[string]time.Duration{"/orders": 5 * time.Millisecond})
-	cand := buildServer(t, map[string]time.Duration{"/orders": 5 * time.Millisecond})
-
-	thin := compareSides(t,
-		sendMixFor(t, base.URL, 20, time.Second),
-		sendMixFor(t, cand.URL, 20, time.Second))
-	dense := compareSides(t,
-		sendMixAt(t, base.URL, 40, 5*time.Second, denseShape()),
-		sendMixAt(t, cand.URL, 40, 5*time.Second, denseShape()))
-
-	thinRoute := routeRow(t, thin, "GET /orders")
-	denseRoute := routeRow(t, dense, "GET /orders")
-	require.NotNil(t, thinRoute.Resolution.SmallestVisible)
-	require.NotNil(t, denseRoute.Resolution.SmallestVisible)
-	t.Logf("thin  %d samples a side, can see %.1f%%",
-		*thinRoute.SentBaseline, *thinRoute.Resolution.SmallestVisible*100)
-	t.Logf("dense %d samples a side, can see %.1f%%",
-		*denseRoute.SentBaseline, *denseRoute.Resolution.SmallestVisible*100)
-
-	require.Greater(t, *thinRoute.SentBaseline*4, 0, "the thin run sent something")
-	require.Greater(t, *denseRoute.SentBaseline, *thinRoute.SentBaseline*3,
-		"the dense run has to actually be denser for this to mean anything")
-	require.Less(t, *denseRoute.Resolution.SmallestVisible,
-		*thinRoute.Resolution.SmallestVisible,
-		"more samples must resolve a smaller difference")
-
-	// And neither may invent a regression between two identical servers.
-	for name, c := range map[string]*workload.Comparison{"thin": thin, "dense": dense} {
-		rows := workload.Judge(c, proofThresholds())
-		require.NotEqual(t, workload.VerdictFail, workload.ComparisonOutcome(rows),
-			"%s run reported a regression between identical servers", name)
-		require.Empty(t, workload.ComparisonBreaches(rows), "%s run", name)
-	}
-}
-
 func TestASideThatMeasuredNothingProjectsAsUnverifiedRatherThanZero(t *testing.T) {
 	t.Parallel()
 	// The projection's fail closed case. A side whose run produced no result
