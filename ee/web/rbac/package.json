@@ -15,7 +15,7 @@
     "@antifailure-ee/features": "*",
     "@antifailure/api": "file:../../../web/apps/api",
     "@antifailure/db": "file:../../../web/packages/db",
-    "yaml": "^2.7.0"
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@types/node": "^24.13.5",
