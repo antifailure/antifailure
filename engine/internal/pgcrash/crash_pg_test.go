@@ -494,6 +494,166 @@ func TestVerify_ACrashThatNeverHappenedIsUnverifiedRatherThanPassed(t *testing.T
 	require.Zero(t, res.Reconciliation.LostCount, "a pause lost acknowledged commits")
 }
 
+// pauseInjector is a container_pause aimed at the suite's database, and the
+// undo the proof calls to thaw it.
+func pauseInjector(t *testing.T, inj *fault.Injector) (func(context.Context) (pgcrash.Injected, error), func(context.Context) error) {
+	t.Helper()
+	var injection *fault.Injection
+	inject := func(ctx context.Context) (pgcrash.Injected, error) {
+		in, err := inj.Inject(ctx, fault.Fault{
+			Name: "freeze", Kind: fault.KindContainerPause,
+			Target: fault.Target{Role: fault.RoleDatabase},
+		})
+		if err != nil {
+			return pgcrash.Injected{}, err
+		}
+		injection = in
+		return pgcrash.Injected{Evidence: in.Evidence}, nil
+	}
+	thaw := func(ctx context.Context) error { return injection.Undo(ctx) }
+	return inject, thaw
+}
+
+// TestVerify_AFreezeIsThawedAtItsDeclaredHold is the overrun the in place
+// measurement exposed. The writers used to be stopped before the database was
+// thawed, and Stop gives each writer two seconds to finish a statement that,
+// against a frozen database, never finishes. A freeze declared for three
+// seconds was held for 5.003, and the daemon agreed.
+//
+// The span is read from the daemon, every 25ms, rather than from anything the
+// proof says about itself. The tolerance is 200ms under the settle, for the
+// poll's own resolution, and 500ms over it, for the pause and unpause calls
+// and the inspect latency; the defect was two full seconds over.
+func TestVerify_AFreezeIsThawedAtItsDeclaredHold(t *testing.T) {
+	cli := requireDocker(t)
+	envID := "pgf" + strconv.FormatInt(time.Now().UnixNano()%1_000_000, 36)
+	db := startDatabase(t, cli, envID, testKind, "")
+	inj, err := fault.New(cli, envID)
+	require.NoError(t, err)
+	sh := shell(t, cli, db)
+	inject, thaw := pauseInjector(t, inj)
+
+	const settle = 2 * time.Second
+	type sample struct {
+		at     time.Time
+		paused bool
+	}
+	var samples []sample
+	stop, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if r, err := cli.ContainerInspect(context.Background(), db.id, client.ContainerInspectOptions{}); err == nil && r.Container.State != nil {
+				samples = append(samples, sample{time.Now(), r.Container.State.Paused})
+			}
+			time.Sleep(25 * time.Millisecond)
+		}
+	}()
+
+	res, err := pgcrash.Verify(t.Context(), pgcrash.Options{
+		URL: db.url, Runner: runner{sh}, DataDir: pgData,
+		Workload:    pgcrash.WorkloadOptions{Writers: 4},
+		WarmCommits: 100, WarmTimeout: 60 * time.Second,
+		Settle: settle, ReadyTimeout: time.Minute,
+		FaultName: "freeze", Inject: inject, Recover: thaw,
+	})
+	close(stop)
+	<-done
+	require.NoError(t, err)
+	report(t, res)
+
+	var first, last time.Time
+	for _, s := range samples {
+		if s.paused {
+			if first.IsZero() {
+				first = s.at
+			}
+			last = s.at
+		}
+	}
+	require.False(t, first.IsZero(), "the daemon never reported the database paused, so nothing was measured")
+	held := last.Sub(first)
+	t.Logf("daemon saw the database paused for %s, the proof says %s", held, res.FaultInPlace)
+	require.GreaterOrEqual(t, held, settle-200*time.Millisecond,
+		"the daemon saw the freeze for %s, short of the declared %s", held, settle)
+	require.LessOrEqual(t, held, settle+500*time.Millisecond,
+		"the daemon saw the freeze for %s against a declared %s", held, settle)
+}
+
+// TestVerify_ACommitAcknowledgedAfterTheThawIsCountedAndChecked is what
+// thawing before the writers stop must not cost. The writers now run on past
+// the undo, so commits are acknowledged after it, and the claim is unchanged:
+// every one of them is in the ledger the reconciliation reads, and one that is
+// missing afterwards is a lost commit exactly as an earlier one would be.
+//
+// To prove the checking and not only the counting, the thaw deletes a row a
+// writer committed after the thaw, and the proof has to report it lost.
+func TestVerify_ACommitAcknowledgedAfterTheThawIsCountedAndChecked(t *testing.T) {
+	cli := requireDocker(t)
+	envID := "pgt" + strconv.FormatInt(time.Now().UnixNano()%1_000_000, 36)
+	db := startDatabase(t, cli, envID, testKind, "")
+	inj, err := fault.New(cli, envID)
+	require.NoError(t, err)
+	sh := shell(t, cli, db)
+	inject, thaw := pauseInjector(t, inj)
+
+	wl := pgcrash.WorkloadOptions{Writers: 4, Schema: "pgcrash_thaw", Table: "commits"}
+	var deleted int64 = -1
+	res, err := pgcrash.Verify(t.Context(), pgcrash.Options{
+		URL: db.url, Runner: runner{sh}, DataDir: pgData,
+		Workload:    wl,
+		WarmCommits: 100, WarmTimeout: 60 * time.Second,
+		Settle: time.Second, ReadyTimeout: time.Minute,
+		FaultName: "freeze", Inject: inject,
+		Recover: func(ctx context.Context) error {
+			if err := thaw(ctx); err != nil {
+				return err
+			}
+			conn, err := pgx.Connect(ctx, db.url)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
+			// The highest id writer 0 had committed at the thaw. Its ids rise
+			// by one per statement, so anything two past this was sent after
+			// the thaw, not merely finished after it.
+			var atThaw int64
+			if err := conn.QueryRow(ctx, "SELECT coalesce(max(id), -1) FROM "+wl.Qualified()+" WHERE writer = 0").Scan(&atThaw); err != nil {
+				return err
+			}
+			deadline := time.Now().Add(5 * time.Second)
+			for time.Now().Before(deadline) {
+				err := conn.QueryRow(ctx,
+					"DELETE FROM "+wl.Qualified()+" WHERE id = (SELECT min(id) FROM "+wl.Qualified()+
+						" WHERE writer = 0 AND id >= $1) RETURNING id", atThaw+2).Scan(&deleted)
+				if err == nil {
+					return nil
+				}
+				if !errors.Is(err, pgx.ErrNoRows) {
+					return err
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+			return nil
+		},
+	})
+	require.NoError(t, err)
+	report(t, res)
+
+	require.NotEqual(t, int64(-1), deleted,
+		"no writer committed anything after the thaw, so the writers were stopped before the database came back")
+	require.Greater(t, res.Reconciliation.Acknowledged, res.AcknowledgedAtRecover,
+		"commits acknowledged after the thaw are not in the ledger the reconciliation read")
+	require.Equal(t, 1, res.Reconciliation.LostCount,
+		"a commit acknowledged after the thaw and deleted was not reported lost, so it was never checked")
+	require.Contains(t, res.Reconciliation.LostSample, deleted)
+}
+
 // TestVerify_AKilledContainerComesBackAndKeepsItsCommits is the node level
 // fault rather than the process level one: the container's main process is
 // killed, the container stops, and the undo starts it again.

@@ -174,11 +174,12 @@ injection returned to the moment its undo began, beside the hold it declared:
 `It was in place for 5.001s (declared 5s), then undone.` in the terminal and
 the pull request comment, and `in_place_ms`, `hold_declared_ms` and `in_place`
 in the MCP result. The `duration_ms` beside them is the whole step, including
-the wait before the fault, and is not how long the fault lasted. The two can
-disagree with the declaration and the report says so rather than repeating
-the manifest: a frozen database is held about two seconds past its hold,
-because the writers are given that long to finish the statement they were on
-before the database is thawed.
+the wait before the fault, and is not how long the fault lasted.
+
+Around a database fault the fault is undone at its hold and the writers are
+stopped after it, so a freeze lasts as long as it declares. Commits the writers
+make after the undo are counted and checked like every other: each one the
+client was told was committed must still be there.
 
 `commits_before_fault` counts commits rather than seconds on purpose. A second
 on a loaded machine can be a second in which nothing committed, and a crash
