@@ -57,6 +57,10 @@ export interface AxNode {
    *  marks no default leaves submits empty, and the planner falls through to
    *  the shared words and the workflow's own description, which is honest. */
   readonly isDefault?: boolean;
+  /** busy is the platform's own "this is still being worked on": aria-busy
+   *  in Chromium, AXElementBusy on macOS. Any busy node makes the whole
+   *  snapshot busy, which runner/src/drivers/settle.ts reads as not finished. */
+  readonly busy?: boolean;
   /** ref is the reader's own handle for this element, opaque here. The macOS
    *  reader puts an index path in it so a second call can address the same
    *  element; a reader that acts by role and name leaves it out. */
@@ -218,10 +222,12 @@ export function snapshotFrom(
   const submits: string[] = [];
   const words: string[] = [];
   let unnamed = 0;
+  let busy = false;
 
   for (const { node, parent } of walk(root)) {
     const role = normalizeRole(node.role);
     const name = node.name.trim();
+    if (node.busy === true) busy = true;
     const interactive = FIELD_ROLES.has(role) || CONTROL_ROLES.has(role);
 
     if (interactive && enabledOf(node)) {
@@ -307,6 +313,9 @@ export function snapshotFrom(
     submits,
     unnamed,
     text: words.join('\n'),
+    // Only when true, so a snapshot of a screen whose platform said nothing
+    // is the same shape it always was.
+    ...(busy ? { busy } : {}),
   };
 }
 

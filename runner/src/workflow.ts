@@ -116,6 +116,12 @@ export interface Snapshot {
    *  wording, on an application that was never given a chance to show
    *  anything at all. */
   readonly status?: number | undefined;
+  /** busy is true when the platform itself says the screen is still working:
+   *  aria-busy in Chromium's accessibility tree, AXElementBusy on macOS.
+   *  Absent means the platform said nothing, which is what most screens and
+   *  every mobile tree say. runner/src/drivers/settle.ts refuses to call a
+   *  busy screen settled, however still it looks. */
+  readonly busy?: boolean;
 }
 
 /** Decides what to do next. */

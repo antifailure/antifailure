@@ -110,13 +110,24 @@ export function treeFrom(nodes: readonly CdpAxNode[], submitNames: ReadonlySet<s
       role: string; name: string; ref: string;
       value?: string; enabled?: boolean; focused?: boolean;
       required?: boolean; checked?: boolean; isDefault?: boolean;
-      children?: AxNode[];
+      busy?: boolean; children?: AxNode[];
     } = { role: text(node.role) || 'none', name, ref: id };
 
     const value = text(node.value);
     if (value) out.value = value;
     if (property(node, 'disabled') === 'true') out.enabled = false;
     if (property(node, 'focused') === 'true') out.focused = true;
+    // aria-busy, which Chromium publishes as the property `busy`, and NOT in
+    // the shape of its neighbours. MEASURED against a real Electron window: a
+    // region carrying aria-busy="true" arrives as {type: "boolean", value: 1},
+    // a number, where `checked` and `required` arrive as the strings above. So
+    // "true" and "1" are both read as busy, and reading only the string that
+    // every other property uses would have made this signal silently dead. An
+    // ignored node's is not read either: a skeleton an application hid from
+    // screen readers is not the application saying it is working, and the
+    // same probe showed Chromium drops the property from such a node anyway.
+    const busy = property(node, 'busy');
+    if (!node.ignored && (busy === 'true' || busy === '1')) out.busy = true;
     const checked = property(node, 'checked');
     if (checked !== undefined) out.checked = checked === 'true';
 

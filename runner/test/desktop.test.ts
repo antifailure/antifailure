@@ -229,6 +229,36 @@ test('the Electron reader reads the string valued properties the protocol really
   assert.equal(kids[2]?.enabled, false);
 });
 
+test('the Electron reader reads aria-busy in the numeric shape Chromium really sends it', () => {
+  // MEASURED, and the shape is the point: a region with aria-busy="true" came
+  // back from a real Electron window as {type: "boolean", value: 1}, a NUMBER,
+  // where checked and required arrive as strings. A reader that expected the
+  // string "true" read every busy screen as idle and nothing would ever say so.
+  const tree = treeFrom([
+    { nodeId: '1', role: { value: 'RootWebArea' }, name: { value: 'Ledger' }, childIds: ['2', '3', '4'] },
+    {
+      nodeId: '2', role: { value: 'region' }, name: { value: 'Journal' },
+      properties: [{ name: 'busy', value: { value: 1 } }],
+    },
+    {
+      nodeId: '3', role: { value: 'region' }, name: { value: 'Totals' },
+      properties: [{ name: 'busy', value: { value: 'true' } }],
+    },
+    {
+      // Hidden from screen readers, so not the application saying anything.
+      nodeId: '4', ignored: true, role: { value: 'none' },
+      properties: [{ name: 'busy', value: { value: 1 } }],
+    },
+  ], new Set());
+  const kids = tree.children ?? [];
+  assert.equal(kids[0]?.busy, true);
+  assert.equal(kids[1]?.busy, true);
+  assert.equal(kids[2]?.busy, undefined);
+  assert.equal(snapshotFrom(tree, WHERE).busy, true);
+  // And a screen whose platform said nothing is the shape it always was.
+  assert.equal('busy' in snapshotFrom(signInTree(), WHERE), false);
+});
+
 test('the Electron reader marks a required checkbox Chromium reports only as invalid', () => {
   // MEASURED against a real form: Chromium publishes required=true on a
   // required text input and publishes nothing of the kind on a required
@@ -411,6 +441,7 @@ test('runDesktop fails when the screen does not show what the workflow expected'
   const results = await runDesktop({
     app: { kind: 'electron', executablePath: 'unused' },
     open: async () => surface,
+    settle: FAST,
     workflows: [{
       name: 'a deliberately wrong expectation',
       description: 'Sign in.',
@@ -439,6 +470,7 @@ test('runDesktop still says error when the screen genuinely shows one', async ()
   const results = await runDesktop({
     app: { kind: 'electron', executablePath: 'unused' },
     open: async () => surface,
+    settle: FAST,
     workflows: [{
       name: 'a sign in the application broke',
       description: 'Sign in.',
@@ -450,6 +482,191 @@ test('runDesktop still says error when the screen genuinely shows one', async ()
   assert.ok(results[0]!.outcome.detail.includes(
     'The page shows an error rather than what was expected. It says: "Could not connect to the ledger service."'),
   results[0]!.outcome.detail);
+});
+
+// Loading. The failure these answer: an Electron ledger client that fetches
+// its journal in the main process was judged on the skeleton it draws while
+// the answer is in flight, and FAILED with "transfer.posted" not found in front
+// of a ledger holding thousands of them. See runner/src/drivers/settle.ts.
+
+/** FAST is the patience a test can afford: a short budget, and a quiet period
+ *  short enough that a scripted screen's reads are milliseconds apart. */
+const FAST = { budgetMs: 500, quietMs: 10 } as const;
+
+/** The ledger client's loading screen, as its tree reads before the IPC
+ *  answer lands: the heading, the words it shows while reading, the empty
+ *  table's caption and header. Quoted from the failing run's own detail. */
+const LOADING = screen({
+  title: 'Ledger',
+  text: 'Journal\nReading the ledger\nThe newest journal entries\nSEQ\nEVENT\nACCOUNT\nAMOUNT\nRECORDED',
+});
+
+function journal(event: string): Snapshot {
+  return screen({
+    title: 'Ledger',
+    text: `Journal\nhttp://127.0.0.1:39000\n2 entries, newest first\nSEQ\nEVENT\n2\n${event}\n1\n${event}`,
+  });
+}
+
+/** loadingThen is a surface that reads as `loading` for its first `reads`
+ *  snapshots and as `loaded` after, which is what a client waiting on a fetch
+ *  looks like to something reading its tree. Counted in reads rather than
+ *  milliseconds so the test says the same thing on a loaded machine. */
+function loadingThen(reads: number, loading: Snapshot, loaded: Snapshot): AxSurface & { readonly reads: () => number } {
+  let n = 0;
+  return {
+    reads: () => n,
+    async snapshot() { n++; return n <= reads ? loading : loaded; },
+    async fill() { throw new Error('nothing on a journal is typed into'); },
+    async check() { throw new Error('nothing on a journal is ticked'); },
+    async click() { throw new Error('nothing on a journal is pressed'); },
+    async close() { /* nothing to release */ },
+  };
+}
+
+const READ_THE_JOURNAL = {
+  name: 'read the journal',
+  description: 'Open the journal and confirm posted transfers are listed.',
+  expect: ['"transfer.posted"'],
+} as const;
+
+test('a screen that is still loading is judged once it has loaded, not on its loading screen', async () => {
+  // Loading for six reads: longer than the first look, so the planner meets
+  // the loading screen, finds nothing to press and says stuck. That stuck is
+  // the moment the old loop turned into a FAIL.
+  const surface = loadingThen(6, LOADING, journal('transfer.posted'));
+  const results = await runDesktop({
+    app: { kind: 'electron', executablePath: 'unused' },
+    open: async () => surface,
+    settle: FAST,
+    workflows: [READ_THE_JOURNAL],
+  });
+  assert.equal(results[0]!.outcome.verdict, 'pass', results[0]!.outcome.detail);
+  assert.ok(surface.reads() > 6, `the screen was never read after it loaded: ${surface.reads()} reads`);
+});
+
+test('a screen that loads into something to press is driven, not judged', async () => {
+  // The loaded screen is not the answer yet: it offers a control the workflow
+  // has to press. So a changed screen goes back to the planner, and judging it
+  // on arrival would fail a workflow one press from passing.
+  let pressed = false;
+  let reads = 0;
+  const surface: AxSurface = {
+    async snapshot() {
+      if (pressed) return journal('transfer.posted');
+      reads++;
+      return reads <= 4 ? LOADING
+        : screen({ title: 'Ledger', controls: ['Show posted transfers'], text: 'Journal\n3000 entries' });
+    },
+    async fill() { /* never reached */ },
+    async check() { /* never reached */ },
+    async click() { pressed = true; },
+    async close() { /* nothing to release */ },
+  };
+  const results = await runDesktop({
+    app: { kind: 'electron', executablePath: 'unused' },
+    open: async () => surface,
+    settle: FAST,
+    workflows: [{ ...READ_THE_JOURNAL, description: 'Press Show posted transfers.' }],
+  });
+  assert.equal(results[0]!.outcome.verdict, 'pass', results[0]!.outcome.detail);
+  assert.ok(pressed, 'the loaded screen was judged instead of driven');
+});
+
+test('a screen that finishes loading without the expectation still fails, on the loaded screen', async () => {
+  // The arm that proves waiting cannot manufacture a pass. The journal loads
+  // and holds nothing but reversals, and the verdict is about THAT screen:
+  // quoted, and not the loading screen before it.
+  const surface = loadingThen(6, LOADING, journal('transfer.reversed'));
+  const results = await runDesktop({
+    app: { kind: 'electron', executablePath: 'unused' },
+    open: async () => surface,
+    settle: FAST,
+    workflows: [READ_THE_JOURNAL],
+  });
+  const { verdict, cause, detail } = results[0]!.outcome;
+  assert.equal(verdict, 'fail', detail);
+  assert.equal(cause, 'expectation-not-met');
+  assert.ok(detail.startsWith('"transfer.posted" was not found.'), detail);
+  assert.ok(detail.includes('transfer.reversed'), `the loaded screen is not the one judged: ${detail}`);
+  assert.ok(!detail.includes('Reading the ledger'), `the loading screen was judged: ${detail}`);
+  assert.match(detail, /had stopped changing, so it was judged finished\.$/);
+});
+
+test('a screen that never stops changing is judged on its last read, and the verdict says so', async () => {
+  // A clock, a counter, a feed: something that never holds still. It must not
+  // hold a run forever, and a verdict on it must not pretend it was finished.
+  // Still for its first two reads, so the first look settles on the loading
+  // screen, and then moving forever: the verdict has to be about the last
+  // read the watch took and not about the screen the planner gave up on.
+  let n = 0;
+  const surface: AxSurface = {
+    async snapshot() {
+      n++;
+      return screen({ title: 'Ledger', text: n <= 2 ? 'Journal\nReading the ledger' : `Journal\nReading the ledger\nTick ${n}` });
+    },
+    async fill() { /* never reached */ },
+    async check() { /* never reached */ },
+    async click() { /* never reached */ },
+    async close() { /* nothing to release */ },
+  };
+  const started = Date.now();
+  const results = await runDesktop({
+    app: { kind: 'electron', executablePath: 'unused' },
+    open: async () => surface,
+    settle: { budgetMs: 400, quietMs: 10 },
+    workflows: [READ_THE_JOURNAL],
+  });
+  const elapsed = Date.now() - started;
+  const { verdict, detail } = results[0]!.outcome;
+  assert.equal(verdict, 'fail', detail);
+  assert.match(detail, /The screen was still changing when it was judged/);
+  // The LAST read is the one judged, not the first and not a stale one.
+  assert.ok(detail.includes(`Tick ${n}"`), `judged a read other than the last (${n}): ${detail}`);
+  // And bounded: one budget for the attempt, not one per question.
+  assert.ok(elapsed < 400 * 1.75, `an attempt spent ${elapsed} ms against a 400 ms budget`);
+});
+
+test('the last press of a spent step budget is judged on what it loaded, not on its loading screen', async () => {
+  // One step: press "Open journal", and the step budget is gone. The press is
+  // exactly the thing whose effect has had the least time to draw, so the
+  // verdict the budget produces gets the same patience as any other.
+  let pressed = false;
+  let after = 0;
+  const surface: AxSurface = {
+    async snapshot() {
+      if (!pressed) return screen({ title: 'Ledger', controls: ['Open journal'], text: 'Ledger' });
+      after++;
+      return after <= 4 ? LOADING : journal('transfer.posted');
+    },
+    async fill() { /* never reached */ },
+    async check() { /* never reached */ },
+    async click() { pressed = true; },
+    async close() { /* nothing to release */ },
+  };
+  const results = await runDesktop({
+    app: { kind: 'electron', executablePath: 'unused' },
+    open: async () => surface,
+    settle: FAST,
+    workflows: [{ ...READ_THE_JOURNAL, description: 'Press Open journal.', maxSteps: 1 }],
+  });
+  assert.ok(pressed, 'the control was never pressed');
+  assert.equal(results[0]!.outcome.verdict, 'pass', results[0]!.outcome.detail);
+});
+
+test('a screen that is already still costs one extra read, not a wait', async () => {
+  const surface = loadingThen(0, LOADING, journal('transfer.posted'));
+  const started = Date.now();
+  const results = await runDesktop({
+    app: { kind: 'electron', executablePath: 'unused' },
+    open: async () => surface,
+    settle: { budgetMs: 10_000, quietMs: 10 },
+    workflows: [READ_THE_JOURNAL],
+  });
+  assert.equal(results[0]!.outcome.verdict, 'pass', results[0]!.outcome.detail);
+  // Two reads before the planner's first decision, and the pass needs no more.
+  assert.equal(surface.reads(), 2);
+  assert.ok(Date.now() - started < 1_000, 'a still screen was waited on');
 });
 
 test('runDesktop blocks, never fails, when the application could not be opened', async () => {
@@ -650,6 +867,57 @@ test('the Electron surface drives a real Electron application, and says no when 
     });
     assert.equal(failed[0]!.outcome.verdict, 'fail', failed[0]!.outcome.detail);
     assert.equal(failed[0]!.outcome.cause, 'expectation-not-met');
+  });
+
+/** ledgerAnswering serves /journal the way the ledger behind the failing run
+ *  did, after `delayMs`, with rows of one event, so a real Electron client
+ *  spends that long on its loading screen. */
+async function ledgerAnswering(event: string, delayMs: number) {
+  const { createServer: createHttp } = await import('node:http');
+  const rows = JSON.stringify(Array.from({ length: 200 }, (_, i) => ({ seq: 200 - i, event })));
+  const server = createHttp((req, res) => {
+    if (req.url !== '/journal') { res.writeHead(404).end(); return; }
+    setTimeout(() => res.writeHead(200, { 'content-type': 'application/json' }).end(rows), delayMs);
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+  return { url: `http://127.0.0.1:${(server.address() as { port: number }).port}`, close: () => server.close() };
+}
+
+test('the Electron surface judges a real client once its journal has loaded, and still says no',
+  async (t: TestContext) => {
+    const binary = electronBinary();
+    if ('absent' in binary) return cannotCheck(t, binary.absent);
+    // The failing run's own shape: a main process fetch the page cannot see,
+    // held back a second and a half. Before settle.ts this was a FAIL with the
+    // loading screen quoted as what the application showed.
+    const app: DesktopApp = {
+      kind: 'electron', executablePath: binary.path,
+      args: [join(here, 'fixtures', 'journal')], timeoutMs: 30_000,
+    };
+    const workflow = {
+      name: 'read the journal',
+      description: 'Open the journal and confirm posted transfers are listed.',
+      expect: ['"transfer.posted"'],
+    };
+
+    const posted = await ledgerAnswering('transfer.posted', 1_500);
+    try {
+      const results = await runDesktop({ app, baseURL: posted.url, workflows: [workflow] });
+      assert.equal(results[0]!.outcome.verdict, 'pass', results[0]!.outcome.detail);
+    } finally {
+      posted.close();
+    }
+
+    const reversed = await ledgerAnswering('transfer.reversed', 1_500);
+    try {
+      const results = await runDesktop({ app, baseURL: reversed.url, workflows: [workflow] });
+      const { verdict, detail } = results[0]!.outcome;
+      assert.equal(verdict, 'fail', detail);
+      assert.ok(detail.includes('transfer.reversed'), `the loaded journal is not what was judged: ${detail}`);
+      assert.ok(!detail.includes('Reading the ledger'), `the loading screen was judged: ${detail}`);
+    } finally {
+      reversed.close();
+    }
   });
 
 test('the native surface refuses a locked screen as itself, not as an empty application',
