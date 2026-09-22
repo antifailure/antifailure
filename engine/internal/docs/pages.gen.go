@@ -9351,8 +9351,19 @@ to see the check say no before you trust it saying yes.
 | ` + "`" + `crash_recovery.writers` + "`" + ` | 8 | Connections committing at once. |
 | ` + "`" + `crash_recovery.commits_before_fault` + "`" + ` | 200 | Acknowledged commits before a fault lands. |
 | ` + "`" + `crash_recovery.recovery_timeout` + "`" + ` | ` + "`" + `2m` + "`" + ` | How long the database has to answer a query again. |
-| ` + "`" + `faults[].after` + "`" + ` | ` + "`" + `5s` + "`" + ` | A floor on how long the workload runs first. |
+| ` + "`" + `faults[].after` + "`" + ` | ` + "`" + `5s` + "`" + ` | A floor on how long the run waits before the fault: with the writers committing around a database fault, and as a plain wait before any other. |
 | ` + "`" + `faults[].hold` + "`" + ` | ` + "`" + `3s` + "`" + ` | How long the fault stays in place. |
+
+Every fault reports how long it was in place, measured from the moment the
+injection returned to the moment its undo began, beside the hold it declared:
+` + "`" + `It was in place for 5.001s (declared 5s), then undone.` + "`" + ` in the terminal and
+the pull request comment, and ` + "`" + `in_place_ms` + "`" + `, ` + "`" + `hold_declared_ms` + "`" + ` and ` + "`" + `in_place` + "`" + `
+in the MCP result. The ` + "`" + `duration_ms` + "`" + ` beside them is the whole step, including
+the wait before the fault, and is not how long the fault lasted. The two can
+disagree with the declaration and the report says so rather than repeating
+the manifest: a frozen database is held about two seconds past its hold,
+because the writers are given that long to finish the statement they were on
+before the database is thawed.
 
 ` + "`" + `commits_before_fault` + "`" + ` counts commits rather than seconds on purpose. A second
 on a loaded machine can be a second in which nothing committed, and a crash
@@ -26093,7 +26104,7 @@ One failure injected into one container. The name is what a report calls it, the
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| ` + "`" + `after` + "`" + ` | string | no | How long the workload runs before this fault is injected. It is a floor rather than the whole wait: the engine also waits for real acknowledged commits, because a fault injected into a database that has committed nothing yet has nothing to lose and passes every durability check by having none to make. Defaults to ` + "`" + `5s` + "`" + `. Matches ` + "`" + `^[0-9]+(ms\|s\|m)$` + "`" + `. |
+| ` + "`" + `after` + "`" + ` | string | no | How long the run waits before this fault is injected. Around a database fault with the durability proof on, the writers commit through this wait, and it is a floor rather than the whole wait: the engine also waits for real acknowledged commits, because a fault injected into a database that has committed nothing yet has nothing to lose and passes every durability check by having none to make. Before any other fault it is a plain wait. Defaults to ` + "`" + `5s` + "`" + `. Matches ` + "`" + `^[0-9]+(ms\|s\|m)$` + "`" + `. |
 | ` + "`" + `headroom_bytes` + "`" + ` | integer | no | How little room disk_fill leaves free. A filesystem filled to exactly zero leaves no space to write the file that empties it, so this is required and bounded rather than defaulted to nothing. Defaults to ` + "`" + `1.6777216e+07` + "`" + `. Minimum 1.048576e+06, maximum 1.073741824e+09. |
 | ` + "`" + `hold` + "`" + ` | string | no | How long the fault stays in place before it is undone. A fault with no undo, such as a killed process, ignores this and the value says how long the run waits before reading the result. Defaults to ` + "`" + `3s` + "`" + `. Matches ` + "`" + `^[0-9]+(ms\|s\|m)$` + "`" + `. |
 | ` + "`" + `kind` + "`" + ` | ` + "`" + `process_kill` + "`" + `, ` + "`" + `container_kill` + "`" + `, ` + "`" + `container_stop` + "`" + `, ` + "`" + `container_pause` + "`" + `, ` + "`" + `network_partition` + "`" + `, ` + "`" + `read_only_data` + "`" + `, ` + "`" + `disk_fill` + "`" + ` | **yes** | What is done. process_kill sends SIGKILL to one process inside the container and leaves the container running, which is the real database crash: the postmaster discards shared memory and replays its write ahead log. container_kill sends SIGKILL to the container's main process, so the container stops and is started again, which is the node that went away. container_stop sends SIGTERM and then SIGKILL, which is a clean shutdown and deliberately does NO recovery, so it is the contrast that shows a recovery check is looking. container_pause freezes every process with the cgroup freezer, killing nothing and closing no connection, which is the stall. network_partition detaches the container from the environment's network and attaches it again with the same aliases. read_only_data removes write permission from the data directory, so a write meets a real errno. disk_fill fills the filesystem holding the data directory, and is refused unless that filesystem is a mount of its own. |

@@ -68,6 +68,11 @@ type Options struct {
 	// is injected, and WarmTimeout is how long to wait for them.
 	WarmCommits int
 	WarmTimeout time.Duration
+	// WarmFloor is the least time the writers run before the fault, however
+	// quickly WarmCommits arrive. It is the manifest's declared after, which
+	// promises a floor: without it a fast machine reached its commits in well
+	// under a second and the fault went in then, whatever the manifest said.
+	WarmFloor time.Duration
 	// Settle is how long to leave the fault in place before recovering.
 	Settle time.Duration
 	// ReadyTimeout is how long the database has to come back.
@@ -143,6 +148,12 @@ type Result struct {
 	FlushLSN string `json:"flushLsn,omitempty"`
 	// Downtime is how long the database was unreachable.
 	Downtime time.Duration `json:"downtime"`
+	// FaultInPlace is how long the fault was in place: from the moment Inject
+	// returned to the moment Recover was about to be called. It is measured
+	// rather than copied from Settle, so a run cancelled partway through its
+	// settle says how long the fault really lasted. Zero when Inject never
+	// returned.
+	FaultInPlace time.Duration `json:"fault_in_place"`
 	// WriteErrors is how many writes failed while the fault was in place, and
 	// LastWriteError is the most recent one. A crash with no write errors at
 	// all is a crash the workload never noticed, which is worth seeing.
@@ -312,19 +323,23 @@ func Verify(ctx context.Context, opts Options) (Result, error) {
 	// down. Stop is idempotent for exactly this.
 	defer w.Stop()
 
+	warmStart := time.Now()
 	warm := w.WaitForCommits(ctx, opts.WarmCommits, opts.WarmTimeout)
+	sleep(ctx, opts.WarmFloor-time.Since(warmStart))
 
 	faultAt := time.Now()
 	injected, err := opts.Inject(ctx)
 	if err != nil {
 		return res, err
 	}
+	injectedAt := time.Now()
 	res.Evidence, res.KilledSignal = injected.Evidence, injected.KilledSignal
 
 	sleep(ctx, opts.Settle)
 	w.Stop()
 	res.WriteErrors, res.LastWriteError = w.Errors()
 
+	res.FaultInPlace = time.Since(injectedAt)
 	if opts.Recover != nil {
 		if err := opts.Recover(ctx); err != nil {
 			return res, err

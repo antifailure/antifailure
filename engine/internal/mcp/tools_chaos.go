@@ -377,7 +377,20 @@ type chaosFaultDoc struct {
 	// Evidence is what the injector said it did at the moment it did it, which
 	// is what backs the claim that the fault landed rather than being asked
 	// for.
-	Evidence   string            `json:"evidence,omitempty"`
+	Evidence string `json:"evidence,omitempty"`
+	// InPlaceMs is how long the fault was measured to be in place, from the
+	// injection returning to its undo beginning, and HoldDeclaredMs is the
+	// hold the manifest asked for. InPlace says the same in one sentence.
+	//
+	// They exist because duration_ms alone was read as the length of the
+	// fault. It was zero for every fault outside a durability proof, whatever
+	// happened, and an agent that saw a five second network partition
+	// reported as lasting 0 ms rightly doubted the cut had lasted at all.
+	InPlaceMs      int64  `json:"in_place_ms"`
+	HoldDeclaredMs int64  `json:"hold_declared_ms"`
+	InPlace        string `json:"in_place,omitempty"`
+	// DurationMs is the whole step: the declared wait before the fault, the
+	// fault, its undo and any verification. It is longer than InPlaceMs.
 	DurationMs int64             `json:"duration_ms"`
 	Recovery   *chaosRecoveryDoc `json:"recovery,omitempty"`
 }
@@ -449,6 +462,7 @@ func describeChaos(run *env.ChaosRun, held, verified bool) *chaosDoc {
 			// the fault failed: a refusal with no reason attached is a refusal
 			// nobody can act on.
 			Evidence: neutralize(f.Evidence, maxEvidenceReported), DurationMs: f.DurationMs,
+			InPlaceMs: f.InPlaceMs, HoldDeclaredMs: f.HoldDeclaredMs, InPlace: f.InPlaceSays(),
 		}
 		if f.Recovery != nil {
 			entry.Recovery = describeRecovery(f.Recovery)

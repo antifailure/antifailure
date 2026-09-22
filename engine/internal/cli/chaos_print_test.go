@@ -108,3 +108,18 @@ func TestPrintChaos_AnUnreadControlFileIsNotChecksumsOff(t *testing.T) {
 	require.Contains(t, out, "      pages          not checked, because the control file could not be read after the fault, "+
 		"so whether data checksums are on is unknown\n")
 }
+
+// TestPrintChaos_SaysHowLongAFaultWasInPlace is the terminal half of the
+// report that a five second network partition lasted 0 ms. The terminal printed
+// what was detached and nothing about for how long, so the JSON's zero was the
+// only number anyone had.
+func TestPrintChaos_SaysHowLongAFaultWasInPlace(t *testing.T) {
+	out := printed(t, &env.ChaosRun{Report: report.Chaos{Faults: []report.ChaosFault{{
+		Name: "cut-the-service-off-from-the-database", Kind: "network_partition", Target: "service ledger",
+		Evidence: "detached af-svc-ledger from af-net-ledger",
+		Injected: true, Undone: true,
+		DurationMs: 10548, InPlaceMs: 5001, HoldDeclaredMs: 5000,
+	}}}})
+	require.Contains(t, out, "It was in place for 5.001s (declared 5s), then undone.\n",
+		"the terminal did not say how long the partition was in place")
+}

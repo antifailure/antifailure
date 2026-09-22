@@ -153,3 +153,50 @@ func TestChaosSection_ChecksumsOffSaysPagesWereNotChecked(t *testing.T) {
 		"and a torn page would read back as data |")
 	require.NotContains(t, out, "\u2014", "an em dash reached the pull request comment")
 }
+
+// partitionChaos is the fault from the report that found this: a network
+// partition declared to hold five seconds, which the injector held for five.
+func partitionChaos() *report.Chaos {
+	return &report.Chaos{Faults: []report.ChaosFault{{
+		Name: "cut-the-service-off-from-the-database", Kind: "network_partition", Target: "service ledger",
+		Evidence: "detached af-svc-ledger from af-net-ledger",
+		Injected: true, Undone: true,
+		DurationMs: 10548, InPlaceMs: 5001, HoldDeclaredMs: 5000,
+	}}}
+}
+
+// A partition's comment used to say what was detached and nothing about for
+// how long, while the only number any surface carried was a duration that was
+// zero for every such fault. The comment now says how long the fault was
+// measured to be in place, beside what the manifest declared, so a reviewer
+// never has to infer the length of an outage from a field that measured
+// something else.
+func TestChaosSection_SaysHowLongTheFaultWasInPlace(t *testing.T) {
+	out := report.Run{Chaos: partitionChaos()}.Markdown()
+	require.Contains(t, out,
+		"Fault `cut-the-service-off-from-the-database` (network_partition) on service ledger: "+
+			"detached af-svc-ledger from af-net-ledger. It was in place for 5.001s (declared 5s), then undone.")
+}
+
+// A measured zero is said as a sentence, never printed as "0 ms" beside a
+// declared hold where it reads as a fault that did not last.
+func TestInPlaceSays_AZeroIsSaidAndNotPrinted(t *testing.T) {
+	f := partitionChaos().Faults[0]
+	f.InPlaceMs = 0
+	require.Equal(t, "in place for no measurable time (declared 5s)", f.InPlaceSays())
+}
+
+// A fault whose undo did not complete is not "then undone".
+func TestInPlaceSays_AnUndoThatDidNotCompleteIsNotUndone(t *testing.T) {
+	f := partitionChaos().Faults[0]
+	f.Undone = false
+	require.Equal(t, "in place for 5.001s (declared 5s), and its undo did not complete", f.InPlaceSays())
+}
+
+// A fault that never went in was never in place, and says nothing rather
+// than a duration.
+func TestInPlaceSays_AFaultThatNeverWentInSaysNothing(t *testing.T) {
+	f := partitionChaos().Faults[0]
+	f.Injected, f.Undone, f.InPlaceMs = false, false, 0
+	require.Empty(t, f.InPlaceSays())
+}

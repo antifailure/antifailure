@@ -166,8 +166,19 @@ to see the check say no before you trust it saying yes.
 | `crash_recovery.writers` | 8 | Connections committing at once. |
 | `crash_recovery.commits_before_fault` | 200 | Acknowledged commits before a fault lands. |
 | `crash_recovery.recovery_timeout` | `2m` | How long the database has to answer a query again. |
-| `faults[].after` | `5s` | A floor on how long the workload runs first. |
+| `faults[].after` | `5s` | A floor on how long the run waits before the fault: with the writers committing around a database fault, and as a plain wait before any other. |
 | `faults[].hold` | `3s` | How long the fault stays in place. |
+
+Every fault reports how long it was in place, measured from the moment the
+injection returned to the moment its undo began, beside the hold it declared:
+`It was in place for 5.001s (declared 5s), then undone.` in the terminal and
+the pull request comment, and `in_place_ms`, `hold_declared_ms` and `in_place`
+in the MCP result. The `duration_ms` beside them is the whole step, including
+the wait before the fault, and is not how long the fault lasted. The two can
+disagree with the declaration and the report says so rather than repeating
+the manifest: a frozen database is held about two seconds past its hold,
+because the writers are given that long to finish the statement they were on
+before the database is thawed.
 
 `commits_before_fault` counts commits rather than seconds on purpose. A second
 on a loaded machine can be a second in which nothing committed, and a crash

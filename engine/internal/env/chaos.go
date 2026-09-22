@@ -99,14 +99,23 @@ func runtimeProvider(m *schema.Manifest) schema.RuntimeProvider {
 // a panic, a cancelled context or a failed verification all still leave the
 // environment the way they found it. A fault held open past the end of its own
 // step is a fault the next step is measuring without knowing it.
+//
+// The results are named because the deferred line below writes the duration
+// into the entry the caller receives. With unnamed results it wrote into a
+// local the return statement had already copied, so every fault that was not
+// a durability proof reported a duration of zero: a network partition held
+// for its full five seconds read as one that lasted no time at all, to the
+// agent that asked for it.
 func (o *Orchestrator) runOneFault(
 	ctx context.Context, inj *fault.Injector, url string,
 	declared schema.Fault, cr *schema.CrashRecovery,
-) (report.ChaosFault, *pgcrash.Result) {
+) (entry report.ChaosFault, proof *pgcrash.Result) {
 	started := time.Now()
 	f := faultFrom(declared)
-	entry := report.ChaosFault{
+	hold, _ := time.ParseDuration(declared.Hold)
+	entry = report.ChaosFault{
 		Name: declared.Name, Kind: string(declared.Kind), Target: f.Target.String(),
+		HoldDeclaredMs: hold.Milliseconds(),
 	}
 	defer func() { entry.DurationMs = time.Since(started).Milliseconds() }()
 
@@ -121,14 +130,26 @@ func (o *Orchestrator) runOneFault(
 		return o.crashProof(ctx, inj, url, declared, cr, entry, started)
 	}
 
+	// The declared wait before the fault is honoured here too. It used to be
+	// read only by the durability proof, so a fault aimed at a service went in
+	// the instant the step began whatever the manifest said.
+	after, _ := time.ParseDuration(declared.After)
+	sleepFor(ctx, after)
+
 	in, err := inj.Inject(ctx, f)
 	if err != nil {
 		entry.Error, entry.Refused = err.Error(), refusedAsUnsafe(err)
 		return entry, nil
 	}
+	applied := time.Now()
 	entry.Injected, entry.Evidence = true, in.Evidence
-	hold, _ := time.ParseDuration(declared.Hold)
 	sleepFor(ctx, hold)
+	// Measured from the moment the injection returned to the moment its undo
+	// begins, which is the only span in which the fault is known to be in
+	// place: the injector's own timestamp is taken before it acts. Read off
+	// the clock rather than copied from the manifest, so a run cancelled
+	// halfway through its hold says how long the fault really lasted.
+	entry.InPlaceMs = time.Since(applied).Milliseconds()
 	if err := in.Undo(context.WithoutCancel(ctx)); err != nil {
 		entry.Error = err.Error()
 		return entry, nil
@@ -204,9 +225,12 @@ func (o *Orchestrator) crashProof(
 			SynchronousCommit: cr.SynchronousCommit,
 		},
 		WarmCommits: cr.CommitsBeforeFault,
-		// The declared wait is a floor on the warm up as well as a wait, so a
-		// manifest that asks for a long soak gets one and one that asks for
-		// none still waits for the commits the proof needs.
+		// The declared wait is a floor on the warm up, so a manifest that asks
+		// for a long soak gets one and one that asks for none still waits for
+		// the commits the proof needs. This comment used to say so while only
+		// the timeout below read it, and the timeout is a ceiling: a freeze
+		// declared after 5s went in 0.6s into its run, measured.
+		WarmFloor:    after,
 		WarmTimeout:  timeout + after,
 		Settle:       hold,
 		ReadyTimeout: timeout,
@@ -244,6 +268,10 @@ func (o *Orchestrator) crashProof(
 			entry.Undone = true
 		}
 	}
+	// Measured by the proof between its injection and its recovery, and read
+	// on the error path too: a proof that failed after the fault went in
+	// still left it in place for as long as it did.
+	entry.InPlaceMs = res.FaultInPlace.Milliseconds()
 	entry.DurationMs = time.Since(started).Milliseconds()
 	if err != nil {
 		if entry.Error == "" {
