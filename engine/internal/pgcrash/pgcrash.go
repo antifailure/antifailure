@@ -151,8 +151,12 @@ type Result struct {
 	// FlushLSN is the highest flush position a writer saw after one of its own
 	// acknowledged commits, in the text form Postgres prints.
 	FlushLSN string `json:"flushLsn,omitempty"`
-	// Downtime is how long the database was unreachable.
-	Downtime time.Duration `json:"downtime"`
+	// Downtime is how long the database did not answer, as the probe that ran
+	// beside the fault measured it, and Availability is the whole of what the
+	// probe saw. Zero with Availability.Unreachable false means every attempt
+	// was answered, which is a different fact from a short outage.
+	Downtime     time.Duration `json:"downtime"`
+	Availability Availability  `json:"availability"`
 	// FaultInPlace is how long the fault was in place: from the moment Inject
 	// returned to the moment Recover was about to be called. It is measured
 	// rather than copied from Settle, so a run cancelled partway through its
@@ -338,6 +342,18 @@ func Verify(ctx context.Context, opts Options) (Result, error) {
 	sleep(ctx, opts.WarmFloor-time.Since(warmStart))
 
 	faultAt := time.Now()
+	// The probe starts with the fault and runs on its own clock, so what it
+	// measures is the database, not the settle, the undo or the writer stop
+	// that the proof does in between.
+	pr := startProbe(ctx, pgAttempt(opts.URL), probeInterval, probeTimeout)
+	stopProbe := func() {
+		if pr != nil {
+			res.Availability = pr.stop()
+			res.Downtime = res.Availability.For
+			pr = nil
+		}
+	}
+	defer stopProbe()
 	injected, err := opts.Inject(ctx)
 	if err != nil {
 		return res, err
@@ -361,7 +377,7 @@ func Verify(ctx context.Context, opts Options) (Result, error) {
 	// undo. The flush position that recovery must replay past is only judged
 	// for a fault that crashed the database, and a crash ends every writer's
 	// connection, which a writer never reopens. The log window starts at the
-	// fault, the downtime is timed from the fault, and the rows are read after
+	// fault, the downtime is measured by a probe of its own, and the rows are read after
 	// Stop.
 	res.FaultInPlace = time.Since(injectedAt)
 	res.AcknowledgedAtRecover, _, _ = w.Ledger().Counts()
@@ -374,8 +390,11 @@ func Verify(ctx context.Context, opts Options) (Result, error) {
 	if recoverErr != nil {
 		return res, recoverErr
 	}
-	downtime, err := waitReady(ctx, opts, faultAt)
-	res.Downtime = downtime
+	_, err = waitReady(ctx, opts, faultAt)
+	if err == nil {
+		pr.settle(probeTimeout)
+	}
+	stopProbe()
 	if err != nil {
 		return res, aferrors.Wrap(err, aferrors.AFCHS006,
 			"timeout", opts.ReadyTimeout.String(), "fault", opts.FaultName,

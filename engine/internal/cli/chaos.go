@@ -148,7 +148,7 @@ func printChaos(e *Env, run *env.ChaosRun) {
 		e.Out.Printf("      relations      heap %d, index %d\n", rec.HeapRows, rec.IndexRows)
 		e.Out.Printf("      amcheck        %s\n", e.Out.Wrap(rec.AmcheckSays(), chaosValueIndent))
 		e.Out.Printf("      pages          %s\n", e.Out.Wrap(rec.PagesSay(), chaosValueIndent))
-		e.Out.Printf("      unreachable    %dms\n", rec.DowntimeMs)
+		e.Out.Printf("      unreachable    %s\n", e.Out.Wrap(rec.UnreachableSays(), chaosValueIndent))
 	}
 
 	e.Out.Println("")

@@ -159,6 +159,32 @@ Leave it out unless you mean it. A manifest that sets it to `off` is asking for
 a run that is expected to report lost commits, which is useful exactly once:
 to see the check say no before you trust it saying yes.
 
+## Reading the numbers
+
+The `unreachable` line is measured by a probe that starts with the fault and
+runs beside it. Every 100 milliseconds it opens a connection and runs
+`SELECT 1`, and an attempt that gets no answer within a second counts as
+unanswered. The outage runs from the first unanswered attempt to the first
+answer after it, so it is known to the probe's interval, which the line
+prints: `unreachable    110ms, probed every 100ms`. The settle, the undo and
+the stopping of the writers happen while the probe runs and are not part of the
+number. When every attempt was answered the line says `never` rather than
+printing a zero. A frozen database counts as unreachable: the kernel accepts
+the connection and nothing answers it.
+
+The first crash after `af up` can take noticeably longer to recover than later
+ones. Before it replays anything, Postgres syncs every file in the data
+directory to disk (`recovery_init_sync_method`, which defaults to `fsync`), and
+on the first crash those files include every page written when the branch was
+created. Measured on the demo ledger, that step took between 1.9 and 8.4
+seconds on the first crash after bringing the environment up, and under 0.2
+seconds on the crashes after it. The database's log shows it between
+`database system was interrupted` and `redo starts at`, and with
+`log_startup_progress_interval` lowered it prints `syncing data directory
+(fsync)` as it goes. It is Postgres making the data directory durable before
+trusting it, not the fault or the engine, and how long it takes depends on the
+disk under the container.
+
 ## Tuning
 
 | Key | Default | What it is |

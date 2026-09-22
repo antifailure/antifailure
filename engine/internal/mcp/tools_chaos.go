@@ -427,8 +427,16 @@ type chaosRecoveryDoc struct {
 	IndexRows int64  `json:"index_rows"`
 	Amcheck   string `json:"amcheck,omitempty"`
 	// ChecksumsOn reports whether a torn page would have been detected at all.
-	ChecksumsOn bool  `json:"data_checksums_enabled"`
-	DowntimeMs  int64 `json:"database_unreachable_ms"`
+	ChecksumsOn bool `json:"data_checksums_enabled"`
+	// DowntimeMs is how long a probe beside the fault saw the database not
+	// answer. It is zero both when the database never stopped answering and
+	// when it did for less than the probe's resolution, so Unreachable says
+	// which, and Unreachable carries the sentence the terminal prints.
+	DowntimeMs        int64  `json:"database_unreachable_ms"`
+	BecameUnreachable bool   `json:"database_became_unreachable"`
+	Recovered         bool   `json:"database_answered_again"`
+	ProbeIntervalMs   int64  `json:"probe_interval_ms"`
+	Unreachable       string `json:"database_unreachable"`
 }
 
 // describeChaos renders what the faults did, bounded and neutralised.
@@ -503,6 +511,8 @@ func describeRecovery(rec *report.ChaosRecovery) *chaosRecoveryDoc {
 		HeapRows:       rec.HeapRows, IndexRows: rec.IndexRows,
 		Amcheck:     neutralize(rec.Amcheck, 200),
 		ChecksumsOn: rec.ChecksumsOn, DowntimeMs: rec.DowntimeMs,
+		BecameUnreachable: rec.Unreachable, Recovered: rec.Recovered,
+		ProbeIntervalMs: rec.ProbeIntervalMs, Unreachable: rec.UnreachableSays(),
 	}
 }
 

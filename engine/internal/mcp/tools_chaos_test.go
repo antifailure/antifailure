@@ -707,3 +707,20 @@ func TestDescribeChaos_SaysHowLongTheFaultWasInPlace(t *testing.T) {
 		"the result did not say in words how long the fault was in place")
 	require.Equal(t, int64(10548), got.DurationMs)
 }
+
+// The MCP answer quoted database_unreachable_ms as the outage. It now carries
+// whether the database became unreachable at all, whether it answered again,
+// the probe's resolution, and the sentence the terminal prints.
+func TestDescribeChaos_CarriesWhatTheProbeMeasured(t *testing.T) {
+	t.Parallel()
+	run := chaosRun()
+	rec := run.Report.Faults[0].Recovery
+	rec.DowntimeMs, rec.Unreachable, rec.Recovered, rec.ProbeIntervalMs = 110, true, true, 100
+	got := describeChaos(run, true, true).Faults[0].Recovery
+	require.NotNil(t, got)
+	require.Equal(t, int64(110), got.DowntimeMs)
+	require.True(t, got.BecameUnreachable, "whether the database became unreachable did not reach the result")
+	require.True(t, got.Recovered, "whether it answered again did not reach the result")
+	require.Equal(t, int64(100), got.ProbeIntervalMs, "the probe's resolution did not reach the result")
+	require.Equal(t, "110ms, probed every 100ms", got.Unreachable)
+}

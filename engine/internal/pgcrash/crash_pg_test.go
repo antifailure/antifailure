@@ -861,7 +861,7 @@ func report(t *testing.T, res pgcrash.Result) {
 	t.Logf("relations: checked=%v agreed=%v heap=%d index=%d amcheck=%q why=%q",
 		res.Relations.Checked, res.Relations.Agreed, res.Relations.HeapRows,
 		res.Relations.IndexRows, res.Relations.Amcheck, res.Relations.Why)
-	t.Logf("downtime=%s writeErrors=%d lastWriteError=%q", res.Downtime, res.WriteErrors, res.LastWriteError)
+	t.Logf("downtime=%s availability=%+v writeErrors=%d lastWriteError=%q", res.Downtime, res.Availability, res.WriteErrors, res.LastWriteError)
 	for _, p := range res.Problems {
 		t.Logf("PROBLEM    %s: %s | %s", p.Rule, p.Title, p.Detail)
 	}

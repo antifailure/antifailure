@@ -1171,8 +1171,15 @@ type ChaosRecovery struct {
 	Amcheck             string
 	// ChecksumsOn reports whether a torn page would have been detected.
 	ChecksumsOn bool
-	// DowntimeMs is how long the database did not answer a query.
-	DowntimeMs int64
+	// DowntimeMs is how long the database did not answer a query, measured
+	// by a probe that ran beside the fault from the moment it was injected.
+	// Unreachable is whether it ever stopped answering, Recovered whether it
+	// was seen answering again before the probe stopped, and ProbeIntervalMs
+	// is how often the probe asked, which is the measurement's resolution.
+	DowntimeMs      int64
+	Unreachable     bool
+	Recovered       bool
+	ProbeIntervalMs int64
 	// Verified reports whether the run established what it set out to. A run
 	// that is not verified has not passed: it has not looked.
 	Verified bool
@@ -1267,13 +1274,36 @@ func (r Run) chaosSection() string {
 		fmt.Fprintf(&b, "| Torn pages in the writers' table | %s |\n", rec.PagesSay())
 		fmt.Fprintf(&b, "| Cluster state, before and after | %s, then %s |\n",
 			orUnknown(rec.StateBefore), orUnknown(rec.StateAfter))
-		fmt.Fprintf(&b, "| The database was unreachable for | %s |\n", millis(rec.DowntimeMs))
+		fmt.Fprintf(&b, "| The database was unreachable for | %s |\n", rec.UnreachableSays())
 		b.WriteString("\n")
 		if !rec.Verified {
 			b.WriteString("This fault's recovery was not established. The findings above say what could not be looked at.\n\n")
 		}
 	}
 	return b.String()
+}
+
+// UnreachableSays is how long the database did not answer, in the words
+// every surface uses.
+//
+// "never" is said as a word. A database a pause froze, or one that came back
+// between two probes, is not the same fact as one that was down for no time,
+// and a zero beside a fault reads as the fault having done nothing.
+func (rec *ChaosRecovery) UnreachableSays() string {
+	if rec.ProbeIntervalMs <= 0 {
+		// A report from an engine that did not probe. Its number is the old
+		// one, timed through the settle, so it is labelled as that.
+		return millis(rec.DowntimeMs) + ", timed from the fault to the first query after the settle, not probed"
+	}
+	every := millis(rec.ProbeIntervalMs)
+	switch {
+	case !rec.Unreachable:
+		return "never: every query a probe sent every " + every + " from the fault onwards was answered"
+	case !rec.Recovered:
+		return fmt.Sprintf("at least %s, and it had not answered again when the probe stopped (probed every %s)",
+			millis(rec.DowntimeMs), every)
+	}
+	return fmt.Sprintf("%s, probed every %s", millis(rec.DowntimeMs), every)
 }
 
 // crashCell says whether the database crashed, in the words the log used.

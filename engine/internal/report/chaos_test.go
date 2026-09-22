@@ -200,3 +200,35 @@ func TestInPlaceSays_AFaultThatNeverWentInSaysNothing(t *testing.T) {
 	f.Injected, f.Undone, f.InPlaceMs = false, false, 0
 	require.Empty(t, f.InPlaceSays())
 }
+
+// The unreachable row used to print the time from the fault to the first
+// query after the settle, which could never be less than the settle. It now
+// prints what a probe beside the fault measured, with its resolution, and says
+// "never" rather than printing a zero when every probe was answered.
+func TestUnreachableSays_WhatTheProbeMeasuredWithItsResolution(t *testing.T) {
+	rec := &report.ChaosRecovery{DowntimeMs: 1660, Unreachable: true, Recovered: true, ProbeIntervalMs: 100}
+	require.Equal(t, "1.66s, probed every 100ms", rec.UnreachableSays())
+
+	out := report.Run{Chaos: &report.Chaos{Faults: []report.ChaosFault{{
+		Name: "postgres-crash", Kind: "process_kill", Target: "database", Injected: true, Undone: true,
+		Recovery: rec,
+	}}}}.Markdown()
+	require.Contains(t, out, "| The database was unreachable for | 1.66s, probed every 100ms |")
+}
+
+func TestUnreachableSays_NeverIsAWordNotAZero(t *testing.T) {
+	rec := &report.ChaosRecovery{ProbeIntervalMs: 100}
+	require.Equal(t, "never: every query a probe sent every 100ms from the fault onwards was answered", rec.UnreachableSays())
+}
+
+func TestUnreachableSays_AnOutageWithNoEndIsAFloor(t *testing.T) {
+	rec := &report.ChaosRecovery{DowntimeMs: 3000, Unreachable: true, ProbeIntervalMs: 100}
+	require.Equal(t, "at least 3s, and it had not answered again when the probe stopped (probed every 100ms)", rec.UnreachableSays())
+}
+
+// A report from an engine that did not probe carries only the old number, and
+// it is labelled as what it was rather than passed off as a measurement.
+func TestUnreachableSays_AnUnprobedNumberIsLabelledAsOne(t *testing.T) {
+	rec := &report.ChaosRecovery{DowntimeMs: 3100}
+	require.Equal(t, "3.1s, timed from the fault to the first query after the settle, not probed", rec.UnreachableSays())
+}
