@@ -298,7 +298,7 @@ func recoveryOf(res pgcrash.Result) *report.ChaosRecovery {
 		Signal:         res.CrashSignal(),
 		Replayed:       res.Recovery.Replayed(),
 		RedoStart:      res.Recovery.RedoStart,
-		RedoEnd:        res.Recovery.RedoEnd,
+		RedoEnd:        replayedTo(res),
 		StateBefore:    res.Before.State,
 		StateAfter:     res.After.State,
 		Acknowledged:   rec.Acknowledged,
@@ -313,6 +313,19 @@ func recoveryOf(res pgcrash.Result) *report.ChaosRecovery {
 		DowntimeMs:     res.Downtime.Milliseconds(),
 		Verified:       res.Verified(),
 	}
+}
+
+// replayedTo is how far replay reached, for the report's "from X to Y".
+//
+// The end of replay when the proof established it, and otherwise the log's
+// "redo done at". That line is the START of the last record replayed, so it
+// is short of the true end by one record, and it is used only when nothing
+// better was read, rather than printing no end at all.
+func replayedTo(res pgcrash.Result) string {
+	if res.ReplayEnd != "" {
+		return res.ReplayEnd
+	}
+	return res.Recovery.RedoEnd
 }
 
 // ChaosFindings turns one fault's outcome into the findings the gate reads.

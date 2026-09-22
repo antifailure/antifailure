@@ -294,3 +294,21 @@ func TestRecoveryOf_CarriesTheProofIntoTheShapeAReportRenders(t *testing.T) {
 	require.Equal(t, int64(9833), got.DowntimeMs)
 	require.True(t, got.Verified)
 }
+
+// The report's "from X to Y" used the log's "redo done at", which is the
+// start of the last record replayed and short of where replay ended by that
+// record. It carries the end the proof established, and falls back to the
+// log's position only when none was.
+func TestRecoveryOf_SaysWhereReplayEndedNotWhereItsLastRecordBegan(t *testing.T) {
+	res := pgcrash.Result{
+		KilledSignal: 9,
+		Recovery:     pgcrash.Recovery{RedoStart: "0/1950490", RedoEnd: "0/19723A8", Unclean: true},
+		ReplayEnd:    "0/19723D0",
+	}
+	require.Equal(t, "0/19723D0", env.RecoveryOfForTest(res).RedoEnd,
+		"the report named the start of the last record as the end of replay")
+
+	res.ReplayEnd = ""
+	require.Equal(t, "0/19723A8", env.RecoveryOfForTest(res).RedoEnd,
+		"with no established end the report printed no end at all")
+}

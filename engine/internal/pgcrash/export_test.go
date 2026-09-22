@@ -13,3 +13,13 @@ func JudgeForTest(r *Result, beforeErr, afterErr error) { r.judge(Options{}, bef
 func CheckRelationsForTest(ctx context.Context, url string) Relations {
 	return checkRelations(ctx, Options{URL: url})
 }
+
+// JudgeCrashForTest is JudgeForTest for a fault that was expected to crash
+// the database, which is the only judgement the replay checks run under.
+func JudgeCrashForTest(r *Result) { r.judge(Options{ExpectCrash: true}, nil, nil, 0) }
+
+// ReadControlForTest reads the control file the way the proof does, for a
+// test that crashes a database by hand rather than through Verify.
+func ReadControlForTest(ctx context.Context, r Runner, dataDir string) (Control, error) {
+	return readControl(ctx, Options{Runner: r, DataDir: dataDir})
+}
