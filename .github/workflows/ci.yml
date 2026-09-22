@@ -604,12 +604,17 @@ jobs:
         run: |
           set -euo pipefail
           sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          # The signing key is in the tree, pinned by its fingerprint, rather than
+          # fetched on every run: the fetch failed three times on 2026-09-21 with
+          # curl (56) and each time turned a required context red having tested
+          # nothing. It is checked against PGDG's published fingerprint first.
+          gpg --show-keys --with-colons .github/keys/apt.postgresql.org.asc \
+            | grep -x "fpr:::::::::B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8:" >/dev/null
+          sudo install -m 0644 .github/keys/apt.postgresql.org.asc /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
             | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-client-17
+          sudo apt-get -o Acquire::Retries=5 update -qq
+          sudo apt-get -o Acquire::Retries=5 install -y -qq postgresql-client-17
           # Proof, not hope: the version that will actually be chosen.
           pg_dump --version
           test -x /usr/lib/postgresql/17/bin/pg_dump
@@ -1615,12 +1620,17 @@ jobs:
         run: |
           set -euo pipefail
           sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          # The signing key is in the tree, pinned by its fingerprint, rather than
+          # fetched on every run: the fetch failed three times on 2026-09-21 with
+          # curl (56) and each time turned a required context red having tested
+          # nothing. It is checked against PGDG's published fingerprint first.
+          gpg --show-keys --with-colons .github/keys/apt.postgresql.org.asc \
+            | grep -x "fpr:::::::::B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8:" >/dev/null
+          sudo install -m 0644 .github/keys/apt.postgresql.org.asc /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
             | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-client-17
+          sudo apt-get -o Acquire::Retries=5 update -qq
+          sudo apt-get -o Acquire::Retries=5 install -y -qq postgresql-client-17
           test -x /usr/lib/postgresql/17/bin/pg_dump
 
       - name: The community build does not need ee
