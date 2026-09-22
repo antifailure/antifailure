@@ -1,6 +1,7 @@
 package workload_test
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -259,4 +260,107 @@ func TestARouteWithNoDistributionCannotClaimAResolution(t *testing.T) {
 	require.Contains(t, r2.Resolution.Detail, "no distribution")
 	_, ok := r2.Resolution.Verdict(99, 0.6)
 	require.False(t, ok, "an unknown band decides nothing, whatever it is shown")
+}
+
+// ordersTail is one route's distribution, held fixed while only the sample
+// count changes. The shape is a 5ms handler's on this machine: a tight body
+// and a tail that opens past p95.
+func ordersTail(sent int) workload.RouteMetric {
+	return metric("GET /orders", sent, 5.3, 5.9, 6.2, 7.4, 11.0)
+}
+
+// smallestVisibleAt compares two identical sides of n samples each and returns
+// the difference that comparison could see.
+func smallestVisibleAt(t *testing.T, n int) float64 {
+	t.Helper()
+	c, err := workload.Compare(sideWith("main", ordersTail(n)), sideWith("feature", ordersTail(n)))
+	require.NoError(t, err)
+	r := routeRow(t, c, "GET /orders")
+	require.NotNil(t, r.Resolution.SmallestVisible, "%d samples a side resolved nothing", n)
+	return *r.Resolution.SmallestVisible
+}
+
+func TestMoreSamplesResolveASmallerDifference(t *testing.T) {
+	t.Parallel()
+	// The property the band rests on: with the distribution held still, more
+	// samples see a smaller difference. If that stops holding, the band is not
+	// measuring sampling error and every refusal it produces is arbitrary.
+	//
+	// THIS USED TO BE A LIVE TEST, AND IT PROVED NOTHING EITHER WAY. It timed
+	// two real servers, a thin run of about 77 samples a side at concurrency 20
+	// and a dense one of about 1300 at concurrency 40, and asserted the dense
+	// band was narrower. It passed and failed on the same tree: PR #557 changed
+	// no Go and read "thin can see 3.3%, dense can see 4.1%", red, on a commit
+	// whose engine job had passed on main. Looped eight times on an idle
+	// laptop it failed three, with the thin band anywhere from 4.1 to 34.4
+	// percent and the dense one from 4.8 to 30.2.
+	//
+	// The flake was not noise around a true claim; the claim was confounded.
+	// The band is the run's own distribution read either side of p95, so it
+	// moves with the tail as well as with the count, and the two runs had
+	// different tails: a different concurrency against a different request
+	// rate, on whatever the host was doing that second. Seventeen times the
+	// samples narrows the quantile window about four fold, and a tail that
+	// happened to open twice as steeply in the dense run gave that back. So the
+	// count is the only thing that changes here.
+	// 77 and 1300 are the thin and dense counts the live version sent.
+	counts := []int{20, 40, 77, 100, 400, 1300, 1600, 6400, 25600}
+	previous := math.Inf(1)
+	for _, n := range counts {
+		got := smallestVisibleAt(t, n)
+		t.Logf("%6d samples a side can see %.2f%%", n, got*100)
+		require.Less(t, got, previous, "%d samples saw no smaller a difference than fewer did", n)
+		previous = got
+	}
+
+	// And by how much, which is the law rather than the direction. From a
+	// hundred samples up the window around p95 sits between the recorded p90
+	// and p99, where the distribution is a straight line either side, so the
+	// band is the window's half width times the two slopes, on both sides,
+	// over the base p95. The window's half width goes as one over the square
+	// root of the count, so four times the samples is exactly half the band.
+	lower := (6.2 - 5.9) / 0.05
+	upper := (7.4 - 6.2) / 0.04
+	for _, n := range []int{100, 400, 1600, 6400} {
+		dq := 1.645 * math.Sqrt(0.95*0.05/float64(n))
+		want := dq * (lower + upper) / 6.2
+		require.InDelta(t, want, smallestVisibleAt(t, n), 1e-9,
+			"%d samples a side: the band is not the sampling window read off the distribution", n)
+		require.InDelta(t, 0.5, smallestVisibleAt(t, 4*n)/smallestVisibleAt(t, n), 1e-9,
+			"four times %d samples must halve the band", n)
+	}
+}
+
+func TestAWiderTailIsAWiderBandAtTheSameCount(t *testing.T) {
+	t.Parallel()
+	// The other half of why the live version flaked, stated as its own
+	// property so it is a claim and not an accident: at one sample count the
+	// band follows the tail. A run whose tail opens further past p95 cannot see
+	// as small a difference, which is correct, and is exactly why two live runs
+	// with different tails cannot be compared on their counts alone.
+	band := func(p99 float64) float64 {
+		row := metric("GET /orders", 1300, 5.3, 5.9, 6.2, p99, 30)
+		c, err := workload.Compare(sideWith("main", row), sideWith("feature", row))
+		require.NoError(t, err)
+		r := routeRow(t, c, "GET /orders")
+		require.NotNil(t, r.Resolution.SmallestVisible)
+		return *r.Resolution.SmallestVisible
+	}
+	require.Less(t, band(7.4), band(9.8))
+	require.Less(t, band(9.8), band(14.0))
+}
+
+func TestIdenticalSidesNeverBreachAtAnyCount(t *testing.T) {
+	t.Parallel()
+	// The live test's second claim, that neither run invents a regression
+	// between identical servers. On identical sides the observed change is
+	// zero and the band is positive, so this holds by construction at every
+	// count; asserting it here keeps it from ever depending on a host again.
+	for _, n := range []int{20, 77, 1300, 25600} {
+		c, err := workload.Compare(sideWith("main", ordersTail(n)), sideWith("feature", ordersTail(n)))
+		require.NoError(t, err)
+		rows := workload.Judge(c, workload.ComparisonThresholds{P95Increase: 1.0, ThroughputDrop: 0.25})
+		require.NotEqual(t, workload.VerdictFail, workload.ComparisonOutcome(rows), "%d samples a side", n)
+		require.Empty(t, workload.ComparisonBreaches(rows), "%d samples a side", n)
+	}
 }
