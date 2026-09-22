@@ -14,6 +14,250 @@ and the per change entries are what make it a wall. `just relnotes` refuses an
 unbalanced marker, a second region in one section, an empty region, and a
 section that omits all of itself.
 
+## v1.6.0
+
+Antifailure could rehearse a change against a copy of production and say what
+the change did while everything around it worked. It could not break anything
+on purpose, so nothing it reported said what the system does when a process
+dies, a disk fills or the network splits, and every recovery was assumed rather
+than proved. A `chaos:` block now declares the faults a rehearsal may inject
+and `af chaos` injects them, seven kinds, all real, each with an undo that runs
+even when the run fails. Around a fault aimed at the database the run proves
+the recovery instead of observing that it finished: every commit the client
+was told was committed must still be there, nothing may be there that no client
+attempted, the write ahead log must have replayed past the last flush a writer
+saw, and the heap and its index must still agree. The same faults are reachable
+from the MCP server as `inject_declared_faults`.
+
+A twin was also described by hand, beside the infrastructure as code that
+actually built production. A manifest can now say where that code lives, a
+reader turns a Terraform plan, Terraform or OpenTofu HCL, or Kubernetes
+manifests into a description of production that says which fields it read and
+which it could not resolve, and `af up` creates the buckets, queues, tables and
+parameters production declares inside the emulators before any service starts.
+A pull request that changes only that infrastructure is rehearsed now, where it
+used to select no check at all.
+
+`af load compare` measures a build against its base branch on the same golden,
+under the same seed and the same mix, and decides only what it can resolve. It
+throws away a warm-up, sends sixteen interleaved rounds to each side, sizes each
+route's interval from how much the rounds disagreed, and answers "too close to
+say" where the host's own noise is larger than the change. And the desktop and
+phone surfaces a manifest could name in v1.5.5 can now be run, because a
+manifest declares the application they drive.
+
+### For operators, before you upgrade
+
+**A declared extension is now enforced on every branch, not only when a golden
+is built.** A branch that added an extension to `database.extensions` beside
+the migration that needs it used to come up from the golden it already had,
+green, with the extension absent. The branch now creates it, and an extension
+the image cannot carry is refused by name. `af golden refresh` now runs
+`database.seed`, and a golden holding no tables at all is refused with
+AF-DB-041 when the manifest declares where its contents come from. **A run that
+passed with a missing extension or an empty golden will now be refused;** a
+project that declares neither `database.source_url_env` nor `database.seed` is
+untouched (#541).
+
+**A pull request that changes only infrastructure as code now runs a
+rehearsal.** It used to write `environment=false` and run nothing. It now brings
+the environment up, and the added lines select the migration rehearsal, load or
+the egress decisions by what they set. Expect runs on pull requests that used to
+cost none. Nothing applies your infrastructure as code (#527).
+
+**A desktop or phone workflow with no application declared is refused when the
+manifest is read.** It used to be refused by the runner after its environment
+had been built and paid for. A `desktop` or `mobile` block that no workflow
+drives is refused too. For a desktop application that was the quieter mistake:
+the run opened a browser, passed, and never launched the application somebody
+named (#525, #551).
+
+<!-- relnotes:omit -->
+### Added
+
+Fault injection. A `chaos:` block declares the faults a rehearsal may inject
+and `af chaos` runs them: `SIGKILL` to a process inside a container, `SIGKILL`
+to a container's main process, a clean stop, a cgroup freeze, a detach from the
+environment's network, a data directory made read only, and a bounded fill of
+the filesystem holding it. Each fault is aimed at a container resolved from the
+labels the runtime stamped at create time, and a container with no Antifailure
+label, one belonging to another environment, and the egress sidecar are
+refused, with ownership read again from the daemon at the instant of the act.
+A fault that was applied and changed nothing is refused rather than reported as
+survived. Findings split across `policy.chaos_failure`, which defaults to
+`fail` and covers a lost commit, a phantom row, a short replay and a damaged
+relation, and `policy.chaos_unverified`, which defaults to `warn` and covers
+everything the run could not establish. Network latency and packet loss are not
+included, because shaping traffic needs `tc` in a namespace the images do not
+carry (#517).
+
+`inject_declared_faults` puts fault injection on the MCP server. An agent asks
+for the manifest's declared faults to be injected into its branch's
+environment, one at a time, and reads back whether each landed, the evidence
+recorded at the instant it acted, whether the undo ran, and around a database
+fault whether every acknowledged commit survived. The result carries `held` and
+`verified` separately, a run that is held and not verified is `INCONCLUSIVE`,
+and there is no argument that chooses, aims, softens or disables a fault (#538).
+
+`run_sql_workload` puts the concurrent SQL workload on the MCP server, so an
+agent can measure a change to an index, a lock, a storage parameter or a query
+directly: transactions per second, transaction and per statement latency
+percentiles, deadlocks, serialization failures, retries and the rows the
+statements touched (#533).
+
+`af load compare` brings a second environment up from the base revision,
+branches the same golden for both, and sends both the same weighted mix in the
+same order under the same seed. `load.comparison.thresholds` carries
+`p95_increase` against the base branch, `throughput_drop` and
+`error_rate_increase`, and a threshold that could not be evaluated reports
+unverified and exits non zero, never pass. A route present on one side only is
+reported rather than hidden (#511). Each side gets a discarded warm-up and then
+sixteen short rounds, interleaved so neither side always goes first, and each
+route's interval comes from how much the rounds disagreed, at ninety percent for
+every route together. A limit entirely below the interval fails, one entirely at
+or above it passes, and one inside it is reported as too close to say, with the
+smallest change the host could have resolved printed beside it. `--rounds` and
+`--warmup` set the schedule, and the JSON report carries every round's p95 per
+route. The duration and the scale are settled once from this build's manifest
+and sent to both sides, so a branch that changed `load.duration` or
+`load.scale` no longer compares two different workloads (#540, #556).
+`af workload compare` now prints the per route table it had only put in the
+JSON (#511).
+
+An `infrastructure` block names the stacks that declare production, each with
+its source, path, workspace and variable files. It changes nothing an
+environment builds. `af init` drafts `source` and `path` from the tree and never
+guesses the workspace or the variable files, and validation refuses a path that
+is absolute, climbs out of the repository, is named twice, is missing, or holds
+nothing the source can read (#529).
+
+A reader describes production from its infrastructure as code: plan output
+from `terraform show -json` first, then Terraform and OpenTofu HCL, raw Kubernetes
+manifests and Kustomize image and replica overrides. Every field is not
+declared, read, or declared and not resolvable with a sentence and a line
+number, and a credential it refuses to carry is reported separately from a
+value it could not work out. It never executes anything, never reaches a cloud,
+and never reads a Terraform state file, and environment variable names and
+secret references are carried without their values (#526).
+
+`af up` creates the cloud resources production's infrastructure as code
+declares inside the emulators before any service starts, through the
+environment's own sidecar at the provider's own hostname. What an emulator
+cannot hold is named rather than dropped, a secret or a parameter holds a
+placeholder and is reported as substituted, and a resource is called reproduced
+only after it has been read back (#528).
+
+A `desktop` block names the application a desktop workflow drives: `kind`
+`electron` or `macos`, the `application` resolved against the manifest's
+directory, and optionally the `process` a native application runs as (#525).
+
+### Changed
+
+An infrastructure change is rehearsed. The analyser used to file infrastructure
+as code with prose, test files and CI configuration as inert, so a change to
+production's database, capacity or firewall ran nothing. A database engine
+version or a server parameter now selects the migration rehearsal, a replica
+count, an instance size or an autoscaling bound selects load, and a firewall or
+security group rule selects the egress decisions, each fact naming its file and
+line. When an added line sets a database engine major different from
+`database.version`, the report names both. The published action exports an
+output per check (#527).
+
+### Fixed
+
+Several of these fix fault injection, which is new in this release. They are
+listed because each changed what a run reports.
+
+A Docker daemon out of address ranges was told to run `af doctor` and `af down`,
+and neither could free one. That refusal is now AF-RUN-052, which counts the
+daemon's networks and the Antifailure networks with nothing attached, and names
+`af env prune --orphaned`, a new selector that lists the environments holding
+such networks and removes them with `--yes`. It waits an hour from an
+environment's newest resource and never considers a network without the
+Antifailure label. `af doctor` counts them too (#565).
+
+A workflow could say `surface: ios` and never be driven, because nothing could
+say which application. A `mobile` block declares its `id`, and optionally the
+built `app` to install and the `device` to use, and `af explain` shows it
+(#551).
+
+An Electron application under `af test` was never told where the environment
+was. It is now launched with `AF_BASE_URL` set to the environment's address,
+over the runner's own environment (#550).
+
+A desktop or phone workflow could be failed against an application still
+loading, quoting the loading screen. The first read is repeated until the tree
+holds still, and before any verdict that is not a pass the screen gets up to ten
+seconds to change. This never turns a failure into a pass (#559).
+
+A terminal workflow could fail about output the program certainly wrote, more
+often on a busy machine, because the screen was judged with its last redraw
+still queued (#534).
+
+A workflow that failed because an expectation was absent was explained as the
+application showing an error. The detail now names the missing expectation and
+quotes what was showing, and says an error was showing only when the runner
+recognised one (#554).
+
+An expectation that could never match was named at character 295 of a sentence
+cut off at 120 in the report cell. The cell now opens with the quoted
+expectation (#531).
+
+`af watch` carried a picture of every agent and drew none of them. The terminal
+view is now the whole swarm in a grid, each pane headed by the personality
+driving it, with the agent's latest frame drawn through the iTerm2, kitty or
+sixel protocol when the terminal says it can. The capability query also works
+on macOS now, and the view asks the terminal what colour it is painted and takes
+the palette whose contrast holds against it (#522).
+
+`af logs` told a running environment to come up for a name that was never a
+service. An undeclared name is refused with AF-RUN-050 and the database or a
+datastore with AF-RUN-051, and an empty result now says which of its causes it
+is. `read_service_logs` makes the same distinction (#553).
+
+`AF-MSK-010`'s next step sent the reader to `af mask plan`, which could not run
+from the state the refusal leaves. It now carries the remedy that works (#543).
+
+The console run page cut off how to reproduce a failure at every laptop width.
+The reproduction sits on its own wrapping line under its verdict, one step per
+line (#557).
+
+A network partition held for five seconds was reported as lasting no time, and
+every fault outside a durability proof reported zero. Each fault now reports its
+real duration and how long it was in place beside the declared hold, in words
+in the terminal and the pull request comment and as `in_place_ms`,
+`hold_declared_ms` and `in_place` in the MCP result. `after` is now honoured as
+the least time before a fault (#558).
+
+A database freeze declared for three seconds held for five, because the writers
+were stopped before the thaw. It now thaws at its declared hold, and commits
+made after the thaw are counted (#563).
+
+The `unreachable` figure could never be shorter than the settle. A probe now
+runs `SELECT 1` every 100 milliseconds from the moment of the fault, and the
+line prints its resolution, or `never` when every attempt was answered (#566).
+
+A crash recovery that replayed every byte was reported as short by one record.
+The end of replay is now read from the checkpoint Postgres takes when crash
+recovery finishes, and a run that cannot tell says so (#564).
+
+Undoing a pause could report success and leave the database frozen. The undo
+always asks for the thaw and reads the container back (#567).
+
+A disk fill refused as unsafe told the reader that everything measured after it
+meant nothing. It is now `chaos.fault.unsafe`, and a fault whose undo failed
+reports the environment as still broken instead of "was not applied" (#549).
+
+`af chaos` printed nothing about torn pages when the check ran and passed. Each
+crash fault now carries an `amcheck` line and a `pages` line (#552), and the
+pull request comment's "Heap and index agree" says yes only when amcheck
+verified the index (#555).
+
+`inject_declared_faults` summed separate outages into one that never happened.
+It reports the longest single outage, with the per fault numbers in the detail
+(#539).
+<!-- relnotes:end -->
+
 ## v1.5.5
 
 Antifailure could rehearse a browser and nothing else. The surface abstraction
