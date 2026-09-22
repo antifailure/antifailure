@@ -154,6 +154,11 @@ type Result struct {
 	// settle says how long the fault really lasted. Zero when Inject never
 	// returned.
 	FaultInPlace time.Duration `json:"fault_in_place"`
+	// AcknowledgedAtRecover is how many commits the ledger held when the fault
+	// was undone. The writers run on past that point, so the reconciliation's
+	// Acknowledged is larger by every commit made after the undo, and each of
+	// those is checked for exactly as the earlier ones are.
+	AcknowledgedAtRecover int `json:"acknowledgedAtRecover"`
 	// WriteErrors is how many writes failed while the fault was in place, and
 	// LastWriteError is the most recent one. A crash with no write errors at
 	// all is a crash the workload never noticed, which is worth seeing.
@@ -287,8 +292,8 @@ func (r Result) Verified() bool { return len(r.Unverified) == 0 }
 //	read the control file, so there is a before
 //	start the writers and wait for real acknowledged commits, not for a clock
 //	inject the fault and record the instant, which windows the log
-//	let it settle, then stop the writers so nothing races the read
-//	recover, if the fault needs recovering
+//	let it settle, then recover, if the fault needs recovering
+//	stop the writers, so nothing races the read
 //	wait for the database, timing how long it was gone
 //	read the control file and the log, and reconcile the ledger
 //	check the heap against its index
@@ -336,14 +341,33 @@ func Verify(ctx context.Context, opts Options) (Result, error) {
 	res.Evidence, res.KilledSignal = injected.Evidence, injected.KilledSignal
 
 	sleep(ctx, opts.Settle)
+
+	// The fault is undone at the declared hold and the writers are stopped
+	// after it, in that order. They used to be stopped first, and Stop gives a
+	// writer stopGrace to finish the statement it is on: against a frozen
+	// database no statement finishes, so the freeze was held for the settle
+	// AND the grace, measured live at 5.003s against a declared 3s. Stopping
+	// after the undo also leaves the claim unchanged and makes it wider: a
+	// statement stuck in the fault now completes and is counted, and every
+	// commit acknowledged after the undo is in the ledger the reconciliation
+	// reads, so it has to be present too.
+	//
+	// Nothing measured below depends on the writers having stopped before the
+	// undo. The flush position that recovery must replay past is only judged
+	// for a fault that crashed the database, and a crash ends every writer's
+	// connection, which a writer never reopens. The log window starts at the
+	// fault, the downtime is timed from the fault, and the rows are read after
+	// Stop.
+	res.FaultInPlace = time.Since(injectedAt)
+	res.AcknowledgedAtRecover, _, _ = w.Ledger().Counts()
+	var recoverErr error
+	if opts.Recover != nil {
+		recoverErr = opts.Recover(ctx)
+	}
 	w.Stop()
 	res.WriteErrors, res.LastWriteError = w.Errors()
-
-	res.FaultInPlace = time.Since(injectedAt)
-	if opts.Recover != nil {
-		if err := opts.Recover(ctx); err != nil {
-			return res, err
-		}
+	if recoverErr != nil {
+		return res, recoverErr
 	}
 	downtime, err := waitReady(ctx, opts, faultAt)
 	res.Downtime = downtime
