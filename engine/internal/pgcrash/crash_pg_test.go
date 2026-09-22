@@ -264,6 +264,13 @@ func TestVerify_ASigkilledPostgresLosesNoAcknowledgedCommit(t *testing.T) {
 	require.NoError(t, err)
 	report(t, res)
 
+	// How long the fault was in place is measured, not copied from Settle,
+	// and it covers at least the settle the proof was asked for. A result
+	// that carried zero here is the one that told an agent a five second
+	// partition had lasted no time at all.
+	require.GreaterOrEqual(t, res.FaultInPlace, 2*time.Second,
+		"the proof settled for 2s and says the fault was in place for %s", res.FaultInPlace)
+
 	// The crash happened. Each of these is a separate assertion because each
 	// one fails for a different reason, and a single compound assertion would
 	// stop at the first and say nothing about the rest.
@@ -402,6 +409,42 @@ func TestVerify_AnUninjuredDatabaseIsNotReportedAsRecovered(t *testing.T) {
 	require.True(t, res.Held(), "an undisturbed database did not hold: %v", problemRules(res.Problems))
 	require.NotContains(t, problemRules(res.Unverified), pgcrash.RuleNoCrash,
 		"a run that expected no crash was reported as one that failed to crash")
+}
+
+// TestVerify_TheFaultWaitsForTheDeclaredFloor is the manifest's after, which
+// promises the writers run at least that long before the fault. It used to be
+// read only as part of the warm up's timeout, which is a ceiling, so on a
+// machine that reached its commits in well under a second the fault went in
+// then: a freeze declared after 5s went in 0.6s into its run, measured live.
+//
+// The liveness arm, so nothing is broken and the only thing measured is when
+// the injection was asked for.
+func TestVerify_TheFaultWaitsForTheDeclaredFloor(t *testing.T) {
+	cli := requireDocker(t)
+	envID := "pgw" + strconv.FormatInt(time.Now().UnixNano()%1_000_000, 36)
+	db := startDatabase(t, cli, envID, testKind, "")
+	sh := shell(t, cli, db)
+
+	const floor = 4 * time.Second
+	var asked time.Time
+	started := time.Now()
+	res, err := pgcrash.Verify(t.Context(), pgcrash.Options{
+		URL: db.url, Runner: runner{sh}, DataDir: pgData,
+		Workload:    pgcrash.WorkloadOptions{Writers: 4},
+		WarmCommits: 50, WarmTimeout: 60 * time.Second, WarmFloor: floor,
+		Settle: 500 * time.Millisecond, ReadyTimeout: time.Minute,
+		ExpectCrash: false, FaultName: "no-fault",
+		Inject: func(context.Context) (pgcrash.Injected, error) {
+			asked = time.Now()
+			return pgcrash.Injected{Evidence: "no fault was injected"}, nil
+		},
+	})
+	require.NoError(t, err)
+	report(t, res)
+
+	require.False(t, asked.IsZero(), "the injection was never asked for")
+	require.GreaterOrEqual(t, asked.Sub(started), floor,
+		"the fault was asked for %s into the run, before the declared %s floor", asked.Sub(started), floor)
 }
 
 // TestVerify_ACrashThatNeverHappenedIsUnverifiedRatherThanPassed is the third

@@ -2740,7 +2740,7 @@
           "type": "string",
           "pattern": "^[0-9]+(ms|s|m)$",
           "default": "5s",
-          "description": "How long the workload runs before this fault is injected. It is a floor rather than the whole wait: the engine also waits for real acknowledged commits, because a fault injected into a database that has committed nothing yet has nothing to lose and passes every durability check by having none to make."
+          "description": "How long the run waits before this fault is injected. Around a database fault with the durability proof on, the writers commit through this wait, and it is a floor rather than the whole wait: the engine also waits for real acknowledged commits, because a fault injected into a database that has committed nothing yet has nothing to lose and passes every durability check by having none to make. Before any other fault it is a plain wait."
         },
         "hold": {
           "type": "string",

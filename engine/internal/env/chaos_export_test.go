@@ -1,6 +1,8 @@
 package env
 
 import (
+	"context"
+
 	"github.com/antifailure/antifailure/engine/internal/fault"
 	"github.com/antifailure/antifailure/engine/internal/pgcrash"
 	"github.com/antifailure/antifailure/engine/internal/report"
@@ -26,3 +28,13 @@ func RecoveryOfForTest(res pgcrash.Result) *report.ChaosRecovery { return recove
 // RefusedAsUnsafeForTest is the one decision that sorts a refusal from a
 // failure, and it is only reachable through a live injector otherwise.
 func RefusedAsUnsafeForTest(err error) bool { return refusedAsUnsafe(err) }
+
+// RunOneFaultForTest runs one declared fault through the production step,
+// with no durability proof around it, against whatever daemon the injector
+// was built on. It is the door the timing tests use: what the step REPORTS
+// about how long a fault lasted is only checkable against the step itself.
+func RunOneFaultForTest(ctx context.Context, inj *fault.Injector, declared schema.Fault) report.ChaosFault {
+	o := &Orchestrator{progress: func(string) {}}
+	entry, _ := o.runOneFault(ctx, inj, "", declared, nil)
+	return entry
+}

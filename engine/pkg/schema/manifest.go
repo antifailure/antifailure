@@ -1867,7 +1867,7 @@ type Fault struct {
 	Service string      `json:"service,omitempty" yaml:"service,omitempty"`
 	// Process is the substring of a command line process_kill matches.
 	Process string `json:"process,omitempty" yaml:"process,omitempty"`
-	// After is how long the workload runs before this fault is injected, and
+	// After is how long the run waits before this fault is injected, and
 	// Hold is how long the fault stays in place before it is undone.
 	After string `json:"after,omitempty" yaml:"after,omitempty"`
 	Hold  string `json:"hold,omitempty" yaml:"hold,omitempty"`

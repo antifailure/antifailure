@@ -136,6 +136,7 @@ func printChaos(e *Env, run *env.ChaosRun) {
 		}
 		e.Out.Status(SymbolOK, f.Name, f.Kind+" on "+f.Target)
 		e.Out.Note(StyleDim, f.Evidence)
+		e.Out.Note(StyleDim, "It was "+f.InPlaceSays()+".")
 		rec := f.Recovery
 		if rec == nil {
 			continue

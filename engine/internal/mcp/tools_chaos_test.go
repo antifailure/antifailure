@@ -684,3 +684,26 @@ func (h *chaosHarness) call(t *testing.T, name string, args map[string]any) map[
 	require.Truef(t, ok, "no structured content in %v", result)
 	return sc
 }
+
+// The report this was written against came through this tool: a network
+// partition declared to hold five seconds came back with duration_ms 0, and
+// the agent reading it rightly doubted the cut had lasted. The result now
+// carries how long the fault was measured to be in place, the hold the
+// manifest declared beside it, and one sentence saying both, so the length of
+// the outage is never read off a field that measures the whole step.
+func TestDescribeChaos_SaysHowLongTheFaultWasInPlace(t *testing.T) {
+	t.Parallel()
+	doc := describeChaos(&env.ChaosRun{Report: report.Chaos{Faults: []report.ChaosFault{{
+		Name: "cut-the-service-off-from-the-database", Kind: "network_partition", Target: "service ledger",
+		Evidence: "detached af-svc-ledger from af-net-ledger",
+		Injected: true, Undone: true,
+		DurationMs: 10548, InPlaceMs: 5001, HoldDeclaredMs: 5000,
+	}}}}, true, true)
+	require.Len(t, doc.Faults, 1)
+	got := doc.Faults[0]
+	require.Equal(t, int64(5001), got.InPlaceMs, "the measured time in place did not reach the result")
+	require.Equal(t, int64(5000), got.HoldDeclaredMs, "the declared hold did not reach the result")
+	require.Equal(t, "in place for 5.001s (declared 5s), then undone", got.InPlace,
+		"the result did not say in words how long the fault was in place")
+	require.Equal(t, int64(10548), got.DurationMs)
+}

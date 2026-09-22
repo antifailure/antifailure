@@ -1096,8 +1096,56 @@ type ChaosFault struct {
 	Refused bool
 	// Recovery is the durability proof, when one was run around this fault.
 	Recovery *ChaosRecovery
-	// DurationMs is how long the fault and its verification took.
+	// DurationMs is how long the fault's whole step took: the declared wait
+	// before it, the fault, the undo and any verification. It is not how long
+	// the fault was in place, which is InPlaceMs.
 	DurationMs int64
+	// InPlaceMs is how long the fault was measured to be in place: from the
+	// moment the injection returned to the moment its undo began. Zero when
+	// it never went in. HoldDeclaredMs is the hold the manifest asked for,
+	// carried beside it so a reader compares the two rather than trusting
+	// either one alone.
+	InPlaceMs      int64
+	HoldDeclaredMs int64
+}
+
+// chaosKindWithNoUndo is the one fault kind the injector cannot reverse,
+// spelled as the manifest spells it. The fault package owns the constant and a
+// test in the env package, which imports both, holds the two to one string.
+const chaosKindWithNoUndo = "process_kill"
+
+// InPlaceSays is the sentence every surface uses for how long a fault was in
+// place, measured, beside what the manifest declared.
+//
+// One sentence in one place, because the number it replaces was read by an
+// agent as the length of a network partition when it measured nothing at all:
+// a duration of 0 ms beside a declared five second hold made the reader doubt
+// the cut had lasted, and nothing on the screen said which of the two to
+// believe. A fault that went in and has no measured hold says that instead of
+// printing a zero.
+func (f ChaosFault) InPlaceSays() string {
+	if !f.Injected {
+		return ""
+	}
+	declared := ""
+	if f.HoldDeclaredMs > 0 {
+		declared = fmt.Sprintf(" (declared %s)", millis(f.HoldDeclaredMs))
+	}
+	if f.InPlaceMs <= 0 {
+		return "in place for no measurable time" + declared
+	}
+	if f.Kind == chaosKindWithNoUndo {
+		// A killed process has nothing to put back, so there is no span in
+		// which it is "in place". The hold is the wait before the result is
+		// read, which the manifest's own description says.
+		return fmt.Sprintf("followed by a wait of %s%s before the result was read, since a killed process has no undo",
+			millis(f.InPlaceMs), declared)
+	}
+	undone := ", then undone"
+	if !f.Undone {
+		undone = ", and its undo did not complete"
+	}
+	return fmt.Sprintf("in place for %s%s%s", millis(f.InPlaceMs), declared, undone)
 }
 
 // ChaosRecovery is what the crash proof established.
@@ -1202,7 +1250,8 @@ func (r Run) chaosSection() string {
 			fmt.Fprintf(&b, "Fault `%s` did not run.\n\n", f.Name)
 			continue
 		}
-		fmt.Fprintf(&b, "Fault `%s` (%s) on %s: %s\n\n", f.Name, oneLine(f.Kind), oneLine(target), oneLine(f.Evidence))
+		fmt.Fprintf(&b, "Fault `%s` (%s) on %s: %s. It was %s.\n\n",
+			f.Name, oneLine(f.Kind), oneLine(target), strings.TrimSuffix(oneLine(f.Evidence), "."), f.InPlaceSays())
 		rec := f.Recovery
 		if rec == nil {
 			continue
