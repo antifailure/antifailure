@@ -47,6 +47,11 @@ type Progress struct {
 	stepAt  time.Time
 	drawn   bool
 	stopped bool
+	// midLine is whether the last record written through the Output stopped
+	// short of a newline. A status line drawn then would land on the end of
+	// that partial line, and the erase before the rest of it would take the
+	// partial line with it.
+	midLine bool
 
 	ticker clock.Ticker
 	done   chan struct{}
@@ -68,6 +73,7 @@ func NewProgress(o *Output, clk clock.Clock) *Progress {
 	if !p.live {
 		return p
 	}
+	o.live = p
 	p.ticker = clk.NewTicker(tick)
 	p.wg.Add(1)
 	go p.redraw()
@@ -85,7 +91,13 @@ func (p *Progress) Step(line string) {
 		return
 	}
 	p.erase()
-	p.o.Printf("%s%s\n", blockIndent, line)
+	// Straight to the stream rather than through Printf, which would come
+	// back through the guard and ask for the lock this already holds. The
+	// same two refusals Printf makes are made here.
+	if p.o.Format != FormatJSON && !p.o.Quiet {
+		p.write(blockIndent + line + "\n")
+		p.midLine = false
+	}
 	p.stepAt = p.clock.Now()
 	if p.live {
 		p.draw()
@@ -133,14 +145,16 @@ func (p *Progress) redraw() {
 
 // draw writes the status line. The caller holds the lock.
 func (p *Progress) draw() {
-	line := fmt.Sprintf("%s%s elapsed, %s on this step",
-		blockIndent, mmss(p.clock.Since(p.begun)), mmss(p.clock.Since(p.stepAt)))
-	// The interrupt affordance is the second half of the line and the first
-	// thing to go when the terminal is narrow, because a reader who cannot see
-	// the elapsed time has lost the thing this line exists for, and a reader
-	// who cannot see the reminder still has the habit.
-	if hint := "   Ctrl-C to stop and roll back"; cells(line)+cells(hint) <= p.o.Width {
-		line += hint
+	if p.midLine {
+		return
+	}
+	// Measured now rather than at startup, so that a terminal resized in the
+	// middle of a twenty minute run gets a line that fits the new width at the
+	// next tick rather than one that wraps for the rest of the run.
+	width := p.o.liveWidth()
+	line := statusText(mmss(p.clock.Since(p.begun)), mmss(p.clock.Since(p.stepAt)), width-1)
+	if line == "" {
+		return
 	}
 	// The leading carriage return puts the cursor at the left margin before
 	// anything is written, so the status line always starts at column zero
@@ -148,8 +162,45 @@ func (p *Progress) draw() {
 	// self-delimiting in the byte stream: everything from a carriage return to
 	// the erase that follows it is status, and everything else is the
 	// transcript, which is what lets a test prove the two are the same file.
-	p.o.Raw("\r" + p.o.S(StyleDim, ansi.Truncate(line, p.o.Width-1, "")))
+	p.write("\r" + p.o.S(StyleDim, line))
 	p.drawn = true
+}
+
+// statusText composes the status line to fit in room cells, or returns "" when
+// nothing useful fits.
+//
+// It must fit, strictly. A carriage return only reaches back to the start of
+// the row the cursor is on, so a line that wraps by a single cell is redrawn
+// from its second row, and the first row is left on the screen once a second
+// for as long as the run lasts. One cell short of the width rather than the
+// width itself, because a terminal that has just written its last column may
+// already have moved the cursor to the next row.
+//
+// The versions are in the order they give things up. The interrupt affordance
+// is the first thing to go when the terminal is narrow, because a reader who
+// cannot see the elapsed time has lost the thing this line exists for, and a
+// reader who cannot see the reminder still has the habit. The step timer goes
+// next and the run timer last. Below five cells even the bare timer is cut,
+// which is a terminal nobody is reading a status line on, and a clipped
+// timer that stays on one row still beats a whole one that wraps.
+func statusText(total, step string, room int) string {
+	if room <= 0 {
+		return ""
+	}
+	base := fmt.Sprintf("%s%s elapsed, %s on this step", blockIndent, total, step)
+	for _, v := range []string{
+		base + "   Ctrl-C to stop and roll back",
+		base,
+		fmt.Sprintf("%s%s elapsed, %s this step", blockIndent, total, step),
+		fmt.Sprintf("%s%s elapsed", blockIndent, total),
+		total + " elapsed",
+		total,
+	} {
+		if cells(v) <= room {
+			return v
+		}
+	}
+	return ansi.Truncate(total, room, "")
 }
 
 // erase removes the status line, if one is on the screen. The caller holds the
@@ -163,8 +214,32 @@ func (p *Progress) erase() {
 	if !p.drawn {
 		return
 	}
-	p.o.Raw("\r\x1b[2K")
+	p.write("\r\x1b[2K")
 	p.drawn = false
+}
+
+// write puts bytes on the stream without passing through the guard. The caller
+// holds the lock, which the guard would otherwise ask for again.
+func (p *Progress) write(s string) {
+	p.o.note(fmt.Fprint(p.o.Out, s))
+}
+
+// statusGuard is the writer Output hands out while a status line is live. It
+// erases the status line before anything else reaches the screen, and it does
+// not draw it again: the next tick does that, under whatever was written, at
+// most a second later.
+type statusGuard struct{ p *Progress }
+
+func (g statusGuard) Write(b []byte) (int, error) {
+	p := g.p
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.erase()
+	n, err := p.o.Out.Write(b)
+	if len(b) > 0 {
+		p.midLine = b[len(b)-1] != '\n'
+	}
+	return n, err
 }
 
 // mmss renders a duration as minutes and seconds, always the same width so

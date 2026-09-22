@@ -70,7 +70,7 @@ func (b *Block) Flush() {
 	}
 	indent := len(blockIndent) + label + blockGap
 	for _, r := range b.rows {
-		o.note(fmt.Fprintf(o.Out, "%s%s%s%s\n",
+		o.note(fmt.Fprintf(o.w(), "%s%s%s%s\n",
 			blockIndent,
 			o.padTo(r[0], label),
 			strings.Repeat(" ", blockGap),
@@ -92,9 +92,9 @@ func (o *Output) Subject(title, context string) {
 	if o.Format == FormatJSON || o.Quiet {
 		return
 	}
-	o.note(fmt.Fprintf(o.Out, "\n%s\n", o.S(StyleBold, title)))
+	o.note(fmt.Fprintf(o.w(), "\n%s\n", o.S(StyleBold, title)))
 	if context != "" {
-		o.note(fmt.Fprintf(o.Out, "%s\n", o.S(StyleDim, o.Wrap(context, 0))))
+		o.note(fmt.Fprintf(o.w(), "%s\n", o.S(StyleDim, o.Wrap(context, 0))))
 	}
 }
 
@@ -111,7 +111,7 @@ func (o *Output) Hint(text, command string) {
 		return
 	}
 	if command == "" {
-		o.note(fmt.Fprintf(o.Out, "%s%s\n", blockIndent, o.Wrap(text, len(blockIndent))))
+		o.note(fmt.Fprintf(o.w(), "%s%s\n", blockIndent, o.Wrap(text, len(blockIndent))))
 		return
 	}
 	// The command is placed rather than wrapped into the prose, because Wrap
@@ -125,10 +125,10 @@ func (o *Output) Hint(text, command string) {
 		last = line[i+1:]
 	}
 	if cells(last)+1+cells(command) <= o.Width {
-		o.note(fmt.Fprintf(o.Out, "%s %s\n", line, o.S(StyleBold, command)))
+		o.note(fmt.Fprintf(o.w(), "%s %s\n", line, o.S(StyleBold, command)))
 		return
 	}
-	o.note(fmt.Fprintf(o.Out, "%s\n%s  %s\n", line, blockIndent, o.S(StyleBold, command)))
+	o.note(fmt.Fprintf(o.w(), "%s\n%s  %s\n", line, blockIndent, o.S(StyleBold, command)))
 }
 
 // Empty says there is nothing to show, and what would put something there.
@@ -144,7 +144,7 @@ func (o *Output) Empty(what, hint, command string) {
 	if o.Format == FormatJSON || o.Quiet {
 		return
 	}
-	o.note(fmt.Fprintf(o.Out, "%s%s\n", blockIndent, o.Wrap(what, len(blockIndent))))
+	o.note(fmt.Fprintf(o.w(), "%s%s\n", blockIndent, o.Wrap(what, len(blockIndent))))
 	if hint != "" {
 		o.Hint(hint, command)
 	}
@@ -160,6 +160,6 @@ func (o *Output) Note(style Style, text string) {
 	if o.Format == FormatJSON || o.Quiet {
 		return
 	}
-	o.note(fmt.Fprintf(o.Out, "\n%s%s\n",
+	o.note(fmt.Fprintf(o.w(), "\n%s%s\n",
 		blockIndent, o.S(style, o.Wrap(text, len(blockIndent)))))
 }

@@ -68,6 +68,24 @@ type Output struct {
 	// real terminal sees the layout reflow, and they are the only one who
 	// benefits from it.
 	Width int
+	// LiveWidth measures the terminal again, now, for the one thing drawn in
+	// place: the status line under a long running command.
+	//
+	// Width is decided once, at the command boundary, and clamped to a floor
+	// below which a table stops shrinking. Both are right for the transcript
+	// and both are wrong for a line that is rewritten with a carriage return,
+	// because a carriage return only reaches back to the start of the row the
+	// cursor is on. A status line one cell wider than the real terminal wraps,
+	// the next redraw rewrites only the second row, and every second leaves a
+	// stale first row behind. A terminal narrower than the floor, or one
+	// resized after the command started, is exactly that case. Nil, or an
+	// answer of zero, means Width is the best there is.
+	LiveWidth func() int
+	// live is the status line currently drawn at the bottom of this stream,
+	// if there is one. Every write goes through w, which erases it first,
+	// because a record printed after a status line nobody erased is written
+	// onto the end of it.
+	live *Progress
 	// writeErr is the first failure writing to Out.
 	//
 	// Kept rather than returned, because a print helper that returned an
@@ -175,6 +193,52 @@ func clampWidth(n int) int {
 	}
 }
 
+// TerminalWidth returns a LiveWidth that asks the terminal behind w for its
+// width each time it is called, or nil when w is not a terminal at all.
+//
+// Unclamped, deliberately. The floor DetectWidth applies is a readability
+// decision about the transcript; this answers a physical question, which is
+// how many cells fit on one row before the terminal wraps.
+func TerminalWidth(w io.Writer) func() int {
+	f, ok := w.(*os.File)
+	if !ok {
+		return nil
+	}
+	return func() int {
+		n, _, err := term.GetSize(int(f.Fd()))
+		if err != nil || n <= 0 {
+			return 0
+		}
+		return n
+	}
+}
+
+// liveWidth is how many cells the status line may use on this row, now.
+func (o *Output) liveWidth() int {
+	if o.LiveWidth != nil {
+		if n := o.LiveWidth(); n > 0 {
+			return n
+		}
+	}
+	return o.Width
+}
+
+// w is the writer every record goes through.
+//
+// When a status line is on the screen, the writer erases it before the record
+// is written and leaves it erased; the next tick draws it again under the
+// record. Without this every command that printed through Output while a run's
+// status line was live glued its line onto the end of the status line: af load
+// compare's "round 4 of 48" arrived after "Ctrl-C to stop and roll back", the
+// pair wrapped, and the redraw's carriage return reached back only to the
+// second row, so a long compare filled the screen with stacked copies.
+func (o *Output) w() io.Writer {
+	if o.live == nil {
+		return o.Out
+	}
+	return statusGuard{o.live}
+}
+
 func cells(s string) int { return textwrap.Cells(s) }
 
 // Printf writes to the output stream in text mode, and nothing in JSON mode.
@@ -185,7 +249,7 @@ func (o *Output) Printf(format string, args ...any) {
 	if o.Format == FormatJSON || o.Quiet {
 		return
 	}
-	o.note(fmt.Fprintf(o.Out, format, args...))
+	o.note(fmt.Fprintf(o.w(), format, args...))
 }
 
 // Println writes a line in text mode.
@@ -193,12 +257,12 @@ func (o *Output) Println(s string) {
 	if o.Format == FormatJSON || o.Quiet {
 		return
 	}
-	o.note(fmt.Fprintln(o.Out, s))
+	o.note(fmt.Fprintln(o.w(), s))
 }
 
 // Raw writes to the output stream regardless of format or quiet. It is for
 // content the user asked for, such as a rendered manifest or a log line.
-func (o *Output) Raw(s string) { o.note(fmt.Fprint(o.Out, s)) }
+func (o *Output) Raw(s string) { o.note(fmt.Fprint(o.w(), s)) }
 
 // JSON writes a document in JSON mode, and nothing in text mode.
 func (o *Output) JSON(v any) error {
@@ -304,7 +368,7 @@ func (o *Output) Status(symbol, label, detail string) {
 	}
 	const gutter = 2 + 5 + 1
 	if detail == "" {
-		o.note(fmt.Fprintln(o.Out, strings.TrimRight(
+		o.note(fmt.Fprintln(o.w(), strings.TrimRight(
 			"  "+o.padTo(o.S(StyleOf(symbol), symbol), 5)+" "+label, " ")))
 		return
 	}
@@ -321,12 +385,12 @@ func (o *Output) Status(symbol, label, detail string) {
 		indent = gutter + cells(label) + 1
 	}
 	if o.Width-indent < minDetail {
-		o.note(fmt.Fprintf(o.Out, "  %s %s\n    %s\n",
+		o.note(fmt.Fprintf(o.w(), "  %s %s\n    %s\n",
 			o.padTo(o.S(StyleOf(symbol), symbol), 5), label,
 			o.S(StyleDim, o.WrapTo(detail, 4, o.Width))))
 		return
 	}
-	o.note(fmt.Fprintln(o.Out, strings.TrimRight(
+	o.note(fmt.Fprintln(o.w(), strings.TrimRight(
 		"  "+o.padTo(o.S(StyleOf(symbol), symbol), 5)+" "+o.padTo(label, statusLabelWidth)+
 			" "+o.S(StyleDim, o.WrapTo(detail, indent, o.Width)), " ")))
 }
@@ -344,7 +408,7 @@ func (o *Output) Section(title string) {
 	if o.Format == FormatJSON || o.Quiet {
 		return
 	}
-	o.note(fmt.Fprintf(o.Out, "\n%s\n", o.S(StyleBold, title)))
+	o.note(fmt.Fprintf(o.w(), "\n%s\n", o.S(StyleBold, title)))
 }
 
 // Column describes one column of a table.
@@ -430,7 +494,7 @@ func (o *Output) Table(cols []Column, rows [][]string) {
 			head.WriteString(strings.Repeat(" ", tableGap))
 		}
 	}
-	o.note(fmt.Fprintln(o.Out, o.S(StyleDim, strings.TrimRight(head.String(), " "))))
+	o.note(fmt.Fprintln(o.w(), o.S(StyleDim, strings.TrimRight(head.String(), " "))))
 
 	for _, r := range rows {
 		var b strings.Builder
@@ -445,7 +509,7 @@ func (o *Output) Table(cols []Column, rows [][]string) {
 				b.WriteString(strings.Repeat(" ", tableGap))
 			}
 		}
-		o.note(fmt.Fprintln(o.Out, strings.TrimRight(b.String(), " ")))
+		o.note(fmt.Fprintln(o.w(), strings.TrimRight(b.String(), " ")))
 	}
 }
 
@@ -513,13 +577,13 @@ func (o *Output) stackRows(cols []Column, rows [][]string) {
 	}
 	for i, r := range rows {
 		if i > 0 {
-			o.note(fmt.Fprintln(o.Out, ""))
+			o.note(fmt.Fprintln(o.w(), ""))
 		}
 		head := ""
 		if len(r) > 0 {
 			head = r[0]
 		}
-		o.note(fmt.Fprintf(o.Out, "%s%s\n", tableIndent, head))
+		o.note(fmt.Fprintf(o.w(), "%s%s\n", tableIndent, head))
 		for j, c := range cols[1:] {
 			cell := ""
 			if j+1 < len(r) {
@@ -529,7 +593,7 @@ func (o *Output) stackRows(cols []Column, rows [][]string) {
 				continue
 			}
 			indent := len(tableIndent) + 2 + label + 2
-			o.note(fmt.Fprintf(o.Out, "%s  %s  %s\n", tableIndent,
+			o.note(fmt.Fprintf(o.w(), "%s  %s  %s\n", tableIndent,
 				o.S(StyleDim, o.padTo(c.Title, label)),
 				o.WrapTo(cell, indent, o.Width)))
 		}
