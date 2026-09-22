@@ -400,8 +400,9 @@ const pruneCutoff = 24 * time.Hour
 func checkLeftoverEnvironments(ctx context.Context, env *Env, _ Prober) CheckResult {
 	r := CheckResult{Name: "Leftover environments"}
 	r.Remediation = "'af env prune' lists anything older than a day and removes nothing; " +
-		"'af env prune --yes' removes what it listed. One at a time is 'af down --branch <branch>'. " +
-		"'af env list' shows what is held."
+		"'af env prune --yes' removes what it listed. 'af env prune --orphaned' lists only the ones " +
+		"holding networks with nothing attached, which is what uses up Docker's address ranges. " +
+		"One at a time is 'af down --branch <branch>'. 'af env list' shows what is held."
 
 	envs, err := listEnvironments(ctx, env)
 	if err != nil {
@@ -424,7 +425,7 @@ func leftoverVerdict(envs []environment, now time.Time) (CheckStatus, string) {
 	if len(envs) == 0 {
 		return CheckPass, "none are being held"
 	}
-	stale := 0
+	stale, orphans := 0, 0
 	oldest := time.Duration(0)
 	for _, e := range envs {
 		age := now.Sub(e.Oldest)
@@ -434,6 +435,27 @@ func leftoverVerdict(envs []environment, now time.Time) (CheckStatus, string) {
 		if age > pruneCutoff {
 			stale++
 		}
+		// The same predicate af env prune --orphaned plans with, so the count
+		// here is the list that command prints.
+		if pruneSelects(now, e, pruneOptions{orphaned: true, olderThan: orphanCutoff}) {
+			orphans++
+		}
+	}
+	if orphans > 0 {
+		// Ahead of the age check, because it is the more urgent of the two.
+		// An old environment costs disk; a network nothing is attached to
+		// holds one of the thirty or so address ranges Docker can hand out,
+		// and when the last one goes no environment can be created at all.
+		// On 2026-09-22 fourteen such networks were half of a full daemon and
+		// this check said only how old things were.
+		verb := "hold"
+		if orphans == 1 {
+			verb = "holds"
+		}
+		return CheckWarn, fmt.Sprintf(
+			"%s %s networks with nothing attached, out of %d being held; "+
+				"'af env prune --orphaned' lists them",
+			plural(orphans, "environment", "environments"), verb, len(envs))
 	}
 	if stale == 0 {
 		// Held is not the same as leaked. An environment somebody is working in

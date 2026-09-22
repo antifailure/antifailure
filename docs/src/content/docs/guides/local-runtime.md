@@ -189,6 +189,32 @@ absolute URLs from `AF_PUBLIC_URL` or `AF_ENV_URL` may name the port it lost.
 Bringing the environment up again after freeing the port gives every container
 the same answer.
 
+## Networks
+
+```
+AF-RUN-052 The environment's network could not be created, because Docker has
+no address range left to give it: Docker has handed out every address range it
+is allowed to. The daemon holds 30 networks, and 14 of them are Antifailure
+networks with no container attached
+```
+
+Every environment gets two networks, and every network takes one address range
+from a fixed set Docker hands out. The defaults hold about thirty one, and
+Docker counts every network on the machine against them, whoever made it. The
+usual cause is environments whose run was killed before its teardown: their
+networks stay behind with nothing attached, each still holding a range.
+
+`af env prune --orphaned` lists exactly those, the environments that hold
+networks with nothing attached and nothing running, and removes nothing.
+`af env prune --orphaned --yes` removes what it listed. An environment counts
+only once nothing has been created in it for an hour, so one being brought up
+right now is never taken, and a network without the Antifailure label is never
+considered at all. `af doctor` counts them in its leftover environments check.
+
+If the message counts few networks of ours, the daemon is full of another
+tool's. `docker network ls` names them, and widening `default-address-pools` in
+Docker's daemon settings makes room for more.
+
 ## Size
 
 ```

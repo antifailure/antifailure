@@ -331,6 +331,15 @@ the daemon does not record which repository made what, so a cutoff from here
 reaches every project's environments. For a sweep that reads each
 environment's own lifetime instead, see af env reap.
 
+--orphaned narrows it to environments that hold networks with nothing attached
+and nothing running, which is what a run killed before its teardown leaves.
+Each such network still holds one of the thirty or so address ranges Docker's
+default pools can hand out, and when they run out no environment can be
+created at all. With --orphaned the cutoff is an hour unless --older-than says
+otherwise, measured from the environment's newest resource, so one that is
+being brought up right now is never taken. Networks without the Antifailure
+label are never considered.
+
 ```
 af env prune [flags]
 ```
@@ -349,6 +358,7 @@ af env prune --older-than 0s --yes
 | --- | --- | --- |
 | `--dry-run` | `false` | List what would be removed and stop, which is also what running bare does. |
 | `--older-than` | `24h0m0s` | Only consider environments older than this. |
+| `--orphaned` | `false` | Only environments holding networks with nothing attached and nothing running. |
 | `--yes` | `false` | Remove what the plan lists. Without it nothing is removed. |
 
 ### `af env pull`

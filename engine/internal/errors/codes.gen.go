@@ -504,6 +504,9 @@ const (
 	// {service} is {what}, not a service, so it writes no output that 'af
 	// logs' can show.
 	AFRUN051 Code = "AF-RUN-051"
+	// The environment's network could not be created, because Docker has
+	// no address range left to give it: {detail}
+	AFRUN052 Code = "AF-RUN-052"
 
 	// Scheduling
 	// No runtime satisfies the placement requirement {requirement}.
@@ -2254,6 +2257,15 @@ var catalog = map[Code]Entry{
 		Docs:      "reference/manifest",
 		Retryable: false,
 		ExitCode:  ExitUsage,
+	},
+	AFRUN052: {
+		Code:      AFRUN052,
+		Area:      "RUN",
+		Message:   "The environment's network could not be created, because Docker has no address range left to give it: {detail}",
+		NextStep:  "Run 'af env prune --orphaned' to list the Antifailure environments nothing is attached to, and 'af env prune --orphaned --yes' to remove exactly those. 'af doctor' counts them too. Networks another tool made are never touched: if the daemon is full of those, 'docker network ls' names them, and widening default-address-pools in Docker's daemon settings makes room for more.",
+		Docs:      "guides/local-runtime",
+		Retryable: true,
+		ExitCode:  ExitFailure,
 	},
 	AFSCH001: {
 		Code:      AFSCH001,
