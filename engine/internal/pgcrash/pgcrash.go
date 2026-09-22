@@ -143,6 +143,11 @@ type Result struct {
 	Reconciliation Reconciliation `json:"reconciliation"`
 	// Relations is the heap and index check.
 	Relations Relations `json:"relations"`
+	// ReplayEnd is where crash recovery stopped replaying, the END of the last
+	// record it replayed, and ReplayEndSource says where it was read. Empty
+	// when it was not established or not needed.
+	ReplayEnd       string `json:"replayEnd,omitempty"`
+	ReplayEndSource string `json:"replayEndSource,omitempty"`
 	// FlushLSN is the highest flush position a writer saw after one of its own
 	// acknowledged commits, in the text form Postgres prints.
 	FlushLSN string `json:"flushLsn,omitempty"`
@@ -405,6 +410,58 @@ func Verify(ctx context.Context, opts Options) (Result, error) {
 	return res, nil
 }
 
+// replayEnd is where crash recovery stopped replaying, which is the END of
+// the last record it replayed, and says where that was read from. why is
+// non-empty when it could not be established.
+//
+// The source is the checkpoint Postgres takes the moment crash recovery ends.
+// It is taken at the insert position replay left and before any connection is
+// accepted, so no client record can sit between the end of replay and its redo
+// position. Nothing else in the log gives the end: "redo done at" is the start
+// of the last record, lastRecordStart here.
+//
+// Two readings of that checkpoint, in order:
+//
+//   - Its own "checkpoint complete" line, which on Postgres 16 and later
+//     carries "redo lsn=". The line is found by following "checkpoint
+//     starting: end-of-recovery", so it is that checkpoint and no other.
+//   - The control file read after recovery, when its latest checkpoint's redo
+//     position equals the checkpoint's own location. That is the shape of a
+//     checkpoint taken with nothing running, which the end of recovery one is.
+//     An online checkpoint's redo position precedes its record, and an online
+//     checkpoint with nothing to do is skipped rather than written, so a later
+//     one cannot pass for it.
+//
+// Either reading must lie at or past the start of the last record replayed,
+// or it describes some other checkpoint and is refused.
+func (r *Result) replayEnd(lastRecordStart uint64) (uint64, string, string) {
+	if eor := r.Recovery.EndOfRecoveryRedo; eor != "" {
+		lsn, err := ParseLSN(eor)
+		switch {
+		case err != nil:
+			return 0, "", fmt.Sprintf("the end of recovery checkpoint's redo position %q is not readable", eor)
+		case lsn < lastRecordStart:
+			return 0, "", fmt.Sprintf("the end of recovery checkpoint's redo position %s is before the last record replayed at %s", eor, r.Recovery.RedoEnd)
+		}
+		return lsn, "the end of recovery checkpoint in the log", ""
+	}
+	c := r.After
+	if c.RedoLSN == "" || c.CheckpointLSN == "" {
+		return 0, "", "the log carries no end of recovery checkpoint position and the control file was not read after recovery"
+	}
+	if c.RedoLSN != c.CheckpointLSN {
+		return 0, "", fmt.Sprintf("the log carries no end of recovery checkpoint position and the control file's latest checkpoint, at %s with redo at %s, is not one taken with nothing running", c.CheckpointLSN, c.RedoLSN)
+	}
+	lsn, err := ParseLSN(c.RedoLSN)
+	switch {
+	case err != nil:
+		return 0, "", fmt.Sprintf("the control file's redo position %q is not readable", c.RedoLSN)
+	case lsn < lastRecordStart:
+		return 0, "", fmt.Sprintf("the control file's latest checkpoint at %s is before the last record replayed at %s", c.RedoLSN, r.Recovery.RedoEnd)
+	}
+	return lsn, "the end of recovery checkpoint in the control file", ""
+}
+
 // judge turns what was measured into problems and unverified entries.
 //
 // Separate from Verify and taking only values, so that every branch in it can
@@ -492,13 +549,40 @@ func (r *Result) judge(opts Options, beforeErr, afterErr error, warmCommits int)
 					})
 				}
 			}
+			// The flush position a writer read is the END of what was
+			// flushed, so it is compared with the END of replay and never
+			// with "redo done at", which is the start of the last record
+			// replayed. That comparison fired on a replay that was complete
+			// to the byte, whenever the last record flushed was the last one
+			// replayed, and turned main red.
+			replayEnd, source, why := r.replayEnd(end)
+			if why == "" {
+				r.ReplayEnd, r.ReplayEndSource = FormatLSN(replayEnd), source
+			}
 			if r.FlushLSN != "" {
-				if flushed, err := ParseLSN(r.FlushLSN); err == nil && end < flushed {
+				flushed, errFlush := ParseLSN(r.FlushLSN)
+				switch {
+				case errFlush != nil:
+					r.Unverified = append(r.Unverified, Problem{
+						Rule:   RuleReplayShort,
+						Title:  "The flush position a writer read is not readable",
+						Detail: fmt.Sprintf("a writer read %q", r.FlushLSN),
+						Fix:    "Report this: the engine read a flush position it cannot parse, which is a defect in the engine rather than in the database.",
+					})
+				case why != "":
+					r.Unverified = append(r.Unverified, Problem{
+						Rule:  RuleReplayShort,
+						Title: "Where replay ended could not be established",
+						Detail: fmt.Sprintf("a writer read the flush position %s before the fault, and %s, so whether recovery replayed everything the client saw flushed is not known",
+							r.FlushLSN, why),
+						Fix: "Keep log_checkpoints on, which is the default, so the end of recovery checkpoint's line carries its redo position.",
+					})
+				case replayEnd < flushed:
 					r.Problems = append(r.Problems, Problem{
 						Rule:  RuleReplayShort,
 						Title: "Recovery replayed less than the client saw flushed",
-						Detail: fmt.Sprintf("a writer read the flush position %s from this database before the fault, and recovery stopped at %s",
-							r.FlushLSN, r.Recovery.RedoEnd),
+						Detail: fmt.Sprintf("a writer read the flush position %s from this database before the fault, and replay ended at %s, read from %s",
+							r.FlushLSN, r.ReplayEnd, source),
 						Fix: "This is a durability defect. Keep the log, the control file and the flush position from this run.",
 					})
 				}

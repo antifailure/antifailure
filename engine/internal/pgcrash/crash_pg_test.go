@@ -286,8 +286,11 @@ func TestVerify_ASigkilledPostgresLosesNoAcknowledgedCommit(t *testing.T) {
 	require.True(t, res.Recovery.Replayed(), "the log carries no redo start and end")
 	start, err := pgcrash.ParseLSN(res.Recovery.RedoStart)
 	require.NoError(t, err)
-	end, err := pgcrash.ParseLSN(res.Recovery.RedoEnd)
-	require.NoError(t, err)
+	// The end of replay, not "redo done at": that is the start of the last
+	// record replayed, which equals the start of the first when one record
+	// was replayed, and would read here as a replay of nothing.
+	end, err := pgcrash.ParseLSN(res.ReplayEnd)
+	require.NoError(t, err, "the end of replay was not established")
 	require.Greater(t, end, start, "recovery ended at or before where it started, so it replayed nothing")
 	wantFrom, err := pgcrash.ParseLSN(res.Before.RedoLSN)
 	require.NoError(t, err)
@@ -369,6 +372,14 @@ func TestVerify_ReportsALostCommitWhenOneIsGenuinelyLost(t *testing.T) {
 			"either the loss did not happen on this machine or the check cannot see one")
 	require.Contains(t, problemRules(res.Problems), pgcrash.RuleLostCommit,
 		"the lost commits were counted and no finding was raised for them")
+	// And the loss is a lost commit, not a short replay. What
+	// synchronous_commit off loses was acknowledged and never flushed, and
+	// recovery replayed everything that was: the film's take of this branch
+	// read a flush of 0/5760000 against "redo done at 0/575FF98" beside 1267
+	// lost commits, and called the replay short as well. Only log that was
+	// flushed and then not replayed is a short replay.
+	require.NotContains(t, problemRules(res.Problems), pgcrash.RuleReplayShort,
+		"commits lost before they were flushed were reported as a replay that stopped short of the flush")
 	require.False(t, res.Held(), "the run reported a lost commit and still held")
 	// The loss must be reported as loss, not as invention.
 	require.Zero(t, res.Reconciliation.PhantomCount, "a lost commit was reported as a phantom")

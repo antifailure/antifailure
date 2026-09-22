@@ -30,10 +30,25 @@ type Recovery struct {
 	Unclean bool `json:"unclean"`
 	// UncleanLine is the line that said so.
 	UncleanLine string `json:"uncleanLine,omitempty"`
-	// RedoStart and RedoEnd are the positions replay began and ended at. They
-	// are empty when the log said redo was not required.
+	// RedoStart and RedoEnd are the positions the log gives for the start and
+	// the finish of replay. They are empty when the log said redo was not
+	// required.
+	//
+	// RedoEnd is NOT where replay ended. Postgres prints "redo done at" with
+	// the START of the last record it replayed (xlogreader->ReadRecPtr in
+	// xlogrecovery.c on 15 to 18, ReadRecPtr in xlog.c on 14), so everything
+	// that record wrote lies past it. Comparing it with a flush position,
+	// which is an END, called a replay short by exactly one record whenever
+	// the last record flushed was the last record replayed, and that failed
+	// main. The end of replay is ReplayEnd on Result.
 	RedoStart string `json:"redoStart,omitempty"`
 	RedoEnd   string `json:"redoEnd,omitempty"`
+	// EndOfRecoveryRedo is the redo position of the checkpoint Postgres takes
+	// when crash recovery finishes, read from its own "checkpoint complete"
+	// line. That checkpoint is written at the insert position recovery left,
+	// before any client can connect, so its redo position is where replay
+	// ended. Postgres 16 and later print it; 14 and 15 do not, and it is empty.
+	EndOfRecoveryRedo string `json:"endOfRecoveryRedo,omitempty"`
 	// RedoNotRequired is true when the cluster came back and had nothing to
 	// replay. It is a real outcome and it is recorded separately, because a
 	// run that expected replay and got none has not proved what it set out to.
@@ -55,6 +70,7 @@ func (r Recovery) Replayed() bool { return r.RedoStart != "" && r.RedoEnd != "" 
 var (
 	reCrash    = regexp.MustCompile(`was terminated by signal (\d+)`)
 	reRedoAt   = regexp.MustCompile(`redo (starts|done) at ([0-9A-Fa-f]+/[0-9A-Fa-f]+)`)
+	reRedoLSN  = regexp.MustCompile(`redo lsn=([0-9A-Fa-f]+/[0-9A-Fa-f]+)`)
 	reInterest = regexp.MustCompile(`terminated by signal|reinitializing|not properly shut down|was interrupted|redo starts at|redo done at|redo is not required|ready to accept connections|automatic recovery in progress|end-of-recovery|database system is shut down`)
 )
 
@@ -64,6 +80,8 @@ const (
 	phraseInterrupt = "database system was interrupted"
 	phraseNoRedo    = "redo is not required"
 	phraseReady     = "database system is ready to accept connections"
+	phraseEORStart  = "checkpoint starting: end-of-recovery"
+	phraseCkptDone  = "checkpoint complete:"
 )
 
 // interestingLines is how many matched lines are kept.
@@ -82,8 +100,23 @@ const interestingLines = 40
 // database starting for the first time is a recovery check that never ran.
 func ParseRecovery(log string) Recovery {
 	var r Recovery
+	// endOfRecovery is set between an end-of-recovery checkpoint starting and
+	// the next checkpoint completing, which is that one: checkpoints do not
+	// overlap. Read before the filter, because a "checkpoint complete" line is
+	// otherwise not one of the lines this keeps.
+	endOfRecovery := false
 	for _, line := range strings.Split(log, "\n") {
 		line = strings.TrimSpace(strings.TrimRight(line, "\r"))
+		switch {
+		case strings.Contains(line, phraseEORStart):
+			endOfRecovery = true
+			r.EndOfRecoveryRedo = ""
+		case endOfRecovery && strings.Contains(line, phraseCkptDone):
+			endOfRecovery = false
+			if m := reRedoLSN.FindStringSubmatch(line); m != nil {
+				r.EndOfRecoveryRedo = m[1]
+			}
+		}
 		if line == "" || !reInterest.MatchString(line) {
 			continue
 		}
