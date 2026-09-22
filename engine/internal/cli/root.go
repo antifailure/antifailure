@@ -225,6 +225,10 @@ func Execute(ctx context.Context, args []string, opts Options) int {
 	// about where the right margin is.
 	out.Width = DetectWidth(opts.Stdout, opts.Getenv)
 	out.TTY = DetectTTY(opts.Stdout, opts.Getenv)
+	// The one exception to measuring once: the status line is rewritten in
+	// place, and a line rewritten in place has to fit the terminal as it is at
+	// that second, not as it was when the command began.
+	out.LiveWidth = TerminalWidth(opts.Stdout)
 
 	env := &Env{
 		Out:         out,

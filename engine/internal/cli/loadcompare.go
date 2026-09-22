@@ -143,7 +143,10 @@ af load compare --seed 7 --keep`),
 				Duration: duration, Scale: scale, Seed: seed, Keep: keep,
 				Rounds: rounds, Warmup: warmup,
 				NoWarmup: noWarmup(cmd.Flags(), warmup),
-				Progress: func(line string) { e.Out.Printf("  %s\n", line) },
+				// Each round is a step on the status line, so that "on this
+				// step" measures the round in flight rather than the whole
+				// compare since the environment came up.
+				Progress: func(line string) { progressFor(e).Step(line) },
 			})
 			if errors.Is(err, env.ErrLoadBaselineSameCommit) {
 				// A branch level with its base is a legitimate state rather
