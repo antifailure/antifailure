@@ -190,6 +190,13 @@ type Result struct {
 	BackendsSeen         *int `json:"backends_seen"`
 	// ObserverNote says why the observation is missing, when it is.
 	ObserverNote string `json:"observer_note,omitempty"`
+
+	// raw is every latency this run measured, kept so that several rounds of
+	// one workload can be pooled into one result from the SAMPLES rather than
+	// by averaging their percentiles. Unexported, so it never crosses a
+	// document boundary and Merge can tell a result that carries samples from
+	// one that has been through JSON. See merge.go.
+	raw *rawSamples
 }
 
 // TransactionResult is one transaction kind's numbers.
@@ -954,11 +961,22 @@ func (m *meter) finish(opts Options, elapsed time.Duration) *Result {
 			Latency: load.Percentiles(s.samples),
 		})
 	}
-	sort.Slice(res.PerStatement, func(i, j int) bool {
-		// Slowest first, because that is the line somebody changing an index
-		// is looking for and scrolling to find it is the same as not showing
-		// it.
-		a, b := res.PerStatement[i], res.PerStatement[j]
+	sortStatements(res.PerStatement)
+	res.raw = m.rawSamples()
+	return res
+}
+
+// sortStatements orders the per statement rows slowest first, because that is
+// the line somebody changing an index is looking for and scrolling to find it
+// is the same as not showing it.
+//
+// Shared with Merge rather than repeated there, so that a pooled result and a
+// single run's result present their statements in the same order. Two orders
+// would make a round against round comparison read as though the rows had
+// moved when only the pooling had.
+func sortStatements(rows []StatementResult) {
+	sort.Slice(rows, func(i, j int) bool {
+		a, b := rows[i], rows[j]
 		if a.Latency.P95Ms != b.Latency.P95Ms {
 			return a.Latency.P95Ms > b.Latency.P95Ms
 		}
@@ -967,7 +985,31 @@ func (m *meter) finish(opts Options, elapsed time.Duration) *Result {
 		}
 		return a.Label < b.Label
 	})
-	return res
+}
+
+// rawSamples copies every latency out of the meter, called with the lock held.
+func (m *meter) rawSamples() *rawSamples {
+	raw := &rawSamples{
+		all:           append([]float64(nil), m.all...),
+		byTransaction: map[string][]float64{},
+		byStatement:   map[stmtKey][]float64{},
+		order:         append([]string(nil), m.order...),
+		weights:       map[string]float64{},
+		baselines:     map[string]Baseline{},
+	}
+	for name, s := range m.transactions {
+		raw.byTransaction[name] = append([]float64(nil), s.samples...)
+	}
+	for key, s := range m.statements {
+		raw.byStatement[key] = append([]float64(nil), s.samples...)
+	}
+	for name, w := range m.weights {
+		raw.weights[name] = w
+	}
+	for name, b := range m.baselines {
+		raw.baselines[name] = b
+	}
+	return raw
 }
 
 func mean(samples []float64) float64 {

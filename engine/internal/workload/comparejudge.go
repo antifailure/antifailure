@@ -84,15 +84,58 @@ func Judge(c *Comparison, t ComparisonThresholds) []ComparisonVerdict {
 		return out
 	}
 	if t.ThroughputDrop > 0 {
-		out = append(out, judgeThroughput(c, t.ThroughputDrop))
+		out = append(out, judgeThroughput(c, t.ThroughputDrop, throughputMeasure(c.Kind)))
 	}
 	if t.ErrorRateIncrease > 0 {
-		out = append(out, judgeErrorRate(c, t.ErrorRateIncrease))
+		out = append(out, judgeErrorRate(c, t.ErrorRateIncrease, nounsFor(c.Kind)))
 	}
 	if t.P95Increase > 0 {
-		out = append(out, judgeRouteP95(c, t.P95Increase)...)
+		out = append(out, judgeRouteP95(c, t.P95Increase, nounsFor(c.Kind))...)
 	}
 	return out
+}
+
+// comparisonNouns is what one row of the per unit table is CALLED, and what
+// the count beneath it counts.
+//
+// A table rather than the word "route" written forty times, because a SQL
+// comparison has no routes: its rows are a transaction or a statement inside
+// one, and a report that called a statement a route would be describing the
+// wrong instrument to the one reader who can tell. The HTTP entry is the
+// original wording, and every sentence built from it below resolves to exactly
+// the string it was before this table existed. That is a requirement rather
+// than a nicety: the HTTP comparison's report is on film.
+type comparisonNouns struct {
+	// unit and units name one row and several.
+	unit, units string
+	// attempts is what a row's count counts: a route is SENT requests, a SQL
+	// unit is EXECUTED.
+	attempts string
+	// failures is what an error rate is a share of.
+	failures string
+	// ran and wasRan are the past tense and the participle of what happened
+	// to a row, which are the same word for a route and two different ones
+	// for a unit: rounds SENT a route and RAN a unit, and a route WAS SENT
+	// where a unit WAS RUN. Both spellings are needed because the sentences
+	// below use both, and "was ran" is the kind of line that makes a reader
+	// stop trusting the report it is in.
+	ran, wasRan string
+	// imperative opens the sentence that says what to do about a unit the run
+	// could not resolve.
+	imperative string
+}
+
+func nounsFor(kind Kind) comparisonNouns {
+	if kind == SQLWorkload {
+		return comparisonNouns{
+			unit: "unit", units: "units", attempts: "executions", failures: "transactions",
+			ran: "ran", wasRan: "run", imperative: "Run",
+		}
+	}
+	return comparisonNouns{
+		unit: "route", units: "routes", attempts: "requests", failures: "requests",
+		ran: "sent", wasRan: "sent", imperative: "Send",
+	}
 }
 
 // measure finds one run wide measure by name.
@@ -105,26 +148,72 @@ func measure(c *Comparison, name string) *MeasureDifference {
 	return nil
 }
 
-// judgeThroughput reads the achieved rate, never the target rate.
+// throughputWords is the measure a kind's throughput lives in and the three
+// sentences that report on it.
+//
+// A words table rather than a conditional inside each sentence, and the HTTP
+// entry is the original wording reproduced character for character. The HTTP
+// comparison's report is on film, so a rewrite of it here, however small,
+// would be a change to output somebody has already shown.
+type throughputWords struct {
+	measure string
+	// missing, zeroBase and failed are the three things this verdict can say.
+	missing  string
+	zeroBase string
+	failed   string
+}
+
+// throughputMeasure is what "throughput" means for the kind being compared.
+//
+// A SQL workload sends no requests at all, so reading achieved_rate for one
+// would find nothing and report a declared throughput_drop limit as
+// unmeasurable forever: a threshold in force that evaluated nothing, which is
+// the exact defect this file's header exists to refuse. Its throughput is TPS,
+// committed transactions over the wall clock, which is the number a database
+// is measured in and the one the manifest's limit is about.
+func throughputMeasure(kind Kind) throughputWords {
+	if kind == SQLWorkload {
+		return throughputWords{
+			measure: "tps",
+			missing: "one of the two runs did not record a transaction rate, so there is " +
+				"nothing to compare against",
+			zeroBase: "the base branch committed no transactions per second, so a drop " +
+				"against it is not a number",
+			failed: "this branch committed %.3g transactions per second against the base " +
+				"branch's %.3g, a drop of %.1f percent against a limit of %.1f percent",
+		}
+	}
+	return throughputWords{
+		measure: "achieved_rate",
+		missing: "one of the two runs did not record an achieved request rate, so " +
+			"there is nothing to compare against",
+		zeroBase: "the base branch achieved no requests per second, so a drop against " +
+			"it is not a number",
+		failed: "this branch served %.3g requests per second against the base branch's %.3g, " +
+			"a drop of %.1f percent against a limit of %.1f percent",
+	}
+}
+
+// judgeThroughput reads what was achieved, never what was aimed for.
 //
 // A run that fell behind its target reports the target as fine while the queue
 // grows, which is the reason load.Result records both and this reads the one
-// that happened.
-func judgeThroughput(c *Comparison, limit float64) ComparisonVerdict {
+// that happened. The SQL workload has no target to fall behind: its clients
+// run transactions as fast as the think time allows them to, so its TPS is
+// already the rate that happened.
+func judgeThroughput(c *Comparison, limit float64, w throughputWords) ComparisonVerdict {
 	v := ComparisonVerdict{
-		Name: "throughput_drop", Measure: "achieved_rate", Threshold: limit,
+		Name: "throughput_drop", Measure: w.measure, Threshold: limit,
 		Value: VerdictUnverified,
 	}
-	m := measure(c, "achieved_rate")
+	m := measure(c, w.measure)
 	if m == nil || m.Baseline == nil || m.Candidate == nil {
-		v.Detail = "one of the two runs did not record an achieved request rate, so " +
-			"there is nothing to compare against"
+		v.Detail = w.missing
 		return v
 	}
 	v.Baseline, v.Candidate = m.Baseline, m.Candidate
 	if *m.Baseline <= 0 {
-		v.Detail = "the base branch achieved no requests per second, so a drop against " +
-			"it is not a number"
+		v.Detail = w.zeroBase
 		return v
 	}
 	// A drop rather than a ratio of rates, so the number reads the same way
@@ -133,10 +222,7 @@ func judgeThroughput(c *Comparison, limit float64) ComparisonVerdict {
 	v.Observed = floatp(drop)
 	v.Value = passFail(drop <= limit)
 	if v.Value == VerdictFail {
-		v.Detail = fmt.Sprintf(
-			"this branch served %.3g requests per second against the base branch's %.3g, "+
-				"a drop of %.1f percent against a limit of %.1f percent",
-			*m.Candidate, *m.Baseline, drop*100, limit*100)
+		v.Detail = fmt.Sprintf(w.failed, *m.Candidate, *m.Baseline, drop*100, limit*100)
 	}
 	return v
 }
@@ -144,7 +230,7 @@ func judgeThroughput(c *Comparison, limit float64) ComparisonVerdict {
 // judgeErrorRate compares in absolute points rather than as a ratio, because a
 // base branch error rate of zero has no ratio and a build introducing errors
 // where there were none is the case this most needs to catch.
-func judgeErrorRate(c *Comparison, limit float64) ComparisonVerdict {
+func judgeErrorRate(c *Comparison, limit float64, n comparisonNouns) ComparisonVerdict {
 	v := ComparisonVerdict{
 		Name: "error_rate_increase", Measure: "error_rate", Threshold: limit,
 		Value: VerdictUnverified,
@@ -161,9 +247,9 @@ func judgeErrorRate(c *Comparison, limit float64) ComparisonVerdict {
 	v.Value = passFail(rise <= limit)
 	if v.Value == VerdictFail {
 		v.Detail = fmt.Sprintf(
-			"this branch failed %.2f percent of requests against the base branch's %.2f percent, "+
+			"this branch failed %.2f percent of %s against the base branch's %.2f percent, "+
 				"a rise of %.2f points against a limit of %.2f points",
-			*m.Candidate*100, *m.Baseline*100, rise*100, limit*100)
+			*m.Candidate*100, n.failures, *m.Baseline*100, rise*100, limit*100)
 	}
 	return v
 }
@@ -179,7 +265,7 @@ func judgeErrorRate(c *Comparison, limit float64) ComparisonVerdict {
 // says so. Without it a comparison of two runs that share no route at all
 // would return only unverified rows that a reader skims past, and the run
 // would carry a threshold that evaluated nothing.
-func judgeRouteP95(c *Comparison, limit float64) []ComparisonVerdict {
+func judgeRouteP95(c *Comparison, limit float64, n comparisonNouns) []ComparisonVerdict {
 	rows := make([]ComparisonVerdict, 0, len(c.Routes)+1)
 	measured := 0
 	for _, r := range c.Routes {
@@ -190,15 +276,15 @@ func judgeRouteP95(c *Comparison, limit float64) []ComparisonVerdict {
 		}
 		switch {
 		case !r.InBaseline:
-			v.Detail = "this route was not sent on the base branch, so there is no " +
-				"base measurement to compare against"
+			v.Detail = "this " + n.unit + " was not " + n.wasRan + " on the base branch, " +
+				"so there is no base measurement to compare against"
 		case !r.InCandidate:
-			v.Detail = "this route was sent on the base branch and not on this one, so " +
-				"there is no measurement on this side to compare"
+			v.Detail = "this " + n.unit + " was " + n.wasRan + " on the base branch and not on " +
+				"this one, so there is no measurement on this side to compare"
 		case r.P95Baseline == nil || r.P95Candidate == nil:
-			v.Detail = "one of the two runs recorded no p95 for this route"
+			v.Detail = "one of the two runs recorded no p95 for this " + n.unit
 		case *r.P95Baseline == 0:
-			v.Detail = "the base branch recorded a p95 of zero for this route, so a " +
+			v.Detail = "the base branch recorded a p95 of zero for this " + n.unit + ", so a " +
 				"ratio against it is not a number"
 		default:
 			ratio := *r.P95Candidate/(*r.P95Baseline) - 1
@@ -219,7 +305,7 @@ func judgeRouteP95(c *Comparison, limit float64) []ComparisonVerdict {
 			if !ok {
 				v.Value = VerdictUnverified
 				v.Unresolvable = true
-				v.Detail = unresolvableDetail(r, ratio, limit)
+				v.Detail = unresolvableDetail(r, ratio, limit, n)
 				break
 			}
 			measured++
@@ -243,8 +329,8 @@ func judgeRouteP95(c *Comparison, limit float64) []ComparisonVerdict {
 		rows = append(rows, ComparisonVerdict{
 			Name: "p95_increase", Measure: "p95_ms", Threshold: limit,
 			Value: VerdictUnverified,
-			Detail: "a per route latency limit was in force and not one route carried a " +
-				"measurement it could be judged on, so this threshold compared nothing",
+			Detail: "a per " + n.unit + " latency limit was in force and not one " + n.unit +
+				" carried a measurement it could be judged on, so this threshold compared nothing",
 		})
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].Scope < rows[j].Scope })
@@ -257,9 +343,9 @@ func judgeRouteP95(c *Comparison, limit float64) []ComparisonVerdict {
 // tells somebody nothing about what to do next, and the two things that fix it
 // are a longer run and a quieter machine. The sample count is named because it
 // is the lever the reader actually has.
-func unresolvableDetail(r RouteDifference, observed, limit float64) string {
+func unresolvableDetail(r RouteDifference, observed, limit float64, n comparisonNouns) string {
 	if r.Resolution.Method == ResolutionRounds {
-		return roundsUnresolvableDetail(r.Resolution, observed, limit)
+		return roundsUnresolvableDetail(r.Resolution, observed, limit, n)
 	}
 	sent := 0
 	if r.SentBaseline != nil {
@@ -269,7 +355,7 @@ func unresolvableDetail(r RouteDifference, observed, limit float64) string {
 		sent = *r.SentCandidate
 	}
 	if r.Resolution.SmallestVisible == nil {
-		return "this run cannot say how far this route's p95 could have landed from " +
+		return "this run cannot say how far this " + n.unit + "'s p95 could have landed from " +
 			"itself, so it cannot say whether a difference of " +
 			fmt.Sprintf("%.1f percent", limit*100) + " would have been visible: " +
 			r.Resolution.Detail
@@ -279,32 +365,35 @@ func unresolvableDetail(r RouteDifference, observed, limit float64) string {
 		"the difference measured is %.1f percent give or take %.1f, so the true value "+
 			"lies anywhere between %.1f and %.1f percent and the limit of %.1f sits "+
 			"inside that: neither a pass nor a breach would have meant anything. The "+
-			"p95 here rests on %d requests and could have landed %.3gms either side of "+
+			"p95 here rests on %d %s and could have landed %.3gms either side of "+
 			"itself with nothing changing",
 		observed*100, band*100, (observed-band)*100, (observed+band)*100,
-		limit*100, sent, bandOf(r.Resolution))
+		limit*100, sent, n.attempts, bandOf(r.Resolution))
 	if r.Resolution.TooFewSamples {
 		detail += ". " + r.Resolution.Detail
 	}
-	return detail + ". Send for longer, or on a quieter machine"
+	return detail + ". " + n.imperative + " for longer, or on a quieter machine"
 }
 
 // roundsUnresolvableDetail says the same for a change measured round against
 // round, with the number a reader can act on: the smallest change this host
 // could have resolved on this route at this many rounds.
-func roundsUnresolvableDetail(res RouteResolution, observed, limit float64) string {
+func roundsUnresolvableDetail(
+	res RouteResolution, observed, limit float64, n comparisonNouns,
+) string {
 	if !res.hasInterval() {
-		return res.Detail + ". Send for longer, so every route reaches every round"
+		return res.Detail + ". " + n.imperative + " for longer, so every " + n.unit +
+			" reaches every round"
 	}
 	return fmt.Sprintf(
 		"measured round against round across %d rounds, the change is %.1f percent and "+
 			"the true value lies between %.1f and %.1f percent, at ninety percent for all %d "+
-			"routes together; the limit of %.1f sits inside that, so neither a pass nor a "+
-			"breach would have meant anything. On this host, at this many rounds, this route "+
-			"can resolve a change of about %.0f percent. Send for longer, run more rounds, "+
+			"%s together; the limit of %.1f sits inside that, so neither a pass nor a "+
+			"breach would have meant anything. On this host, at this many rounds, this %s "+
+			"can resolve a change of about %.0f percent. %s for longer, run more rounds, "+
 			"or use a quieter machine",
 		res.Rounds, observed*100, *res.ChangeLow*100, *res.ChangeHigh*100, res.Family,
-		limit*100, *res.SmallestVisible*100)
+		n.units, limit*100, n.unit, *res.SmallestVisible*100, n.imperative)
 }
 
 // bandOf is the wider of the two sides' half widths, which is the one a reader
@@ -320,12 +409,7 @@ func bandOf(res RouteResolution) float64 {
 	return worst
 }
 
-func routeScope(r RouteDifference) string {
-	if r.Scenario == "" {
-		return r.Route
-	}
-	return r.Scenario + " " + r.Route
-}
+func routeScope(r RouteDifference) string { return UnitKey(r.Scenario, r.Route) }
 
 // ComparisonOutcome is the one word answer over a set of judged thresholds.
 //

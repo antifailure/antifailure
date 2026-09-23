@@ -1089,6 +1089,16 @@ at once on one host would contend with each other and measure that instead.
 A difference is a difference, and a threshold under load.comparison.thresholds
 is what turns one into a verdict.
 
+With --sql it compares the concurrent SQL workload instead: clients running
+whole transactions against each build's own database rather than requests
+against its application. Same mix, built once on this build so that neither
+side reads its own pg_stat_statements, same client count, same think time and
+the same per round seed. The unit of comparison becomes the transaction and
+the statement inside it, and each one reports p50, p95 and p99 on both sides.
+Throughput becomes committed transactions a second, judged against the same
+load.comparison.thresholds.throughput_drop. It needs a load.sql block and
+refuses without one.
+
 The base environment is torn down unless --keep says otherwise. The
 environment for this build is left running whether or not this brought it up.
 
@@ -1099,6 +1109,7 @@ af load compare [flags]
 ```
 af load compare
 af load compare --baseline origin/main --duration 60s
+af load compare --sql --concurrency 16
 af load compare --seed 7 --keep
 ```
 
@@ -1106,12 +1117,16 @@ af load compare --seed 7 --keep
 | --- | --- | --- |
 | `--baseline` | - | Revision to compare against, overriding load.comparison.base_ref. |
 | `--branch` | - | Branch to compare, defaulting to the checked out one. |
+| `--concurrency` | `8` | Clients each side runs at once, overriding load.sql.clients. Needs --sql. |
 | `--duration` | `0s` | How long to send for on each side, overriding the manifest. |
 | `--keep` | `false` | Leave the base environment up, for looking at a difference. |
 | `--report` | - | Write the comparison here as well as to the terminal. |
 | `--rounds` | `0` | Interleaved rounds per side, 16 when not set. 1 measures each side once, base first. |
 | `--scale` | `0` | Fraction of production's arrival rate to send at each side, overriding the manifest. |
 | `--seed` | `0` | Seed for the request sequence. The same seed is used on both sides. |
+| `--sql` | `false` | Compare the SQL workload from load.sql instead of the HTTP mix. |
+| `--think-time` | `0s` | How long a client waits between transactions, overriding load.sql.think_time. Needs --sql. |
+| `--transactions` | `0` | Transactions each client runs, split across the rounds, overriding load.sql.transactions. Needs --sql. |
 | `--warmup` | `0s` | Mix sent at each side and discarded before measuring, 5s when not set. 0s sends none. |
 
 ### `af load run`
