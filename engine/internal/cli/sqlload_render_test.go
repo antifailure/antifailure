@@ -117,3 +117,99 @@ func TestWhatTheSQLWorkloadCommandPrintsWhenItCommittedNothing(t *testing.T) {
 	require.Error(t, verdict)
 	require.Contains(t, verdict.Error(), "AF-LOD-021")
 }
+
+// TestWhatTheSQLWorkloadCommandPrintsAboutLockContention.
+//
+// Three outcomes and all three are printed, which is what this test is really
+// asserting. Waiting is a finding. Not waiting is a finding. A run nothing
+// watched is not a finding at all, and it has to look different from the
+// second: a reader shown nothing about lock waits concludes there were none,
+// so the absence has to be said out loud.
+func TestWhatTheSQLWorkloadCommandPrintsAboutLockContention(t *testing.T) {
+	waits, waitMS, seen := 6, 3600.0, 3
+	res := &sqlload.Result{
+		Source: sqlload.SourceDeclared, Clients: 3,
+		Transactions: 40, Duration: 3 * time.Second, TPS: 13.3,
+		Refused: []sqlload.Refused{}, BackendsSeen: &seen,
+		LockWaits: &waits, LockWaitMS: &waitMS, LockWaitNote: sqlload.LockWaitBound,
+		LockWaitPairs: []sqlload.LockWait{
+			{
+				BlockedTransaction: "bump the counter", BlockedStatement: "take the row",
+				BlockingTransaction: "bump the counter", BlockingStatement: "hold it",
+				BlockingState: "active", BlockingInRun: true,
+				LockType: "transactionid", Mode: "ShareLock", Waits: 4, WaitedMS: 3600,
+			},
+			{
+				BlockedTransaction: "bump the counter", BlockedStatement: "take the row",
+				BlockingState: "idle in transaction", BlockingInRun: false,
+				Relation: "counters", LockType: "tuple", Mode: "ExclusiveLock",
+				Waits: 2, WaitedMS: 400,
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	e := &Env{Out: NewOutput(&buf, &buf)}
+	printSQLLoad(e, res, nil)
+	printed := buf.String()
+	t.Logf("\n%s", printed)
+
+	require.Contains(t, printed,
+		"6 times a client of this run queued for a lock, 3.6s of waiting between them across 3 backends.")
+	// Both statements, in the mix's own words. A pid here would be a number
+	// nobody can act on and would not line up between two runs.
+	require.Contains(t, printed, "bump the counter / take the row")
+	require.Contains(t, printed, "bump the counter / hold it")
+	require.Contains(t, printed, "queued on transactionid, ShareLock, 4 times, 3.6s")
+	// The holder outside the run says so rather than being drawn as one of
+	// this mix's statements, which would send a reader to fix a mix that is
+	// not the problem.
+	require.Contains(t, printed, "waited on another session on this database, idle in transaction")
+	require.Contains(t, printed, "queued on tuple on counters, ExclusiveLock, 2 times, 400ms")
+	// Every name arrives whole. The first draft of this block was a five
+	// column table and at eighty columns it printed "bump the counter..." in
+	// every cell, which is a run that says it blocked and will not say on
+	// what.
+	require.NotContains(t, printed, "...",
+		"a pair was clipped, so the thing a reader came for is the part that was cut")
+	require.Contains(t, printed, "pg_blocking_pids",
+		"the numbers printed without saying what the sampling could not see")
+}
+
+// TestWhatTheSQLWorkloadCommandPrintsWhenNothingQueuedAndWhenNobodyLooked.
+//
+// The pair of lines that must never be confused, asserted together so that a
+// renderer which collapsed them fails here rather than in front of somebody
+// reading a clean bill of health off a run nothing measured.
+func TestWhatTheSQLWorkloadCommandPrintsWhenNothingQueuedAndWhenNobodyLooked(t *testing.T) {
+	none, noneMS, seen := 0, 0.0, 3
+	quiet := &sqlload.Result{
+		Source: sqlload.SourceDeclared, Clients: 3, Transactions: 900,
+		Duration: 2 * time.Second, Refused: []sqlload.Refused{}, BackendsSeen: &seen,
+		LockWaits: &none, LockWaitMS: &noneMS, LockWaitPairs: []sqlload.LockWait{},
+		LockWaitNote: sqlload.LockWaitBound,
+	}
+	var quietBuf bytes.Buffer
+	printSQLLoad(&Env{Out: NewOutput(&quietBuf, &quietBuf)}, quiet, nil)
+	quietOut := quietBuf.String()
+	t.Logf("\n%s", quietOut)
+	require.Contains(t, quietOut, "No client of this run was ever seen waiting for a lock.")
+	require.Contains(t, quietOut, "Sampled every 200ms",
+		"a zero printed with no statement of the resolution it was measured at")
+	require.NotContains(t, quietOut, "not measured")
+
+	unwatched := &sqlload.Result{
+		Source: sqlload.SourceDeclared, Clients: 3, Transactions: 900,
+		Duration: 2 * time.Second, Refused: []sqlload.Refused{}, BackendsSeen: &seen,
+		LockWaitNote: "nothing watched the wait queues, so this run says nothing about " +
+			"whether it blocked, which is not the same as having found no contention",
+	}
+	var unwatchedBuf bytes.Buffer
+	printSQLLoad(&Env{Out: NewOutput(&unwatchedBuf, &unwatchedBuf)}, unwatched, nil)
+	unwatchedOut := unwatchedBuf.String()
+	t.Logf("\n%s", unwatchedOut)
+	require.Contains(t, unwatchedOut, "Lock waits were not measured")
+	require.Contains(t, unwatchedOut, "not the same as having found no contention")
+	require.NotContains(t, unwatchedOut, "No client of this run was ever seen waiting",
+		"an unwatched run was drawn as a run that never queued")
+}

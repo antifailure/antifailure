@@ -228,6 +228,57 @@ the error to go: it can never manufacture the evidence it exists to provide. A
 run whose watching connection could not open reports nothing rather than zero,
 because "no overlap" and "nobody looked" are different answers.
 
+### The contention it was under
+
+A deadlock and a serialization failure end a transaction, so the client sees a
+`SQLSTATE` and the run counts it. The commonest outcome of lock contention ends
+nothing at all: a transaction queues behind another one, gets its lock, and
+commits normally. Nothing is raised, nothing is retried, and a build that takes
+a lock a little earlier or holds it a little longer moves the percentiles and
+changes no other number in the result.
+
+So the same watching connection also asks `pg_blocking_pids` which of this
+run's backends are in a lock queue and which backends are in front of them.
+The run reports how many times one of its clients started waiting, how many
+backend milliseconds of waiting the samples found, and the pairs: the statement
+that waited, the statement that blocked it, the kind of lock and the mode.
+
+Both sides are named with the mix's own statement labels rather than with a
+process id, because the run knows what each of its clients is executing. A
+holder with no statement against it was idle in transaction, which is to say
+holding its locks and doing nothing, and that is usually the finding. A holder
+reported as another session on the database is exactly that: the waiter is
+always one of this run's clients, because nobody else's wait is this run's
+finding, and the holder may be anything else connected to the same database.
+
+```
+  6 times a client of this run queued for a lock, 3.6s of waiting between them across 3 backends.
+
+  BLOCKED                          WAITED ON                     ON                          WAITS  WAITED
+  bump the counter / take the row  bump the counter / hold it    transactionid, ShareLock        4     3.6s
+  bump the counter / take the row  a client of this run, idle    tuple on counters, Exclusive    2     0.4s
+```
+
+The same understatement applies and it is stated in the result rather than left
+to be discovered. The wait queues are sampled every 200 milliseconds, so a wait
+that began and ended between two samples is missing entirely and the counts are
+floors rather than totals. Every lock type the server queues on is in scope,
+including the transaction id waits a row conflict produces, tuple locks and
+advisory locks, and each pair says which kind it was. Contention that never
+becomes a wait is out of scope by definition: a lock granted with nobody ahead
+of it cost nothing.
+
+A run nobody watched reports nothing here rather than zero, and that matters
+more than it does above. Zero lock waits is the most reassuring answer this
+result can give, so an instrument that did not run must not be able to produce
+it.
+
+`af workload compare` differences `lock_waits` and `lock_wait_ms` between two
+runs the way it differences deadlocks and retries, so "this build blocked more
+than the last one" is a sentence the comparison can now make. It differences
+the two numbers rather than the pairs, which stay in `af load sql -o json` and
+in the MCP result.
+
 ## Thresholds
 
 ```yaml

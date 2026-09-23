@@ -243,6 +243,26 @@ type Measured struct {
 	// from a zero.
 	PeakOpenTransactions *int `json:"peak_open_transactions"`
 	BackendsSeen         *int `json:"backends_seen"`
+	// LockWaits and LockWaitMs are the contention the run was SEEN to suffer,
+	// read from the wait queues by the same connection while it ran: how many
+	// times one of its backends started waiting for a lock, and how many
+	// backend milliseconds of waiting the samples found.
+	//
+	// They are here rather than only in the engine's own result because they
+	// are the two numbers a baseline comparison can carry. A deadlock and a
+	// serialization failure end a transaction and were already counted; a
+	// transaction that merely queued committed normally and left no trace, so
+	// a build that holds a lock longer moved the percentiles and changed
+	// nothing else on this struct. "This build blocked more than the last one"
+	// was not a sentence anything here could express.
+	//
+	// Null rather than zero when nothing watched, for a sharper reason than
+	// the two above. Zero contention is the most reassuring answer this
+	// struct can carry, so it must not be producible by an instrument that
+	// never ran: a comparison that read a null as a zero would call the first
+	// watched run a regression and an unwatched one a clean build.
+	LockWaits  *int     `json:"lock_waits"`
+	LockWaitMs *float64 `json:"lock_wait_ms"`
 
 	DurationMs *float64 `json:"duration_ms"`
 	// Source is where the traffic mix came from, so a reader can tell

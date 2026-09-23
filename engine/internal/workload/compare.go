@@ -244,6 +244,7 @@ func measureDifferences(baseline, candidate *Result) []MeasureDifference {
 	serA, serB := ints(baseline.Measured.SerializationFailures, candidate.Measured.SerializationFailures)
 	stmtA, stmtB := ints(baseline.Measured.StatementsRun, candidate.Measured.StatementsRun)
 	rowA, rowB := ints(baseline.Measured.RowsTouched, candidate.Measured.RowsTouched)
+	lockA, lockB := ints(baseline.Measured.LockWaits, candidate.Measured.LockWaits)
 
 	pairs := []pair{
 		{"requests", reqA, reqB, false},
@@ -276,6 +277,14 @@ func measureDifferences(baseline, candidate *Result) []MeasureDifference {
 		{"deadlocks", dlA, dlB, true},
 		{"serialization_failures", serA, serB, true},
 		{"statements_run", stmtA, stmtB, false},
+		// The contention, and it is worse when there is more of it for the
+		// same reason a deadlock is: a build that made its clients queue
+		// longer for the same work is slower for a reason, and this is the
+		// only pair of rows that can say what the reason was. A run that
+		// nobody watched carries nulls, so it produces no row at all rather
+		// than a zero that would read as a build which blocked nothing.
+		{"lock_waits", lockA, lockB, true},
+		{"lock_wait_ms", baseline.Measured.LockWaitMs, candidate.Measured.LockWaitMs, true},
 	}
 
 	out := make([]MeasureDifference, 0, len(pairs))

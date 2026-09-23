@@ -146,6 +146,13 @@ type Statement struct {
 	// Write says the statement changes data. Recorded rather than inferred at
 	// execution time so a report can say what a run was allowed to do.
 	Write bool `json:"write"`
+
+	// ref is this statement's identity, shared by pointer so a client can
+	// publish what it is executing for the price of one atomic store. Filled
+	// once before the run starts, the way a query parameter's pool is, and
+	// unexported because it is bookkeeping rather than part of the mix
+	// anybody writes or reads back.
+	ref *stmtRef
 }
 
 // ParamKind is where one parameter's values come from.
