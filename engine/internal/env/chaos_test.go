@@ -328,3 +328,65 @@ func TestRecoveryOf_CarriesWhatTheProbeSaw(t *testing.T) {
 	require.True(t, got.Recovered)
 	require.Equal(t, int64(100), got.ProbeIntervalMs)
 }
+
+// TestChaosFindings_TheInvariantArmSurvivesAFaultThatEndedInAnError is the
+// restructure this arm forced, and the ordering it exists for.
+//
+// The three fault findings used to RETURN instead of falling through to the
+// proof's, which was right while a fault that ended in an error always meant
+// there was no proof to read. It stopped being right when the proof grew an
+// arm that outlives its own failure: a database that does not come back makes
+// Verify return an error AND is the single most important moment to say that
+// the project's own rules were never asked of a recovered database. A return
+// there dropped the finding entirely.
+func TestChaosFindings_TheInvariantArmSurvivesAFaultThatEndedInAnError(t *testing.T) {
+	got := env.ChaosFindings(
+		report.ChaosFault{
+			Name: "freeze", Injected: true, Undone: true,
+			Error: "AF-CHS-006: the database did not answer a query within 5s",
+		},
+		&pgcrash.Result{Unverified: []pgcrash.Problem{{
+			Rule:   pgcrash.RuleInvariantUnevaluated,
+			Title:  "An invariant could not be asked of this database",
+			Detail: "invariant no-negative-balance was not asked after the recovery",
+		}}},
+		gate(),
+	)
+	require.Len(t, got, 2, "the fault's own finding and the invariant arm's are both facts about this run")
+	require.Equal(t, env.RuleFaultRefused, got[0].Rule)
+	require.Equal(t, pgcrash.RuleInvariantUnevaluated, got[1].Rule)
+	require.Equal(t, report.LevelWarn, got[1].Level,
+		"a rule nobody could ask was reported at the level of one that was checked and found wrong")
+	require.Equal(t, "fault freeze", got[1].Where)
+}
+
+// TestChaosFindings_OnlyTheAttributableInvariantStopsAMerge holds the levels
+// the three invariant rules carry, which is what a merge is actually blocked
+// by.
+//
+// A rule the run INHERITED broken must not stop a merge: the change under test
+// did not break it, and a gate that fails on it teaches a project to switch
+// the whole arm off. A rule that held before the fault and does not hold after
+// it is the one thing here the run can attribute to the fault, and it is the
+// only one that fails.
+func TestChaosFindings_OnlyTheAttributableInvariantStopsAMerge(t *testing.T) {
+	got := env.ChaosFindings(
+		report.ChaosFault{Name: "postgres-crash", Injected: true, Undone: true},
+		&pgcrash.Result{
+			Problems: []pgcrash.Problem{{Rule: pgcrash.RuleInvariantBroken, Title: "broke"}},
+			Unverified: []pgcrash.Problem{
+				{Rule: pgcrash.RuleInvariantAlreadyViolated, Title: "inherited"},
+				{Rule: pgcrash.RuleInvariantUnevaluated, Title: "unasked"},
+			},
+		},
+		gate(),
+	)
+	require.Len(t, got, 3)
+	require.Equal(t, pgcrash.RuleInvariantBroken, got[0].Rule)
+	require.Equal(t, report.LevelFail, got[0].Level,
+		"an invariant the fault broke does not stop the merge by default")
+	require.Equal(t, report.LevelWarn, got[1].Level,
+		"a rule the run inherited broken stops the merge, which blames a change for a defect it did not make")
+	require.Equal(t, report.LevelWarn, got[2].Level,
+		"a rule nobody asked stops the merge as though it had been checked")
+}

@@ -290,7 +290,7 @@ func TestRules_AreAllDistinctAndNamespaced(t *testing.T) {
 		require.Regexp(t, `^chaos\.[a-z_]+\.[a-z_]+$`, r,
 			"a rule outside the chaos namespace would not route to the chaos exit codes")
 	}
-	require.Len(t, pgcrash.Rules(), 12)
+	require.Len(t, pgcrash.Rules(), 15)
 }
 
 // set builds the row set a reconciliation reads.
