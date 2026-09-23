@@ -15,6 +15,7 @@ import (
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/load"
 	"github.com/antifailure/antifailure/engine/internal/manifest"
+	"github.com/antifailure/antifailure/engine/internal/sqlload"
 	"github.com/antifailure/antifailure/engine/internal/workload"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
@@ -50,6 +51,57 @@ type LoadCompareJSON struct {
 	// route's change and interval were computed from. Published so that the
 	// interval can be recomputed by hand, rather than taken on trust.
 	Rounds []workload.RoundP95 `json:"rounds,omitempty"`
+	// SQL is present only when the concurrent SQL workload was compared, and
+	// carries the facts about it that a difference cannot: how many clients
+	// ran, where the mix came from, and each side's own evidence that its
+	// clients really overlapped.
+	//
+	// A new key rather than new keys beside the existing ones, and absent
+	// entirely for an HTTP comparison, so that nothing a reader of the HTTP
+	// document already parses changed name, shape or presence. Which workload
+	// this was is already in comparison.kind, so there is no second field
+	// saying it: two places to read one fact is one place to be wrong.
+	SQL *loadCompareSQLJSON `json:"sql,omitempty"`
+}
+
+// loadCompareSQLJSON is what a SQL comparison knows and a difference does not.
+type loadCompareSQLJSON struct {
+	// Source is "declared" or "statement_statistics" and Description is what a
+	// declared document calls itself.
+	Source      string `json:"source"`
+	Description string `json:"description,omitempty"`
+	// Clients, ThinkTime and RoundTransactions were resolved once and used on
+	// both sides. RoundTransactions is the per client bound ONE ROUND carried,
+	// zero when the rounds were bounded by time alone.
+	Clients           int    `json:"clients"`
+	ThinkTime         string `json:"think_time"`
+	RoundTransactions int    `json:"round_transactions,omitempty"`
+
+	Baseline  loadCompareSQLSideJSON `json:"baseline"`
+	Candidate loadCompareSQLSideJSON `json:"candidate"`
+}
+
+// loadCompareSQLSideJSON is one side's evidence that it ran the way it says.
+//
+// The observation is here rather than folded into the comparison because it is
+// not a difference: N clients are not N concurrent database sessions, and a
+// side whose clients never overlapped measured a serial workload. A
+// comparison of two serial workloads is a perfectly consistent set of numbers
+// about a run nobody asked for, and only these fields can say so. The pointers
+// stay pointers all the way out, because "nobody looked" and "no overlap" are
+// different answers.
+type loadCompareSQLSideJSON struct {
+	PeakActiveBackends   *int           `json:"peak_active_backends"`
+	PeakOpenTransactions *int           `json:"peak_open_transactions"`
+	BackendsSeen         *int           `json:"backends_seen"`
+	ObserverNote         string         `json:"observer_note,omitempty"`
+	ClientsStopped       int            `json:"clients_stopped"`
+	StoppedBecause       map[string]int `json:"stopped_because,omitempty"`
+	// Refused is what the mix would not run. One mix is built for both sides,
+	// so the two lists are the same list; it is carried per side anyway
+	// because a side that reported a different one would be a finding about
+	// this harness rather than about the builds.
+	Refused []sqlload.Refused `json:"refused"`
 }
 
 type loadCompareSideJSON struct {
@@ -67,6 +119,9 @@ func newLoadCompareCommand(e *Env) *cobra.Command {
 	var keep bool
 	var rounds int
 	var warmup time.Duration
+	var sql bool
+	var concurrency, transactions int
+	var thinkTime time.Duration
 	cmd := &cobra.Command{
 		Use:   "compare",
 		Short: "Run the same traffic against the base branch too, and report what moved",
@@ -103,11 +158,22 @@ at once on one host would contend with each other and measure that instead.
 A difference is a difference, and a threshold under load.comparison.thresholds
 is what turns one into a verdict.
 
+With --sql it compares the concurrent SQL workload instead: clients running
+whole transactions against each build's own database rather than requests
+against its application. Same mix, built once on this build so that neither
+side reads its own pg_stat_statements, same client count, same think time and
+the same per round seed. The unit of comparison becomes the transaction and
+the statement inside it, and each one reports p50, p95 and p99 on both sides.
+Throughput becomes committed transactions a second, judged against the same
+load.comparison.thresholds.throughput_drop. It needs a load.sql block and
+refuses without one.
+
 The base environment is torn down unless --keep says otherwise. The
 environment for this build is left running whether or not this brought it up.`),
 		Example: strings.TrimSpace(`
 af load compare
 af load compare --baseline origin/main --duration 60s
+af load compare --sql --concurrency 16
 af load compare --seed 7 --keep`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -135,14 +201,32 @@ af load compare --seed 7 --keep`),
 					"set load.comparison.enabled to true to run it")
 				return nil
 			}
+			if err := checkSQLCompareFlags(cmd.Flags(), sql, m); err != nil {
+				return err
+			}
 
-			e.Out.Section("Comparing against the base branch")
+			if sql {
+				e.Out.Section("Comparing the SQL workload against the base branch")
+			} else {
+				e.Out.Section("Comparing against the base branch")
+			}
 			res, err := o.LoadCompare(cmd.Context(), env.LoadCompareOptions{
 				Baseline: cfg.Baseline,
 				BaseRef:  orDefaultString(baseRef, cfg.BaseRef),
 				Duration: duration, Scale: scale, Seed: seed, Keep: keep,
 				Rounds: rounds, Warmup: warmup,
 				NoWarmup: noWarmup(cmd.Flags(), warmup),
+				// Passed only when they were typed, for the reason loadRate
+				// documents at length: a flag holds its default whether or not
+				// anybody set it, and passing a default down as a choice is
+				// what made load.scale unreachable from the command line. Here
+				// it would silently override load.sql.clients with eight on
+				// every run.
+				SQL:     sql,
+				Clients: changedInt(cmd.Flags(), "concurrency", concurrency),
+				Transactions: changedInt(
+					cmd.Flags(), "transactions", transactions),
+				ThinkTime: changedDuration(cmd.Flags(), "think-time", thinkTime),
 				// Each round is a step on the status line, so that "on this
 				// step" measures the round in flight rather than the whole
 				// compare since the environment came up.
@@ -179,15 +263,43 @@ af load compare --seed 7 --keep`),
 			if manifestPath, perr := manifest.Find(e.WorkDir); perr == nil {
 				digest = manifestDigest(manifestPath)
 			}
-			baseline := workload.ProjectLoad(res.Baseline, workload.ProjectLoadOptions{
-				Branch: res.BaselineBranch, Command: "af load run",
-				ManifestDigest: digest, P95Increase: p95Increase, ErrorRate: errorRate,
-			})
-			candidate := workload.ProjectLoad(res.Candidate, workload.ProjectLoadOptions{
-				EnvID: o.EnvID(), Branch: o.Branch(),
-				Command: "af load run", ManifestDigest: digest,
-				P95Increase: p95Increase, ErrorRate: errorRate,
-			})
+			// One projection per workload, each carrying its OWN per side
+			// thresholds: load.thresholds for the mix and load.sql.thresholds
+			// for the SQL workload. Those are the single run limits, measured
+			// against production or against what the statistics said the
+			// statements used to cost, and they are here so that a verdict
+			// TRANSITION between the two sides is visible. The base branch
+			// deltas under load.comparison.thresholds are a different question
+			// and Judge evaluates them over both sides at once, below.
+			var baseline, candidate *workload.Result
+			var rounds []workload.RoundP95
+			if sql {
+				meanIncrease, sqlErrorRate := o.SQLThresholds()
+				baseline = workload.ProjectSQLLoad(res.BaselineSQL,
+					workload.ProjectSQLLoadOptions{
+						Branch: res.BaselineBranch, Command: "af load sql",
+						ManifestDigest: digest,
+						MeanIncrease:   meanIncrease, ErrorRate: sqlErrorRate,
+					})
+				candidate = workload.ProjectSQLLoad(res.CandidateSQL,
+					workload.ProjectSQLLoadOptions{
+						EnvID: o.EnvID(), Branch: o.Branch(),
+						Command: "af load sql", ManifestDigest: digest,
+						MeanIncrease: meanIncrease, ErrorRate: sqlErrorRate,
+					})
+				rounds = sqlRoundP95s(res)
+			} else {
+				baseline = workload.ProjectLoad(res.Baseline, workload.ProjectLoadOptions{
+					Branch: res.BaselineBranch, Command: "af load run",
+					ManifestDigest: digest, P95Increase: p95Increase, ErrorRate: errorRate,
+				})
+				candidate = workload.ProjectLoad(res.Candidate, workload.ProjectLoadOptions{
+					EnvID: o.EnvID(), Branch: o.Branch(),
+					Command: "af load run", ManifestDigest: digest,
+					P95Increase: p95Increase, ErrorRate: errorRate,
+				})
+				rounds = roundP95s(res)
+			}
 			comparison, err := workload.Compare(baseline, candidate)
 			if err != nil {
 				return err
@@ -195,7 +307,6 @@ af load compare --seed 7 --keep`),
 			// Round against round wherever there are rounds to pair. The
 			// pooled comparison above is kept only for the run wide measures
 			// and for a single pass, whose notes say what it cannot see.
-			rounds := roundP95s(res)
 			if len(rounds) >= 2 {
 				workload.ResolveByRounds(comparison, rounds)
 			}
@@ -206,32 +317,21 @@ af load compare --seed 7 --keep`),
 			verdict := workload.ComparisonOutcome(judged)
 
 			if e.Out.Format == FormatJSON {
-				doc := LoadCompareJSON{
-					Comparison: comparison, Judged: judged, Verdict: verdict,
-					Baseline:         loadCompareSideJSON{Rev: res.Rev, How: res.How},
-					Candidate:        loadCompareSideJSON{Rev: res.CandidateRev},
-					Golden:           res.Golden,
-					BaselineTornDown: res.BaselineTornDown,
-					BaselineBranch:   res.BaselineBranch,
-					Notes:            comparison.Notes,
-					Rounds:           rounds,
-				}
-				if err := e.Out.JSON(doc); err != nil {
+				if err := e.Out.JSON(
+					loadCompareDoc(res, comparison, judged, verdict, rounds),
+				); err != nil {
 					return err
 				}
 				return loadCompareExit(thresholds, judged, verdict)
 			}
 
-			renderLoadComparison(e, res, comparison, judged, verdict)
+			if sql {
+				renderSQLComparison(e, res, comparison, judged, verdict)
+			} else {
+				renderLoadComparison(e, res, comparison, judged, verdict)
+			}
 			if output != "" {
-				doc := LoadCompareJSON{
-					Comparison: comparison, Judged: judged, Verdict: verdict,
-					Baseline:  loadCompareSideJSON{Rev: res.Rev, How: res.How},
-					Candidate: loadCompareSideJSON{Rev: res.CandidateRev},
-					Golden:    res.Golden, BaselineTornDown: res.BaselineTornDown,
-					BaselineBranch: res.BaselineBranch, Notes: comparison.Notes,
-					Rounds: rounds,
-				}
+				doc := loadCompareDoc(res, comparison, judged, verdict, rounds)
 				body, merr := json.MarshalIndent(doc, "", "  ")
 				if merr != nil {
 					return merr
@@ -258,6 +358,26 @@ af load compare --seed 7 --keep`),
 	cmd.Flags().DurationVar(&warmup, "warmup", 0, fmt.Sprintf(
 		"Mix sent at each side and discarded before measuring, %s when not set. 0s sends none",
 		env.DefaultCompareWarmup))
+	// An explicit flag, never an inference. The alternative considered and
+	// rejected was comparing the SQL workload whenever load.sql is declared
+	// and the HTTP mix otherwise, which would silently change what `af load
+	// compare` measures in every repository that adds a load.sql block, and
+	// change it in a pipeline rather than in front of somebody. A flag is one
+	// word to type and it can be read in a log six months later.
+	cmd.Flags().BoolVar(&sql, "sql", false,
+		"Compare the SQL workload from load.sql instead of the HTTP mix")
+	// The three SQL knobs take the same names af load sql gives them, because
+	// a flag that means one thing under one command and is spelled differently
+	// under another is a flag people get wrong. Each one applies to BOTH sides
+	// and there is deliberately no way to set one per side.
+	cmd.Flags().IntVar(&concurrency, "concurrency", 8,
+		"Clients each side runs at once, overriding load.sql.clients. Needs --sql")
+	cmd.Flags().IntVar(&transactions, "transactions", 0,
+		"Transactions each client runs, split across the rounds, overriding "+
+			"load.sql.transactions. Needs --sql")
+	cmd.Flags().DurationVar(&thinkTime, "think-time", 0,
+		"How long a client waits between transactions, overriding load.sql.think_time. "+
+			"Needs --sql")
 	cmd.Flags().BoolVar(&keep, "keep", false,
 		"Leave the base environment up, for looking at a difference")
 	// --report rather than --output, for the reason af oracle and af ci both
@@ -266,6 +386,176 @@ af load compare --seed 7 --keep`),
 	// file literally named json.
 	cmd.Flags().StringVar(&output, "report", "", "Write the comparison here as well as to the terminal")
 	return cmd
+}
+
+// checkSQLCompareFlags refuses a combination that cannot mean what it says.
+//
+// Three refusals and each one is a question with no honest answer rather than
+// a matter of taste.
+//
+// --sql without a load.sql block asks for a workload that does not exist. It
+// is AF-LOD-017, the same code `af load sql` refuses with for the same missing
+// block, because it is the same fact and a second code for it would be a
+// second thing to look up.
+//
+// A SQL knob without --sql would be read as a choice and used for nothing. It
+// is refused rather than ignored: the same flag SET and IGNORED is how
+// load.scale spent months unreachable from the command line, and the person
+// who typed --concurrency 32 deserves to know it did nothing before the run
+// rather than after.
+//
+// --scale with --sql is the same defect pointed the other way. Scale is a
+// fraction of production's ARRIVAL RATE, and a SQL workload has no arrival
+// rate at all: its clients run transactions back to back with think time
+// between them. Accepting it silently would report a run at a concurrency
+// nobody chose under a number the reader believes they set.
+func checkSQLCompareFlags(flags *pflag.FlagSet, sql bool, m *schema.Manifest) error {
+	sqlKnobs := []string{"concurrency", "transactions", "think-time"}
+	if !sql {
+		for _, name := range sqlKnobs {
+			if flags.Changed(name) {
+				return aferrors.Coded(aferrors.AFLOD010,
+					"detail", "--"+name+" configures the SQL workload and this comparison is "+
+						"sending the HTTP mix, so it would be read and used for nothing; add "+
+						"--sql, or drop it")
+			}
+		}
+		return nil
+	}
+	if flags.Changed("scale") {
+		return aferrors.Coded(aferrors.AFLOD017,
+			"detail", "--scale is a fraction of production's arrival rate and the SQL workload "+
+				"has none: its clients run transactions back to back with think time between "+
+				"them. Use --concurrency to change how many clients run, or --think-time to "+
+				"change the wait between transactions")
+	}
+	if m == nil || m.Load == nil || m.Load.SQL == nil {
+		return aferrors.Coded(aferrors.AFLOD017,
+			"detail", "--sql compares the workload under load.sql and this manifest declares "+
+				"no load.sql block, so there is no workload to run on either side; declare one, "+
+				"or drop --sql to compare the HTTP mix")
+	}
+	return nil
+}
+
+// changedInt and changedDuration pass a flag's value down only when somebody
+// typed it.
+//
+// A cobra flag holds its default whether or not anybody set it, so passing the
+// variable straight down hands the engine a DEFAULT dressed as a CHOICE, and
+// the manifest key it was meant to fall back on becomes unreachable. That is
+// not a hypothetical: it is how load.scale was unreachable from the command
+// line while `af explain` read the manifest's value back correctly.
+func changedInt(flags *pflag.FlagSet, name string, v int) int {
+	if flags.Changed(name) {
+		return v
+	}
+	return 0
+}
+
+func changedDuration(flags *pflag.FlagSet, name string, v time.Duration) time.Duration {
+	if flags.Changed(name) {
+		return v
+	}
+	return 0
+}
+
+// sqlRoundP95s pairs the two sides' rounds as each UNIT's p95 in that round.
+//
+// The same pairing roundP95s does for routes, over the two units a SQL
+// workload has: the transaction, keyed by its name alone, and the statement,
+// keyed by its transaction and its label. The keys are built with
+// workload.UnitKey rather than by hand, because the row this feeds is found by
+// exactly that string and a second spelling of it would not error: the unit
+// would simply never find its rounds and report "too few rounds ran this unit
+// on both sides" forever.
+//
+// A unit a round did not run, or ran only failures of, is absent from that
+// round rather than recorded as zero, for the same reason a route is: a zero
+// enters the log ratio as an infinitely fast round.
+func sqlRoundP95s(res *env.LoadCompareResult) []workload.RoundP95 {
+	n := len(res.BaselineSQLRounds)
+	if len(res.CandidateSQLRounds) < n {
+		n = len(res.CandidateSQLRounds)
+	}
+	perUnit := func(r *sqlload.Result) map[string]float64 {
+		out := map[string]float64{}
+		if r == nil {
+			return out
+		}
+		for _, tx := range r.PerTransaction {
+			if tx.Executed > 0 && tx.Latency.P95Ms > 0 {
+				out[workload.UnitKey("", tx.Name)] = tx.Latency.P95Ms
+			}
+		}
+		for _, st := range r.PerStatement {
+			if st.Executed > 0 && st.Latency.P95Ms > 0 {
+				out[workload.UnitKey(st.Transaction, st.Label)] = st.Latency.P95Ms
+			}
+		}
+		return out
+	}
+	out := make([]workload.RoundP95, 0, n)
+	for k := 0; k < n; k++ {
+		out = append(out, workload.RoundP95{
+			Base: perUnit(res.BaselineSQLRounds[k]), Candidate: perUnit(res.CandidateSQLRounds[k]),
+		})
+	}
+	return out
+}
+
+// loadCompareDoc is the machine readable document, built in one place.
+//
+// One constructor rather than two identical literals, which is what it was:
+// the JSON output and the --report file each built their own and the two had
+// to be kept in step by eye. A field added to one and not the other is a
+// report file that carries less than the same command's stdout.
+func loadCompareDoc(
+	res *env.LoadCompareResult, comparison *workload.Comparison,
+	judged []workload.ComparisonVerdict, verdict string, rounds []workload.RoundP95,
+) LoadCompareJSON {
+	return LoadCompareJSON{
+		Comparison: comparison, Judged: judged, Verdict: verdict,
+		Baseline:         loadCompareSideJSON{Rev: res.Rev, How: res.How},
+		Candidate:        loadCompareSideJSON{Rev: res.CandidateRev},
+		Golden:           res.Golden,
+		BaselineTornDown: res.BaselineTornDown,
+		BaselineBranch:   res.BaselineBranch,
+		Notes:            comparison.Notes,
+		Rounds:           rounds,
+		SQL:              loadCompareSQLDoc(res),
+	}
+}
+
+// loadCompareSQLDoc is nil for an HTTP comparison, so the key is absent from
+// the document rather than present and empty.
+func loadCompareSQLDoc(res *env.LoadCompareResult) *loadCompareSQLJSON {
+	if !res.SQL {
+		return nil
+	}
+	return &loadCompareSQLJSON{
+		Source: res.SQLSource, Description: res.SQLDescription,
+		Clients: res.Clients, ThinkTime: res.ThinkTime.String(),
+		RoundTransactions: res.RoundTransactions,
+		Baseline:          sqlCompareSideDoc(res.BaselineSQL),
+		Candidate:         sqlCompareSideDoc(res.CandidateSQL),
+	}
+}
+
+func sqlCompareSideDoc(r *sqlload.Result) loadCompareSQLSideJSON {
+	if r == nil {
+		return loadCompareSQLSideJSON{Refused: []sqlload.Refused{}}
+	}
+	out := loadCompareSQLSideJSON{
+		PeakActiveBackends: r.PeakActiveBackends, PeakOpenTransactions: r.PeakOpenTransactions,
+		BackendsSeen: r.BackendsSeen, ObserverNote: r.ObserverNote,
+		ClientsStopped: r.ClientsStopped, StoppedBecause: r.StoppedBecause,
+		Refused: r.Refused,
+	}
+	if out.Refused == nil {
+		out.Refused = []sqlload.Refused{}
+	}
+	return out
 }
 
 // roundP95s pairs the two sides' rounds, round k with round k, as each route's
@@ -412,6 +702,21 @@ func renderLoadComparison(
 			{Title: "change"}, {Title: "moved"}, {Title: "can see"}}, routes)
 	}
 
+	renderComparisonTail(e, c, judged, verdict)
+}
+
+// renderComparisonTail is everything after the tables: what broke, what could
+// not be measured, what could not be resolved, what the comparison cannot see,
+// and the verdict.
+//
+// Shared between the two workloads rather than written twice, and it is the
+// part that most needs to be: every block in it exists because a comparison
+// once reported a number without one of them. A second copy for the SQL path
+// would be a second place for one of these blocks to go missing, and the
+// symptom of a missing block here is silence, which reads as a clean run.
+func renderComparisonTail(
+	e *Env, c *workload.Comparison, judged []workload.ComparisonVerdict, verdict string,
+) {
 	breaches := workload.ComparisonBreaches(judged)
 	if len(breaches) > 0 {
 		e.Out.Println("")

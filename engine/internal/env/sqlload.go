@@ -46,6 +46,30 @@ type SQLLoadOptions struct {
 	Select []string
 	// Progress receives a line a second and may be nil.
 	Progress func(sqlload.Progress)
+
+	// Mix, when set, is the exact workload to run, and nothing is built: the
+	// manifest's source is not read, the document it names is not opened, and
+	// pg_stat_statements on the branch is not queried.
+	//
+	// It exists for the two build comparison and for nothing else. A DERIVED
+	// mix is read from the statistics of the database it is about to run
+	// against, so two environments would produce two mixes, weighted by
+	// whatever each one's own startup happened to execute. Comparing those and
+	// calling the difference a regression would be comparing two different
+	// workloads, which is the one thing a comparison must never do. So the
+	// comparison builds the mix once, on this build, and hands the same object
+	// to both sides.
+	Mix *sqlload.Mix
+	// Resolved says Clients, Duration, Transactions and ThinkTime above are
+	// already settled and the manifest must not be consulted for any of them.
+	//
+	// Separate from "the field is non zero", because ZERO IS A CHOICE for
+	// three of the four. A comparison that resolved think_time to nothing
+	// would, without this, fall through to the manifest on each side and wait
+	// between transactions on whichever side declared one. The same is true of
+	// a transaction bound of zero and of a duration of zero, and each of those
+	// silently compares two different workloads.
+	Resolved bool
 }
 
 // SQLLoadPlan is a resolved workload: the mix, the knobs, and what the mix
@@ -109,6 +133,45 @@ func (o *Orchestrator) SQLLoad(ctx context.Context, opts SQLLoadOptions) (*sqllo
 	return res, plan, err
 }
 
+// sqlLoadMix resolves the workload without running it.
+//
+// Unexported, and that is deliberate rather than an oversight. It is a step
+// inside the two build comparison, not a capability anybody can ask for: there
+// is no command and no tool that resolves a workload and stops. Exporting it
+// would put a method on the orchestrator's surface that only one caller in
+// this package uses, which is the shape tools/paritycheck exists to find.
+//
+// It exists for the two build comparison, which has to settle the mix and
+// every knob ONCE, on this build, and then hand the same values to both sides.
+// Resolving them per side is how two environments end up running two
+// workloads: a derived mix is read from the database it is about to run
+// against, so each side would weight the statements by its own startup.
+//
+// It opens a connection because a derived mix needs one, and closes it again.
+// A declared mix needs none and opens one anyway rather than branching on the
+// source here, because the connection string is also what proves the database
+// this comparison is about is reachable at all, before the first round is sent
+// rather than after the warm-up.
+func (o *Orchestrator) sqlLoadMix(ctx context.Context, opts SQLLoadOptions) (*SQLLoadPlan, error) {
+	cfg := o.opts.Manifest.Load
+	if cfg == nil || cfg.SQL == nil {
+		return nil, aferrors.Coded(aferrors.AFLOD017,
+			"detail", "the manifest declares no load.sql block, so there is no workload to run")
+	}
+	s, err := o.openReading(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer s.close()
+
+	url, err := s.dbProv.ConnString(ctx, provider.Branch{EnvID: o.envID}, provider.ConnDirect)
+	if err != nil {
+		return nil, aferrors.Coded(aferrors.AFLOD017, "detail", err.Error())
+	}
+	o.opts.Redactor.Register(url.Reveal())
+	return o.sqlLoadPlan(ctx, cfg.SQL, url.Reveal(), opts)
+}
+
 // sqlLoadPlan resolves every knob and builds the mix.
 func (o *Orchestrator) sqlLoadPlan(ctx context.Context, cfg *schema.LoadSQL, url string, opts SQLLoadOptions) (*SQLLoadPlan, error) {
 	plan := ResolveSQLLoad(cfg, opts)
@@ -116,8 +179,12 @@ func (o *Orchestrator) sqlLoadPlan(ctx context.Context, cfg *schema.LoadSQL, url
 	var mix *sqlload.Mix
 	var description string
 	var err error
-	switch cfg.Source {
-	case schema.SQLStatementStatistics:
+	switch {
+	case opts.Mix != nil:
+		// Handed in whole, so neither the document nor the statistics is read
+		// on this side. See SQLLoadOptions.Mix.
+		mix = opts.Mix
+	case cfg.Source == schema.SQLStatementStatistics:
 		mix, err = o.deriveSQLMix(ctx, cfg, url)
 	default:
 		mix, description, err = readSQLScript(o.opts.Root, cfg.Script)
@@ -147,6 +214,16 @@ func (o *Orchestrator) sqlLoadPlan(ctx context.Context, cfg *schema.LoadSQL, url
 // precedence was written three times before that function existed and two of
 // the three disagreed.
 func ResolveSQLLoad(cfg *schema.LoadSQL, opts SQLLoadOptions) *SQLLoadPlan {
+	if opts.Resolved {
+		// Nothing below runs. A caller that has already settled every knob is
+		// saying so precisely because it must hand both sides of a comparison
+		// the same values, and reading the manifest here for the one field
+		// that happens to be zero is how the two sides diverge.
+		return &SQLLoadPlan{
+			Clients: opts.Clients, Duration: opts.Duration,
+			Transactions: opts.Transactions, ThinkTime: opts.ThinkTime,
+		}
+	}
 	plan := &SQLLoadPlan{Clients: 8, Duration: 60 * time.Second}
 	if cfg != nil {
 		if cfg.Clients > 0 {
