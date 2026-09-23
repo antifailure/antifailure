@@ -131,6 +131,36 @@ func TestAFailedSampleDoesNotMakeTheNextOneLookLikeAContinuation(t *testing.T) {
 	require.Equal(t, "the wait queues could not be read: boom", totals.note)
 }
 
+// TestASampleThatLandedAndOneThatFailedReportBothHalves.
+//
+// The note a run carries when its wait queue reading was interrupted has to say
+// that a reading was LOST, not that the counts stop there. Only the first
+// failure is kept, so a run whose opening sample timed out under load and whose
+// every later sample succeeded carries the same note, and "the counts stop
+// here" would be a false claim about a run that recovered. The instrument's own
+// limits still have to be attached, because the numbers are real.
+func TestASampleThatLandedAndOneThatFailedReportBothHalves(t *testing.T) {
+	o := &observer{pids: map[int32]bool{}, locks: newLockTotals()}
+	// The failure first and the good samples after, which is the ordering that
+	// catches a note claiming sampling stopped.
+	o.locks.failed("the wait queues could not be read: timed out")
+	o.locks.add(sampleFrom(map[int32]LockWait{101: aWait("take the row", "hold it")}),
+		testIntervalMS)
+	o.locks.add(sampleFrom(nil), testIntervalMS)
+
+	var res Result
+	o.locksInto(&res)
+
+	require.NotNil(t, res.LockWaits, "samples landed and the result reports nothing")
+	require.Equal(t, 1, *res.LockWaits)
+	require.Contains(t, res.LockWaitNote, "timed out")
+	require.Contains(t, res.LockWaitNote, "at least one reading of them was lost")
+	require.Contains(t, res.LockWaitNote, "pg_blocking_pids",
+		"a partly sampled run lost the instrument's own limits")
+	require.NotContains(t, res.LockWaitNote, "stop at whatever",
+		"a run that recovered was told its counts stopped at the failure")
+}
+
 // TestOnlyTheFirstFailureIsKept, for the reason the backend observer keeps
 // only its first: a database that went away produces one informative reason
 // and then one identical reason every 200 milliseconds for the rest of the run.

@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -174,6 +176,55 @@ func TestWhatTheSQLWorkloadCommandPrintsAboutLockContention(t *testing.T) {
 		"a pair was clipped, so the thing a reader came for is the part that was cut")
 	require.Contains(t, printed, "pg_blocking_pids",
 		"the numbers printed without saying what the sampling could not see")
+
+	// And the documented block is THIS output rather than somebody's
+	// impression of it.
+	//
+	// Worth its own assertion because nothing else could say no about it. The
+	// first draft of this renderer was a table, the concepts page was written
+	// against that table, the renderer became a list, and every gate stayed
+	// green over a page showing output the product does not produce.
+	// docexamples checks that commands in the documentation exist and
+	// figurecheck checks that figures have a source; neither reads a fenced
+	// block of program output.
+	requireDocumentedBlock(t, "The contention it was under", printed)
+}
+
+// requireDocumentedBlock asserts every line of the first fenced block under a
+// heading in the SQL workloads page appears in what the renderer produced.
+//
+// Line by line rather than as one string, so a page that has drifted names the
+// line that drifted instead of printing two screens of output and leaving the
+// reader to diff them.
+func requireDocumentedBlock(t *testing.T, heading, printed string) {
+	t.Helper()
+	page, err := os.ReadFile(filepath.Join(
+		"..", "..", "..", "docs", "src", "content", "docs", "concepts", "sql-workloads.md"))
+	require.NoError(t, err, "the page this block is quoted from is not in the tree")
+
+	rest := string(page)
+	at := strings.Index(rest, "### "+heading)
+	require.Positive(t, at, "the page has no %q section, so this test is checking nothing", heading)
+	rest = rest[at:]
+
+	open := strings.Index(rest, "```")
+	require.Positive(t, open, "the section quotes no output block")
+	rest = rest[open+3:]
+	rest = rest[strings.Index(rest, "\n")+1:]
+	end := strings.Index(rest, "```")
+	require.Positive(t, end, "the block is not closed")
+
+	lines := 0
+	for _, line := range strings.Split(rest[:end], "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		lines++
+		require.Contains(t, printed, line,
+			"the page shows a line this renderer does not produce")
+	}
+	require.GreaterOrEqual(t, lines, 4,
+		"fewer lines were compared than the block has, so this check could pass over nothing")
 }
 
 // TestWhatTheSQLWorkloadCommandPrintsWhenNothingQueuedAndWhenNobodyLooked.

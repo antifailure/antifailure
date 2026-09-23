@@ -289,12 +289,19 @@ func (o *observer) locksInto(res *Result) {
 
 	res.LockWaitNote = LockWaitBound
 	if o.locks.note != "" {
-		// Sampling that started and then broke reports both halves. The
-		// numbers are real and they stopped part way through, and a reader
-		// given only the first of those would read a truncated measurement as
-		// a complete one.
-		res.LockWaitNote = o.locks.note + ", so these counts stop at whatever had been " +
-			"sampled by then. " + LockWaitBound
+		// Sampling that landed at least once and also failed at least once
+		// reports both halves.
+		//
+		// "at least one reading was lost" rather than "the counts stop here",
+		// and the difference is not pedantry. Only the FIRST failure is kept,
+		// for the reason the observer keeps only its first, so a run whose
+		// opening sample timed out under load and whose every later sample
+		// succeeded carries this note too. Saying sampling stopped would be a
+		// false claim about a run that recovered. What is true either way is
+		// that a reading was lost and the floor is lower for it, which is the
+		// direction this whole measurement already errs in.
+		res.LockWaitNote = o.locks.note + ", so at least one reading of them was lost and " +
+			"these counts are lower for it. " + LockWaitBound
 	}
 	if o.locks.dropped > 0 {
 		res.LockWaitNote += fmt.Sprintf(" %d further distinct blocking pairs were seen and "+

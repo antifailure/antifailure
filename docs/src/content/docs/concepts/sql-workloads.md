@@ -254,9 +254,12 @@ finding, and the holder may be anything else connected to the same database.
 ```
   6 times a client of this run queued for a lock, 3.6s of waiting between them across 3 backends.
 
-  BLOCKED                          WAITED ON                     ON                          WAITS  WAITED
-  bump the counter / take the row  bump the counter / hold it    transactionid, ShareLock        4     3.6s
-  bump the counter / take the row  a client of this run, idle    tuple on counters, Exclusive    2     0.4s
+    bump the counter / take the row
+      waited on bump the counter / hold it
+      queued on transactionid, ShareLock, 4 times, 3.6s
+    bump the counter / take the row
+      waited on another session on this database, idle in transaction
+      queued on tuple on counters, ExclusiveLock, 2 times, 400ms
 ```
 
 The same understatement applies and it is stated in the result rather than left
