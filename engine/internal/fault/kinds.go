@@ -8,9 +8,12 @@ import (
 	"strings"
 
 	cerrdefs "github.com/containerd/errdefs"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
 
+	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 )
 
@@ -328,7 +331,20 @@ func (i *Injector) diskFill(ctx context.Context, c Container, f Fault) (string, 
 	if devs[0] == devs[1] {
 		return "", nil, aferrors.Coded(aferrors.AFCHS005,
 			"fault", f.Name, "target", name(c), "path", dir,
-			"detail", "it shares a filesystem with its parent, so filling it would fill the daemon's disk and every other container on this machine with it")
+			"detail", "it shares a filesystem with its parent, which is the container's writable layer and therefore the daemon's own disk, so filling it would fill every other container on this machine with it")
+	}
+	// A filesystem of its own is necessary and it is not sufficient.
+	//
+	// The device check above answers "is this directory a mount", and a mount
+	// can still be a slice of the daemon's disk: a named volume is its own
+	// mount, passes that check, and filling it takes the machine's space just
+	// as surely as filling the writable layer does. It would take it HAVING
+	// satisfied the guard, which is worse than being refused. So the mount is
+	// read from the daemon and it has to be one this environment created with a
+	// size fixed at creation, which is the only arrangement whose blast radius
+	// this package can state.
+	if err := i.boundedToThisEnvironment(ctx, c, f, dir); err != nil {
+		return "", nil, err
 	}
 	free, err := i.freeBytes(ctx, c, dir)
 	if err != nil {
@@ -378,6 +394,55 @@ func (i *Injector) diskFill(ctx context.Context, c Container, f Fault) (string, 
 			"detail", fmt.Sprintf("the filesystem holding %s reports %d bytes free after the fill and %d before, so nothing was filled", dir, after, free))
 	}
 	return fmt.Sprintf("filled %s in %s from %d bytes free to %d", dir, name(c), free, after), undo, nil
+}
+
+// boundedToThisEnvironment refuses a fill whose size this package cannot state.
+//
+// Read from the daemon rather than from inside the container, for the reason
+// every ownership check in this package is: what a container says about itself
+// is what a fault could have changed, and the daemon is the one party that
+// knows which volume it mounted where and how it was created.
+//
+// The three questions, and each is a separate refusal because they send
+// somebody to different places: is the data directory a mount at all, is the
+// mount a volume this environment owns, and is that volume's size fixed.
+func (i *Injector) boundedToThisEnvironment(ctx context.Context, c Container, f Fault, dir string) error {
+	refuse := func(detail string) error {
+		return aferrors.Coded(aferrors.AFCHS005,
+			"fault", f.Name, "target", name(c), "path", dir, "detail", detail)
+	}
+	state, err := i.inspect(ctx, c.ID)
+	if err != nil {
+		return codedExec(f, c, err.Error())
+	}
+	var mounted *container.MountPoint
+	for idx := range state.Mounts {
+		if strings.TrimSuffix(state.Mounts[idx].Destination, "/") == strings.TrimSuffix(dir, "/") {
+			mounted = &state.Mounts[idx]
+			break
+		}
+	}
+	if mounted == nil {
+		return refuse("the daemon reports no mount at it, so the filesystem it is on is one this environment did not create and whose size nothing here can state")
+	}
+	if mounted.Type != mount.TypeVolume || mounted.Name == "" {
+		return refuse(fmt.Sprintf("it is a %s mount rather than a volume this environment created, so how much of the machine filling it would take is not this run's to know",
+			mounted.Type))
+	}
+	vol, err := i.cli.VolumeInspect(ctx, mounted.Name, client.VolumeInspectOptions{})
+	if err != nil {
+		return codedExec(f, c, fmt.Sprintf("inspecting the volume %s mounted at %s: %v", mounted.Name, dir, err))
+	}
+	if !dockerutil.IsOurs(vol.Volume.Labels) || vol.Volume.Labels[dockerutil.LabelEnv] != i.envID {
+		return refuse("the volume " + mounted.Name + " mounted at it belongs to something other than this environment, and a fault may only fill what its own environment owns")
+	}
+	// The size, read from the options the volume was created with. A volume
+	// without one is a directory on the daemon's disk however it is mounted,
+	// and filling it fills the machine.
+	if vol.Volume.Options["type"] != "tmpfs" || !strings.Contains(vol.Volume.Options["o"], "size=") {
+		return refuse("the volume " + mounted.Name + " mounted at it has no size fixed at creation, so filling it would take space from the daemon's disk and every other container on this machine")
+	}
+	return nil
 }
 
 // freeBytes is how much room the filesystem holding dir has.

@@ -443,6 +443,21 @@ errors:
     retryable: false
     exit_code: 3
 
+  - code: AF-DB-042
+    area: DB
+    message: "database.data_filesystem.size_bytes asks for {declared} bytes and the Docker daemon reports {memory} bytes of memory."
+    next_step: "Lower database.data_filesystem.size_bytes to under half of that, or give the daemon more memory. The filesystem that key asks for is held in memory, which is what stops a disk_fill fault reaching the machine's disk; one larger than the machine would move the same problem from the disk to the memory, and a daemon killed for memory takes every other environment on it too."
+    docs: guides/chaos
+    retryable: false
+    exit_code: 3
+  - code: AF-DB-043
+    area: DB
+    message: "The data directory does not fit in the filesystem database.data_filesystem.size_bytes asks for: {used} bytes of data into {declared} bytes."
+    next_step: "Raise database.data_filesystem.size_bytes above the size of the data directory, with room left over for the fault to fill. The copy is refused rather than truncated, because half a data directory is a database that starts and is missing rows."
+    docs: guides/chaos
+    retryable: false
+    exit_code: 3
+
   # Masking
   - code: AF-MSK-001
     area: MSK
@@ -1552,7 +1567,7 @@ errors:
   - code: AF-CHS-005
     area: CHS
     message: "The fault {fault} is refused because its effect would reach past {target}: {detail}"
-    next_step: "A fault may only affect the environment that declared it. Narrow the fault, or give the target the dedicated volume the fault needs."
+    next_step: "A fault may only affect the environment that declared it. For disk_fill that means the data directory needs a filesystem of its own, which database.data_filesystem.size_bytes gives it: declare a size that holds the database with room left to fill, and the fill lands inside the environment instead of on the machine's disk. Narrow the fault if the refusal was the cap rather than the layout."
     docs: guides/chaos
     retryable: false
     exit_code: 3

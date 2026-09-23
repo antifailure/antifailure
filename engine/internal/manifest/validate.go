@@ -624,6 +624,8 @@ func (v *validator) database(m *schema.Manifest) {
 			named = "database.extensions"
 		case len(d.PreloadLibraries) > 0:
 			named = "database.preload_libraries"
+		case d.DataFilesystem != nil:
+			named = "database.data_filesystem"
 		}
 		if named != "" {
 			v.add(named,

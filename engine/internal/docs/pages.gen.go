@@ -9247,7 +9247,7 @@ afterwards is a durability failure whatever caused it.
 | ` + "`" + `container_pause` + "`" + ` | Freezes every process with the cgroup freezer. Nothing is killed and no connection closes. | Thaws it. |
 | ` + "`" + `network_partition` + "`" + ` | Detaches the container from the environment's network. | Attaches it again, with the aliases it had. |
 | ` + "`" + `read_only_data` + "`" + ` | Removes write permission from the data directory. | Restores the mode it recorded. |
-| ` + "`" + `disk_fill` + "`" + ` | Fills the filesystem holding the data directory to a stated headroom. | Removes the file it wrote. |
+| ` + "`" + `disk_fill` + "`" + ` | Fills the filesystem holding the data directory to a stated headroom. Needs ` + "`" + `database.data_filesystem.size_bytes` + "`" + `, below. | Removes the file it wrote. |
 
 ` + "`" + `process_kill` + "`" + ` and ` + "`" + `container_kill` + "`" + ` are the two kinds that stop Postgres
 uncleanly, so they are the two the recovery proof expects a replay from. The
@@ -9274,12 +9274,69 @@ emulator stands in for a third party the environment must not reach, so
 stopping one does not produce an outage: it produces a request that goes
 looking for the real host.
 
-` + "`" + `disk_fill` + "`" + ` carries a fourth refusal. A container's writable layer is the
-daemon's own disk, so filling a directory on it fills the machine and every
-other container running on it. The fault checks that the directory is a mount
-of its own and refuses when it is not. That refusal is reported as
-` + "`" + `chaos.fault.unsafe` + "`" + `: the claim the fault was declared to establish was not
-established, and nothing else in the run was touched by it.
+` + "`" + `disk_fill` + "`" + ` carries a fourth refusal, and a declaration that lifts it.
+
+A container's writable layer is the daemon's own disk, so filling a directory
+on it fills the machine and every other container running on it. The fault
+reads the mount at the data directory from the daemon and refuses unless it is
+a volume this environment created with a size fixed when it was created. A
+mount of its own is not enough on its own: a plain named volume is its own
+mount and is still a slice of the daemon's disk, so it would pass a device
+check and take the machine down having satisfied the guard. Both refusals are
+reported as ` + "`" + `chaos.fault.unsafe` + "`" + `: the claim the fault was declared to establish
+was not established, and nothing else in the run was touched by it.
+
+## Giving the data directory a filesystem of its own
+
+` + "`" + "`" + "`" + `yaml
+database:
+  storage:
+    size_bytes: 536870912
+chaos:
+  enabled: true
+  faults:
+    - name: fill-the-data-volume
+      kind: disk_fill
+      target: database
+      headroom_bytes: 8388608
+      max_fill_bytes: 536870912
+` + "`" + "`" + "`" + `
+
+With that, the branch keeps its data directory on a filesystem of the declared
+size and ` + "`" + `disk_fill` + "`" + ` lands: the fill writes one file until the stated headroom
+is left, Postgres meets a real ` + "`" + `No space left on device` + "`" + ` on its next extend,
+and the undo removes the file and the free space comes back. Without it the
+data directory is on the writable layer and the fault is refused before it acts.
+
+The filesystem is held in memory, and that is the containment argument rather
+than an implementation detail. A volume on the daemon's disk cannot be filled
+without taking space from every other container on the machine; one in memory
+has a size fixed at creation and takes nothing from anything outside the
+environment. Three things follow, and they are the cost of the feature:
+
+- The whole database lives in it, so the size has to hold the data directory
+  with room left for the fault to fill. A copy that does not fit is refused by
+  name, with both numbers, rather than truncated.
+- A size of more than half the memory the Docker daemon reports is refused.
+  A filesystem in memory larger than the machine moves the same problem from
+  the disk to the memory, and a daemon killed for memory takes every other
+  environment with it.
+- The data directory does not survive the Docker daemon restarting. ` + "`" + `af up` + "`" + `
+  builds it again from the golden.
+
+The branch pays a copy of the data directory when it comes up, where an
+ordinary branch pays nothing because the daemon's storage driver copies on
+write. So this is the layout for rehearsing a disk that fills, and not the one
+to measure how a disk performs.
+
+The environment also runs one container that holds that filesystem mounted and
+does nothing else. It is not decoration: the local volume driver unmounts a
+memory backed volume when the last container using it stops, so without it a
+` + "`" + `container_kill` + "`" + ` or ` + "`" + `container_stop` + "`" + ` would delete the data directory rather
+than crash the database, the undo would start a container that initialised an
+empty one, and the durability proof would report every acknowledged commit
+lost. Faults refuse to touch it for the same reason they refuse to touch the
+egress sidecar.
 
 ## Nothing that changed nothing counts as survived
 
@@ -21905,7 +21962,7 @@ The fault {fault} was applied to {target} and changed nothing: {detail}
 
 The fault {fault} is refused because its effect would reach past {target}: {detail}
 
-**What to do.** A fault may only affect the environment that declared it. Narrow the fault, or give the target the dedicated volume the fault needs.
+**What to do.** A fault may only affect the environment that declared it. For disk_fill that means the data directory needs a filesystem of its own, which database.data_filesystem.size_bytes gives it: declare a size that holds the database with room left to fill, and the fill lands inside the environment instead of on the machine's disk. Narrow the fault if the refusal was the cap rather than the layout.
 
 | | |
 | --- | --- |
@@ -22482,6 +22539,30 @@ Nothing reached the golden: the verification read 0 tables, and {origin} declare
 | Exit code | ` + "`" + `3` + "`" + ` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/goldens](/docs/concepts/goldens) |
+
+### AF-DB-042
+
+database.data_filesystem.size_bytes asks for {declared} bytes and the Docker daemon reports {memory} bytes of memory.
+
+**What to do.** Lower database.data_filesystem.size_bytes to under half of that, or give the daemon more memory. The filesystem that key asks for is held in memory, which is what stops a disk_fill fault reaching the machine's disk; one larger than the machine would move the same problem from the disk to the memory, and a daemon killed for memory takes every other environment on it too.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `3` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/chaos](/docs/guides/chaos) |
+
+### AF-DB-043
+
+The data directory does not fit in the filesystem database.data_filesystem.size_bytes asks for: {used} bytes of data into {declared} bytes.
+
+**What to do.** Raise database.data_filesystem.size_bytes above the size of the data directory, with room left over for the fault to fill. The copy is refused rather than truncated, because half a data directory is a database that starts and is missing rows.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `3` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/chaos](/docs/guides/chaos) |
 
 ## Detection
 
@@ -26056,6 +26137,14 @@ The durability proof run around a fault: concurrent writers commit to a schema o
 | ` + "`" + `synchronous_commit` + "`" + ` | ` + "`" + `on` + "`" + `, ` + "`" + `off` + "`" + `, ` + "`" + `local` + "`" + `, ` + "`" + `remote_write` + "`" + `, ` + "`" + `remote_apply` + "`" + ` | no | What the writers set synchronous_commit to, or absent to leave the database's own value alone. It is here because it is the one knob that makes the durability check falsifiable: with it off Postgres acknowledges a commit before the write ahead log record has left shared memory, so a crash loses acknowledged commits by design and the check reports them. Setting it to off in a manifest therefore asks for a run that is EXPECTED to report lost commits, and a project that has not decided to do that should leave it out. |
 | ` + "`" + `writers` + "`" + ` | integer | no | How many connections commit at once. More than one by default: a crash under a serial workload exercises none of the concurrency recovery has to get right. Defaults to ` + "`" + `8` + "`" + `. Minimum 1, maximum 64. |
 
+## DataFilesystem
+
+Gives the branch's data directory a filesystem of its own, so that a disk_fill fault can fill it without filling the machine. Without this the data directory sits on the container's writable layer, which is the Docker daemon's own disk, and disk_fill is refused before it acts: filling that disk would take every other container on the machine with it, and a fault may only reach the environment that declared it. The filesystem is held in memory, and that is what bounds it: it cannot take a byte of space away from anything outside this environment. The price is that the whole database lives in it, so the size has to fit the database, and the data directory does not survive the Docker daemon restarting. Declare it to rehearse a disk that fills, not to measure how a disk performs. The docker provider only.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| ` + "`" + `size_bytes` + "`" + ` | integer | **yes** | How large that filesystem is, in bytes. The database is copied into it when the environment comes up, so it has to be bigger than the database with room left for the fault to fill: a copy that does not fit is refused by name rather than truncated. It is refused as well when it is more than half of the memory the Docker daemon reports, because a filesystem in memory that is larger than the machine is a way to fill the machine rather than the environment. An eighth of a gigabyte is the floor, which is about what an empty Postgres data directory takes. Minimum 1.34217728e+08, maximum 6.8719476736e+10. |
+
 ## Database
 
 Where the environment's Postgres comes from, and how the production copy is made safe before anyone can branch from it.
@@ -26063,6 +26152,7 @@ Where the environment's Postgres comes from, and how the production copy is made
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | ` + "`" + `api_key_env` + "`" + ` | string | no | The name of the variable holding the provider's API key. Named rather than carried: a manifest is committed and a key is not. Defaults to NEON_API_KEY for the neon provider. For the pgurl provider it names the connection string of the server that holds the goldens and the branches, which is the credential in that case, and defaults to PGURL_ADMIN_URL. |
+| ` + "`" + `data_filesystem` + "`" + ` | [DataFilesystem](#datafilesystem) | no | Gives the branch's data directory a filesystem of its own, so that a disk_fill fault can fill it without filling the machine. |
 | ` + "`" + `extensions` + "`" + ` | list of string | no | Extensions to create in the golden before the source is copied into it, one CREATE EXTENSION IF NOT EXISTS each, in the order given. Declare the ones the schema depends on: an extension that is installed in the image but never created carries no types, no operators and no table access methods, so a table stored with one is refused by the restore rather than created. An extension the image does not carry is refused by name, with the image named, rather than surfacing later as a type nobody can find. The golden is committed after this runs, so every branch of it already has them. Max items 32. |
 | ` + "`" + `golden` + "`" + ` | [Golden](#golden) | no | The masked, verified copy every environment branches from. |
 | ` + "`" + `image` + "`" + ` | string | no | The container image the docker provider runs Postgres from, instead of the stock postgres:<version>-alpine. This is how a schema that needs PostGIS, pgvector, TimescaleDB, pg_cron or a custom table access method gets a golden at all: the stock image carries the contrib modules and nothing else, so an extension the source has and the image does not stops the restore. Name an image that already carries what the schema needs, such as pgvector/pgvector:pg17 or postgis/postgis:17-3.5, and pin it by digest where the golden has to be reproducible. The image must run the official entrypoint and honour PGDATA, because the golden is the container's filesystem committed, and it must be the major version this block declares: a mismatch is refused rather than committed. Only the docker provider has an image to choose, so any other provider refuses this key rather than ignoring it. Max length 512. |

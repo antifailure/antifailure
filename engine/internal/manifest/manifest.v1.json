@@ -443,6 +443,9 @@
         },
         "volume": {
           "$ref": "#/$defs/volume"
+        },
+        "data_filesystem": {
+          "$ref": "#/$defs/data_filesystem"
         }
       }
     },
@@ -622,6 +625,23 @@
           "pattern": "^[0-9]+(ms|s|m|h|d)$",
           "default": "720h",
           "description": "How old the profile may be before it is refused. A stale profile is not a smaller number, it is an unknown one, so it is refused the way a stale golden is rather than quoted. Thirty days by default rather than the golden's seven, because a profile is the shape of the data rather than the data."
+        }
+      }
+    },
+    "data_filesystem": {
+      "title": "DataFilesystem",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "size_bytes"
+      ],
+      "description": "Gives the branch's data directory a filesystem of its own, so that a disk_fill fault can fill it without filling the machine. Without this the data directory sits on the container's writable layer, which is the Docker daemon's own disk, and disk_fill is refused before it acts: filling that disk would take every other container on the machine with it, and a fault may only reach the environment that declared it. The filesystem is held in memory, and that is what bounds it: it cannot take a byte of space away from anything outside this environment. The price is that the whole database lives in it, so the size has to fit the database, and the data directory does not survive the Docker daemon restarting. Declare it to rehearse a disk that fills, not to measure how a disk performs. The docker provider only.",
+      "properties": {
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 134217728,
+          "maximum": 68719476736,
+          "description": "How large that filesystem is, in bytes. The database is copied into it when the environment comes up, so it has to be bigger than the database with room left for the fault to fill: a copy that does not fit is refused by name rather than truncated. It is refused as well when it is more than half of the memory the Docker daemon reports, because a filesystem in memory that is larger than the machine is a way to fill the machine rather than the environment. An eighth of a gigabyte is the floor, which is about what an empty Postgres data directory takes."
         }
       }
     },

@@ -88,6 +88,11 @@ type Provider struct {
 	// preload are the libraries every container in this chain loads at server
 	// start, beyond the statistics module.
 	preload []string
+	// storageBytes is how large a filesystem the branch's data directory gets
+	// of its own. Zero is the layout every manifest written before the key
+	// existed asks for: the data directory on the container's writable layer,
+	// which is the daemon's own disk.
+	storageBytes int64
 
 	// ports remembers what this process allocated, so two branches created in
 	// the same run cannot be handed the same port between the probe and the
@@ -126,6 +131,14 @@ type Options struct {
 	// is loaded by the postmaster before any database exists, and a server
 	// carrying its catalog entries without its library refuses to start.
 	PreloadLibraries []string
+	// StorageBytes gives the branch's data directory a filesystem of its own,
+	// of this size, instead of leaving it on the container's writable layer.
+	//
+	// It exists for the disk_fill fault, which is refused before it acts when
+	// the data directory sits on the daemon's disk, because filling that would
+	// fill the machine rather than the environment. Zero is the layout every
+	// manifest written before this key existed asks for.
+	StorageBytes int64
 	// Clock is the time source.
 	Clock clock.Clock
 }
@@ -157,7 +170,8 @@ func New(opts Options) (*Provider, error) {
 		cli: cli, clock: opts.Clock, version: opts.Version,
 		portFrom: opts.PortFrom, seedSQL: opts.SeedSQL,
 		image: opts.Image, extensions: opts.Extensions, preload: opts.PreloadLibraries,
-		ports: dockerutil.NewPortAllocator(opts.PortFrom),
+		storageBytes: opts.StorageBytes,
+		ports:        dockerutil.NewPortAllocator(opts.PortFrom),
 	}, nil
 }
 
@@ -240,7 +254,7 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 	img := p.imageFor(spec.Version)
 	c, err := p.start(ctx, candidate, img, map[string]string{
 		LabelKind: "candidate",
-	}, p.preload)
+	}, p.preload, nil)
 	if err != nil {
 		return provider.GoldenVersion{}, err
 	}
@@ -527,12 +541,25 @@ func (p *Provider) Branch(ctx context.Context, version, envID string) (provider.
 		return provider.Branch{}, fmt.Errorf("db.docker: inspect the golden image: %w", err)
 	}
 
+	// The data directory's own filesystem, when the manifest asked for one.
+	//
+	// Before the container, because the container mounts it: a branch created
+	// first and given the volume afterwards would have spent its first start
+	// on the writable layer, which is the layout this key exists to leave.
+	var storage string
+	if p.storageBytes > 0 {
+		storage, err = p.ensureStorage(ctx, envID, tag)
+		if err != nil {
+			return provider.Branch{}, err
+		}
+	}
+
 	name := branchName(envID)
 	c, err := p.start(ctx, name, tag, map[string]string{
 		LabelKind:   "branch",
 		LabelEnv:    envID,
 		LabelGolden: version,
-	}, p.branchPreload(goldenLabels(info)))
+	}, p.branchPreload(goldenLabels(info)), p.storageMount(storage))
 	if err != nil {
 		return provider.Branch{}, err
 	}
@@ -656,6 +683,16 @@ func (p *Provider) Destroy(ctx context.Context, b provider.Branch) error {
 			return err
 		}
 	}
+	// The anchor and the volume go with the branch, and they go unconditionally
+	// rather than only when this process was the one that asked for them. A
+	// teardown by a build that has the key switched off must still collect what
+	// a build with it on created, or the leak is a running container and a
+	// volume holding somebody's data directory.
+	if b.EnvID != "" {
+		if err := p.removeStorage(ctx, b.EnvID); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -732,7 +769,11 @@ func (p *Provider) Inventory(ctx context.Context) ([]provider.Resource, error) {
 	}
 	for _, c := range containers {
 		switch c.Labels[LabelKind] {
-		case "golden", "candidate", "branch":
+		// The storage anchor is this provider's too, and it has to appear
+		// here. A container the leak detector cannot see is one that leaks
+		// silently, and this one holds a volume open as well, so the volume
+		// would leak behind it.
+		case "golden", "candidate", "branch", dockerutil.KindStorage:
 		default:
 			// Only what this provider owns. The label set is shared with the
 			// runtime, so listing every managed container would report the
@@ -752,6 +793,25 @@ func (p *Provider) Inventory(ctx context.Context) ([]provider.Resource, error) {
 				"golden": c.Labels[LabelGolden],
 				"state":  string(c.State),
 			},
+		})
+	}
+
+	// The data directory volumes, for the same reason. A volume is the one
+	// resource in this provider that holds data, so a leaked one is not just
+	// space: it is somebody's data directory sitting on a machine after the
+	// environment that made it is gone.
+	volumes, err := p.cli.VolumeList(ctx, client.VolumeListOptions{Filters: dockerutil.Filter()})
+	if err != nil {
+		return nil, fmt.Errorf("db.docker: list volumes: %w", err)
+	}
+	for _, v := range volumes.Items {
+		if v.Labels[LabelKind] != dockerutil.KindVolume {
+			continue
+		}
+		created, _ := time.Parse(time.RFC3339, v.CreatedAt)
+		out = append(out, provider.Resource{
+			Kind: "volume/data", ID: v.Name, EnvID: v.Labels[LabelEnv], CreatedAt: created.UTC(),
+			Labels: map[string]string{"name": v.Name, "size": v.Options["o"]},
 		})
 	}
 

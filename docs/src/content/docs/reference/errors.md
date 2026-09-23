@@ -388,7 +388,7 @@ The fault {fault} was applied to {target} and changed nothing: {detail}
 
 The fault {fault} is refused because its effect would reach past {target}: {detail}
 
-**What to do.** A fault may only affect the environment that declared it. Narrow the fault, or give the target the dedicated volume the fault needs.
+**What to do.** A fault may only affect the environment that declared it. For disk_fill that means the data directory needs a filesystem of its own, which database.data_filesystem.size_bytes gives it: declare a size that holds the database with room left to fill, and the fill lands inside the environment instead of on the machine's disk. Narrow the fault if the refusal was the cap rather than the layout.
 
 | | |
 | --- | --- |
@@ -965,6 +965,30 @@ Nothing reached the golden: the verification read 0 tables, and {origin} declare
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/goldens](/docs/concepts/goldens) |
+
+### AF-DB-042
+
+database.data_filesystem.size_bytes asks for {declared} bytes and the Docker daemon reports {memory} bytes of memory.
+
+**What to do.** Lower database.data_filesystem.size_bytes to under half of that, or give the daemon more memory. The filesystem that key asks for is held in memory, which is what stops a disk_fill fault reaching the machine's disk; one larger than the machine would move the same problem from the disk to the memory, and a daemon killed for memory takes every other environment on it too.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/chaos](/docs/guides/chaos) |
+
+### AF-DB-043
+
+The data directory does not fit in the filesystem database.data_filesystem.size_bytes asks for: {used} bytes of data into {declared} bytes.
+
+**What to do.** Raise database.data_filesystem.size_bytes above the size of the data directory, with room left over for the fault to fill. The copy is refused rather than truncated, because half a data directory is a database that starts and is missing rows.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/chaos](/docs/guides/chaos) |
 
 ## Detection
 

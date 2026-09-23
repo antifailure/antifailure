@@ -146,6 +146,14 @@ func Explain(m *schema.Manifest, width int) string {
 		fmt.Fprintf(&b, "  preloaded    %s\n", value(strings.Join(d.PreloadLibraries, ", ")+
 			", added to pg_stat_statements in shared_preload_libraries and never replacing it", 15, width))
 	}
+	// Only when it is declared, and said in full when it is. This key changes
+	// where the branch's data directory lives and what a disk_fill fault is
+	// allowed to do, and neither is visible anywhere else in this output.
+	if d.DataFilesystem != nil {
+		fmt.Fprintf(&b, "  data on      %s\n", value(fmt.Sprintf(
+			"a filesystem of its own, %s, held in memory, so a disk_fill fault fills "+
+				"it rather than the machine's disk", humanBytes(d.DataFilesystem.SizeBytes)), 15, width))
+	}
 	fmt.Fprintf(&b, "  injected as  %s\n", value(d.URLEnv, 15, width))
 	if d.SourceURLEnv != "" {
 		fmt.Fprintf(&b, "  source from  %s\n", value(

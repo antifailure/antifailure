@@ -240,6 +240,29 @@ type Database struct {
 	// Volume names the committed profile of what production holds, which is
 	// the denominator every row count in a report is measured against.
 	Volume *Volume `json:"volume,omitempty" yaml:"volume,omitempty"`
+	// DataFilesystem gives the branch's data directory a filesystem of its own, which
+	// is the layout a disk_fill fault can land on.
+	DataFilesystem *DataFilesystem `json:"data_filesystem,omitempty" yaml:"data_filesystem,omitempty"`
+}
+
+// DataFilesystem gives the data directory a filesystem of its own.
+//
+// It exists for one fault. A container's writable layer is the Docker daemon's
+// own disk, so a disk_fill aimed at a data directory sitting on it would fill
+// the machine and every other container on it, and the injector refuses that
+// before it acts. The refusal is right, and it left the one storage fault
+// anybody reaches for unable to land anywhere.
+//
+// The filesystem this asks for is held in memory, and that is the whole
+// containment argument: filling it cannot take a byte of space away from
+// anything outside the environment, because it never had any. The cost is
+// stated rather than hidden. The database is copied into it at branch time,
+// so it has to be big enough to hold it; and it does not survive the daemon
+// restarting, which an ephemeral branch of a golden can afford and a real
+// database could not.
+type DataFilesystem struct {
+	// SizeBytes is how large that filesystem is.
+	SizeBytes int64 `json:"size_bytes" yaml:"size_bytes"`
 }
 
 // Volume names the committed record of production's own size.

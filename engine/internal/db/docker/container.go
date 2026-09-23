@@ -78,14 +78,22 @@ func (p *Provider) imageFor(version int) string {
 // callers get it from different places: a candidate takes what the manifest
 // declares, and a branch takes what the golden image records it was built
 // with, which is the only one of the two that cannot be wrong.
+//
+// binds is what the container mounts, and it is empty for every container this
+// provider starts except a branch whose manifest asked for the data directory
+// to have a filesystem of its own. It is a parameter rather than a field
+// because the candidate must never get one: a golden is docker commit of the
+// candidate, commit captures the writable layer, and anything written under a
+// mount is not in that layer, so a candidate with a mounted data directory
+// would commit a golden holding no data at all.
 func (p *Provider) start(
-	ctx context.Context, name, img string, labels map[string]string, preload []string,
+	ctx context.Context, name, img string, labels map[string]string, preload, binds []string,
 ) (started, error) {
-	return p.startWithRetry(ctx, name, img, labels, preload, 0)
+	return p.startWithRetry(ctx, name, img, labels, preload, binds, 0)
 }
 
 func (p *Provider) startWithRetry(
-	ctx context.Context, name, img string, labels map[string]string, preload []string, attempt int,
+	ctx context.Context, name, img string, labels map[string]string, preload, binds []string, attempt int,
 ) (started, error) {
 	// A container left by a previous run under the same deterministic name is
 	// removed rather than adopted. Adopting one would mean starting an
@@ -144,6 +152,7 @@ func (p *Provider) startWithRetry(
 			},
 		},
 		HostConfig: &container.HostConfig{
+			Binds:        binds,
 			PortBindings: network.PortMap{hostPort: []network.PortBinding{{
 				// Loopback only. This is the security boundary that makes the
 				// fixed password acceptable: the database is unreachable from
@@ -185,7 +194,7 @@ func (p *Provider) startWithRetry(
 		// bounded so that a machine with no free ports at all still reports
 		// that rather than looping.
 		if dockerutil.IsPortTaken(err) && attempt < dockerutil.PortRetries {
-			return p.startWithRetry(ctx, name, img, labels, preload, attempt+1)
+			return p.startWithRetry(ctx, name, img, labels, preload, binds, attempt+1)
 		}
 		return started{}, fmt.Errorf("db.docker: start the container %s: %w", name, err)
 	}

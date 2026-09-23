@@ -1328,6 +1328,7 @@ func (o *Orchestrator) newDatabaseProvider(ctx context.Context) (provider.Databa
 			Image:            databaseImage(m),
 			Extensions:       databaseExtensions(m),
 			PreloadLibraries: databasePreloadLibraries(m),
+			StorageBytes:     databaseStorageBytes(m),
 		})
 		if err != nil {
 			return nil, err
@@ -1640,6 +1641,20 @@ func databasePreloadLibraries(m *schema.Manifest) []string {
 		return nil
 	}
 	return m.Database.PreloadLibraries
+}
+
+// databaseStorageBytes is how large a filesystem the branch's data directory
+// gets of its own, and zero for the layout every manifest written before this
+// key existed asks for: the data directory on the container's writable layer.
+//
+// Zero is not a smaller number here, it is a different shape. The writable
+// layer is the daemon's own disk, which is why a disk_fill fault aimed at a
+// data directory on it is refused before it acts.
+func databaseStorageBytes(m *schema.Manifest) int64 {
+	if m == nil || m.Database == nil || m.Database.DataFilesystem == nil {
+		return 0
+	}
+	return m.Database.DataFilesystem.SizeBytes
 }
 
 // extensions is the registry this orchestrator consults.

@@ -127,6 +127,11 @@ const (
 	KindEmulator  = "emulator"
 	KindNetwork   = "network"
 	KindVolume    = "volume"
+	// KindStorage is the container that holds the branch's data directory
+	// mounted and does nothing else. It runs no server and answers no request,
+	// and the database's data directory stops existing the moment it stops, so
+	// it is a safety control in the same sense the sidecar is.
+	KindStorage = "storage"
 )
 
 // Managed returns the label set every resource carries.

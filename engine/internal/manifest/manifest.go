@@ -513,6 +513,9 @@ var knownKeys = []string{
 	// the point.
 	"extensions", "preload_libraries",
 	"max_age", "retain", "storage", "storage_url", "volume", "profile",
+	// The filesystem the branch's data directory gets of its own, which is
+	// what a disk_fill fault needs to have somewhere contained to fill.
+	"data_filesystem", "size_bytes",
 	"engine", "stance", "because",
 	// The declarations a stance the engine ACTS on has to carry. A typo in
 	// any of them is a key the parser refuses, and without a suggestion the
