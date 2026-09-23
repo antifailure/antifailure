@@ -3,7 +3,17 @@ package pgcrash
 import (
 	"context"
 	"time"
+
+	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
+
+// PairInvariantsForTest puts the two sides of each invariant together the way
+// Verify does, so the case where a run produced fewer sides than it declared
+// invariants can be driven without a database that stopped answering partway
+// through its own arm.
+func PairInvariantsForTest(invs []schema.Invariant, before, after []InvariantSide) []InvariantCheck {
+	return pairInvariants(invs, before, after)
+}
 
 // JudgeForTest drives the judgement from values, the way the rest of this
 // package's tests drive its parsers, so a branch that only a broken cluster

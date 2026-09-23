@@ -54,6 +54,15 @@ func ChaosUnverified(rule string) bool {
 	case "chaos.recovery.no_crash", "chaos.recovery.no_replay",
 		"chaos.recovery.control_unreadable", "chaos.integrity.amcheck_unavailable",
 		"chaos.integrity.checksums_off", "chaos.durability.inconsistent_ledger",
+		// An invariant that was already violated before the fault, and one
+		// that could not be asked at all. Neither is a thing this run found to
+		// be wrong: the first is a rule the run INHERITED broken, which it
+		// cannot attribute to the fault, and the second is a question nobody
+		// answered. The third invariant rule, chaos.invariant.broken_by_fault,
+		// is deliberately absent from this list, because an invariant that
+		// held before the fault and does not hold after it is exactly the
+		// thing the run looked for and found.
+		"chaos.invariant.already_violated", "chaos.invariant.unevaluated",
 		RuleFaultRefused, RuleFaultUnsafe, RuleFaultNotUndone:
 		return true
 	}

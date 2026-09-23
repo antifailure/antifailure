@@ -12,6 +12,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/fault"
 	"github.com/antifailure/antifailure/engine/internal/gate"
 	"github.com/antifailure/antifailure/engine/internal/pgcrash"
+	"github.com/antifailure/antifailure/engine/internal/redact"
 	"github.com/antifailure/antifailure/engine/internal/report"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
@@ -224,6 +225,14 @@ func (o *Orchestrator) crashProof(
 			Writers:           cr.Writers,
 			SynchronousCommit: cr.SynchronousCommit,
 		},
+		// The manifest's own invariants, asked either side of the fault. The
+		// proof's own assertions are all about a schema of the engine's, for
+		// the reason pgcrash's workload gives, and that reason stops applying
+		// once the writers have stopped and the database is answering again.
+		// This is the arm that asks whether the user's data still means what
+		// the user says it means. A manifest with none leaves it empty and
+		// nothing about it runs.
+		Invariants: o.opts.Manifest.Invariants,
 		WarmCommits: cr.CommitsBeforeFault,
 		// The declared wait is a floor on the warm up, so a manifest that asks
 		// for a long soak gets one and one that asks for none still waits for
@@ -273,17 +282,69 @@ func (o *Orchestrator) crashProof(
 	// still left it in place for as long as it did.
 	entry.InPlaceMs = res.FaultInPlace.Milliseconds()
 	entry.DurationMs = time.Since(started).Milliseconds()
+	entry.Invariants = chaosInvariantsOf(res.Invariants, o.opts.Redactor)
 	if err != nil {
 		if entry.Error == "" {
 			entry.Error = err.Error()
 			entry.Refused = refusedAsUnsafe(err)
 		}
 		entry.Evidence = res.Evidence
+		// The proof is returned on this path too, but ONLY when the invariant
+		// arm has something in it. What the user's own rules said about the
+		// database does not depend on the rest of the proof finishing: the
+		// invariants were asked before the fault, and whether they could be
+		// asked afterwards is itself the answer. A database that never came
+		// back fails here, and a run that returned nothing would have lost the
+		// one finding that says so.
+		//
+		// Conditional rather than unconditional, so a manifest that declares
+		// no invariants gets exactly what it got before. res carries no
+		// judgement on this path, since judge never ran, except the log read
+		// failure that Verify records as it goes, and surfacing that for a
+		// project with no invariants would be a finding this change has no
+		// business adding.
+		if len(res.Invariants) > 0 {
+			return entry, &res
+		}
 		return entry, nil
 	}
 	entry.Injected, entry.Evidence = true, res.Evidence
 	entry.Recovery = recoveryOf(res)
 	return entry, &res
+}
+
+// chaosInvariantsOf carries the invariant arm into the shape the report and
+// the terminal read.
+//
+// A translation rather than an embedding, for the reason recoveryOf gives: the
+// report crosses a JSON boundary into a pull request comment. The errors are
+// put through the redactor here, which is where engine/internal/env does it
+// for the invariants af test runs, so a connection failure that quoted a URL
+// cannot carry a password across that boundary.
+func chaosInvariantsOf(checks []pgcrash.InvariantCheck, red *redact.Redactor) []report.ChaosInvariant {
+	if len(checks) == 0 {
+		return nil
+	}
+	out := make([]report.ChaosInvariant, 0, len(checks))
+	for _, c := range checks {
+		entry := report.ChaosInvariant{
+			Name:        c.Name,
+			Description: c.Description,
+			BeforeHeld:  c.Before.Held,
+			AfterHeld:   c.After.Held,
+			Columns:     c.After.Columns,
+			Rows:        c.After.Rows,
+			More:        c.After.More,
+		}
+		if c.Before.Error != "" {
+			entry.BeforeError = red.String(c.Before.Error)
+		}
+		if c.After.Error != "" {
+			entry.AfterError = red.String(c.After.Error)
+		}
+		out = append(out, entry)
+	}
+	return out
 }
 
 // recoveryOf carries a crash proof into the shape the report reads.
@@ -354,8 +415,38 @@ func replayedTo(res pgcrash.Result) string {
 // environment as one that "was not applied". So the order below is the order
 // of how much each one damages: left in place, then refused as unsafe, then
 // could not be injected.
+//
+// The fault's own findings and the proof's are appended rather than the first
+// returning instead of the second. They used to be one switch whose refusal
+// arms returned, which was right while a refused fault always meant an absent
+// proof. It stopped being right when the proof grew an arm that survives its
+// own failure: a database that does not come back makes Verify return an
+// error AND is the single most important moment to say that the project's own
+// invariants were never asked. A return there would have dropped it.
 func ChaosFindings(f report.ChaosFault, proof *pgcrash.Result, gate report.Policy) []report.Finding {
 	where := "fault " + f.Name
+	out := faultFindings(f, gate, where)
+	if proof == nil {
+		return out
+	}
+	for _, p := range proof.Problems {
+		out = append(out, report.Finding{
+			Rule: p.Rule, Level: gate.ChaosFailure, Title: p.Title,
+			Detail: p.Detail, Fix: p.Fix, Count: p.Count, Where: where,
+		})
+	}
+	for _, p := range proof.Unverified {
+		out = append(out, report.Finding{
+			Rule: p.Rule, Level: gate.ChaosUnverified, Title: p.Title,
+			Detail: p.Detail, Fix: p.Fix, Count: p.Count, Where: where,
+		})
+	}
+	return out
+}
+
+// faultFindings is what went wrong with the fault itself, as opposed to with
+// the recovery it was measured across.
+func faultFindings(f report.ChaosFault, gate report.Policy, where string) []report.Finding {
 	var out []report.Finding
 	switch {
 	case f.Injected && !f.Undone:
@@ -401,21 +492,6 @@ func ChaosFindings(f report.ChaosFault, proof *pgcrash.Result, gate report.Polic
 			Fix:    "Read what the container said, and correct the fault or the environment it is aimed at.",
 			Where:  where,
 		}}
-	}
-	if proof == nil {
-		return out
-	}
-	for _, p := range proof.Problems {
-		out = append(out, report.Finding{
-			Rule: p.Rule, Level: gate.ChaosFailure, Title: p.Title,
-			Detail: p.Detail, Fix: p.Fix, Count: p.Count, Where: where,
-		})
-	}
-	for _, p := range proof.Unverified {
-		out = append(out, report.Finding{
-			Rule: p.Rule, Level: gate.ChaosUnverified, Title: p.Title,
-			Detail: p.Detail, Fix: p.Fix, Count: p.Count, Where: where,
-		})
 	}
 	return out
 }

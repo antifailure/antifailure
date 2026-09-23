@@ -38,6 +38,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
 // Runner runs commands inside the database's own container and reads its log.
@@ -86,6 +87,12 @@ type Options struct {
 	// that was killed has to be started again; a backend that was killed does
 	// not. Nil means the database recovers on its own.
 	Recover func(ctx context.Context) error
+	// Invariants are the manifest's own rules about the user's own data. They
+	// are asked once before the fault and once after the recovery, and the two
+	// answers together are what makes a violation attributable to the fault.
+	// Empty means the arm does not run: no connection is opened for it and
+	// nothing about it reaches any output.
+	Invariants []schema.Invariant
 	// ExpectCrash says whether this fault is supposed to crash the database.
 	//
 	// Written down rather than inferred from what happened, because inferring
@@ -143,6 +150,10 @@ type Result struct {
 	Reconciliation Reconciliation `json:"reconciliation"`
 	// Relations is the heap and index check.
 	Relations Relations `json:"relations"`
+	// Invariants is what the manifest's own invariants said on each side of
+	// the fault, one entry per declared invariant. Empty when the manifest
+	// declares none.
+	Invariants []InvariantCheck `json:"invariants,omitempty"`
 	// ReplayEnd is where crash recovery stopped replaying, the END of the last
 	// record it replayed, and ReplayEndSource says where it was read. Empty
 	// when it was not established or not needed.
@@ -250,6 +261,21 @@ const (
 	// RuleControlUnreadable is pg_controldata not being readable, so the
 	// before and after comparison could not be made.
 	RuleControlUnreadable = "chaos.recovery.control_unreadable"
+	// RuleInvariantBroken is one of the manifest's own invariants holding
+	// before the fault and not holding after the recovery. It is the only one
+	// of the three invariant rules that is a failure, because it is the only
+	// one the run can attribute to the fault.
+	RuleInvariantBroken = "chaos.invariant.broken_by_fault"
+	// RuleInvariantAlreadyViolated is an invariant that did not hold before
+	// the fault either. Unverified, never a failure: the rule is broken and
+	// this run is not what broke it, so nothing it says afterwards is
+	// evidence about the fault.
+	RuleInvariantAlreadyViolated = "chaos.invariant.already_violated"
+	// RuleInvariantUnevaluated is an invariant that could not be asked on one
+	// side or the other, which a database that never came back is the loudest
+	// case of. Unverified, because a rule nobody asked about is not a rule
+	// that held.
+	RuleInvariantUnevaluated = "chaos.invariant.unevaluated"
 )
 
 // Rules is every rule this package can report, for a test that wants to hold
@@ -260,6 +286,7 @@ func Rules() []string {
 		RuleReplayShort, RuleNotInProduction, RuleTimelineMoved,
 		RuleRelationDamaged, RuleChecksumsOff, RuleAmcheckUnavailable,
 		RuleInconsistentLedger, RuleControlUnreadable,
+		RuleInvariantBroken, RuleInvariantAlreadyViolated, RuleInvariantUnevaluated,
 	}
 }
 
@@ -322,6 +349,13 @@ func Verify(ctx context.Context, opts Options) (Result, error) {
 	if err := Prepare(ctx, opts.URL, opts.Workload); err != nil {
 		return res, err
 	}
+	// The manifest's invariants are asked here, before anything is broken and
+	// before the writers start. An invariant that was already violated is not
+	// something this fault did, and a run that asked only afterwards could not
+	// tell the two apart: it would report a project's own pre-existing defect
+	// as a durability failure caused by the crash.
+	beforeInvariants := runInvariants(ctx, opts)
+
 	wl := opts.Workload
 	wl.URL = opts.URL
 
@@ -396,10 +430,23 @@ func Verify(ctx context.Context, opts Options) (Result, error) {
 	}
 	stopProbe()
 	if err != nil {
+		// The database never answered again, so the invariants were not asked
+		// of a recovered database: there is not one. Recorded before the
+		// return rather than left out, because an arm that is simply absent
+		// reads as an arm with nothing to report, and this is the case where
+		// a silent pass would do the most harm.
+		res.Invariants = pairInvariants(opts.Invariants, beforeInvariants,
+			unevaluatedSides(opts.Invariants,
+				fmt.Errorf("the database did not answer a query after the fault: %w", err)))
+		res.judgeInvariants()
 		return res, aferrors.Wrap(err, aferrors.AFCHS006,
 			"timeout", opts.ReadyTimeout.String(), "fault", opts.FaultName,
 			"detail", err.Error())
 	}
+	// Asked of the recovered database as soon as it answers a query, and
+	// before anything else reads it. Judged below, in judge, with everything
+	// else this run measured.
+	res.Invariants = pairInvariants(opts.Invariants, beforeInvariants, runInvariants(ctx, opts))
 
 	after, afterErr := readControl(ctx, opts)
 	res.After = after
@@ -417,6 +464,11 @@ func Verify(ctx context.Context, opts Options) (Result, error) {
 
 	present, err := readPresent(ctx, opts)
 	if err != nil {
+		// Judged even on the way out. The invariants were asked of the
+		// recovered database above, and dropping what they said because the
+		// engine's own table would not read back would hide the one arm that
+		// is about the user's data rather than about the engine's.
+		res.judgeInvariants()
 		return res, err
 	}
 	res.Reconciliation = w.Ledger().Reconcile(present)
@@ -691,6 +743,11 @@ func (r *Result) judge(opts Options, beforeErr, afterErr error, warmCommits int)
 			Fix: "Initialise the database with data checksums on, or turn them on with pg_checksums, if torn page detection matters here.",
 		})
 	}
+
+	// Last, because it is the only arm that is about the user's own data and
+	// a reader should meet it after the engine's own evidence for the
+	// recovery it was measured across.
+	r.judgeInvariants()
 }
 
 // sampleOf renders a handful of identifiers for a finding.
