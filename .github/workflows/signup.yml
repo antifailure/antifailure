@@ -10,9 +10,34 @@ name: Sign-up
 # throughout. The deploy was green throughout. Nothing was wrong with any file
 # in the repository. The only thing that could have told anybody was a request.
 #
-# The waitlist is gone and the same argument now points at something larger.
-# Sign-up is a GitHub exchange against the control plane, and every way it can
-# be shut is a CONFIGURATION rather than a fault:
+# WHAT THE FRONT DOOR IS NOW, because this file spent eight days asserting a
+# page that had been deliberately replaced. Self-serve organization creation was
+# taken off the site: every "Start free" button had been pointing a stranger at
+# a door that does not open, and #467 replaced it with a demo request. So there
+# are two doors and they are different doors:
+#
+#   /signin is how somebody who already has an organization gets back in. It
+#   carries one link, at the control plane's GitHub exchange.
+#
+#   /request-demo is how a stranger asks for access. It is a form, and it posts
+#   to POST /v1/leads on the control plane from the browser, cross origin.
+#
+#   /signup is neither any more. It is a 301 to /request-demo, in
+#   public/staticwebapp.config.json and as a MovedPage under the host config, so
+#   a bookmark and an indexed link still land somewhere true.
+#
+# THE FAILURE THIS FILE IS THE SUBJECT OF. The step below used to fetch /signup
+# with `curl -sSL`, follow that 301 without noticing it, and grade the demo page
+# against an assertion written for a self-serve sign-up page. It then announced
+# THE SIGN-UP PAGE HAS NO WAY IN every morning for over a week while both doors
+# were open and working. That is worse than having no check at all: a red mark
+# that is known to be wrong teaches everybody to stop reading red marks, and the
+# real one, when it comes, arrives in a mailbox people have learned to ignore.
+# Every assertion here now follows no redirect it has not asserted, and names
+# what it actually found.
+#
+# Sign-up is still a GitHub exchange against the control plane, and every way it
+# can be shut is a CONFIGURATION rather than a fault:
 #
 #   AF_SIGNIN_ALLOWLIST naming anybody closes the door to everybody else. The
 #   production tfvars named two people for months, and the process said so in
@@ -26,10 +51,29 @@ name: Sign-up
 # two facts off the answer the console itself reads, from outside, with no
 # credential.
 #
+# IT CREATES NOTHING. The demo queue is read by a person, so a probe that filed
+# a request would be putting a fake lead in front of them every morning, and the
+# first thing anybody would do is stop trusting the queue. The two requests this
+# sends at POST /v1/leads are the inert ones www/lib/control-plane-routes.ts
+# declares and gives the reason for, checked against the API's source rather
+# than assumed: a CORS preflight, which the OPTIONS handler answers without
+# touching the POST path at all, and a POST with an empty body, which
+# validateLead refuses on its first check before recordLead is reached. The
+# second spends one token of the shared auth rate limit bucket, which is why a
+# 429 from it counts as the route being present rather than as a failure.
+#
+# WHY THIS AND NOT routecheck OR origincheck, both of which ask the control
+# plane a question that overlaps with these. Both run in deploy.yml, which is to
+# say both run when something ships. Nothing here ships. The failure this file
+# exists for arrives with no deploy at all: a control plane rolled back to a tag
+# without a route, a site origin edited in the tfvars, a redirect dropped from
+# the host config by a merge nobody reread. sitesmoke.yml makes the same
+# argument in its own header and it is the reason both of these run daily.
+#
 # WHY NOT ON THE STATUS PAGE. deploy/status/targets.json probes the sign-in
-# redirect and that row is customer facing. These two assertions go red the
-# moment somebody deliberately closes signups, which is a decision rather than
-# an outage, and publishing a decision as an incident is how a status page stops
+# redirect and that row is customer facing. These assertions go red the moment
+# somebody deliberately closes signups, which is a decision rather than an
+# outage, and publishing a decision as an incident is how a status page stops
 # being believed. The audience for this is us.
 #
 # Separate from CI and on a schedule for the reason links.yml gives: this is a
@@ -53,7 +97,7 @@ concurrency:
 
 jobs:
   probe:
-    name: somebody can still sign up
+    name: a stranger can ask for access and an operator can sign in
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -95,7 +139,7 @@ jobs:
 
           if ! grep -q '"github"' /tmp/session.json; then
             echo "::error::/auth/session lists no GitHub sign-in method, which is the only one the"
-            echo "::error::sign-up page offers. Nobody can start an exchange."
+            echo "::error::sign-in page offers. Nobody can start an exchange."
             echo "session: $(cat /tmp/session.json)"
             exit 1
           fi
@@ -140,26 +184,222 @@ jobs:
           esac
           echo "starting a sign-in redirects to GitHub with a state value"
 
-      - name: The sign-up page offers that door
+      - name: The sign-in page offers that door
         run: |
           set -uo pipefail
           site=https://antifailure.dev
 
-          status=$(curl -sSL -m 20 -o /tmp/signup.html -w '%{http_code}' "$site/signup" || echo 000)
+          # No -L. /signin is a page rather than a redirect, and following a hop
+          # here is exactly how this file came to grade the wrong document for
+          # eight days.
+          status=$(curl -sS -m 20 -o /tmp/signin.html -w '%{http_code}' "$site/signin" || echo 000)
           if [ "$status" != "200" ]; then
-            echo "::error::GET /signup returned $status."
+            echo "::error::GET /signin returned $status rather than 200. This is the page every"
+            echo "::error::operator with an existing organization comes back through, and it is the"
+            echo "::error::one the header's Log in link and deploy/status/targets.json both point at."
             exit 1
           fi
-          # The marketing page and the control plane are two deployments on two
+
+          # The marketing site and the control plane are two deployments on two
           # hosts, and the link between them is a string in the site's bundle.
           # Nothing else checks that it still points at a control plane that
           # exists: this is the one assertion that fails when the site is
           # rebuilt against the wrong origin.
-          if ! grep -qF 'https://app.antifailure.dev/auth/github' /tmp/signup.html; then
-            echo "::error::THE SIGN-UP PAGE HAS NO WAY IN. /signup renders without a link to"
-            echo "::error::https://app.antifailure.dev/auth/github, so the primary call to action"
-            echo "::error::on the page goes nowhere. CONTROL_PLANE_URL in www/lib/site.ts is what"
-            echo "::error::builds it."
+          #
+          # The href attribute rather than the bare URL. AuthScreen renders an
+          # anchor, and a build that left the address behind as prose in a
+          # sentence would satisfy a substring match while the button went
+          # nowhere.
+          if ! grep -qF 'href="https://app.antifailure.dev/auth/github"' /tmp/signin.html; then
+            echo "::error::THE SIGN-IN PAGE HAS NO WAY IN. /signin renders without an anchor at"
+            echo "::error::https://app.antifailure.dev/auth/github, so Continue with GitHub, which is"
+            echo "::error::the only control on the page, goes nowhere. The address is built by"
+            echo "::error::controlPlaneUrl(\"auth.github\") from CONTROL_PLANE_URL in www/lib/site.ts,"
+            echo "::error::which reads NEXT_PUBLIC_CONTROL_PLANE_URL at build time and otherwise"
+            echo "::error::defaults to the production plane. Here is what the page does carry:"
+            grep -oE 'href="[^"]*auth[^"]*"' /tmp/signin.html | sort -u | head -5
             exit 1
           fi
-          echo "/signup renders and links at the control plane's GitHub exchange"
+          echo "/signin renders and its one control is an anchor at the control plane's GitHub exchange"
+
+      - name: A stranger can still ask for access
+        run: |
+          set -uo pipefail
+          site=https://antifailure.dev
+
+          # No -L again, and this is the page the followed redirect used to land
+          # on by accident.
+          status=$(curl -sS -m 20 -o /tmp/demo.html -w '%{http_code}' "$site/request-demo" || echo 000)
+          if [ "$status" != "200" ]; then
+            echo "::error::GET /request-demo returned $status rather than 200. This is the site's"
+            echo "::error::front door for somebody who does not have an organization yet: the header,"
+            echo "::error::the hero, the pricing page and the footer all lead here, and /signup 301s"
+            echo "::error::to it. The page is www/app/request-demo/page.tsx."
+            exit 1
+          fi
+
+          if ! grep -q '<form' /tmp/demo.html; then
+            echo "::error::/request-demo RENDERS NO FORM. The page answers 200 and there is nothing"
+            echo "::error::on it to fill in, so every call to action on the site now leads to a page"
+            echo "::error::that cannot be acted on. DemoRequestForm is a client component inside"
+            echo "::error::www/components/pages/company/RequestDemo.tsx; a build that dropped it, or"
+            echo "::error::an error boundary swallowing it, looks exactly like this."
+            exit 1
+          fi
+
+          # The fields validateDemoRequest in www/lib/demo-request.ts requires.
+          # A field that stops being rendered cannot be filled in, and the form
+          # refuses to submit without it, so the page would be a dead end that
+          # answers 200 and passes every other assertion here. phone is left out
+          # on purpose: it is the one optional field.
+          missing=
+          for field in firstName lastName email company jobTitle orgType country; do
+            if ! grep -qF "name=\"$field\"" /tmp/demo.html; then
+              missing="$missing $field"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::THE DEMO FORM CANNOT BE SUBMITTED. /request-demo is missing a control for"
+            echo "::error::each of:$missing. validateDemoRequest in www/lib/demo-request.ts requires"
+            echo "::error::every one of them and names the first missing one before the network is"
+            echo "::error::touched, so nobody can get past a field that is not on the page."
+            exit 1
+          fi
+
+          # The honeypot is off-screen rather than display:none, so it is in the
+          # markup and readable from here. It is the only thing standing between
+          # the demo queue and a bot, and a person reading that queue cannot
+          # tell it stopped working by looking at the page.
+          if ! grep -qF 'name="company_website"' /tmp/demo.html; then
+            echo "::error::THE DEMO FORM LOST ITS HONEYPOT. The form still works for a person. The"
+            echo "::error::field a bot fills and a person never sees is gone from the markup, so"
+            echo "::error::nothing now answers a bot with the confirmation it expects while writing"
+            echo "::error::no row, and the queue a person reads fills up. It is company_website in"
+            echo "::error::www/components/pages/company/DemoRequestForm.tsx. If it was renamed, this"
+            echo "::error::check is what needs the new name."
+            exit 1
+          fi
+          echo "/request-demo renders a form carrying every required field and the honeypot"
+
+      - name: The demo form can reach the queue it posts to
+        run: |
+          set -uo pipefail
+          plane=https://app.antifailure.dev
+          site=https://antifailure.dev
+
+          # The form is a cross origin fetch with a JSON content type, so a
+          # browser sends this preflight before it sends anything else. When the
+          # preflight is refused the browser never sends the POST, and the page
+          # shows "Could not reach the server" for a request the control plane
+          # would have answered perfectly. That is the exact sentence somebody
+          # read on the careers form, and it is the reason this is asserted from
+          # the hostname people type rather than inferred from the tfvars.
+          #
+          # It is also the cheapest honest probe there is: the OPTIONS handler
+          # in web/apps/api/src/server.ts writes nothing, spends no rate limit
+          # token, and never reaches the POST path.
+          status=$(curl -sS -m 20 -X OPTIONS -o /dev/null -D /tmp/preflight.txt -w '%{http_code}' \
+            -H "Origin: $site" \
+            -H 'Access-Control-Request-Method: POST' \
+            -H 'Access-Control-Request-Headers: content-type' \
+            "$plane/v1/leads" || echo 000)
+          allowed=$(sed -n 's/^[Aa]ccess-[Cc]ontrol-[Aa]llow-[Oo]rigin:[[:space:]]*//p' /tmp/preflight.txt | tr -d '\r' | head -1)
+
+          if [ "$status" = "404" ]; then
+            echo "::error::THE DEMO FORM POSTS AT NOTHING. The control plane answers 404 for"
+            echo "::error::/v1/leads, so pressing Request a demo shows Could not reach the server and"
+            echo "::error::the request is lost. The site publishes on every merge to main and the"
+            echo "::error::control plane only moves when a v* tag is promoted, so this is what a"
+            echo "::error::rollback to a tag that predates the route looks like from outside."
+            exit 1
+          fi
+          if [ "$status" = "403" ]; then
+            echo "::error::THE DEMO FORM IS REFUSED BEFORE IT IS SENT. The control plane answered 403"
+            echo "::error::to the CORS preflight from $site, so a browser never sends the request at"
+            echo "::error::all and the page says Could not reach the server. site_origin in"
+            echo "::error::infra/terraform/stacks/control-plane must name this hostname exactly;"
+            echo "::error::matchSiteOrigin compares whole origins and never suffixes."
+            exit 1
+          fi
+          if [ "$status" != "204" ]; then
+            echo "::error::the CORS preflight for POST /v1/leads returned $status, expected 204."
+            cat /tmp/preflight.txt || true
+            exit 1
+          fi
+          if [ "$allowed" != "$site" ]; then
+            echo "::error::the preflight succeeded and echoed ${allowed:-no allow-origin header} rather"
+            echo "::error::than $site. A browser compares that header against its own origin and"
+            echo "::error::refuses the response when they differ, so the form fails on a 204."
+            exit 1
+          fi
+
+          # The preflight and the POST are two handlers. Proving the preflight
+          # answers does not prove the route behind it is still registered, so
+          # ask that separately. An empty body is refused by validateLead on its
+          # first check, before recordLead, which is what makes this inert; a
+          # 429 is the shared auth bucket answering and means the route is
+          # there, which is the only thing being asked.
+          status=$(curl -sS -m 20 -X POST -o /tmp/leads.json -w '%{http_code}' \
+            -H 'content-type: application/json' -d '{}' "$plane/v1/leads" || echo 000)
+          case "$status" in
+            400|429) ;;
+            404)
+              echo "::error::THE DEMO FORM POSTS AT NOTHING. The preflight is answered but POST"
+              echo "::error::/v1/leads is 404, so the browser sends the request and the request lands"
+              echo "::error::nowhere. The OPTIONS handler and the POST handler are registered"
+              echo "::error::separately in web/apps/api/src/server.ts and one of them is gone."
+              exit 1
+              ;;
+            *)
+              echo "::error::POST /v1/leads answered $status to an empty body, and the only answers"
+              echo "::error::that say anything about this route are 400, which is validateLead"
+              echo "::error::refusing, and 429, which is the rate limiter. This run did not find out"
+              echo "::error::whether the route is there, which is not the same as finding it gone."
+              head -c 500 /tmp/leads.json || true
+              exit 1
+              ;;
+          esac
+          echo "the leads route answers the preflight for $site and is registered for POST"
+
+      - name: The old sign-up URL still lands somewhere true
+        run: |
+          set -uo pipefail
+          site=https://antifailure.dev
+
+          # Asserted rather than followed. /signup was the front door for as
+          # long as the product had self-serve sign-up, so it is in bookmarks,
+          # in link previews and in whatever anybody wrote down at the time. It
+          # earns a 301 rather than a 404 for as long as that is true, and the
+          # 301 is the thing that is easy to drop by accident: it lives in
+          # www/public/staticwebapp.config.json, which the host reads and no
+          # test in this repository evaluates.
+          status=$(curl -sS -m 20 -o /dev/null -D /tmp/signup-head.txt -w '%{http_code}' "$site/signup" || echo 000)
+          location=$(sed -n 's/^[Ll]ocation:[[:space:]]*//p' /tmp/signup-head.txt | tr -d '\r' | head -1)
+
+          if [ "$status" = "404" ]; then
+            echo "::error::/signup IS A 404. It was the site's front door and it is still linked to"
+            echo "::error::from outside, so it has to land somewhere. The 301 to /request-demo is the"
+            echo "::error::route entry in www/public/staticwebapp.config.json, and the page behind it"
+            echo "::error::is the MovedPage at www/app/signup/page.tsx for hosts that do not read"
+            echo "::error::that file. Something dropped both."
+            exit 1
+          fi
+          if [ "$status" != "301" ]; then
+            echo "::error::/signup returned $status, expected a 301 to /request-demo. A 200 here means"
+            echo "::error::the redirect is gone and the MovedPage is being served in its place, which"
+            echo "::error::is a real page telling somebody to go somewhere else rather than taking"
+            echo "::error::them there, and it splits the indexable result in two."
+            cat /tmp/signup-head.txt || true
+            exit 1
+          fi
+          case "$location" in
+            /request-demo|https://antifailure.dev/request-demo) ;;
+            *)
+              echo "::error::/signup redirects to ${location:-nowhere} rather than /request-demo. That"
+              echo "::error::is where the site's own copy, its sitemap and its canonical link all say"
+              echo "::error::a stranger goes; the route entry in www/public/staticwebapp.config.json"
+              echo "::error::disagrees with them."
+              exit 1
+              ;;
+          esac
+          echo "/signup 301s to /request-demo, so an old link still reaches the door that is open"
