@@ -286,13 +286,36 @@ func TestChaosSection_SurvivesAFaultThatEndedInAnError(t *testing.T) {
 	out := report.Run{Chaos: &report.Chaos{Faults: []report.ChaosFault{{
 		Name: "freeze", Kind: "container_pause", Target: "database",
 		Injected: true, Undone: true,
-		Error:    "AF-CHS-006: the database did not answer a query within 5s",
+		Error: "AF-CHS-006: the database did not answer a query within 5s",
 		Invariants: []report.ChaosInvariant{{
 			Name: "no-negative-balance", BeforeHeld: true,
 			AfterError: "the database did not answer a query after the fault",
 		}},
 	}}}}.Markdown()
 	require.Contains(t, out, "| `no-negative-balance` | held | not asked: the database did not answer a query after the fault |")
+
+	// And the fault is not described as one that could not be injected, and
+	// the section does not claim nothing after it was measured while printing
+	// the table of what was. It went in, it was undone, and the run around it
+	// did not finish.
+	require.NotContains(t, out, "could not be injected",
+		"a fault that went in was reported as one that could not be injected")
+	require.NotContains(t, out, "Nothing after it was measured",
+		"the section said nothing was measured and then printed what was")
+	require.Contains(t, out, "went into database and the run around it did not finish")
+}
+
+// TestChaosSection_AFaultThatNeverWentInStillSaysNothingWasMeasured is the
+// other side of that branch, so the fix above cannot have turned every failure
+// into a fault that landed.
+func TestChaosSection_AFaultThatNeverWentInStillSaysNothingWasMeasured(t *testing.T) {
+	out := report.Run{Chaos: &report.Chaos{Faults: []report.ChaosFault{{
+		Name: "postgres-crash", Kind: "process_kill", Target: "database",
+		Error: "AF-CHS-004: no process in the container matches",
+	}}}}.Markdown()
+	require.Contains(t, out, "could not be injected")
+	require.Contains(t, out, "Nothing after it was measured.")
+	require.NotContains(t, out, "the run around it did not finish")
 }
 
 // TestChaosSection_AddsNothingWhenNoInvariantIsDeclared is the liveness arm

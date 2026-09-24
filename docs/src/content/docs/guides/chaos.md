@@ -154,8 +154,8 @@ recovered database. Both answers are printed, because one of them cannot be
 read on its own.
 
 ```text
-      invariant      no-negative-balance: held before the fault, held after the recovery
-      invariant      orders-have-a-customer: held before the fault, violated, 2 rows after the recovery
+      invariant      no-negative-balance: before the fault held; after the recovery held
+      invariant      orders-have-a-customer: before the fault held; after the recovery violated, 2 rows
 ```
 
 An invariant that was already violated before the fault is reported and is

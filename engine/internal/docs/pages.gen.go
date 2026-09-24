@@ -9339,8 +9339,8 @@ recovered database. Both answers are printed, because one of them cannot be
 read on its own.
 
 ` + "`" + "`" + "`" + `text
-      invariant      no-negative-balance: held before the fault, held after the recovery
-      invariant      orders-have-a-customer: held before the fault, violated, 2 rows after the recovery
+      invariant      no-negative-balance: before the fault held; after the recovery held
+      invariant      orders-have-a-customer: before the fault held; after the recovery violated, 2 rows
 ` + "`" + "`" + "`" + `
 
 An invariant that was already violated before the fault is reported and is
@@ -24488,8 +24488,8 @@ refused at the line rather than treated as the weakest one.
 | ` + "`" + `cleanup` + "`" + ` | ` + "`" + `fail` + "`" + ` | Teardown left a resource behind. |
 | ` + "`" + `workflows_unverified` + "`" + ` | ` + "`" + `fail` + "`" + ` | No workflow reached a verdict about the application, because every one was blocked or unverified or because none was declared. |
 | ` + "`" + `review` + "`" + ` | ` + "`" + `warn` + "`" + ` | The static code reviewer flagged a correctness defect in the change's added lines. Advisory by default because the reviewer is model backed; runs only when a model key is configured. |
-| ` + "`" + `chaos_failure` + "`" + ` | ` + "`" + `fail` + "`" + ` | A fault's recovery was wrong: a commit the client was told was committed is gone, a row is present that no client wrote, a replay stopped short, a heap and an index disagree. |
-| ` + "`" + `chaos_unverified` + "`" + ` | ` + "`" + `warn` + "`" + ` | A fault run could not establish what it set out to: nothing crashed, no replay is recorded, the control file would not parse, ` + "`" + `amcheck` + "`" + ` is absent. A separate key because a check that found a problem and a check that could not look are different facts. |
+| ` + "`" + `chaos_failure` + "`" + ` | ` + "`" + `fail` + "`" + ` | A fault's recovery was wrong: a commit the client was told was committed is gone, a row is present that no client wrote, a replay stopped short, a heap and an index disagree, or one of this project's own ` + "`" + `invariants` + "`" + ` held before the fault and does not hold after the recovery. |
+| ` + "`" + `chaos_unverified` + "`" + ` | ` + "`" + `warn` + "`" + ` | A fault run could not establish what it set out to: nothing crashed, no replay is recorded, the control file would not parse, ` + "`" + `amcheck` + "`" + ` is absent, an invariant could not be asked, or an invariant was already violated before the fault so nothing after it is attributable to the fault. A separate key because a check that found a problem and a check that could not look are different facts. |
 
 See [verdicts](/docs/concepts/verdicts) for what each level does to the run
 and to the exit code.
@@ -25290,6 +25290,19 @@ still broken.
 A project that declares no ` + "`" + `chaos` + "`" + ` block, declares one that is off, declares one
 with no faults, or asks for a runtime other than the local one is
 ` + "`" + `INCONCLUSIVE` + "`" + ` rather than a pass over a proof that did not happen.
+
+Around a fault with the durability proof on, every invariant the manifest
+declares is asked twice, once before anything is broken and once against the
+recovered database, and each fault carries both answers. The proof's own
+assertions are all about a schema of the engine's, deliberately, and that
+leaves only your own invariants able to say whether your data still means what
+you say it means. Both sides travel because the after side alone cannot be
+acted on: a rule that is broken after a crash and was broken before it is not
+something the crash did. ` + "`" + `attributable_to_the_fault` + "`" + ` is true only for one that
+held before and does not hold after, and that is the only one that fails the
+run. The violating rows themselves do not cross this boundary, because they
+come out of the customer's database and this is read by a model; ` + "`" + `af chaos -o
+json` + "`" + ` carries them for a person.
 
 The outage figure is the **longest single** one, never the sum. The faults run
 one at a time and each is undone before the next begins, so their outages are

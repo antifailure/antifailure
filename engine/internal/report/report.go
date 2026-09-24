@@ -1333,12 +1333,20 @@ func (r Run) chaosSection() string {
 			target = "the environment"
 		}
 		switch {
+		case f.Error != "" && f.Injected:
+			// A fault that WENT IN and then failed is not a fault that could
+			// not be injected, and "nothing after it was measured" is false of
+			// it: the invariant arm was measured, and it is printed under this
+			// line. A database that does not come back after a crash arrives
+			// here, and the sentence below used to send the reader to look at
+			// a fault that had landed.
+			fmt.Fprintf(&b, "Fault `%s` went into %s and the run around it did not finish: %s\n\n",
+				f.Name, oneLine(target), oneLine(f.Error))
+			b.WriteString(chaosInvariantTable(f))
+			continue
 		case f.Error != "":
 			fmt.Fprintf(&b, "Fault `%s` could not be injected into %s: %s Nothing after it was measured.\n\n",
 				f.Name, oneLine(target), oneLine(f.Error))
-			// The invariant arm survives this, because the database not
-			// coming back is reported here and is the moment it matters most.
-			b.WriteString(chaosInvariantTable(f))
 			continue
 		case !f.Injected:
 			fmt.Fprintf(&b, "Fault `%s` did not run.\n\n", f.Name)

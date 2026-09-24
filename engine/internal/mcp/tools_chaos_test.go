@@ -724,3 +724,84 @@ func TestDescribeChaos_CarriesWhatTheProbeMeasured(t *testing.T) {
 	require.Equal(t, int64(100), got.ProbeIntervalMs, "the probe's resolution did not reach the result")
 	require.Equal(t, "110ms, probed every 100ms", got.Unreachable)
 }
+
+// chaosRunWithInvariants is the same run with the project's own rules asked on
+// both sides of the fault, in the three shapes that mean different things.
+func chaosRunWithInvariants() *env.ChaosRun {
+	run := chaosRun()
+	run.Report.Faults[0].Invariants = []report.ChaosInvariant{
+		{Name: "every-account-exists", BeforeHeld: true, AfterHeld: true},
+		{Name: "orders-have-a-customer", BeforeHeld: true, Rows: [][]string{{"7"}, {"9"}}},
+		{Name: "no-negative-balance", Rows: [][]string{{"2"}}},
+		{Name: "asks-a-missing-table", BeforeError: "relation does not exist",
+			AfterError: "relation does not exist"},
+	}
+	return run
+}
+
+// TestDescribeChaos_CarriesTheProjectsOwnRulesWithBothSides is the arm an
+// agent asking the durability question has to be able to read.
+//
+// Both sides travel, because the after side alone cannot be acted on: a rule
+// broken after a crash that was broken before it is not something the crash
+// did, and an agent handed only the second would report a project's own
+// pre-existing defect as a regression the change caused.
+func TestDescribeChaos_CarriesTheProjectsOwnRulesWithBothSides(t *testing.T) {
+	t.Parallel()
+	doc := describeChaos(chaosRunWithInvariants(), false, true)
+	require.Len(t, doc.Faults, 1)
+	got := doc.Faults[0].Invariants
+	require.Len(t, got, 4, "the arm did not reach the tool's output")
+
+	require.Equal(t, "every-account-exists", got[0].Name)
+	require.Equal(t, "held", got[0].Before)
+	require.Equal(t, "held", got[0].After)
+	require.False(t, got[0].Attributable)
+
+	require.Equal(t, "held", got[1].Before)
+	require.Equal(t, "violated, 2 rows", got[1].After)
+	require.True(t, got[1].Attributable,
+		"the one rule this run can put on the fault was not marked as such")
+
+	require.Equal(t, "violated", got[2].Before)
+	require.False(t, got[2].Attributable,
+		"a rule the run inherited broken was offered to an agent as caused by the fault")
+
+	require.Equal(t, "not asked: relation does not exist", got[3].Before)
+	require.False(t, got[3].Attributable)
+
+	// And the rows themselves do not cross. They come out of the customer's
+	// database and this is read by a model.
+	rendered, err := json.Marshal(doc)
+	require.NoError(t, err)
+	require.NotContains(t, string(rendered), `"7"`, "a row from the customer's database crossed into the tool output")
+}
+
+// TestDescribeChaos_AManifestWithNoInvariantsCarriesNothing is the liveness
+// arm, and the requirement that a project which declares none sees no change.
+func TestDescribeChaos_AManifestWithNoInvariantsCarriesNothing(t *testing.T) {
+	t.Parallel()
+	doc := describeChaos(chaosRun(), true, true)
+	require.Empty(t, doc.Faults[0].Invariants)
+	rendered, err := json.Marshal(doc)
+	require.NoError(t, err)
+	require.NotContains(t, string(rendered), "invariants",
+		"an empty arm rendered a key, so a project that declares none gained output")
+}
+
+// TestDescribeChaos_TruncatesTheInvariantArmAndSaysSo is the bound. A manifest
+// may declare a hundred invariants and twenty faults may be reported, and two
+// thousand entries is not a result an agent can read. A truncation that said
+// nothing would be worse than the length.
+func TestDescribeChaos_TruncatesTheInvariantArmAndSaysSo(t *testing.T) {
+	t.Parallel()
+	run := chaosRun()
+	for i := 0; i < maxChaosInvariantsReported+5; i++ {
+		run.Report.Faults[0].Invariants = append(run.Report.Faults[0].Invariants,
+			report.ChaosInvariant{Name: "rule", BeforeHeld: true, AfterHeld: true})
+	}
+	doc := describeChaos(run, true, true)
+	require.Len(t, doc.Faults[0].Invariants, maxChaosInvariantsReported)
+	require.Contains(t, strings.Join(doc.Notes, "\n"), "asked 25 invariants and the first 20 are shown",
+		"the arm was cut and nothing said so")
+}

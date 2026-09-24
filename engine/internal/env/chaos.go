@@ -232,7 +232,7 @@ func (o *Orchestrator) crashProof(
 		// This is the arm that asks whether the user's data still means what
 		// the user says it means. A manifest with none leaves it empty and
 		// nothing about it runs.
-		Invariants: o.opts.Manifest.Invariants,
+		Invariants:  o.opts.Manifest.Invariants,
 		WarmCommits: cr.CommitsBeforeFault,
 		// The declared wait is a floor on the warm up, so a manifest that asks
 		// for a long soak gets one and one that asks for none still waits for

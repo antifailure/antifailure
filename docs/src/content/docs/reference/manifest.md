@@ -616,8 +616,8 @@ refused at the line rather than treated as the weakest one.
 | `cleanup` | `fail` | Teardown left a resource behind. |
 | `workflows_unverified` | `fail` | No workflow reached a verdict about the application, because every one was blocked or unverified or because none was declared. |
 | `review` | `warn` | The static code reviewer flagged a correctness defect in the change's added lines. Advisory by default because the reviewer is model backed; runs only when a model key is configured. |
-| `chaos_failure` | `fail` | A fault's recovery was wrong: a commit the client was told was committed is gone, a row is present that no client wrote, a replay stopped short, a heap and an index disagree. |
-| `chaos_unverified` | `warn` | A fault run could not establish what it set out to: nothing crashed, no replay is recorded, the control file would not parse, `amcheck` is absent. A separate key because a check that found a problem and a check that could not look are different facts. |
+| `chaos_failure` | `fail` | A fault's recovery was wrong: a commit the client was told was committed is gone, a row is present that no client wrote, a replay stopped short, a heap and an index disagree, or one of this project's own `invariants` held before the fault and does not hold after the recovery. |
+| `chaos_unverified` | `warn` | A fault run could not establish what it set out to: nothing crashed, no replay is recorded, the control file would not parse, `amcheck` is absent, an invariant could not be asked, or an invariant was already violated before the fault so nothing after it is attributable to the fault. A separate key because a check that found a problem and a check that could not look are different facts. |
 
 See [verdicts](/docs/concepts/verdicts) for what each level does to the run
 and to the exit code.

@@ -481,6 +481,19 @@ A project that declares no `chaos` block, declares one that is off, declares one
 with no faults, or asks for a runtime other than the local one is
 `INCONCLUSIVE` rather than a pass over a proof that did not happen.
 
+Around a fault with the durability proof on, every invariant the manifest
+declares is asked twice, once before anything is broken and once against the
+recovered database, and each fault carries both answers. The proof's own
+assertions are all about a schema of the engine's, deliberately, and that
+leaves only your own invariants able to say whether your data still means what
+you say it means. Both sides travel because the after side alone cannot be
+acted on: a rule that is broken after a crash and was broken before it is not
+something the crash did. `attributable_to_the_fault` is true only for one that
+held before and does not hold after, and that is the only one that fails the
+run. The violating rows themselves do not cross this boundary, because they
+come out of the customer's database and this is read by a model; `af chaos -o
+json` carries them for a person.
+
 The outage figure is the **longest single** one, never the sum. The faults run
 one at a time and each is undone before the next begins, so their outages are
 separate events, and adding them would describe an outage that never happened:

@@ -128,13 +128,22 @@ func printChaos(e *Env, run *env.ChaosRun) {
 			printChaosInvariants(e, f)
 			continue
 		case f.Error != "":
+			// A fault that WENT IN and then failed is not a fault that could
+			// not be injected, and this branch used to say it was. A database
+			// that does not come back after a crash arrives here, with the
+			// fault applied and undone and the proof unfinished, and "could
+			// not inject" sent the reader to look at a fault that had landed.
+			// It is also the run where the project's own rules were never
+			// asked of a recovered database, which is the most important line
+			// on that screen, so the arm prints under it.
+			if f.Injected {
+				e.Out.Status(SymbolWarn, f.Name, f.Kind+" on "+f.Target)
+				e.Out.Note(StyleDim, "Injected, and the run around it did not finish: "+f.Error)
+				printChaosInvariants(e, f)
+				continue
+			}
 			e.Out.Status(SymbolSkip, f.Name, f.Kind+" on "+f.Target)
 			e.Out.Note(StyleDim, "Could not inject: "+f.Error)
-			// Printed here too. A database that did not come back after a
-			// fault that DID go in arrives on this branch, and that is the
-			// run where "the project's own rules were never asked" is the
-			// most important line on the screen.
-			printChaosInvariants(e, f)
 			continue
 		case !f.Injected:
 			e.Out.Status(SymbolSkip, f.Name, "did not run")
@@ -188,10 +197,16 @@ func printChaos(e *Env, run *env.ChaosRun) {
 // fault. The sentences come from engine/internal/report, which is where the
 // pull request comment gets them, so the terminal and the comment cannot say
 // two different things about the same run.
+//
+// The side is NAMED BEFORE its answer, which reads worse in isolation and
+// better in the case that matters. An answer can end in a reason, and the
+// reason for an unasked invariant ends in the words "after the fault", so
+// putting the label last produced "the database did not answer a query after
+// the fault after the recovery" on the one screen this arm exists for.
 func printChaosInvariants(e *Env, f report.ChaosFault) {
 	for _, i := range f.Invariants {
 		e.Out.Printf("      invariant      %s\n", e.Out.Wrap(
-			fmt.Sprintf("%s: %s before the fault, %s after the recovery",
+			fmt.Sprintf("%s: before the fault %s; after the recovery %s",
 				i.Name, i.BeforeSays(), i.AfterSays()), chaosValueIndent))
 	}
 }
