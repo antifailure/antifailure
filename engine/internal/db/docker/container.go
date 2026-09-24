@@ -152,7 +152,7 @@ func (p *Provider) startWithRetry(
 			},
 		},
 		HostConfig: &container.HostConfig{
-			Binds:        binds,
+			Binds: binds,
 			PortBindings: network.PortMap{hostPort: []network.PortBinding{{
 				// Loopback only. This is the security boundary that makes the
 				// fixed password acceptable: the database is unreachable from
