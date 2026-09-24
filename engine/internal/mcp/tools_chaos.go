@@ -58,6 +58,13 @@ const (
 	maxFaultsReported   = 20
 	maxChaosNoteLength  = 400
 	maxEvidenceReported = 400
+	// A manifest may declare a hundred invariants and twenty faults may be
+	// reported, so the arm is bounded PER FAULT for the same reason the faults
+	// are: two thousand entries is not a result an agent can read. Named apart
+	// from tools_explore.go's maxInvariantsReported, which bounds the same
+	// manifest list on a different tool and at a different number, because one
+	// name for two bounds is how the two come to be read as one.
+	maxChaosInvariantsReported = 20
 )
 
 // newInjectFaultsTool builds inject_declared_faults.
@@ -393,6 +400,35 @@ type chaosFaultDoc struct {
 	// fault, its undo and any verification. It is longer than InPlaceMs.
 	DurationMs int64             `json:"duration_ms"`
 	Recovery   *chaosRecoveryDoc `json:"recovery,omitempty"`
+	// Invariants is what the project's own rules about its own data said
+	// before the fault and after the recovery. Absent when the manifest
+	// declares none, and absent when no durability proof ran around this
+	// fault.
+	Invariants []chaosInvariantDoc `json:"invariants,omitempty"`
+}
+
+// chaosInvariantDoc is one of the manifest's own invariants, asked on both
+// sides of the fault.
+//
+// The two sentences, and deliberately not the violating rows. Those rows come
+// out of the customer's database and this crosses into an agent's context: a
+// finding is something to act on and a row is something somebody else wrote.
+// What an agent needs is which rule changed and which way, and `af chaos -o
+// json` holds the rows for a person who wants them.
+type chaosInvariantDoc struct {
+	Name string `json:"name"`
+	// Before and After are what the statement said on each side, in the same
+	// words the terminal and the pull request comment use. "not asked" is one
+	// of those words and it is never "held", because a rule nobody could ask
+	// is not a rule that held.
+	Before string `json:"before_the_fault"`
+	After  string `json:"after_the_recovery"`
+	// Attributable is true only when the rule held before the fault and does
+	// not hold after the recovery, which is the one answer about it this run
+	// can put on the fault. A rule that was already violated is reported with
+	// this false, so an agent cannot read an inherited defect as one the
+	// change caused.
+	Attributable bool `json:"attributable_to_the_fault"`
 }
 
 // chaosRecoveryDoc is what the durability proof established around one fault.
@@ -475,6 +511,12 @@ func describeChaos(run *env.ChaosRun, held, verified bool) *chaosDoc {
 		if f.Recovery != nil {
 			entry.Recovery = describeRecovery(f.Recovery)
 		}
+		entry.Invariants = describeInvariants(f.Invariants)
+		if len(f.Invariants) > maxChaosInvariantsReported {
+			doc.Notes = append(doc.Notes, fmt.Sprintf(
+				"Fault %s asked %d invariants and the first %d are shown. Read the rest with af chaos -o json.",
+				neutralize(f.Name, 128), len(f.Invariants), maxChaosInvariantsReported))
+		}
 		doc.Faults = append(doc.Faults, entry)
 	}
 
@@ -495,6 +537,30 @@ func describeChaos(run *env.ChaosRun, held, verified bool) *chaosDoc {
 		}
 	}
 	return doc
+}
+
+// describeInvariants carries the invariant arm across the boundary.
+//
+// Every string is neutralised, because an invariant's name and the error a
+// statement raised both come from outside the engine, and this is read by a
+// model.
+func describeInvariants(invs []report.ChaosInvariant) []chaosInvariantDoc {
+	if len(invs) == 0 {
+		return nil
+	}
+	if len(invs) > maxChaosInvariantsReported {
+		invs = invs[:maxChaosInvariantsReported]
+	}
+	out := make([]chaosInvariantDoc, 0, len(invs))
+	for _, i := range invs {
+		out = append(out, chaosInvariantDoc{
+			Name:         neutralize(i.Name, 128),
+			Before:       neutralize(i.BeforeSays(), maxChaosNoteLength),
+			After:        neutralize(i.AfterSays(), maxChaosNoteLength),
+			Attributable: i.Attributable(),
+		})
+	}
+	return out
 }
 
 func describeRecovery(rec *report.ChaosRecovery) *chaosRecoveryDoc {

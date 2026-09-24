@@ -156,9 +156,9 @@ func TestPrintChaos_SaysWhatTheProjectsOwnRulesSaidOnBothSides(t *testing.T) {
 		report.ChaosInvariant{Name: "orders-have-a-customer", BeforeHeld: true, Rows: [][]string{{"7"}, {"9"}}},
 		report.ChaosInvariant{Name: "no-negative-balance", Rows: [][]string{{"2"}}},
 	))
-	require.Contains(t, out, "      invariant      every-account-exists: held before the fault, held after the recovery\n")
-	require.Contains(t, out, "      invariant      orders-have-a-customer: held before the fault, violated, 2 rows after the recovery\n")
-	require.Contains(t, out, "      invariant      no-negative-balance: violated before the fault, violated, 1 row after the recovery\n")
+	require.Contains(t, out, "      invariant      every-account-exists: before the fault held; after the recovery held\n")
+	require.Contains(t, out, "      invariant      orders-have-a-customer: before the fault held; after the recovery violated, 2 rows\n")
+	require.Contains(t, out, "      invariant      no-negative-balance: before the fault violated; after the recovery violated, 1 row\n")
 }
 
 // TestPrintChaos_AnInvariantNobodyAskedIsNotPrintedAsHeld is the silent pass
@@ -169,9 +169,15 @@ func TestPrintChaos_AnInvariantNobodyAskedIsNotPrintedAsHeld(t *testing.T) {
 		Name: "no-negative-balance", BeforeHeld: true,
 		AfterError: "the database did not answer a query after the fault",
 	}))
-	require.Contains(t, out, "      invariant      no-negative-balance: held before the fault, "+
-		"not asked: the database did not answer a query after the fault after the recovery\n")
-	require.NotContains(t, out, "no-negative-balance: held before the fault, held after the recovery")
+	require.Contains(t, out, "      invariant      no-negative-balance: before the fault held; "+
+		"after the recovery not asked: the database did not answer a query after the fault\n")
+	require.NotContains(t, out, "after the recovery held")
+
+	// And the label comes before its answer, so a reason that itself ends in
+	// "after the fault" does not run straight into the words "after the
+	// recovery". It read "did not answer a query after the fault after the
+	// recovery" when the label came last.
+	require.NotContains(t, out, "after the fault after the recovery")
 }
 
 // TestPrintChaos_PrintsTheArmWhenTheFaultItselfEndedInAnError is the ordering
@@ -182,15 +188,34 @@ func TestPrintChaos_PrintsTheArmWhenTheFaultItselfEndedInAnError(t *testing.T) {
 	run := &env.ChaosRun{Report: report.Chaos{Faults: []report.ChaosFault{{
 		Name: "freeze", Kind: "container_pause", Target: "database",
 		Injected: true, Undone: true,
-		Error:    "AF-CHS-006: the database did not answer a query within 5s",
+		Error: "AF-CHS-006: the database did not answer a query within 5s",
 		Invariants: []report.ChaosInvariant{{
 			Name: "no-negative-balance", BeforeHeld: true,
 			AfterError: "the database did not answer a query after the fault",
 		}},
 	}}}}
 	out := printed(t, run)
-	require.Contains(t, out, "      invariant      no-negative-balance: held before the fault, "+
-		"not asked: the database did not answer a query after the fault after the recovery\n")
+	require.Contains(t, out, "      invariant      no-negative-balance: before the fault held; "+
+		"after the recovery not asked: the database did not answer a query after the fault\n")
+
+	// And the fault is not described as one that could not be injected. It
+	// went in, it was undone, and the run around it did not finish, and the
+	// old sentence sent a reader to look at a fault that had landed.
+	require.NotContains(t, out, "Could not inject",
+		"a fault that went in was reported as one that could not be injected")
+	require.Contains(t, out, "Injected, and the run around it did not finish: AF-CHS-006")
+}
+
+// TestPrintChaos_AFaultThatNeverWentInStillSaysSo is the other side of that
+// branch, so the fix above cannot have turned every failure into a fault that
+// landed.
+func TestPrintChaos_AFaultThatNeverWentInStillSaysSo(t *testing.T) {
+	out := printed(t, &env.ChaosRun{Report: report.Chaos{Faults: []report.ChaosFault{{
+		Name: "postgres-crash", Kind: "process_kill", Target: "database",
+		Error: "AF-CHS-004: no process in the container matches",
+	}}}})
+	require.Contains(t, out, "Could not inject: AF-CHS-004")
+	require.NotContains(t, out, "the run around it did not finish")
 }
 
 // TestPrintChaos_PrintsNothingWhenNoInvariantIsDeclared is the liveness arm,
