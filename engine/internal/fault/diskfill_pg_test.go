@@ -95,6 +95,17 @@ func sleeperWithMount(t *testing.T, cli *client.Client, labels map[string]string
 }
 
 // fill is the fault every case in this file drives.
+//
+// The cap the refusal cases pass is deliberately far below what filling the
+// daemon's disk would take, and that is a SAFETY property of this file rather
+// than a detail. A mutation run that removed the containment check ran one of
+// these cases with a cap of a terabyte, and the fill it then had no reason to
+// refuse wrote 65 GB into a volume on the real disk before it was killed. With
+// the cap here, a guard that has been broken refuses on the cap instead, the
+// case still goes red because the refusal says something else, and nothing is
+// written. A test that can damage the machine when the thing it guards is
+// broken is a test that cannot be run against a broken guard, which is the one
+// time it matters.
 func fill(name string, headroom, max int64) fault.Fault {
 	return fault.Fault{
 		Name: name, Kind: fault.KindDiskFill,
@@ -150,7 +161,7 @@ func TestDiskFill_RefusesAVolumeWithNoSizeFixedAtCreation(t *testing.T) {
 	require.NotEqual(t, cols[0], cols[1],
 		"the mount is not its own filesystem, so this case is not testing the refusal it names")
 
-	_, err = inj.InjectInto(t.Context(), id, fill("fill-a-plain-volume", 1<<20, 1<<40))
+	_, err = inj.InjectInto(t.Context(), id, fill("fill-a-plain-volume", 1<<20, 2<<20))
 	require.Error(t, err, "a fill was accepted on a volume that has the daemon's whole disk behind it")
 	require.Contains(t, err.Error(), "AF-CHS-005")
 	require.Contains(t, err.Error(), "no size fixed at creation")
@@ -172,7 +183,7 @@ func TestDiskFill_RefusesAVolumeOfAnotherEnvironment(t *testing.T) {
 
 	inj, err := fault.New(cli, envID)
 	require.NoError(t, err)
-	_, err = inj.InjectInto(t.Context(), id, fill("fill-another-environment", 1<<20, 1<<40))
+	_, err = inj.InjectInto(t.Context(), id, fill("fill-another-environment", 1<<20, 2<<20))
 	require.Error(t, err, "a fill was accepted on another environment's volume")
 	require.Contains(t, err.Error(), "AF-CHS-005")
 	require.Contains(t, err.Error(), "belongs to something other than this environment")
@@ -189,7 +200,7 @@ func TestDiskFill_RefusesAVolumeNobodyLabelled(t *testing.T) {
 
 	inj, err := fault.New(cli, envID)
 	require.NoError(t, err)
-	_, err = inj.InjectInto(t.Context(), id, fill("fill-a-strangers-volume", 1<<20, 1<<40))
+	_, err = inj.InjectInto(t.Context(), id, fill("fill-a-strangers-volume", 1<<20, 2<<20))
 	require.Error(t, err, "a fill was accepted on a volume nothing here created")
 	require.Contains(t, err.Error(), "AF-CHS-005")
 	require.Contains(t, err.Error(), "belongs to something other than this environment")
