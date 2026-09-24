@@ -62,6 +62,18 @@ name: Sign-up
 # second spends one token of the shared auth rate limit bucket, which is why a
 # 429 from it counts as the route being present rather than as a failure.
 #
+# 000 MEANS THE REQUEST NEVER GOT AN ANSWER, and every step writes that the
+# same way. `curl -w '%{http_code}'` prints 000 on a connection that never
+# opened and then exits non zero, so the older `|| echo 000` appended a SECOND
+# 000 to output curl had already written and the refusal read "returned 000000",
+# a status no server can send. Capturing the substitution and defaulting on its
+# exit status instead keeps the one case where curl is killed before it writes
+# anything, without inventing a six digit code in the sentence somebody reads at
+# seven in the morning. It is a small thing and it is in this file on purpose:
+# the whole subject here is a gate whose message sent people looking in the
+# wrong place, and the idiom was copied into four new steps from the two it was
+# already in.
+
 # WHY THIS AND NOT routecheck OR origincheck, both of which ask the control
 # plane a question that overlaps with these. Both run in deploy.yml, which is to
 # say both run when something ships. Nothing here ships. The failure this file
@@ -111,7 +123,7 @@ jobs:
           set -uo pipefail
           plane=https://app.antifailure.dev
 
-          status=$(curl -sS -m 20 -o /tmp/session.json -w '%{http_code}' "$plane/auth/session" || echo 000)
+          status=$(curl -sS -m 20 -o /tmp/session.json -w '%{http_code}' "$plane/auth/session") || status=000
           if [ "$status" != "200" ]; then
             echo "::error::GET /auth/session returned $status. The control plane is not answering."
             head -c 500 /tmp/session.json || true
@@ -153,7 +165,7 @@ jobs:
           # Deliberately not followed. Following the hop would make GitHub's
           # availability the subject, and a probe that failed because github.com
           # was slow would be reporting somebody else's outage under our name.
-          status=$(curl -sS -m 20 -o /dev/null -D /tmp/head.txt -w '%{http_code}' "$plane/auth/github" || echo 000)
+          status=$(curl -sS -m 20 -o /dev/null -D /tmp/head.txt -w '%{http_code}' "$plane/auth/github") || status=000
           location=$(sed -n 's/^[Ll]ocation:[[:space:]]*//p' /tmp/head.txt | tr -d '\r' | head -1)
 
           if [ "$status" != "302" ]; then
@@ -192,7 +204,7 @@ jobs:
           # No -L. /signin is a page rather than a redirect, and following a hop
           # here is exactly how this file came to grade the wrong document for
           # eight days.
-          status=$(curl -sS -m 20 -o /tmp/signin.html -w '%{http_code}' "$site/signin" || echo 000)
+          status=$(curl -sS -m 20 -o /tmp/signin.html -w '%{http_code}' "$site/signin") || status=000
           if [ "$status" != "200" ]; then
             echo "::error::GET /signin returned $status rather than 200. This is the page every"
             echo "::error::operator with an existing organization comes back through, and it is the"
@@ -229,7 +241,7 @@ jobs:
 
           # No -L again, and this is the page the followed redirect used to land
           # on by accident.
-          status=$(curl -sS -m 20 -o /tmp/demo.html -w '%{http_code}' "$site/request-demo" || echo 000)
+          status=$(curl -sS -m 20 -o /tmp/demo.html -w '%{http_code}' "$site/request-demo") || status=000
           if [ "$status" != "200" ]; then
             echo "::error::GET /request-demo returned $status rather than 200. This is the site's"
             echo "::error::front door for somebody who does not have an organization yet: the header,"
@@ -302,7 +314,7 @@ jobs:
             -H "Origin: $site" \
             -H 'Access-Control-Request-Method: POST' \
             -H 'Access-Control-Request-Headers: content-type' \
-            "$plane/v1/leads" || echo 000)
+            "$plane/v1/leads") || status=000
           allowed=$(sed -n 's/^[Aa]ccess-[Cc]ontrol-[Aa]llow-[Oo]rigin:[[:space:]]*//p' /tmp/preflight.txt | tr -d '\r' | head -1)
 
           if [ "$status" = "404" ]; then
@@ -340,7 +352,7 @@ jobs:
           # 429 is the shared auth bucket answering and means the route is
           # there, which is the only thing being asked.
           status=$(curl -sS -m 20 -X POST -o /tmp/leads.json -w '%{http_code}' \
-            -H 'content-type: application/json' -d '{}' "$plane/v1/leads" || echo 000)
+            -H 'content-type: application/json' -d '{}' "$plane/v1/leads") || status=000
           case "$status" in
             400|429) ;;
             404)
@@ -373,7 +385,7 @@ jobs:
           # 301 is the thing that is easy to drop by accident: it lives in
           # www/public/staticwebapp.config.json, which the host reads and no
           # test in this repository evaluates.
-          status=$(curl -sS -m 20 -o /dev/null -D /tmp/signup-head.txt -w '%{http_code}' "$site/signup" || echo 000)
+          status=$(curl -sS -m 20 -o /dev/null -D /tmp/signup-head.txt -w '%{http_code}' "$site/signup") || status=000
           location=$(sed -n 's/^[Ll]ocation:[[:space:]]*//p' /tmp/signup-head.txt | tr -d '\r' | head -1)
 
           if [ "$status" = "404" ]; then
