@@ -51,7 +51,10 @@ export function Hero() {
 
             The two sentences are in the order a visitor needs them: what they
             can have today with no account, then how the hosted plane is
-            reached now that self-serve is off. */}
+            reached, which is by talking to somebody as a matter of how it is
+            sold rather than because signing up is refused. See
+            components/pages/company/RequestDemo.tsx for where that value
+            actually lives. */}
         <p className="mt-5 max-w-[760px] text-[15px] leading-6 tracking-extra-tight text-gray-new-40 max-lg:mt-4 max-lg:max-w-[520px] max-md:text-[14px]">
           The engine is open source and runs in your own continuous integration
           today, with no account.

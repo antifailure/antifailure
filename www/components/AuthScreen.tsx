@@ -16,10 +16,17 @@ function GitHubMark({ className }: { className?: string }) {
 
 /**
  * The sign-in screen. It used to serve sign-up too, on a `mode` prop, until
- * self-serve was switched off: a stranger cannot create an organization on
- * their own now, so the front door is /request-demo and this screen is only
- * for operators who already have one. The cover art and its history below are
- * kept because both the sign-in and the retired sign-up screen wore it.
+ * the site stopped marketing self-serve sign-up and made /request-demo the
+ * front door, so this screen is only for operators who already have an
+ * organization. NOT because a stranger cannot create one: `AF_SELF_SERVE_SIGNUP`
+ * is ON, from `self_serve_signup` in
+ * `infra/terraform/stacks/control-plane/staging.tfvars` and
+ * `production.tfvars`, both `true` since 61f8578c6 on 2026-09-02. The
+ * `variables.tf` default of `false` is what made this comment and six others
+ * say the opposite, because a default is not a value. The funnel is the
+ * decision; see components/pages/company/RequestDemo.tsx. The cover art and its
+ * history below are kept because both the sign-in and the retired sign-up
+ * screen wore it.
  *
  * WHAT THIS PAGE HAS BEEN, in order, because each version was a true statement
  * about the product at the time and the page is where they went stale.
@@ -132,9 +139,11 @@ export function AuthScreen() {
 
             {/* One paragraph, the same shape as the two below it. It names the
                 two things somebody who cannot sign in yet needs: the hosted
-                plane is reached by a booked demo now that self-serve is off,
-                and an invitation link puts you in somebody else's organization
-                rather than one of your own. */}
+                plane is sold by talking to somebody, which is a decision about
+                the funnel rather than a closed door, and an invitation link puts
+                you in somebody else's organization rather than one of your own.
+                The rendered sentence claims neither, which is why it did not go
+                stale with the comment that used to sit here. */}
             <p className="mt-7 text-[13.5px] leading-6 text-black/55">
               No organization yet?{" "}
               <a

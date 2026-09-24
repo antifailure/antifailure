@@ -281,8 +281,11 @@ export function PricingPage() {
                 and survives: the engine is MIT licensed, it installs with one
                 command, and it needs no account at all. What changes is the
                 label beside it. It went through "Request hosted access" and
-                "Create an account"; self-serve is off now, so the hosted plane
-                is reached by a booked demo and the button says so. */}
+                "Create an account"; the hosted plane is sold by talking to
+                somebody now, so the button says so. That is a funnel decision
+                and not a claim that signing up is refused: see
+                components/pages/company/RequestDemo.tsx for where the flag's
+                real value lives. */}
             <Button href="/docs/getting-started/quickstart">Start the quickstart</Button>
             <Button href="/request-demo" theme="outlined">
               Request a demo
