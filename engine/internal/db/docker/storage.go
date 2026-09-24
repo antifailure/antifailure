@@ -272,11 +272,35 @@ func (p *Provider) removeStorage(ctx context.Context, envID string) error {
 
 // storageMount is what the branch container mounts, and empty when the manifest
 // declared no size.
+//
+// nocopy, and that word is the difference between one mechanism and two.
+//
+// Docker copies an image's content at the mount point into a volume it finds
+// empty. For a memory backed volume that ordinarily does not happen, because
+// the driver has not mounted the tmpfs yet when the copy would run: measured on
+// this daemon, a container with content at the mount point sees an empty
+// directory. But this environment has an ANCHOR, and the anchor mounts the
+// volume BEFORE the branch container is created, so by then the tmpfs IS
+// mounted and the copy lands in it. Measured the same way: with an anchor
+// holding it, the same container sees the image's file.
+//
+// So without this word the golden's data reaches the data directory twice over,
+// once from fillStorage and once from the daemon, and the second one is
+// invisible. A mutation test proved it: deleting the copy in fillStorage left
+// every assertion passing, because the daemon was quietly doing the same work.
+// A second mechanism nobody knows about is worse than either mechanism alone.
+// It rests on an ordering no documentation states, it would put the data there
+// with a mode and an owner this package did not choose, and on the day it
+// changes the branch comes up as an immaculate empty Postgres, which is the
+// exact failure the dataDir constant was written to close.
+//
+// With it, fillStorage is the only thing that fills this directory, and the
+// same mutation now fails with relation "ledger" does not exist.
 func (p *Provider) storageMount(vol string) []string {
 	if vol == "" {
 		return nil
 	}
-	return []string{vol + ":" + dataDir}
+	return []string{vol + ":" + dataDir + ":nocopy"}
 }
 
 // execOutputLimit is how much of a command's output is read. Everything run
