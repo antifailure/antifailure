@@ -9290,7 +9290,7 @@ was not established, and nothing else in the run was touched by it.
 
 ` + "`" + "`" + "`" + `yaml
 database:
-  storage:
+  data_filesystem:
     size_bytes: 536870912
 chaos:
   enabled: true
