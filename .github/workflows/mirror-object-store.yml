@@ -1,0 +1,132 @@
+# Copy the object storage image the golden store suites need into a registry
+# we control.
+#
+# THE FAILURE THIS EXISTS FOR, and it has already happened once. On 2026-09-24
+# the publisher made `quay.io/minio/minio` and `quay.io/minio/mc` private
+# between 23:17 and 23:25 UTC. The engine job's object storage step began
+# failing on EVERY pull request with `unauthorized: access to the requested
+# resource is not authorized` and exit code 125, the `Test` step after it read
+# `skipped`, and the `engine` required context was red having examined nothing.
+# Six pull requests and main were blocked behind one third party's decision.
+#
+# #579 unblocked that by pinning Bitnami's build of MinIO's own source instead,
+# and said in both files that it was a stopgap. This is the other half. After
+# #579 the only independent verifier of the Signature Version 4 signing that
+# `engine/internal/golden/store_s3.go` implements BY HAND is an image in the
+# `bitnamilegacy` namespace, which is by its own name a frozen archive published
+# as a migration safety net and carries no retention promise at all. So the
+# window in which this copy is possible is open because of #579 and closes if
+# that namespace goes the way quay just did.
+#
+# WHY THE IMAGE IS COPIED AND NOT PULLED AND PUSHED. `docker pull` of a multi
+# architecture index fetches ONE platform, so pushing it afterwards produces a
+# different, single architecture manifest under a different digest. The runner
+# is linux/amd64 and a developer's Mac is linux/arm64, and the whole point of
+# pinning the index digest is that one declaration resolves to each machine's
+# own image. `crane copy` moves the manifests as bytes, registry to registry,
+# with no local daemon in the path, so the index digest survives. The step after
+# the copy PROVES that rather than trusting it.
+#
+# WHY IT IS DISPATCHED BY HAND AND NOT SCHEDULED. A schedule is a second thing
+# that can break silently, and a mirror that stopped running would be invisible
+# until the day it was needed. This runs when a person runs it, and the
+# procedure for the next time the pin moves is written beside the pin in
+# ci.yml. Refreshing the pin is a person's job here for the same reason the
+# image digests are, which ci.yml already explains at length.
+name: mirror the object store
+
+on:
+  workflow_dispatch:
+
+jobs:
+  mirror:
+    name: copy the object store image into ghcr
+    runs-on: ubuntu-latest
+    # ON THE JOB AND NOT ON THE FILE. A workflow level `permissions:` block
+    # granting a write scope hands it to every job in the file, and
+    # TestNoWorkflowGrantsWriteToEveryJob refuses exactly that. This job is the
+    # only one here and it still says so on itself, because the next job added
+    # to this file must not inherit the ability to publish packages.
+    #
+    # `packages: write` is the push side and is the smallest scope that can do
+    # this at all. The engine job that later PULLS the copy needs only
+    # `packages: read`. The token is the automatic GITHUB_TOKEN, so this is a
+    # workflow file change rather than a new secret or an account setting.
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      # A plain shell login rather than an action, which is what cd.yml,
+      # release.yml and control-plane-image.yml already do for this registry.
+      # It adds no action to pin and `crane` reads Docker's own config file,
+      # so one login serves both.
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # Pinned to a released version. Go is already on this runner, so this
+      # needs no toolchain step and no second action. A pin answers WHICH
+      # thing and never whether it arrived, which ci.yml says at length about
+      # lychee; a fetch that fails here fails the job rather than mirroring
+      # something else.
+      - name: Install crane
+        run: go install github.com/google/go-containerregistry/cmd/crane@v0.22.1
+
+      # THE SOURCE IS WRITTEN BARE AND THAT IS DELIBERATE. Spelled this way it
+      # is the same image KEY that ci.yml and the justfile already name, so
+      # TestEveryPinnedImageAgreesOnOneDigest holds all three equal and this
+      # workflow cannot drift into mirroring an image the suites do not run.
+      # Writing it as `docker.io/bitnamilegacy/minio` would be a different key
+      # to that gate and the guarantee would quietly disappear.
+      #
+      # The TARGET carries no tag on this line, and that is deliberate too. The
+      # pin gate refuses a registry qualified reference that names a tag
+      # anywhere in a tracked file, which is right: it is the only rule that
+      # reaches a reference held in a shell variable. A push cannot name a
+      # digest, so the tag is appended where it is used, which is the shape
+      # control-plane-image.yml and cd.yml already use for this registry.
+      - name: Copy the manifest, preserving the index digest
+        env:
+          SOURCE: bitnamilegacy/minio:2025.7.23-debian-12-r5@sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20
+          TARGET_REPO: ghcr.io/${{ github.repository_owner }}/minio
+          TARGET_TAG: 2025.7.23-debian-12-r5
+        run: |
+          set -euo pipefail
+          # `--all-tags` is NOT passed. One reference is copied, the one the
+          # suites pin, because a mirror that quietly carried more than the
+          # tree names is a mirror nobody can audit against the tree.
+          crane copy "$SOURCE" "${TARGET_REPO}:${TARGET_TAG}"
+
+      # THE WHOLE CLAIM OF THIS WORKFLOW, CHECKED RATHER THAN STATED. If the
+      # copy had re serialised the index, every child manifest could still be
+      # identical while the index digest differed, and the digest pin in ci.yml
+      # would then point at something other than what was reviewed. That is the
+      # one outcome worse than no mirror, because it looks like success. So the
+      # digest is read back off the target and compared, and a mismatch fails
+      # the job rather than printing a warning.
+      #
+      # Read with `crane digest`, which asks the registry for the manifest this
+      # reference resolves to, rather than with anything that has touched a
+      # local daemon.
+      - name: The copy is the same index, by digest
+        env:
+          EXPECTED: sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20
+          TARGET_REPO: ghcr.io/${{ github.repository_owner }}/minio
+          TARGET_TAG: 2025.7.23-debian-12-r5
+        run: |
+          set -euo pipefail
+          got=$(crane digest "${TARGET_REPO}:${TARGET_TAG}")
+          echo "source index digest: $EXPECTED"
+          echo "our copy's digest:   $got"
+          if [ "$got" != "$EXPECTED" ]; then
+            echo "The copy is NOT the same index. A digest pin against it would name"
+            echo "something other than the image that was reviewed, so nothing here"
+            echo "should be pinned until this is understood."
+            exit 1
+          fi
+          # Both architectures, because a single platform manifest would also
+          # satisfy a digest comparison against itself if the expectation above
+          # were ever updated to match a broken copy. This says what the index
+          # actually contains.
+          crane manifest "${TARGET_REPO}:${TARGET_TAG}" \
+            | grep -o '"architecture":"[a-z0-9]*"' | sort -u
+          echo "pin this in ci.yml and the justfile as ${TARGET_REPO}@${EXPECTED}"
