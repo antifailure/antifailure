@@ -351,14 +351,22 @@ db-down:
 # container, and TestEveryPinnedImageAgreesOnOneDigest refuses a tree where
 # this recipe and ci.yml name one image at two digests.
 #
-# MINIO COMES FROM quay.io AND NOT FROM DOCKER HUB, which is a real constraint
-# rather than a preference. An anonymous pull token for docker.io/minio/minio
-# comes back carrying an EMPTY access list, so a pull of `minio/minio` from
-# Docker Hub needs a login that a fresh clone and a runner do not have. quay.io
-# serves the same image anonymously and is what MinIO's own documentation uses.
-# Written as a pull rather than as the command, because the pin gate reads a
-# bare image after `docker` plus `run` even inside a comment, and it is right
-# to: a bare name there cannot be told from a subcommand.
+# MINIO NO LONGER COMES FROM MinIO, and ci.yml carries the long version of why.
+# The publisher made `quay.io/minio/minio` and `quay.io/minio/mc` private on
+# 2026-09-24, both official sources answer 401 anonymously, and the Docker Hub
+# escape hatch that this comment used to describe had already closed: an
+# anonymous pull token for docker.io/minio/minio comes back carrying an EMPTY
+# access list. A fresh clone and a runner have no login for either.
+#
+# The replacement is Bitnami's build of MinIO's own source rather than a
+# different S3 emulator, and that distinction is the whole point. TestS3Store
+# exists to drive the Signature Version 4 signing that store_s3.go implements by
+# hand against a server that REJECTS a wrong signature, so an emulator that
+# verifies nothing would leave this recipe working and that suite green while
+# proving nothing. Measured with a PUT carrying a valid SigV4 header and a
+# signature of 64 zeroes: MinIO refuses it 403 SignatureDoesNotMatch, this image
+# refuses it identically, and adobe/s3mock accepts it with 200. It is a stopgap,
+# and the durable answer is a mirror in a registry we control.
 #
 # THESE CREDENTIALS ARE FIXTURES AND NOT SECRETS, stated because a scanner
 # cannot tell the difference and neither can somebody reading the diff. They
@@ -371,10 +379,18 @@ stores:
 
     docker rm -f af-minio af-azurite af-fakegcs > /dev/null 2>&1 || true
 
+    # `server` is still named, and dropping it would make the wait below lie.
+    # This image's entrypoint runs a setup phase when its command is its own
+    # run.sh, and that phase starts MinIO, configures `mc`, stops it and then
+    # starts the real one, so the wait below breaks on a throwaway instance and
+    # the `mc mb` underneath it fails with connection refused. Naming `server`
+    # takes the entrypoint's other branch, `exec minio "$@"`, and skips the
+    # setup phase. The directory is the image's own because it runs as uid 1001
+    # and cannot write one at the root. ci.yml says all of this at length.
     docker run -d --name af-minio -p 49000:9000 \
       -e MINIO_ROOT_USER=aftestaccess -e MINIO_ROOT_PASSWORD=aftestsecret123 \
-      quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e \
-      server /data > /dev/null
+      bitnamilegacy/minio:2025.7.23-debian-12-r5@sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20 \
+      server /bitnami/minio/data > /dev/null
     # No `-f`, because the wait is for a RESPONSE rather than for a 200, which
     # is also what the suite's own reachability probe asks for.
     for _ in $(seq 1 60); do
