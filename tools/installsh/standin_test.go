@@ -137,6 +137,15 @@ func (g *githubStandIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		http.Redirect(w, r, "/"+repo+"/releases/tag/"+tag, http.StatusFound)
 
+	// The release page, which the download failure asks about to tell a release
+	// with no build for this platform from a version nobody published.
+	case strings.HasPrefix(r.URL.Path, "/"+repo+"/releases/tag/"):
+		if tag != "" && path.Base(r.URL.Path) == tag {
+			fmt.Fprintf(w, "<html><title>Release %s</title></html>\n", tag)
+			return
+		}
+		http.NotFound(w, r)
+
 	case strings.HasPrefix(r.URL.Path, "/"+repo+"/releases/download/"):
 		http.ServeFile(w, r, filepath.Join(g.fixtures, path.Base(r.URL.Path)))
 

@@ -263,6 +263,24 @@ func TestAReleaseWithNoBuildForThisPlatformSaysThat(t *testing.T) {
 	absent(t, out, "nothing answered")
 }
 
+// A version nobody published is not a platform gap, and telling somebody who
+// mistyped AF_VERSION that their platform has no build sends them hunting the
+// wrong thing. Found on a real install against live github.com, where
+// AF_VERSION=v99.99.99 produced exactly that sentence.
+func TestAVersionNobodyPublishedIsNotAMissingBuild(t *testing.T) {
+	s := newSession(t)
+	s.asked = "v0.0.7"
+
+	out, err := s.run()
+	if err == nil {
+		t.Fatalf("the installer succeeded on a version that does not exist:\n%s", out)
+	}
+	contains(t, out, "there is no release v0.0.7")
+	contains(t, out, "https://github.com/"+repo+"/releases")
+	absent(t, out, "does not include the build for")
+	absent(t, out, "could not download")
+}
+
 // And the same download failing for a reason that is not absence. This is the
 // arm that proves the classification is being read from the server rather than
 // assumed: the file is right there, and the answer is still no.

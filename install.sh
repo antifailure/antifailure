@@ -109,7 +109,28 @@ why_not() {
       printf '%s' "github.com answered $wn_status for $wn_url, which is what it tells an address that has asked for too much, so $wn_what did not arrive and $wn_then. Wait and run this again"
       ;;
     404)
-      printf '%s' "github.com answered 404 for $wn_url, so release $VERSION does not include $wn_what and $wn_then. What it does include is listed at https://github.com/$REPO/releases/tag/$VERSION"
+      # A 404 on a release asset has two causes and they send the reader in
+      # opposite directions. `AF_VERSION=v1.6` is a typo and there is no such
+      # release; a real version with no archive for this platform is a gap in
+      # the release. Saying "release v1.6 does not include the build for darwin
+      # arm64" to the first one sends somebody hunting a platform problem, which
+      # is this whole change's defect in a smaller sentence. The release page
+      # answers which it is, and asking costs one request on a path that has
+      # already failed.
+      wn_tag=$(probe_url "https://github.com/$REPO/releases/tag/$VERSION") || wn_tag=""
+      case "$(status_of "$wn_tag")" in
+        404)
+          printf '%s' "there is no release $VERSION: github.com answered 404 for $wn_url and for https://github.com/$REPO/releases/tag/$VERSION, and $wn_then. The releases that do exist are listed at https://github.com/$REPO/releases"
+          ;;
+        2*|3*)
+          printf '%s' "github.com answered 404 for $wn_url, so release $VERSION does not include $wn_what and $wn_then. What it does include is listed at https://github.com/$REPO/releases/tag/$VERSION"
+          ;;
+        *)
+          # The release page could not be read either, so which of the two this
+          # is was not established and is not asserted.
+          printf '%s' "github.com answered 404 for $wn_url, so $wn_what did not arrive and $wn_then"
+          ;;
+      esac
       ;;
     *)
       printf '%s' "github.com answered $wn_status for $wn_url, so $wn_what did not arrive and $wn_then"

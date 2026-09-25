@@ -27,10 +27,14 @@ an address that has asked GitHub for too much, a repository that does not exist
 or is private, a repository that has published no release, and a redirect naming
 something that is not a tag each say what happened and what to do about it, and
 the rate limit names `AF_VERSION` because that genuinely is the way through.
-The same collapse is fixed for both downloads: a release with no build for this
-platform is no longer reported as `could not download`, and a `checksums.txt`
-that a network dropped is no longer reported as one that was never published.
-Both implementations are fixed, `curl` and `wget` alike.
+The same collapse is fixed for both downloads. A release with no build for this
+platform is no longer reported as `could not download`, a `checksums.txt` that a
+network dropped is no longer reported as one that was never published, and a
+version nobody published, which is what a mistyped `AF_VERSION` is, is no longer
+reported as a platform with no build: the release page is asked which of the two
+a 404 on an asset means, and the reader is pointed either at the builds that
+release does carry or at the releases that exist. Both implementations are fixed,
+`curl` and `wget` alike.
 
 None of this was tested and none of it could have been. Every session in
 `tools/installsh` set `AF_VERSION`, so the resolution never ran, and the stub
