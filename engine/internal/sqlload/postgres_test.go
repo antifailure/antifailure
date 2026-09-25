@@ -1038,3 +1038,43 @@ func keys(m map[string]int) []string {
 func randomUUIDForTest(i int) string {
 	return fmt.Sprintf("00000000-0000-4000-8000-%012d", i)
 }
+
+// A REAL RUN KEEPS ITS SAMPLES, WHICH IS WHAT MAKES Merge USABLE AT ALL.
+//
+// Merge pools samples and refuses a result that has none, so the whole two
+// build SQL comparison rests on the runner actually filling them. That is
+// exactly the kind of claim a unit test cannot make: merge_internal_test.go
+// builds its own results and would pass unchanged if the production runner
+// stopped recording a single sample. Without this test, a Merge that works
+// perfectly against fixtures and returns ErrNoSamples against every real run
+// would be green here and broken in the field.
+//
+// It also proves the pooled result is itself poolable, which is what lets
+// sixteen rounds be merged in any grouping.
+func TestARealRunKeepsTheSamplesAPoolIsMadeOf(t *testing.T) {
+	url, _ := database(t)
+	run := func(seed int64) *sqlload.Result {
+		res, err := sqlload.Run(context.Background(), sqlload.Options{
+			URL: url, Mix: readMix(t), Clients: 2, Transactions: 6,
+			Seed: seed, Clock: clock.New(),
+		})
+		require.NoError(t, err)
+		return res
+	}
+	a, b := run(1), run(2)
+
+	pooled, err := sqlload.Merge(a, b)
+	require.NoError(t, err,
+		"a real run carried no samples, so nothing could pool its rounds")
+	require.Equal(t, a.Transactions+b.Transactions, pooled.Transactions)
+	require.Equal(t, a.Duration+b.Duration, pooled.Duration)
+	require.Greater(t, pooled.Overall.P95Ms, 0.0,
+		"the pooled percentiles came from an empty pool")
+	require.Len(t, pooled.PerTransaction, len(a.PerTransaction))
+
+	// A pooled result is still a pool, so the rounds can be merged in any
+	// grouping and the answer is the same.
+	again, err := sqlload.Merge(pooled, run(3))
+	require.NoError(t, err)
+	require.Greater(t, again.Transactions, pooled.Transactions)
+}

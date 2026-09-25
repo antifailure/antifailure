@@ -601,5 +601,13 @@ their own connections running whole transactions against the branch, reported
 as transactions per second and statement latency. It runs under `af load sql`
 and is configured under `load.sql`.
 
+`af load compare --sql` compares THAT workload on two builds instead of the
+HTTP mix. Same second environment, same golden for both sides, same
+interleaved rounds and the same `load.comparison.thresholds`. What changes is
+the unit, which becomes the transaction and the statement inside it with p50,
+p95 and p99 on each side, and the throughput, which becomes committed
+transactions a second. It is refused without a `load.sql` block rather than
+quietly falling back to the mix.
+
 Related: [SQL workloads](/docs/concepts/sql-workloads),
 [insights](/docs/concepts/insights), [scheduling](/docs/concepts/scheduling).

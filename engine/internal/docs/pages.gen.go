@@ -3060,6 +3060,14 @@ their own connections running whole transactions against the branch, reported
 as transactions per second and statement latency. It runs under ` + "`" + `af load sql` + "`" + `
 and is configured under ` + "`" + `load.sql` + "`" + `.
 
+` + "`" + `af load compare --sql` + "`" + ` compares THAT workload on two builds instead of the
+HTTP mix. Same second environment, same golden for both sides, same
+interleaved rounds and the same ` + "`" + `load.comparison.thresholds` + "`" + `. What changes is
+the unit, which becomes the transaction and the statement inside it with p50,
+p95 and p99 on each side, and the throughput, which becomes committed
+transactions a second. It is refused without a ` + "`" + `load.sql` + "`" + ` block rather than
+quietly falling back to the mix.
+
 Related: [SQL workloads](/docs/concepts/sql-workloads),
 [insights](/docs/concepts/insights), [scheduling](/docs/concepts/scheduling).
 `,
@@ -4134,10 +4142,72 @@ passing, for the same reason ` + "`" + `af load run` + "`" + ` refuses an inert 
 check that ran nothing and reported green is a check everybody believes is
 running.
 
-## What this does not do
+## Comparing two builds
 
-It does not bring up a second environment. Comparing two builds is
-` + "`" + `af workload compare` + "`" + `, which differences two results that already exist.
+` + "`" + "`" + "`" + `
+af load compare --sql
+` + "`" + "`" + "`" + `
+
+It brings a second environment up from the base revision, branches the SAME
+golden for both so the two sides start over identical rows, runs the same mix
+at the same client count with the same think time and the same per round seed,
+and reports every unit and every run wide number that moved.
+
+` + "`" + "`" + "`" + `
+  Latency is p50 / p95 / p99. The change and the verdict are on the p95.
+  UNIT                     BASE       THIS BUILD  P95 CHANGE  MOVED     CAN SEE
+  checkout       10 / 44 / 98ms  13 / 61 / 210ms      +38.6%  worse         19%
+    insert item   4 / 12 / 30ms   5 / 44 / 180ms     +266.0%  worse         22%
+` + "`" + "`" + "`" + `
+
+The unit is the transaction and the statement inside it, because either alone
+loses the finding. A transaction is what throughput is counted in and what a
+lock is held across, so a transaction whose p99 doubled while its p50 held is a
+lock or a checkpoint and no statement row says so. A statement is the row
+somebody who changed an index reads, and a transaction's latency is the sum of
+several of them.
+
+Three percentiles a side rather than one, because a p95 alone is not a latency
+distribution. The verdict is still decided on the p95: the manifest declares
+one latency limit and this does not invent two more.
+
+Throughput here is committed transactions a second, judged against the same
+` + "`" + `load.comparison.thresholds.throughput_drop` + "`" + `. The HTTP comparison reads the
+achieved REQUEST rate for it; a SQL workload sends no requests, and reading
+that measure for one would report a declared limit as unmeasurable forever.
+
+Everything is settled once, on this build, and handed to both sides: the mix,
+the client count, the duration or the transaction bound, and the think time.
+The mix matters most. A DERIVED mix is read from ` + "`" + `pg_stat_statements` + "`" + ` on the
+database it is about to run against, so a side left to build its own would
+weight the statements by whatever that environment's own startup executed, and
+the two sides would be running two different workloads.
+
+` + "`" + `--concurrency` + "`" + `, ` + "`" + `--transactions` + "`" + ` and ` + "`" + `--think-time` + "`" + ` override the manifest for
+BOTH sides. There is deliberately no way to set one per side: a comparison of
+eight clients against sixteen measures the client count. ` + "`" + `--scale` + "`" + ` is refused
+with ` + "`" + `--sql` + "`" + `, because it is a fraction of production's arrival rate and this
+workload has none.
+
+### What a SQL comparison cannot see
+
+Every report says this, and it is not the same list the HTTP comparison prints.
+
+A mix that WRITES changes the rows, the table size and the index depth it is
+measuring, so the two databases diverge from the golden they branched as soon
+as the first write commits, and each side's later rounds meet a table its own
+earlier rounds produced.
+
+A branch is copy on write. The first write to a page pays for copying it and a
+later write to the same page does not, so a write heavy round measures the
+branching as well as the build, on whichever side reached that page first.
+
+Autovacuum, the checkpointer and the background writer run on the server's own
+schedule rather than the comparison's, so a checkpoint can fall inside one
+round and not inside the round it is paired with. That is noise the interval
+between rounds can see and a single pass cannot.
+
+## What this does not do
 
 It does not replace the differential oracle, which brings up a baseline
 revision, branches one golden for both sides and diffs the responses and the
@@ -18951,6 +19021,16 @@ at once on one host would contend with each other and measure that instead.
 A difference is a difference, and a threshold under load.comparison.thresholds
 is what turns one into a verdict.
 
+With --sql it compares the concurrent SQL workload instead: clients running
+whole transactions against each build's own database rather than requests
+against its application. Same mix, built once on this build so that neither
+side reads its own pg_stat_statements, same client count, same think time and
+the same per round seed. The unit of comparison becomes the transaction and
+the statement inside it, and each one reports p50, p95 and p99 on both sides.
+Throughput becomes committed transactions a second, judged against the same
+load.comparison.thresholds.throughput_drop. It needs a load.sql block and
+refuses without one.
+
 The base environment is torn down unless --keep says otherwise. The
 environment for this build is left running whether or not this brought it up.
 
@@ -18961,6 +19041,7 @@ af load compare [flags]
 ` + "`" + "`" + "`" + `
 af load compare
 af load compare --baseline origin/main --duration 60s
+af load compare --sql --concurrency 16
 af load compare --seed 7 --keep
 ` + "`" + "`" + "`" + `
 
@@ -18968,12 +19049,16 @@ af load compare --seed 7 --keep
 | --- | --- | --- |
 | ` + "`" + `--baseline` + "`" + ` | - | Revision to compare against, overriding load.comparison.base_ref. |
 | ` + "`" + `--branch` + "`" + ` | - | Branch to compare, defaulting to the checked out one. |
+| ` + "`" + `--concurrency` + "`" + ` | ` + "`" + `8` + "`" + ` | Clients each side runs at once, overriding load.sql.clients. Needs --sql. |
 | ` + "`" + `--duration` + "`" + ` | ` + "`" + `0s` + "`" + ` | How long to send for on each side, overriding the manifest. |
 | ` + "`" + `--keep` + "`" + ` | ` + "`" + `false` + "`" + ` | Leave the base environment up, for looking at a difference. |
 | ` + "`" + `--report` + "`" + ` | - | Write the comparison here as well as to the terminal. |
 | ` + "`" + `--rounds` + "`" + ` | ` + "`" + `0` + "`" + ` | Interleaved rounds per side, 16 when not set. 1 measures each side once, base first. |
 | ` + "`" + `--scale` + "`" + ` | ` + "`" + `0` + "`" + ` | Fraction of production's arrival rate to send at each side, overriding the manifest. |
 | ` + "`" + `--seed` + "`" + ` | ` + "`" + `0` + "`" + ` | Seed for the request sequence. The same seed is used on both sides. |
+| ` + "`" + `--sql` + "`" + ` | ` + "`" + `false` + "`" + ` | Compare the SQL workload from load.sql instead of the HTTP mix. |
+| ` + "`" + `--think-time` + "`" + ` | ` + "`" + `0s` + "`" + ` | How long a client waits between transactions, overriding load.sql.think_time. Needs --sql. |
+| ` + "`" + `--transactions` + "`" + ` | ` + "`" + `0` + "`" + ` | Transactions each client runs, split across the rounds, overriding load.sql.transactions. Needs --sql. |
 | ` + "`" + `--warmup` + "`" + ` | ` + "`" + `0s` + "`" + ` | Mix sent at each side and discarded before measuring, 5s when not set. 0s sends none. |
 
 ### ` + "`" + `af load run` + "`" + `

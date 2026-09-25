@@ -9,6 +9,7 @@ import (
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/load"
+	"github.com/antifailure/antifailure/engine/internal/sqlload"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -90,6 +91,24 @@ type LoadCompareOptions struct {
 	Duration time.Duration
 	Scale    float64
 	Seed     int64
+	// SQL compares the concurrent SQL workload instead of the HTTP mix.
+	//
+	// A flag rather than a second method, because everything up to the moment
+	// traffic is sent is the same and is the part worth getting right once:
+	// one golden for both sides, the candidate up first so its golden is the
+	// one to pin, the base environment stamped ephemeral before it comes up,
+	// and a teardown registered before the first error is checked. A second
+	// entry point would be a second copy of all of that, and the copy would be
+	// the one that leaked an environment.
+	SQL bool
+	// Clients, Transactions and ThinkTime are the SQL workload's own knobs and
+	// are sent to BOTH sides unchanged, for the same reason Duration and Scale
+	// are. There is deliberately no per side field here either: a comparison
+	// of eight clients against sixteen is a measurement of the concurrency,
+	// not of the build.
+	Clients      int
+	Transactions int
+	ThinkTime    time.Duration
 	// Rounds is how many interleaved rounds each side is sent, zero meaning
 	// DefaultCompareRounds. One reproduces the old single pass, base then this
 	// build, which is kept reachable on purpose: it is the arm that shows what
@@ -153,6 +172,35 @@ type LoadCompareResult struct {
 	Rounds        int
 	RoundDuration time.Duration
 	Warmup        time.Duration
+
+	// SQL says the concurrent SQL workload was compared rather than the HTTP
+	// mix, which decides which pair of result fields carries the measurement.
+	// A boolean rather than "whichever pair is not nil", because a comparison
+	// that failed before either side ran has both pairs nil and still has to
+	// report which question it was asking.
+	SQL bool
+	// BaselineSQL and CandidateSQL are the two pooled SQL results, and
+	// BaselineSQLRounds and CandidateSQLRounds each side's rounds before they
+	// were pooled, in round order. The same shape and the same rule as the
+	// four fields above: round k of each is a pair sent the same transaction
+	// sequence back to back.
+	BaselineSQL        *sqlload.Result
+	CandidateSQL       *sqlload.Result
+	BaselineSQLRounds  []*sqlload.Result
+	CandidateSQLRounds []*sqlload.Result
+	// Clients, ThinkTime and RoundTransactions are how the SQL workload was
+	// sent, resolved once and used on both sides. RoundTransactions is the per
+	// client transaction bound ONE ROUND carried, zero when the rounds were
+	// bounded by time alone.
+	Clients           int
+	ThinkTime         time.Duration
+	RoundTransactions int
+	// SQLSource is where the mix came from, declared or statement_statistics,
+	// and SQLDescription what a declared document calls itself. Carried
+	// because "both sides ran the same mix" is the claim the whole comparison
+	// rests on, and naming the mix is the cheapest part of supporting it.
+	SQLSource      string
+	SQLDescription string
 	// Notes are what this comparison could not control, always populated.
 	Notes []string
 }
@@ -204,7 +252,13 @@ func (o *Orchestrator) LoadCompare(
 	if err != nil {
 		return nil, err
 	}
-	if candidate.URL == "" {
+	// The URL matters only to the HTTP mix. A SQL comparison talks to the
+	// database directly and an environment that serves nothing over HTTP is a
+	// perfectly good one to run transactions against, so refusing here on a
+	// missing URL would refuse the comparison this flag exists for. What the
+	// SQL side needs instead is a reachable database, and the mix resolver
+	// establishes that before the first round rather than after the warm-up.
+	if candidate.URL == "" && !opts.SQL {
 		return nil, aferrors.Coded(aferrors.AFLOD010,
 			"detail", "this build came up with no URL, so no traffic could be sent at it")
 	}
@@ -234,6 +288,7 @@ func (o *Orchestrator) LoadCompare(
 	result = &LoadCompareResult{
 		Rev: rev, How: how, CandidateRev: head,
 		Golden: candidate.Golden, BaselineBranch: baseline.opts.Branch,
+		SQL: opts.SQL,
 	}
 	progress("bringing " + short(rev) + " up beside it as the base branch")
 	baseEnv, upErr := baseline.Up(ctx)
@@ -251,9 +306,13 @@ func (o *Orchestrator) LoadCompare(
 	if upErr != nil {
 		return result, fmt.Errorf("the base environment did not come up: %w", upErr)
 	}
-	if baseEnv.URL == "" {
+	if baseEnv.URL == "" && !opts.SQL {
 		return result, errors.New(
 			"the base environment came up with no URL, so no traffic could be sent at it")
+	}
+
+	if opts.SQL {
+		return result, o.compareSQL(ctx, result, baseline, opts, progress)
 	}
 
 	// One duration and one scale, resolved ONCE from this build's manifest and
@@ -273,6 +332,22 @@ func (o *Orchestrator) LoadCompare(
 	send := func(ctx context.Context, side compareSide, d time.Duration, seed int64) (
 		*load.Result, []load.Route, error,
 	) {
+		// CONCURRENCY IS EQUAL ON THE TWO SIDES BY ACCIDENT, and this is the
+		// line where it would stop being one. LoadOptions carries no
+		// concurrency field, so load.Run falls back to its own hard coded
+		// twenty on both sides, and two sides that send at one rate through
+		// one number of connections are comparable. The moment a concurrency
+		// field is added to LoadOptions it must be resolved ONCE above, beside
+		// the duration and the scale, and pinned here as an explicit value on
+		// both sides. A comparison of twenty connections against forty
+		// measures the connection count, not the build, and it would do it
+		// silently: every number in the report would still be a number.
+		//
+		// No field is added here for it, because nothing in this comparison
+		// needs to choose one, and a field that exists only so a comment can
+		// point at it is the shape this repository keeps finding and calling
+		// dead. The SQL side DOES choose a client count, and pins it; see
+		// compareSQL.
 		res, refused, err := sides[side].Load(ctx, LoadOptions{Duration: d, Scale: scale, Seed: seed})
 		if err != nil {
 			return nil, refused, fmt.Errorf("the mix against %s did not complete: %w", side, err)
@@ -475,6 +550,9 @@ func interleaved[R any](
 // that was interleaved and warmed.
 func loadCompareNotes(r *LoadCompareResult) []string {
 	var notes []string
+	if r.SQL {
+		return sqlCompareNotes(r)
+	}
 	switch {
 	case r.Rounds <= 1:
 		notes = append(notes, "the two sides were measured once each, the base branch first "+

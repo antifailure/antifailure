@@ -110,7 +110,23 @@ type RouteDifference struct {
 	P95Candidate    *float64 `json:"p95_candidate"`
 	P95Delta        *float64 `json:"p95_delta"`
 	P95Ratio        *float64 `json:"p95_ratio"`
-	Direction       string   `json:"direction"`
+	// P50 and P99 on both sides, so a reader is handed a distribution rather
+	// than one point on it. A p50 that halves while a p99 doubles is a
+	// regression an average reports as an improvement, and it is the shape a
+	// lock or a checkpoint produces, which is exactly what somebody comparing
+	// two storage engines came to see.
+	//
+	// Added after the p95 fields rather than instead of them, and omitted when
+	// a side recorded none, so that no existing field changed name or shape
+	// and a run that measured no distribution says nothing rather than zero.
+	// The VERDICT is still decided on the p95 alone: the manifest declares one
+	// latency limit, and inventing two more for keys nobody wrote would be a
+	// threshold this product made up.
+	P50Baseline  *float64 `json:"p50_baseline,omitempty"`
+	P50Candidate *float64 `json:"p50_candidate,omitempty"`
+	P99Baseline  *float64 `json:"p99_baseline,omitempty"`
+	P99Candidate *float64 `json:"p99_candidate,omitempty"`
+	Direction    string   `json:"direction"`
 	// Resolution is whether this route's p95 comparison could see anything.
 	// Carried on the difference rather than computed by a reader, because a
 	// resolution somebody has to reconstruct from the sample counts is one
@@ -181,11 +197,7 @@ func sideOf(r *Result) ComparisonSide {
 // comparisonNotes says what the comparison cannot see. Always at least one,
 // because there is always something.
 func comparisonNotes(baseline, candidate *Result) []string {
-	notes := []string{
-		"two runs against two environments are not a controlled experiment: the seed " +
-			"makes the request sequence the same and does not make the machine, the " +
-			"database contents or the load on the host the same",
-	}
+	notes := []string{uncontrolledNote(baseline.Kind)}
 	if baseline.State != StateSucceeded || candidate.State != StateSucceeded {
 		notes = append(notes, fmt.Sprintf(
 			"one of the runs did not complete: the baseline is %s and the candidate is %s, "+
@@ -207,6 +219,32 @@ func comparisonNotes(baseline, candidate *Result) []string {
 			"a difference against an absence rather than against a measurement")
 	}
 	return notes
+}
+
+// uncontrolledNote is the sentence every comparison opens with, written for
+// the kind being compared rather than copied between them.
+//
+// The HTTP wording is the original and is reproduced here exactly, character
+// for character, because it is on film. The SQL wording is not a paraphrase of
+// it: a SQL workload's sequence is transactions rather than requests, and the
+// clause about the database contents is WRONG for it in a way that matters.
+// HTTP traffic mostly reads; a SQL mix runs whole transactions on purpose, and
+// a mix allowed to write changes the table it is measuring while it measures
+// it, so the two sides' databases diverge from the golden they branched the
+// moment the first write commits. Saying "the seed does not make the database
+// contents the same" would understate that to the exact reader who needs it.
+func uncontrolledNote(kind Kind) string {
+	if kind == SQLWorkload {
+		return "two runs against two databases are not a controlled experiment: the seed " +
+			"makes the transaction sequence and the parameter values the same, and it does " +
+			"not make the machine, the load on the host, or what autovacuum and the " +
+			"checkpointer chose to do during each run the same; a mix that writes also " +
+			"changes the rows, the table size and the index depth it is measuring, so the " +
+			"two sides drift from the golden they branched as soon as the first write commits"
+	}
+	return "two runs against two environments are not a controlled experiment: the seed " +
+		"makes the request sequence the same and does not make the machine, the " +
+		"database contents or the load on the host the same"
 }
 
 // measureDifferences differences the run wide numbers this kind actually has.
@@ -384,11 +422,13 @@ func routeDifferences(baseline, candidate *Result) []RouteDifference {
 			d.SentBaseline = intp(base.Sent)
 			d.ErrorsBaseline = intp(base.Errors)
 			d.P95Baseline = base.P95Ms
+			d.P50Baseline, d.P99Baseline = base.P50Ms, base.P99Ms
 		}
 		if inCand {
 			d.SentCandidate = intp(cand.Sent)
 			d.ErrorsCandidate = intp(cand.Errors)
 			d.P95Candidate = cand.P95Ms
+			d.P50Candidate, d.P99Candidate = cand.P50Ms, cand.P99Ms
 		}
 		if inBase && inCand && d.P95Baseline != nil && d.P95Candidate != nil {
 			delta := *d.P95Candidate - *d.P95Baseline
