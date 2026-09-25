@@ -46,3 +46,12 @@ account at all.
 Change 2 in the dispatch, wiring setOperatorPassword to a portal tRPC route,
 is already on main: admin.operators.setPassword shipped in #349 with the
 console form, the client wrapper and behavioural tests. It is not rebuilt here.
+
+Correction, 2026-09-24. The first paragraph above is wrong about why, and it is
+left as it was written rather than rewritten. `AF_SELF_SERVE_SIGNUP` was not
+off. It was on in staging and in production when this shipped and it is on now,
+set as `self_serve_signup` in each environment's tfvars under
+`infra/terraform/stacks/control-plane` since 2 September 2026. The variable
+declares a default of off and that default is what was read; neither deployment
+uses it. Sending a stranger to the demo request page is a deliberate choice
+about how the hosted plane is sold, not a consequence of the flag.

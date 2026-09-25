@@ -303,12 +303,15 @@ export const ROUTES: readonly Route[] = [
   // Request a demo, and sign-in.
   //
   // /request-demo replaced /signup as the site's front door to the hosted
-  // plane. Self-serve organization creation is off (`AF_SELF_SERVE_SIGNUP`),
-  // so "Create an account" described a door that does not open for a stranger;
-  // the way in is a booked demo, and every self-serve call to action across
-  // the site now leads here. /signup is kept only as a 301 to this route, in
-  // public/staticwebapp.config.json and as a MovedPage, so a bookmark or an
-  // inbound link still lands somewhere true.
+  // plane, as a decision about the funnel rather than because the door is shut.
+  // `AF_SELF_SERVE_SIGNUP` is ON, and the value lives in `self_serve_signup` in
+  // `infra/terraform/stacks/control-plane/staging.tfvars` and
+  // `production.tfvars`, both `true` since 61f8578c6 on 2026-09-02; the
+  // `variables.tf` default of `false` is what made three comments here claim
+  // otherwise, because a default is not a value. Every self-serve call to
+  // action across the site leads here. /signup is kept only as a 301 to this
+  // route, in public/staticwebapp.config.json and as a MovedPage, so a bookmark
+  // or an inbound link still lands somewhere true.
   //
   // /request-demo IS INDEXABLE, and it is the page a person searching for the
   // product by name is looking for: it says what the demo is and puts a real
