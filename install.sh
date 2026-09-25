@@ -24,15 +24,141 @@ need() {
 
 need uname
 need tar
+# probe_url asks a URL what it answers, WITHOUT following a redirect and
+# without -f, and prints "<status> <location>". The location is empty unless the
+# answer was a redirect.
+#
+# -f is the reason this exists. It prints nothing and exits non zero for every
+# status from 400 up, so a caller reading its output cannot tell a refusal from
+# an empty answer, and a caller inside a pipeline or a command substitution does
+# not see the exit status either. That is exactly how a rate limited 403 came
+# out of this script as "no release was found": see the version block below.
+#
+# 000 is what curl writes when it never got an answer at all, and that stays the
+# contract for both implementations, because "the server said no" and "nothing
+# said anything" are different facts and every message below depends on which
+# one it has. `|| answer=` at the call site rather than `|| echo 000`: curl
+# writes the 000 itself, and #574 landed here once already with a message
+# reading "returned 000000" because both did it.
 if command -v curl >/dev/null 2>&1; then
   fetch() { curl -fsSL "$1" -o "$2"; }
-  read_url() { curl -fsSL "$1"; }
+  # -m bounds it, because this runs to explain a failure and an explanation
+  # that hangs is worse than the failure. The body is one redirect's worth of
+  # nothing, so thirty seconds is not a limit any working network reaches.
+  probe_url() { curl -sS -m 30 -o /dev/null -w '%{http_code} %{redirect_url}' "$1" 2>/dev/null; }
 elif command -v wget >/dev/null 2>&1; then
   fetch() { wget -qO "$2" "$1"; }
-  read_url() { wget -qO- "$1"; }
+  # THERE ARE TWO WGETS AND ONLY ONE OF THEM CAN ANSWER THIS.
+  #
+  # GNU wget reports a status and a Location, in its own log, which is read back
+  # below. BusyBox wget, which is the wget Alpine ships and therefore the wget on
+  # most machines that have no curl, has no option that prints either: its option
+  # parser refuses an unknown option outright rather than ignoring it, so the GNU
+  # invocation would not run at all. Asking which one this is costs one process
+  # and is the difference between resolving a version on Alpine and refusing to.
+  if wget --version 2>&1 | grep -q 'GNU Wget'; then
+    # -q silences the server response as well, so -nv is the quietest setting
+    # that still prints the headers, and --max-redirect=0 stops it following the
+    # redirect whose target is the answer. A machine that never got a response
+    # leaves wget with no status line, where curl prints 000, so awk supplies the
+    # 000 and the two tools keep one contract. --tries, because wget retries
+    # twenty times by default and a diagnosis must not take minutes.
+    probe_url() {
+      wget -nv -S --max-redirect=0 --tries=2 --timeout=30 -O /dev/null "$1" 2>&1 | awk '
+        /^[ \t]*HTTP\/[0-9.]+[ \t]+[0-9][0-9][0-9]/ { status = $2 }
+        /^[ \t]*[Ll]ocation:[ \t]*/ { location = $2 }
+        END { if (status == "") status = "000"; print status, location }'
+    }
+  else
+    # A status and no location, which is all this wget will ever give. It follows
+    # the redirect itself and says nothing about it, so a request that arrives
+    # reads as the 200 the followed page answered; a request that does not arrive
+    # leaves its status in its own error line, which is the one thing it does
+    # print: `wget: server returned error: HTTP/1.1 403 Forbidden`. The empty
+    # location is what sends the version lookup to its second way of asking.
+    probe_url() {
+      wget -q -O /dev/null "$1" 2>/dev/null && { printf '200 '; return 0; }
+      pu_code=$(wget -q -O /dev/null "$1" 2>&1 \
+        | sed -n 's|.*HTTP/[0-9.]* \([0-9][0-9][0-9]\).*|\1|p' | head -1)
+      [ -n "$pu_code" ] || pu_code=000
+      printf '%s ' "$pu_code"
+    }
+  fi
 else
   die "curl or wget is required and neither was found"
 fi
+
+# status_of and location_of split one probe_url answer, and they exist because
+# ${answer#* } returns the whole string when there is no space in it, which
+# would report a status where a location belongs.
+status_of() {
+  case "$1" in
+    "") printf '000' ;;
+    *) printf '%s' "${1%% *}" ;;
+  esac
+}
+
+location_of() {
+  case "$1" in
+    *' '*) printf '%s' "${1#* }" ;;
+    *) printf '' ;;
+  esac
+}
+
+# why_not says what the server answered rather than what we had hoped for.
+#
+# Every download failure in this script used to name the conclusion it had
+# jumped to: an archive that did not arrive "could not be downloaded", and a
+# checksums.txt that did not arrive "was not published for $VERSION". Both
+# sentences are true of a 404 and false of a timeout, a proxy, a DNS failure and
+# a rate limit, and the reader has no way to tell which one they are holding. So
+# the URL is asked what happened, and that is what is reported.
+#
+# $2 is a noun phrase for the thing that did not arrive, $3 is what its absence
+# means for this install. The extra request is only ever made on the way to an
+# error, so nothing on the working path pays for it.
+why_not() {
+  wn_url=$1
+  wn_what=$2
+  wn_then=$3
+  wn_answer=$(probe_url "$wn_url") || wn_answer=""
+  wn_status=$(status_of "$wn_answer")
+  case "$wn_status" in
+    000)
+      printf '%s' "nothing answered at $wn_url, so $wn_what did not arrive and $wn_then. Check that this machine can reach github.com, then run this again"
+      ;;
+    403|429)
+      printf '%s' "github.com answered $wn_status for $wn_url, which is what it tells an address that has asked for too much, so $wn_what did not arrive and $wn_then. Wait and run this again"
+      ;;
+    404)
+      # A 404 on a release asset has two causes and they send the reader in
+      # opposite directions. `AF_VERSION=v1.6` is a typo and there is no such
+      # release; a real version with no archive for this platform is a gap in
+      # the release. Saying "release v1.6 does not include the build for darwin
+      # arm64" to the first one sends somebody hunting a platform problem, which
+      # is this whole change's defect in a smaller sentence. The release page
+      # answers which it is, and asking costs one request on a path that has
+      # already failed.
+      wn_tag=$(probe_url "https://github.com/$REPO/releases/tag/$VERSION") || wn_tag=""
+      case "$(status_of "$wn_tag")" in
+        404)
+          printf '%s' "there is no release $VERSION: github.com answered 404 for $wn_url and for https://github.com/$REPO/releases/tag/$VERSION, and $wn_then. The releases that do exist are listed at https://github.com/$REPO/releases"
+          ;;
+        2*|3*)
+          printf '%s' "github.com answered 404 for $wn_url, so release $VERSION does not include $wn_what and $wn_then. What it does include is listed at https://github.com/$REPO/releases/tag/$VERSION"
+          ;;
+        *)
+          # The release page could not be read either, so which of the two this
+          # is was not established and is not asserted.
+          printf '%s' "github.com answered 404 for $wn_url, so $wn_what did not arrive and $wn_then"
+          ;;
+      esac
+      ;;
+    *)
+      printf '%s' "github.com answered $wn_status for $wn_url, so $wn_what did not arrive and $wn_then"
+      ;;
+  esac
+}
 
 os=$(uname -s | tr '[:upper:]' '[:lower:]')
 case "$os" in
@@ -47,23 +173,157 @@ case "$arch" in
   *) die "$arch is not an architecture this release supports" ;;
 esac
 
+tmp=$(mktemp -d)
+# Removed whether this succeeded or not. A half downloaded archive left in
+# /tmp is the kind of thing somebody finds a year later and cannot explain.
+#
+# Made here rather than after the version is known, because the second way of
+# asking which release is the newest needs somewhere to put a file.
+trap 'rm -rf "$tmp"' EXIT INT TERM
+
+# Resolving "latest" without asking a rate limited API.
+#
+# THIS TOLD PEOPLE THERE WAS NO RELEASE WHEN THE TRUTH WAS THAT WE COULD NOT ASK.
+# It read api.github.com/repos/$REPO/releases/latest, which allows an
+# unauthenticated caller SIXTY requests an hour PER IP ADDRESS and answers 403
+# once that is spent. `curl -f` turned the 403 into an empty string, the sed and
+# head pipeline swallowed the exit status, and the empty version then fell into a
+# die reading "no release was found; set AF_VERSION to install a specific one".
+# The one thing we knew for certain was that no answer had arrived; the one thing
+# the reader was told was the thing we did not know.
+#
+# It is not a rare corner. Sixty per hour is shared by everybody behind one
+# address, so a corporate NAT, a cloud network and any shared CI runner reach it
+# without doing anything unusual, and the advertised one line install is the
+# first thing a stranger runs. Our own CI hit it on #576: the job that installs
+# the way a customer's workflow does runs this eleven times, and its first
+# invocation was told the product has no releases.
+#
+# github.com/$REPO/releases/latest answers the same question by redirecting to
+# releases/tag/<tag>. It is the website rather than the API, it needs no token
+# and it carries no per address budget, so the case that broke cannot happen.
+#
+# Serving the version from antifailure.dev instead was considered and refused.
+# The site is a static export deployed when a merge lands on main, and a release
+# is published when a v* tag is pushed; those are different events in different
+# workflows, so a version file written at site build time is wrong for every
+# release until the next unrelated merge happens to rebuild it. An installer that
+# silently installs a version older than the one it was asked for is worse than
+# one that says it could not ask.
 if [ "$VERSION" = "latest" ]; then
-  VERSION=$(read_url "https://api.github.com/repos/$REPO/releases/latest" \
-    | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
-  [ -n "$VERSION" ] || die "no release was found; set AF_VERSION to install a specific one"
+  latest_url="https://github.com/$REPO/releases/latest"
+  # `|| answer=` rather than a bare assignment: an assignment from a command
+  # substitution carries that command's exit status, and set -e would leave
+  # through it without saying anything, which is the shape of the defect above.
+  answer=$(probe_url "$latest_url") || answer=""
+  status=$(status_of "$answer")
+  location=$(location_of "$answer")
+
+  # A redirect is the one part of this exchange the far end chooses, so what
+  # comes back is treated as input rather than as a version. It is only ever
+  # used to build URLs on github.com that this script composes itself, and the
+  # archive is still checked against its published checksum either way, but a
+  # segment carrying a slash or a query string would compose a URL nobody
+  # intended. Anything outside the characters a git tag is made of is no answer.
+  VERSION=""
+  refused=0
+  # Where the redirect landed, because the three places it can land are three
+  # different facts. A tag is the answer. The releases page is a repository that
+  # has published nothing. ANYWHERE ELSE is not evidence about the repository at
+  # all: it is what a proxy with its own certificate, a sign-in portal in front of
+  # a network, or a repository that has been renamed answers with, and blaming the
+  # product for it would be this script's own defect in a smaller sentence.
+  landed=""
+  case "$location" in
+    */releases/tag/?*)
+      tag=${location##*/}
+      case "$tag" in
+        *[!0-9A-Za-z._+-]*) refused=1 ;;
+        *) VERSION=$tag ;;
+      esac
+      ;;
+    */releases|*/releases/) landed=index ;;
+    ?*) landed=elsewhere ;;
+  esac
+
+  # A SECOND WAY TO ASK, for an answer that carried no redirect to read.
+  #
+  # BusyBox wget cannot report a Location at all, and it is the wget on Alpine,
+  # which this script's own header names as a machine somebody pipes it into. The
+  # version lookup that reads a redirect would refuse there, and the lookup this
+  # replaced did not, so this branch is the difference between fixing a defect and
+  # trading it for a different one.
+  #
+  # github.com serves the newest release's own assets under
+  # releases/latest/download/<name>, so checksums.txt for that release arrives
+  # through a redirect any tool follows silently, with no header reading and no
+  # API. Every archive it names carries the version in its file name, in the same
+  # convention this script composes the download URL from, so nothing new is
+  # assumed about the release. Tags here are v prefixed, which is what puts the v
+  # back; a release tagged without one would compose a download URL that answers
+  # 404 and says so.
+  #
+  # It is also what answers if the redirect ever stops being a redirect, which is
+  # why the trigger is an answer with no tag in it rather than a particular tool.
+  if [ -z "$VERSION" ] && [ "$refused" = 0 ] && [ -z "$landed" ]; then
+    case "$status" in
+      2*|3*)
+        if fetch "https://github.com/$REPO/releases/latest/download/checksums.txt" \
+            "$tmp/latest-checksums.txt" 2>/dev/null; then
+          tag=$(sed -n 's/^[0-9a-f]\{64\}  *antifailure_\([0-9][0-9A-Za-z.+-]*\)_[a-z0-9]*_[a-z0-9]*\.tar\.gz$/\1/p' \
+            "$tmp/latest-checksums.txt" | head -1)
+          [ -z "$tag" ] || VERSION="v$tag"
+        fi
+        ;;
+    esac
+  fi
+
+  # Every answer gets its own sentence. They used to share one, and the one they
+  # shared named the single thing that was never true when it printed.
+  if [ -z "$VERSION" ]; then
+    pick="Set AF_VERSION to a tag from https://github.com/$REPO/releases to install a specific release"
+    # What was refused is deliberately not quoted back. It came from a redirect,
+    # so it is somebody else's bytes, and an installer that prints them to a
+    # terminal prints whatever control characters they hold.
+    [ "$refused" = 0 ] \
+      || die "$latest_url pointed at something that is not a release tag, so which release is the newest could not be established. $pick"
+    case "$status" in
+      000)
+        die "nothing answered at $latest_url, so which release is the newest could not be established. Check that this machine can reach github.com, then run this again. $pick"
+        ;;
+      403|429)
+        die "github.com answered $status for $latest_url, which is what it tells an address that has asked for too much, so which release is the newest could not be established. Wait and run this again. $pick"
+        ;;
+      404)
+        die "github.com answered 404 for $latest_url, so there is no $REPO to install from, or it is not public"
+        ;;
+      *)
+        case "$landed" in
+          index)
+            die "github.com answered $status for $latest_url and pointed at the list of releases rather than at one, so $REPO has published no release to install. $pick"
+            ;;
+          elsewhere)
+            die "$latest_url was answered with $status and a redirect to somewhere that is not a release, which is what a proxy or a sign-in portal in front of this network answers with, so which release is the newest could not be established. $pick"
+            ;;
+          *)
+            die "github.com answered $status for $latest_url and named no release, so which release is the newest could not be established. $pick"
+            ;;
+        esac
+        ;;
+    esac
+  fi
 fi
 bare="${VERSION#v}"
 
 name="antifailure_${bare}_${os}_${arch}"
 base="https://github.com/$REPO/releases/download/$VERSION"
 
-tmp=$(mktemp -d)
-# Removed whether this succeeded or not. A half downloaded archive left in
-# /tmp is the kind of thing somebody finds a year later and cannot explain.
-trap 'rm -rf "$tmp"' EXIT INT TERM
-
 say "Downloading $name"
-fetch "$base/$name.tar.gz" "$tmp/$name.tar.gz" || die "could not download $base/$name.tar.gz"
+# The third answer this script used to collapse into one: a release that exists
+# and has no build for this platform is not the same as a network that dropped
+# the download, and "could not download" was said to both.
+fetch "$base/$name.tar.gz" "$tmp/$name.tar.gz" \
+  || die "$(why_not "$base/$name.tar.gz" "the build for $os $arch" "nothing was installed")"
 
 # The checksum is checked rather than assumed, and there is no path through
 # this block that installs an unverified archive.
@@ -101,8 +361,13 @@ need_sum() {
   fi
 }
 
+# "no checksums.txt was published for $VERSION" is what this said for a network
+# that dropped the file as well, which is the same lie the version lookup told:
+# a refusal is reported as a fact about the release. It still refuses either way,
+# and that is the point of the block above, but the reader is now told which of
+# the two they have, because only one of them is worth running again.
 fetch "$base/checksums.txt" "$tmp/checksums.txt" 2>/dev/null \
-  || die "no checksums.txt was published for $VERSION, so the download cannot be verified; refusing to install"
+  || die "$(why_not "$base/checksums.txt" "checksums.txt" "the download cannot be verified, so this refuses to install")"
 
 expected=$(grep " $name.tar.gz\$" "$tmp/checksums.txt" | awk '{print $1}' | head -1)
 [ -n "$expected" ] \

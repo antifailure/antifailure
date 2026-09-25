@@ -37,6 +37,24 @@ published checksum, and puts `af` and its runner under `~/.antifailure`. It is
 POSIX `sh` rather than bash, so it works in an Alpine container as well as on a
 laptop. The file served at that URL is the [source in the repository](https://github.com/antifailure/antifailure/blob/main/install.sh).
 
+### Installing a particular release
+
+The installer finds out which release is the newest by following the redirect on
+[github.com/antifailure/antifailure/releases/latest](https://github.com/antifailure/antifailure/releases/latest),
+which points at the tag GitHub marks as the latest release. To install a
+different one, name its tag:
+
+```bash
+curl -fsSL https://antifailure.dev/install.sh | AF_VERSION=v1.6.0 sh
+```
+
+`AF_VERSION` is also the way through if the installer cannot work out which
+release is the newest, and it tells you which of those things happened rather
+than guessing. Nothing answering at all, an address that has asked GitHub for
+too much, a repository with no published release, and a release with no build
+for your platform are four different sentences, because only some of them are
+worth trying again.
+
 ### What it does to your PATH
 
 `~/.antifailure/bin` is on nobody's PATH by default, so the installer puts it
