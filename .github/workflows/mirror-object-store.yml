@@ -27,6 +27,18 @@
 # with no local daemon in the path, so the index digest survives. The step after
 # the copy PROVES that rather than trusting it.
 #
+# WHY THE SOURCE IS THE REGISTRY AND NOT THIS TEAM'S LAPTOP. The layers of the
+# ORIGINAL `quay.io/minio/minio` image are still in one developer's local Docker
+# image store, and it was possible to run that digest from cache after quay had
+# already begun refusing it. So there were two candidate sources rather than
+# none, and the cache is deliberately NOT one of them. Three reasons, each
+# sufficient on its own: a local daemon's cache is not reproducible, nothing in
+# this repository could verify what it held, and `crane` copies registry to
+# registry with no local daemon in the path at all, which is exactly what
+# preserves the index. Mirroring from a cache would also rest the provenance of
+# every byte on a measurement one person took on one machine and cannot re take,
+# which is the opposite of what a mirror is for.
+#
 # WHY IT IS DISPATCHED BY HAND AND NOT SCHEDULED. A schedule is a second thing
 # that can break silently, and a mirror that stopped running would be invisible
 # until the day it was needed. This runs when a person runs it, and the
@@ -127,6 +139,30 @@ jobs:
           # satisfy a digest comparison against itself if the expectation above
           # were ever updated to match a broken copy. This says what the index
           # actually contains.
-          crane manifest "${TARGET_REPO}:${TARGET_TAG}" \
-            | grep -o '"architecture":"[a-z0-9]*"' | sort -u
+          arches=$(crane manifest "${TARGET_REPO}:${TARGET_TAG}" \
+            | grep -o '"architecture":"[a-z0-9]*"' | sort -u)
+          echo "$arches"
           echo "pin this in ci.yml and the justfile as ${TARGET_REPO}@${EXPECTED}"
+
+          # INTO THE STEP SUMMARY AND NOT ONLY THE LOG. When this needs
+          # revisiting the digest PAIR is the fastest evidence there is, and a
+          # run's summary survives in a readable place where a buried log line
+          # does not.
+          {
+            echo "## The object store mirror"
+            echo
+            # A list rather than a table, because a markdown table's separator
+            # row is three hyphens and this repository does not write two
+            # together outside a command.
+            echo "- source, the image the suites pin: \`${EXPECTED}\`"
+            echo "- our copy, read back from ghcr: \`${got}\`"
+            echo "- they match, or this step failed before printing this"
+            echo
+            echo "Architectures in our copy's index:"
+            echo
+            echo '```'
+            echo "$arches"
+            echo '```'
+            echo
+            echo "Pin it as \`${TARGET_REPO}@${EXPECTED}\`."
+          } >> "$GITHUB_STEP_SUMMARY"
