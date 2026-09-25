@@ -1282,3 +1282,167 @@ func TestARealRunKeepsTheSamplesAPoolIsMadeOf(t *testing.T) {
 	require.NoError(t, err)
 	require.Greater(t, again.Transactions, pooled.Transactions)
 }
+
+// TestAWaitInASiblingDatabaseIsNotReportedAsThisRunsContention is the fourth
+// arm, and it is the one where "outside the run" turns out to have had a second
+// meaning nobody had filtered on.
+//
+// The three arms above are all about WHO. This one is about WHERE. Both views
+// the sample reads are cluster wide, and ClientApplicationName is a constant
+// every run of this package shares, so a concurrent run against a sibling
+// database on the same server answered the application_name filter as though it
+// were this one. That is the normal case here rather than a contrived one: a
+// branch is a template copy and a cluster carries several of them at once.
+//
+// Two separate falsehoods came out of it and the quieter one is worse. The run
+// wide count rose, because readLockWaits records every returned waiter in the
+// run's own pids set, and that count is what a result persists as how many
+// times one of this run's backends was seen to start waiting. And the relation
+// was resolved in the wrong catalogue: pg_locks names a relation by OID alone,
+// a template copy carries pg_class verbatim, so the foreign OID came back
+// wearing whatever this database calls the relation at that OID.
+//
+// The rename is what makes the second one visible instead of merely true. The
+// sibling waits on a table it calls `ledger`; this database calls the relation
+// at that same OID `counters`. Without the rename both names would read
+// `counters` and a report naming it could not be told from a correct one.
+func TestAWaitInASiblingDatabaseIsNotReportedAsThisRunsContention(t *testing.T) {
+	url, mine := database(t)
+	siblingURL, sibling := database(t)
+	ctx := context.Background()
+
+	_, err := sibling.Exec(ctx, "ALTER TABLE counters RENAME TO ledger")
+	require.NoError(t, err)
+
+	// The premise, measured rather than assumed. Without matching OIDs there is
+	// nothing for the join to resolve wrongly and this test would pass having
+	// exercised none of the predicate it is about.
+	var mineOID, siblingOID uint32
+	require.NoError(t, mine.QueryRow(ctx, `SELECT 'counters'::regclass::oid`).Scan(&mineOID))
+	require.NoError(t, sibling.QueryRow(ctx, `SELECT 'ledger'::regclass::oid`).Scan(&siblingOID))
+	require.Equal(t, mineOID, siblingOID,
+		"the two databases disagree about the OID, so no foreign wait could be "+
+			"misresolved into this one and this test would prove nothing")
+	t.Logf("this database calls OID %d counters; the sibling calls it ledger", mineOID)
+
+	// A relation lock rather than a row conflict, deliberately. A row conflict
+	// queues on a transaction id, which names no relation at all, so it could
+	// not exercise the join to pg_class that this test is mostly about.
+	holder, err := sibling.Begin(ctx)
+	require.NoError(t, err)
+	_, err = holder.Exec(ctx, "LOCK TABLE ledger IN ACCESS EXCLUSIVE MODE")
+	require.NoError(t, err)
+
+	// The waiter wears THIS PACKAGE'S OWN application_name, which is the whole
+	// point: it is what a second run of the product on the same cluster looks
+	// like. Set on the connection rather than on the URL for the reason connect
+	// gives, and on its own connection because a blocked statement blocks its
+	// session.
+	cfg, err := pgx.ParseConfig(siblingURL)
+	require.NoError(t, err)
+	if cfg.RuntimeParams == nil {
+		cfg.RuntimeParams = map[string]string{}
+	}
+	cfg.RuntimeParams["application_name"] = sqlload.ClientApplicationName
+	waiter, err := pgx.ConnectConfig(ctx, cfg)
+	require.NoError(t, err)
+
+	queued := make(chan struct{})
+	go func() {
+		defer close(queued)
+		tx, err := waiter.Begin(context.WithoutCancel(ctx))
+		if err != nil {
+			return
+		}
+		// Expected to block, then to be granted once the holder rolls back.
+		_, _ = tx.Exec(context.WithoutCancel(ctx), "LOCK TABLE ledger IN ACCESS EXCLUSIVE MODE")
+		_ = tx.Rollback(context.WithoutCancel(ctx))
+	}()
+	// Joined before the test returns, which this package's TestMain requires:
+	// it runs goleak.Find over the whole suite.
+	defer func() {
+		_ = holder.Rollback(context.WithoutCancel(ctx))
+		<-queued
+		_ = waiter.Close(context.WithoutCancel(ctx))
+	}()
+
+	// Polled rather than slept, and required: with nothing queued in the
+	// sibling there is no foreign wait to be counted here and the assertions
+	// below would pass having watched an idle server.
+	require.Eventually(t, func() bool {
+		var ungranted int
+		if err := sibling.QueryRow(ctx,
+			`SELECT count(*) FROM pg_locks
+			 WHERE NOT granted AND locktype = 'relation' AND relation = 'ledger'::regclass`,
+		).Scan(&ungranted); err != nil {
+			return false
+		}
+		return ungranted > 0
+	}, 30*time.Second, 100*time.Millisecond,
+		"nothing ever queued in the sibling database, so this test would prove nothing")
+
+	// This run reads and conflicts with nothing, so every wait it reports is a
+	// wait it did not have.
+	res, err := sqlload.Run(ctx, sqlload.Options{
+		URL: url, Mix: readMix(t), Clients: 3, Duration: 2 * time.Second,
+		Seed: 14, Clock: clock.New(),
+	})
+	require.NoError(t, err)
+
+	// Falsification, both halves. A run that did nothing cannot say it did not
+	// queue, and a nil count would mean the wait queues were never read, so the
+	// zero below would be an absence of measurement rather than a measurement.
+	require.Positive(t, res.Transactions,
+		"the run committed nothing, so it cannot be evidence about what it waited for")
+	require.NotNilf(t, res.LockWaits,
+		"the wait queues were never read, so the zero below would not be one: %s",
+		res.LockWaitNote)
+
+	for _, w := range res.LockWaitPairs {
+		t.Logf("pair: blocked=%q blocking=%q in-run=%v relation=%q %s %s, %d times",
+			w.BlockedStatement, w.BlockingStatement, w.BlockingInRun,
+			w.Relation, w.LockType, w.Mode, w.Waits)
+	}
+	var waitedMS float64
+	if res.LockWaitMS != nil {
+		waitedMS = *res.LockWaitMS
+	}
+	require.Zerof(t, *res.LockWaits,
+		"this run took AccessShareLock and nothing else and queued behind nothing, yet it "+
+			"reports %d waits over %v milliseconds. The only queue on this server is in a "+
+			"sibling database, behind a relation that database calls ledger, and the pairs "+
+			"it produced here are %#v",
+		*res.LockWaits, waitedMS, res.LockWaitPairs)
+
+	// Downstream of the same predicate rather than a second independent claim,
+	// and kept because it is the half a reader sees: the pair is what names a
+	// relation, and the name it would carry is this database's own table.
+	require.Empty(t, res.LockWaitPairs,
+		"a wait from another database was reported as a pair of this run's")
+	require.Equal(t, sqlload.LockWaitBound, res.LockWaitNote,
+		"a run that was measured has to carry the instrument's limits, not a failure note")
+
+	// The OTHER sample on the same connection had the same gap, and this is a
+	// second predicate rather than the same one seen twice, so it is asserted
+	// separately and mutated separately. The backend observation counts every
+	// session wearing this run's application_name, so the sibling's waiter was
+	// a fourth backend on a run of three clients. Clients do not reconnect
+	// here, a lost connection stops the client instead, so the count is exact
+	// rather than a bound.
+	require.NotNilf(t, res.BackendsSeen,
+		"the backends were never sampled, so the count below would not be one: %s",
+		res.ObserverNote)
+	peakActive, peakTx := 0, 0
+	if res.PeakActiveBackends != nil {
+		peakActive = *res.PeakActiveBackends
+	}
+	if res.PeakOpenTransactions != nil {
+		peakTx = *res.PeakOpenTransactions
+	}
+	require.Equalf(t, 3, *res.BackendsSeen,
+		"this run opened three client connections and the observer wears a different "+
+			"application_name, so three is the whole of it. The extra backend is in a "+
+			"sibling database, wearing this package's application_name because every run "+
+			"of it does. Peak active was %d and peak in transaction was %d",
+		peakActive, peakTx)
+}

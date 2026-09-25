@@ -147,9 +147,54 @@ var LockWaitBound = fmt.Sprintf(
 // backend it had just watched waiting. The wait is the fact; the name of the
 // holder is what may be missing.
 //
-// The waiter is restricted to this run's application_name and the holder is
-// not. A neighbour's wait is never this run's finding, and a neighbour HOLDING
-// a lock this run waited on is very much this run's finding.
+// The waiter is restricted to this run's application_name AND to this run's
+// database, and the holder is restricted to neither. A neighbour's wait is
+// never this run's finding, and a neighbour HOLDING a lock this run waited on
+// is very much this run's finding.
+//
+// THE DATABASE PREDICATE IS WHAT MAKES THE pg_class JOIN BELOW CORRECT, and it
+// was missing. pg_stat_activity is cluster wide, exactly as pg_locks is, and
+// ClientApplicationName is a constant every run of this package shares, so a
+// concurrent run against a SIBLING database on the same server answered to the
+// application_name filter as though it were this one. Two things then went
+// wrong at once, and the second is the quieter of the two.
+//
+// The relation was resolved in the wrong catalogue. pg_locks names a relation
+// by OID alone and the documentation says what that costs: joining it to
+// pg_class "will only work correctly for relations in the current database".
+// A branch here is a CREATE DATABASE ... TEMPLATE copy, which carries pg_class
+// verbatim, so two branches of one golden agree on the OID of every table in
+// it. Measured on two such copies, with the table renamed in the second so the
+// misresolution could not hide: a session in branch_b queued behind another on
+// branch_b's shipments, OID 16386, and this query run in branch_a returned that
+// wait with relname ORDERS, which is branch_a's own table at the same OID and
+// was never waited on by anybody. A real local table name, for a wait that
+// never touched it.
+//
+// And the wait itself was counted. readLockWaits records every returned waiter
+// in the run wide pids set, so a stranger's queue raised this run's wait count
+// and its waited milliseconds, which is the number a result persists as "how
+// many times one of the run's own backends was seen to start waiting". The
+// labels come back empty, because the pid is not one of this run's, and empty
+// labels are DOCUMENTED as ordinary above, so nothing downstream could tell the
+// row apart from a wait this run really suffered.
+//
+// Neither is privilege gated, which is worth stating because it is the obvious
+// place to hope for a guarantee. Measured as an unprivileged role with no
+// pg_read_all_stats: pid, datname and application_name of a foreign backend are
+// all visible and pg_blocking_pids answers for it. Only query and state are
+// withheld, so the only effect of running unprivileged is that the invented row
+// arrives with an empty BlockingState as well.
+//
+// On a.datname rather than on l.database, and the difference is a whole class of
+// wait. pg_locks.database is the database of the locked OBJECT and it is NULL
+// for a transaction id lock, so a predicate written there would silently drop
+// the transaction id waits a row level conflict produces, which this instrument
+// exists to cover and says it covers. The backend's own database is the right
+// question anyway: a backend of this run is connected to this database, so
+// every relation OID it can lock is resolvable in this database's pg_class,
+// including the shared catalogues, which appear in every database's pg_class
+// and are the one case where pg_locks.database is zero.
 //
 // AS MATERIALIZED needs Postgres 12, which is where the keyword was added and
 // also where a plain CTE stopped being a fence on its own. On anything older
@@ -162,7 +207,7 @@ WITH waiting AS MATERIALIZED (
   SELECT a.pid, l.locktype, l.mode, l.relation
   FROM pg_stat_activity a
   JOIN pg_locks l ON l.pid = a.pid AND NOT l.granted
-  WHERE a.application_name = $1
+  WHERE a.application_name = $1 AND a.datname = current_database()
 )
 SELECT w.pid,
        bp.pid,

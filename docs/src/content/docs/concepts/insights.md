@@ -172,6 +172,16 @@ Locks held while the migrations ran:
 The figures are sampled, so each one is a lower bound rather than a
 measurement, and the report says so.
 
+What it names is limited to relations the project owns, in the database being
+rehearsed. A lock on a TOAST relation is left out, because `pg_toast_16388` is
+not a name the author of a migration can look up, and the table it belongs to is
+in the same sample anyway. A temporary relation is left out, because it belongs
+to one session and nothing in production can queue behind it. And `pg_locks` is
+cluster wide, naming relations by object id alone, so the sample asks for this
+database: a branch is a copy of the golden and two copies agree on the id of
+every table in them, which is how another rehearsal's lock could otherwise be
+reported under a name from this one.
+
 ### The lint rules
 
 Each rule fires on the statement and reports the row count of the table it
