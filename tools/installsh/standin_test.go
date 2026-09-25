@@ -156,6 +156,16 @@ func (g *githubStandIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		http.NotFound(w, r)
 
+	// The newest release's own assets, which github.com serves under
+	// releases/latest/download and which the version lookup falls back to when
+	// the answer carried no redirect it could read.
+	case strings.HasPrefix(r.URL.Path, "/"+repo+"/releases/latest/download/"):
+		if tag == "" {
+			http.NotFound(w, r)
+			return
+		}
+		http.ServeFile(w, r, filepath.Join(g.fixtures, path.Base(r.URL.Path)))
+
 	case strings.HasPrefix(r.URL.Path, "/"+repo+"/releases/download/"):
 		http.ServeFile(w, r, filepath.Join(g.fixtures, path.Base(r.URL.Path)))
 
@@ -288,5 +298,74 @@ func (s *session) onlyWget(t *testing.T) {
 	hide(t, s, "curl")
 	if !onPathIn(s.path, "wget") {
 		t.Fatal("wget is not reachable on the session PATH, so this test would prove nothing")
+	}
+}
+
+// busyBoxWget writes a wget shaped like BusyBox's, which is the wget Alpine ships
+// and so the wget on most machines that have no curl.
+//
+// FIDELITY, STATED RATHER THAN ASSUMED. Two properties are what install.sh
+// depends on and they are what this reproduces: BusyBox's option parser REFUSES
+// an unknown option outright rather than ignoring it, so every GNU only flag
+// fails the whole invocation, and BusyBox wget follows a redirect and writes the
+// body with no option that reports a Location or a status line. Its one status
+// signal is the error line it prints on an HTTP error, whose shape is
+// `wget: server returned error: HTTP/1.1 403 Forbidden`.
+//
+// A real BusyBox could not be run here, and saying so is the point: Docker's API
+// was wedged on this machine and BusyBox does not build for macOS, so the flag
+// refusal and the error line are reproduced from BusyBox's documented usage
+// rather than measured. Everything else in the exchange, the redirects, the
+// statuses and the bodies, is real, because the fetching is done by the real curl
+// underneath.
+func busyBoxWget(t *testing.T, dir, base string) {
+	t.Helper()
+	script := `#!/bin/sh
+# A wget shaped like BusyBox's. See busyBoxWget in standin_test.go.
+out=/dev/null
+url=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -q|-c|-s) ;;
+    -qO|-O) out=$2; shift ;;
+    -T|-U|-P) shift ;;
+    -*)
+      echo "BusyBox v1.36.1 (2024-01-01 00:00:00 UTC) multi-call binary." >&2
+      echo "Usage: wget [-cqS] [--spider] [-O FILE] [-o LOGFILE] [-U AGENT] [-T SEC] URL..." >&2
+      exit 1
+      ;;
+    *) url=$1 ;;
+  esac
+  shift
+done
+case "$url" in
+  https://github.com/*) url="` + base + `/${url#https://github.com/}" ;;
+  https://api.github.com/*) url="` + base + `/api/${url#https://api.github.com/}" ;;
+esac
+code=$(` + realTool(t, "curl") + ` -sSL -o "$out" -w '%{http_code}' "$url" 2>/dev/null)
+case "$code" in
+  2*|3*) exit 0 ;;
+  000|"") echo "wget: can't connect to remote host: Connection refused" >&2; exit 1 ;;
+  *) echo "wget: server returned error: HTTP/1.1 $code Refused" >&2; exit 1 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(dir, "wget"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// onlyBusyBoxWget leaves the session with nothing but a BusyBox shaped wget,
+// which is a bare Alpine container.
+func (s *session) onlyBusyBoxWget(t *testing.T) {
+	t.Helper()
+	if err := os.Remove(filepath.Join(s.stubs, "curl")); err != nil {
+		t.Fatal(err)
+	}
+	busyBoxWget(t, s.stubs, s.github.base())
+	s.wgetOnly = true
+	hide(t, s, "curl")
+	if out, err := exec.Command("/bin/sh", "-c", "PATH="+s.path+" wget --version 2>&1").CombinedOutput(); err == nil ||
+		strings.Contains(string(out), "GNU Wget") {
+		t.Fatalf("this session's wget answers --version like GNU wget, so the BusyBox branch is not what it would take: %s", out)
 	}
 }

@@ -39,6 +39,15 @@ a 404 on an asset means, and the reader is pointed either at the builds that
 release does carry or at the releases that exist. Both implementations are fixed,
 `curl` and `wget` alike.
 
+A machine whose only fetcher is BusyBox wget, which is what Alpine ships and what
+this script's own header names as a place somebody pipes it into, keeps working.
+That wget has no option that reports a redirect and refuses every flag GNU wget
+reads one with, and the lookup this replaced worked there, so the version is read
+instead out of the newest release's own `checksums.txt`, which github.com serves
+under `releases/latest/download` and which names the version in every archive it
+lists. That second way of asking is also what answers if the redirect ever stops
+being a redirect.
+
 None of this was tested and none of it could have been. Every session in
 `tools/installsh` set `AF_VERSION`, so the resolution never ran, and the stub
 `curl` could only exit 22, which cannot express a status at all. The stub is

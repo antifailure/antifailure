@@ -181,16 +181,78 @@ func TestARedirectSomewhereElseIsNotEvidenceAboutTheRepository(t *testing.T) {
 		[]string{"published no release", "asked for too much", "nothing answered"})
 }
 
-// An answer with no redirect in it at all, which is what a changed page shape
-// would look like. It is reported as not understood rather than as an absence.
-func TestAnAnswerWithNoRedirectSaysNoReleaseWasNamed(t *testing.T) {
+// An answer with no redirect in it at all has a second way to be answered, and
+// this is the test that the second way is wired rather than merely written.
+//
+// It is the same branch a BusyBox wget reaches, which is why it is worth having
+// twice: here with the real curl against a page shape that stopped redirecting,
+// and below with a wget that cannot read a redirect at all.
+func TestAnAnswerWithNoRedirectFallsBackToThePublishedChecksums(t *testing.T) {
 	s := newSession(t)
 	s.asked = ""
 	s.github.set(func(g *githubStandIn) { g.status = 200 })
 
+	out := s.install()
+	contains(t, out, "Installed "+version)
+	asked := false
+	for _, p := range s.github.paths() {
+		if p == "/"+repo+"/releases/latest/download/checksums.txt" {
+			asked = true
+		}
+	}
+	if !asked {
+		t.Errorf("the version came from somewhere other than the newest release's checksums: %v", s.github.paths())
+	}
+}
+
+// And with neither a redirect nor the published checksums, it says no release was
+// named rather than that none exists.
+func TestAnAnswerWithNoRedirectAndNoChecksumsNamesNoRelease(t *testing.T) {
+	s := newSession(t)
+	s.asked = ""
+	s.github.set(func(g *githubStandIn) { g.status = 200 })
+	if err := os.Remove(filepath.Join(s.fixtures, "checksums.txt")); err != nil {
+		t.Fatal(err)
+	}
+
 	refusesToResolve(t, s,
 		[]string{"named no release", "AF_VERSION"},
 		[]string{"published no release", "a proxy or a sign-in portal"})
+}
+
+// A BARE ALPINE CONTAINER, which this script's own header names as a machine
+// somebody pipes it into.
+//
+// Its wget is BusyBox's, which has no option that reports a redirect and whose
+// option parser refuses every flag GNU wget reads one with. The lookup this
+// change replaced worked there, because `wget -qO-` is within BusyBox's
+// vocabulary, so a fix that refused on Alpine would have traded one defect for
+// another. It resolves through the newest release's own checksums instead.
+func TestABusyBoxWgetStillResolvesLatest(t *testing.T) {
+	s := newSession(t)
+	s.asked = ""
+	s.onlyBusyBoxWget(t)
+
+	out := s.install()
+	contains(t, out, "Installed "+version)
+	contains(t, out, "Checksum verified")
+	if _, err := os.Stat(filepath.Join(s.binDir(), "af")); err != nil {
+		t.Fatalf("af was not installed on a machine whose only fetcher is a BusyBox wget: %v", err)
+	}
+}
+
+// And it still says which failure it met, because the one status BusyBox wget
+// will give is the error line it prints, and a rate limit read as "no release"
+// is the defect this whole branch exists to remove.
+func TestABusyBoxWgetReportsARateLimitRatherThanAnAbsence(t *testing.T) {
+	s := newSession(t)
+	s.asked = ""
+	s.onlyBusyBoxWget(t)
+	s.github.set(func(g *githubStandIn) { g.status = 403 })
+
+	refusesToResolve(t, s,
+		[]string{"403", "asked for too much"},
+		[]string{"published no release", "named no release"})
 }
 
 // A redirect is the one part of this exchange the far end chooses, so the tag it

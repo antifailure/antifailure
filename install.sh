@@ -48,20 +48,42 @@ if command -v curl >/dev/null 2>&1; then
   probe_url() { curl -sS -m 30 -o /dev/null -w '%{http_code} %{redirect_url}' "$1" 2>/dev/null; }
 elif command -v wget >/dev/null 2>&1; then
   fetch() { wget -qO "$2" "$1"; }
-  # The same two facts out of wget, which reports them only in its own log, so
-  # they are read back from that. -q silences the server response as well, so
-  # -nv is the quietest setting that still prints the headers, and
-  # --max-redirect=0 stops it following the redirect whose target is the answer.
-  # A machine that never got a response leaves wget with no status line, where
-  # curl prints 000, so awk supplies the 000 and the two tools keep one
-  # contract. --tries, because wget retries twenty times by default and a
-  # diagnosis must not take minutes.
-  probe_url() {
-    wget -nv -S --max-redirect=0 --tries=2 --timeout=30 -O /dev/null "$1" 2>&1 | awk '
-      /^[ \t]*HTTP\/[0-9.]+[ \t]+[0-9][0-9][0-9]/ { status = $2 }
-      /^[ \t]*[Ll]ocation:[ \t]*/ { location = $2 }
-      END { if (status == "") status = "000"; print status, location }'
-  }
+  # THERE ARE TWO WGETS AND ONLY ONE OF THEM CAN ANSWER THIS.
+  #
+  # GNU wget reports a status and a Location, in its own log, which is read back
+  # below. BusyBox wget, which is the wget Alpine ships and therefore the wget on
+  # most machines that have no curl, has no option that prints either: its option
+  # parser refuses an unknown option outright rather than ignoring it, so the GNU
+  # invocation would not run at all. Asking which one this is costs one process
+  # and is the difference between resolving a version on Alpine and refusing to.
+  if wget --version 2>&1 | grep -q 'GNU Wget'; then
+    # -q silences the server response as well, so -nv is the quietest setting
+    # that still prints the headers, and --max-redirect=0 stops it following the
+    # redirect whose target is the answer. A machine that never got a response
+    # leaves wget with no status line, where curl prints 000, so awk supplies the
+    # 000 and the two tools keep one contract. --tries, because wget retries
+    # twenty times by default and a diagnosis must not take minutes.
+    probe_url() {
+      wget -nv -S --max-redirect=0 --tries=2 --timeout=30 -O /dev/null "$1" 2>&1 | awk '
+        /^[ \t]*HTTP\/[0-9.]+[ \t]+[0-9][0-9][0-9]/ { status = $2 }
+        /^[ \t]*[Ll]ocation:[ \t]*/ { location = $2 }
+        END { if (status == "") status = "000"; print status, location }'
+    }
+  else
+    # A status and no location, which is all this wget will ever give. It follows
+    # the redirect itself and says nothing about it, so a request that arrives
+    # reads as the 200 the followed page answered; a request that does not arrive
+    # leaves its status in its own error line, which is the one thing it does
+    # print: `wget: server returned error: HTTP/1.1 403 Forbidden`. The empty
+    # location is what sends the version lookup to its second way of asking.
+    probe_url() {
+      wget -q -O /dev/null "$1" 2>/dev/null && { printf '200 '; return 0; }
+      pu_code=$(wget -q -O /dev/null "$1" 2>&1 \
+        | sed -n 's|.*HTTP/[0-9.]* \([0-9][0-9][0-9]\).*|\1|p' | head -1)
+      [ -n "$pu_code" ] || pu_code=000
+      printf '%s ' "$pu_code"
+    }
+  fi
 else
   die "curl or wget is required and neither was found"
 fi
@@ -151,6 +173,14 @@ case "$arch" in
   *) die "$arch is not an architecture this release supports" ;;
 esac
 
+tmp=$(mktemp -d)
+# Removed whether this succeeded or not. A half downloaded archive left in
+# /tmp is the kind of thing somebody finds a year later and cannot explain.
+#
+# Made here rather than after the version is known, because the second way of
+# asking which release is the newest needs somewhere to put a file.
+trap 'rm -rf "$tmp"' EXIT INT TERM
+
 # Resolving "latest" without asking a rate limited API.
 #
 # THIS TOLD PEOPLE THERE WAS NO RELEASE WHEN THE TRUTH WAS THAT WE COULD NOT ASK.
@@ -216,8 +246,40 @@ if [ "$VERSION" = "latest" ]; then
     ?*) landed=elsewhere ;;
   esac
 
-  # Five answers, five sentences. They used to be one sentence, and it named the
-  # only one of the five that was never true when it printed.
+  # A SECOND WAY TO ASK, for an answer that carried no redirect to read.
+  #
+  # BusyBox wget cannot report a Location at all, and it is the wget on Alpine,
+  # which this script's own header names as a machine somebody pipes it into. The
+  # version lookup that reads a redirect would refuse there, and the lookup this
+  # replaced did not, so this branch is the difference between fixing a defect and
+  # trading it for a different one.
+  #
+  # github.com serves the newest release's own assets under
+  # releases/latest/download/<name>, so checksums.txt for that release arrives
+  # through a redirect any tool follows silently, with no header reading and no
+  # API. Every archive it names carries the version in its file name, in the same
+  # convention this script composes the download URL from, so nothing new is
+  # assumed about the release. Tags here are v prefixed, which is what puts the v
+  # back; a release tagged without one would compose a download URL that answers
+  # 404 and says so.
+  #
+  # It is also what answers if the redirect ever stops being a redirect, which is
+  # why the trigger is an answer with no tag in it rather than a particular tool.
+  if [ -z "$VERSION" ] && [ "$refused" = 0 ] && [ -z "$landed" ]; then
+    case "$status" in
+      2*|3*)
+        if fetch "https://github.com/$REPO/releases/latest/download/checksums.txt" \
+            "$tmp/latest-checksums.txt" 2>/dev/null; then
+          tag=$(sed -n 's/^[0-9a-f]\{64\}  *antifailure_\([0-9][0-9A-Za-z.+-]*\)_[a-z0-9]*_[a-z0-9]*\.tar\.gz$/\1/p' \
+            "$tmp/latest-checksums.txt" | head -1)
+          [ -z "$tag" ] || VERSION="v$tag"
+        fi
+        ;;
+    esac
+  fi
+
+  # Every answer gets its own sentence. They used to share one, and the one they
+  # shared named the single thing that was never true when it printed.
   if [ -z "$VERSION" ]; then
     pick="Set AF_VERSION to a tag from https://github.com/$REPO/releases to install a specific release"
     # What was refused is deliberately not quoted back. It came from a redirect,
@@ -255,11 +317,6 @@ bare="${VERSION#v}"
 
 name="antifailure_${bare}_${os}_${arch}"
 base="https://github.com/$REPO/releases/download/$VERSION"
-
-tmp=$(mktemp -d)
-# Removed whether this succeeded or not. A half downloaded archive left in
-# /tmp is the kind of thing somebody finds a year later and cannot explain.
-trap 'rm -rf "$tmp"' EXIT INT TERM
 
 say "Downloading $name"
 # The third answer this script used to collapse into one: a release that exists
