@@ -1096,6 +1096,17 @@ type ChaosFault struct {
 	Refused bool
 	// Recovery is the durability proof, when one was run around this fault.
 	Recovery *ChaosRecovery
+	// Invariants is what the manifest's own rules about the user's own data
+	// said before the fault and after the recovery. Empty when the manifest
+	// declares none, and empty when no durability proof ran around this
+	// fault.
+	//
+	// Beside Recovery rather than inside it, because the two do not fail
+	// together. A database that does not come back leaves Recovery nil and
+	// leaves this arm with the most important thing it will ever say, which is
+	// that the project's own rules were never asked of the recovered database
+	// because there is not one.
+	Invariants []ChaosInvariant
 	// DurationMs is how long the fault's whole step took: the declared wait
 	// before it, the fault, the undo and any verification. It is not how long
 	// the fault was in place, which is InPlaceMs.
@@ -1146,6 +1157,79 @@ func (f ChaosFault) InPlaceSays() string {
 		undone = ", and its undo did not complete"
 	}
 	return fmt.Sprintf("in place for %s%s%s", millis(f.InPlaceMs), declared, undone)
+}
+
+// ChaosInvariant is one of the manifest's own invariants, asked before the
+// fault and again after the recovery.
+//
+// Both sides are carried because one side alone cannot say what a violation
+// means. A rule that is broken after a crash and was broken before it is not
+// something the crash did, and reporting it as one blames a fault for a defect
+// the run inherited.
+type ChaosInvariant struct {
+	Name        string
+	Description string
+	// BeforeHeld and AfterHeld are true when the statement returned no rows on
+	// that side. BeforeError and AfterError say why a side has no verdict at
+	// all, and a side that carries one is not a violation: read the error
+	// first, the way every other invariant result in this package is read.
+	BeforeHeld  bool
+	BeforeError string
+	AfterHeld   bool
+	AfterError  string
+	// Columns, Rows and More are the violating rows from AFTER the recovery,
+	// bounded, so a reader sees which rows rather than only how many. More is
+	// true when there were others that were not kept.
+	Columns []string
+	Rows    [][]string
+	More    bool
+}
+
+// BeforeSays and AfterSays are what each side came out as, in the words every
+// surface uses.
+//
+// One sentence in one place, because the terminal and the pull request comment
+// have already drifted once in this feature: the terminal learned to say what
+// a run had established about torn pages while the comment said nothing, and
+// the comment called a failed amcheck a pass while the terminal quoted it.
+func (i ChaosInvariant) BeforeSays() string {
+	return chaosInvariantSide(i.BeforeHeld, i.BeforeError, 0, false)
+}
+
+// AfterSays is the same for the side read after the recovery, and it is the
+// side that carries the evidence rows.
+func (i ChaosInvariant) AfterSays() string {
+	return chaosInvariantSide(i.AfterHeld, i.AfterError, len(i.Rows), i.More)
+}
+
+// Attributable reports whether this invariant is one the fault can be blamed
+// for: it held before, it was asked after, and it does not hold now.
+func (i ChaosInvariant) Attributable() bool {
+	return i.BeforeError == "" && i.AfterError == "" && i.BeforeHeld && !i.AfterHeld
+}
+
+// chaosInvariantSide renders one side.
+//
+// The error is read before the verdict, so a side that could not be asked can
+// never print as a violation. "Not asked" and "violated" are the two answers
+// this whole feature exists to keep apart.
+func chaosInvariantSide(held bool, errText string, rows int, more bool) string {
+	switch {
+	case errText != "":
+		return "not asked: " + oneLine(errText)
+	case held:
+		return "held"
+	case more:
+		return fmt.Sprintf("violated, more than %d rows", rows)
+	case rows == 1:
+		return "violated, 1 row"
+	case rows == 0:
+		// A statement that returned rows and kept none is a bound of zero,
+		// which nothing configures today. It is said as what is known rather
+		// than as a count, because "violated, 0 rows" reads as a pass.
+		return "violated"
+	}
+	return fmt.Sprintf("violated, %d rows", rows)
 }
 
 // ChaosRecovery is what the crash proof established.
@@ -1249,6 +1333,17 @@ func (r Run) chaosSection() string {
 			target = "the environment"
 		}
 		switch {
+		case f.Error != "" && f.Injected:
+			// A fault that WENT IN and then failed is not a fault that could
+			// not be injected, and "nothing after it was measured" is false of
+			// it: the invariant arm was measured, and it is printed under this
+			// line. A database that does not come back after a crash arrives
+			// here, and the sentence below used to send the reader to look at
+			// a fault that had landed.
+			fmt.Fprintf(&b, "Fault `%s` went into %s and the run around it did not finish: %s\n\n",
+				f.Name, oneLine(target), oneLine(f.Error))
+			b.WriteString(chaosInvariantTable(f))
+			continue
 		case f.Error != "":
 			fmt.Fprintf(&b, "Fault `%s` could not be injected into %s: %s Nothing after it was measured.\n\n",
 				f.Name, oneLine(target), oneLine(f.Error))
@@ -1261,6 +1356,7 @@ func (r Run) chaosSection() string {
 			f.Name, oneLine(f.Kind), oneLine(target), strings.TrimSuffix(oneLine(f.Evidence), "."), f.InPlaceSays())
 		rec := f.Recovery
 		if rec == nil {
+			b.WriteString(chaosInvariantTable(f))
 			continue
 		}
 		b.WriteString("| What was measured | Result |\n| --- | --- |\n")
@@ -1276,10 +1372,36 @@ func (r Run) chaosSection() string {
 			orUnknown(rec.StateBefore), orUnknown(rec.StateAfter))
 		fmt.Fprintf(&b, "| The database was unreachable for | %s |\n", rec.UnreachableSays())
 		b.WriteString("\n")
+		b.WriteString(chaosInvariantTable(f))
 		if !rec.Verified {
 			b.WriteString("This fault's recovery was not established. The findings above say what could not be looked at.\n\n")
 		}
 	}
+	return b.String()
+}
+
+// chaosInvariantTable is what this project's own rules about its own data said
+// either side of the fault.
+//
+// Empty for a manifest that declares no invariants, which is most of them, so
+// nothing is added to a report that has nothing to add. Both sides are in the
+// table rather than the after side alone, because a reader who sees only the
+// after column cannot tell a rule the fault broke from one that was already
+// broken, and those are the two facts the whole arm exists to separate.
+func chaosInvariantTable(f ChaosFault) string {
+	if len(f.Invariants) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("| The project's own rules about its own data | Before the fault | After the recovery |\n| --- | --- | --- |\n")
+	for _, i := range f.Invariants {
+		name := fmt.Sprintf("`%s`", oneLine(i.Name))
+		if i.Attributable() {
+			name = fmt.Sprintf("**`%s`**", oneLine(i.Name))
+		}
+		fmt.Fprintf(&b, "| %s | %s | %s |\n", name, i.BeforeSays(), i.AfterSays())
+	}
+	b.WriteString("\n")
 	return b.String()
 }
 

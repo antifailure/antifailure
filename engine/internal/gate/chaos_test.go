@@ -31,6 +31,11 @@ func TestEveryChaosRuleIsClassifiedAsFoundOrNotLookedAt(t *testing.T) {
 		pgcrash.RuleAmcheckUnavailable: true,
 		pgcrash.RuleChecksumsOff:       true,
 		pgcrash.RuleInconsistentLedger: true,
+		// An invariant the run inherited broken cannot be attributed to the
+		// fault, and one that could not be asked is a question nobody
+		// answered. Neither is something this run found to be wrong.
+		pgcrash.RuleInvariantAlreadyViolated: true,
+		pgcrash.RuleInvariantUnevaluated:     true,
 	}
 	found := map[string]bool{
 		pgcrash.RuleLostCommit:      true,
@@ -39,6 +44,9 @@ func TestEveryChaosRuleIsClassifiedAsFoundOrNotLookedAt(t *testing.T) {
 		pgcrash.RuleNotInProduction: true,
 		pgcrash.RuleTimelineMoved:   true,
 		pgcrash.RuleRelationDamaged: true,
+		// Held before the fault and violated after it is the one invariant
+		// answer the run establishes rather than inherits.
+		pgcrash.RuleInvariantBroken: true,
 	}
 	for _, rule := range pgcrash.Rules() {
 		require.Truef(t, couldNotLook[rule] != found[rule],
@@ -97,4 +105,32 @@ func TestHeldAndVerifiedAreTwoAnswers(t *testing.T) {
 	})
 	require.True(t, held)
 	require.False(t, verified)
+}
+
+// TestChaosHolds_AnInheritedViolationDoesNotStopAMergeAndIsNotAPass is the
+// invariant arm read through the two answers a caller actually gets.
+//
+// A rule the run inherited broken, and one nobody could ask, are both "I could
+// not attribute this to the fault". Neither may stop a merge, and neither may
+// be reported as a run that looked. The one that IS attributable, an invariant
+// that held before the fault and does not hold after it, is a failure the run
+// established, so it stops the merge and it leaves the run verified.
+func TestChaosHolds_AnInheritedViolationDoesNotStopAMergeAndIsNotAPass(t *testing.T) {
+	held, verified := gate.ChaosHolds([]report.Finding{
+		{Rule: pgcrash.RuleInvariantAlreadyViolated, Level: report.LevelWarn},
+	})
+	require.True(t, held, "a rule the change did not break stopped the merge")
+	require.False(t, verified, "a run that could not attribute an invariant reported itself as verified")
+
+	held, verified = gate.ChaosHolds([]report.Finding{
+		{Rule: pgcrash.RuleInvariantUnevaluated, Level: report.LevelWarn},
+	})
+	require.True(t, held, "a rule nobody asked stopped the merge as though it had been checked")
+	require.False(t, verified, "a rule nobody asked was reported as one the run looked at")
+
+	held, verified = gate.ChaosHolds([]report.Finding{
+		{Rule: pgcrash.RuleInvariantBroken, Level: report.LevelFail},
+	})
+	require.False(t, held, "an invariant the fault broke did not stop the merge")
+	require.True(t, verified, "an invariant the fault broke is something this run DID establish")
 }

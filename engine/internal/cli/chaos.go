@@ -125,8 +125,23 @@ func printChaos(e *Env, run *env.ChaosRun) {
 		case f.Error != "" && f.Injected && !f.Undone:
 			e.Out.Status(SymbolWarn, f.Name, f.Kind+" on "+f.Target)
 			e.Out.Note(StyleDim, "Injected and not undone, so this environment is still broken: "+f.Error)
+			printChaosInvariants(e, f)
 			continue
 		case f.Error != "":
+			// A fault that WENT IN and then failed is not a fault that could
+			// not be injected, and this branch used to say it was. A database
+			// that does not come back after a crash arrives here, with the
+			// fault applied and undone and the proof unfinished, and "could
+			// not inject" sent the reader to look at a fault that had landed.
+			// It is also the run where the project's own rules were never
+			// asked of a recovered database, which is the most important line
+			// on that screen, so the arm prints under it.
+			if f.Injected {
+				e.Out.Status(SymbolWarn, f.Name, f.Kind+" on "+f.Target)
+				e.Out.Note(StyleDim, "Injected, and the run around it did not finish: "+f.Error)
+				printChaosInvariants(e, f)
+				continue
+			}
 			e.Out.Status(SymbolSkip, f.Name, f.Kind+" on "+f.Target)
 			e.Out.Note(StyleDim, "Could not inject: "+f.Error)
 			continue
@@ -139,6 +154,7 @@ func printChaos(e *Env, run *env.ChaosRun) {
 		e.Out.Note(StyleDim, "It was "+f.InPlaceSays()+".")
 		rec := f.Recovery
 		if rec == nil {
+			printChaosInvariants(e, f)
 			continue
 		}
 		e.Out.Printf("      crash          %s\n", crashLine(rec))
@@ -149,6 +165,7 @@ func printChaos(e *Env, run *env.ChaosRun) {
 		e.Out.Printf("      amcheck        %s\n", e.Out.Wrap(rec.AmcheckSays(), chaosValueIndent))
 		e.Out.Printf("      pages          %s\n", e.Out.Wrap(rec.PagesSay(), chaosValueIndent))
 		e.Out.Printf("      unreachable    %s\n", e.Out.Wrap(rec.UnreachableSays(), chaosValueIndent))
+		printChaosInvariants(e, f)
 	}
 
 	e.Out.Println("")
@@ -165,6 +182,32 @@ func printChaos(e *Env, run *env.ChaosRun) {
 	}
 	if len(run.Findings) == 0 {
 		e.Out.Println("  Nothing was lost and nothing was invented.")
+	}
+}
+
+// printChaosInvariants prints what this project's own rules about its own data
+// said either side of the fault.
+//
+// Nothing at all for a manifest that declares no invariants, which is the
+// common case, so a run that has nothing to say here says nothing.
+//
+// Both sides on one line, because the after side alone cannot be read: a rule
+// that does not hold after a crash and did not hold before it is not something
+// the crash did, and a line that showed only the second would put that on the
+// fault. The sentences come from engine/internal/report, which is where the
+// pull request comment gets them, so the terminal and the comment cannot say
+// two different things about the same run.
+//
+// The side is NAMED BEFORE its answer, which reads worse in isolation and
+// better in the case that matters. An answer can end in a reason, and the
+// reason for an unasked invariant ends in the words "after the fault", so
+// putting the label last produced "the database did not answer a query after
+// the fault after the recovery" on the one screen this arm exists for.
+func printChaosInvariants(e *Env, f report.ChaosFault) {
+	for _, i := range f.Invariants {
+		e.Out.Printf("      invariant      %s\n", e.Out.Wrap(
+			fmt.Sprintf("%s: before the fault %s; after the recovery %s",
+				i.Name, i.BeforeSays(), i.AfterSays()), chaosValueIndent))
 	}
 }
 
