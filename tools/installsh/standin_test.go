@@ -53,6 +53,12 @@ type githubStandIn struct {
 	// redirecting. 403 is the rate limit, and the whole subject of this file.
 	status int
 
+	// elsewhere, when set, is where /releases/latest is redirected instead of to
+	// a tag or to the releases page. A proxy with its own certificate and a
+	// sign-in portal in front of a network both answer this way, and so does a
+	// repository that has been renamed.
+	elsewhere string
+
 	// denySuffix, when set, makes every path ending in it answer 403, so a
 	// download that fails for a reason other than absence can be arranged.
 	denySuffix string
@@ -98,7 +104,7 @@ func (g *githubStandIn) agentsSeen() []string {
 
 func (g *githubStandIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	g.mu.Lock()
-	tag, status, deny := g.tag, g.status, g.denySuffix
+	tag, status, deny, elsewhere := g.tag, g.status, g.denySuffix, g.elsewhere
 	g.asked = append(g.asked, r.URL.Path)
 	g.agents = append(g.agents, r.UserAgent())
 	g.mu.Unlock()
@@ -119,6 +125,10 @@ func (g *githubStandIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == web || r.URL.Path == api:
 		if status != 0 {
 			http.Error(w, http.StatusText(status), status)
+			return
+		}
+		if elsewhere != "" {
+			http.Redirect(w, r, elsewhere, http.StatusFound)
 			return
 		}
 		if tag == "" {

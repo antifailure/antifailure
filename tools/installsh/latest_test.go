@@ -167,6 +167,32 @@ func TestA404SaysThereIsNoSuchRepository(t *testing.T) {
 		[]string{"published no release", "asked for too much", "nothing answered"})
 }
 
+// A redirect that lands anywhere but the releases pages says nothing about the
+// repository, and saying "this repository has published no release" to somebody
+// behind a proxy or a sign-in portal would be this change's own defect repeated
+// one level down. A renamed repository redirects the same way.
+func TestARedirectSomewhereElseIsNotEvidenceAboutTheRepository(t *testing.T) {
+	s := newSession(t)
+	s.asked = ""
+	s.github.set(func(g *githubStandIn) { g.elsewhere = "/portal/sign-in" })
+
+	refusesToResolve(t, s,
+		[]string{"a proxy or a sign-in portal", "AF_VERSION"},
+		[]string{"published no release", "asked for too much", "nothing answered"})
+}
+
+// An answer with no redirect in it at all, which is what a changed page shape
+// would look like. It is reported as not understood rather than as an absence.
+func TestAnAnswerWithNoRedirectSaysNoReleaseWasNamed(t *testing.T) {
+	s := newSession(t)
+	s.asked = ""
+	s.github.set(func(g *githubStandIn) { g.status = 200 })
+
+	refusesToResolve(t, s,
+		[]string{"named no release", "AF_VERSION"},
+		[]string{"published no release", "a proxy or a sign-in portal"})
+}
+
 // A redirect is the one part of this exchange the far end chooses, so the tag it
 // names is input rather than a version. A segment that is not tag shaped is
 // refused rather than pasted into the download URL this script composes next.

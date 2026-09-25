@@ -197,6 +197,13 @@ if [ "$VERSION" = "latest" ]; then
   # intended. Anything outside the characters a git tag is made of is no answer.
   VERSION=""
   refused=0
+  # Where the redirect landed, because the three places it can land are three
+  # different facts. A tag is the answer. The releases page is a repository that
+  # has published nothing. ANYWHERE ELSE is not evidence about the repository at
+  # all: it is what a proxy with its own certificate, a sign-in portal in front of
+  # a network, or a repository that has been renamed answers with, and blaming the
+  # product for it would be this script's own defect in a smaller sentence.
+  landed=""
   case "$location" in
     */releases/tag/?*)
       tag=${location##*/}
@@ -205,6 +212,8 @@ if [ "$VERSION" = "latest" ]; then
         *) VERSION=$tag ;;
       esac
       ;;
+    */releases|*/releases/) landed=index ;;
+    ?*) landed=elsewhere ;;
   esac
 
   # Five answers, five sentences. They used to be one sentence, and it named the
@@ -227,7 +236,17 @@ if [ "$VERSION" = "latest" ]; then
         die "github.com answered 404 for $latest_url, so there is no $REPO to install from, or it is not public"
         ;;
       *)
-        die "github.com answered $status for $latest_url and named no release tag, so $REPO has published no release to install. $pick"
+        case "$landed" in
+          index)
+            die "github.com answered $status for $latest_url and pointed at the list of releases rather than at one, so $REPO has published no release to install. $pick"
+            ;;
+          elsewhere)
+            die "$latest_url was answered with $status and a redirect to somewhere that is not a release, which is what a proxy or a sign-in portal in front of this network answers with, so which release is the newest could not be established. $pick"
+            ;;
+          *)
+            die "github.com answered $status for $latest_url and named no release, so which release is the newest could not be established. $pick"
+            ;;
+        esac
         ;;
     esac
   fi

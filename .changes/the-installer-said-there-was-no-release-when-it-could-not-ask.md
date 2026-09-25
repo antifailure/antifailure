@@ -22,11 +22,14 @@ when a tag is pushed, so a version file written at site build time would be
 stale for every release until an unrelated merge rebuilt it, and installing the
 wrong release quietly is worse than saying the question could not be answered.
 
-Five answers that used to be one sentence are now five. Nothing answering,
-an address that has asked GitHub for too much, a repository that does not exist
-or is private, a repository that has published no release, and a redirect naming
-something that is not a tag each say what happened and what to do about it, and
-the rate limit names `AF_VERSION` because that genuinely is the way through.
+Answers that used to arrive as one sentence now arrive as what they are. Nothing
+answering, an address that has asked GitHub for too much, a repository that does
+not exist or is private, a repository that has published no release, a redirect
+naming something that is not a tag, and a redirect to somewhere that is not a
+release at all, which is what a proxy or a sign-in portal in front of a network
+answers with, each say what happened and what to do about it. The rate limit
+names `AF_VERSION` because that genuinely is the way through, and `AF_VERSION` is
+documented now, which it was not.
 The same collapse is fixed for both downloads. A release with no build for this
 platform is no longer reported as `could not download`, a `checksums.txt` that a
 network dropped is no longer reported as one that was never published, and a
