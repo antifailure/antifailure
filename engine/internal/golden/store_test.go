@@ -235,6 +235,14 @@ func TestOpenStore_SaysWhatIsMissingFromARemoteURL(t *testing.T) {
 // and rejects a wrong signature exactly as S3 does. That rejection is the
 // thing being tested: Signature Version 4 is implemented in this repository,
 // and a fixture cannot tell a correct signature from a plausible one.
+//
+// It is Bitnami's build of MinIO rather than MinIO's own image since
+// 2026-09-24, when the publisher made quay.io/minio/minio private and this
+// suite's server became unpullable on every runner. The substitute had to be
+// MinIO and not an S3 emulator for the reason in the paragraph above, and the
+// reasoning with its measurements is written out beside the container in
+// ci.yml. An emulator that answers 200 to a request signed with 64 zeroes
+// would leave every assertion below passing and the signing unexamined.
 func TestS3Store(t *testing.T) {
 	endpoint := envOr("AF_TEST_S3_ENDPOINT", "http://127.0.0.1:49000")
 	access := envOr("AF_TEST_S3_ACCESS_KEY", "aftestaccess")
@@ -246,7 +254,10 @@ func TestS3Store(t *testing.T) {
 			"bucket of its own, so a server started by hand needs one made in it: "+
 			"docker run -d --name af-minio -p 49000:9000 "+
 			"-e MINIO_ROOT_USER=%s -e MINIO_ROOT_PASSWORD=<secret> "+
-			"quay.io/minio/minio server /data", endpoint, bucket, access)
+			"bitnamilegacy/minio server /bitnami/minio/data. Name `server` and that "+
+			"directory: the default command makes this image start, stop and restart "+
+			"MinIO before it settles, and it cannot write a directory at the root",
+			endpoint, bucket, access)
 	}
 	env := func(name string) string {
 		switch name {

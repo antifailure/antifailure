@@ -2411,6 +2411,16 @@ func TestEveryPinnedImageAgreesOnOneDigest(t *testing.T) {
 // two sites named two different digests passed. Both directions are checked
 // here, because a pattern widened until it matches everything reports a
 // disagreement that is not there and gets deleted for crying wolf.
+//
+// THE TREE NO LONGER CONTAINS AN UPPERCASE TAG, and that is why this test is
+// load bearing rather than redundant. MinIO made its own image private on
+// 2026-09-24 and the object store those two sites start is now pinned to a
+// lowercase versioned tag, so every real reference in the repository would match
+// the narrow pattern too. Nothing but the fixtures below would notice the tag
+// half being narrowed back, and the next image with an uppercase tag would go
+// unseen exactly as MinIO's did. The strings here are deliberately kept as the
+// reference that produced the defect rather than updated to the current pin: an
+// arm that stops naming the case it was built from stops explaining itself.
 func TestAnUppercaseTagIsStillHeldToOneDigest(t *testing.T) {
 	const a = "sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e"
 	const b = "sha256:cf3dadcfa1fb0324f43958bad1abba986d53c4ecc04d4d50b46c7dcda28bd3cd"

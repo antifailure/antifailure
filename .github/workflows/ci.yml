@@ -776,9 +776,14 @@ jobs:
         # with nothing to point it at converts a vacuous pass into a permanent
         # red wall, which is a worse instrument and not a better one.
         #
-        # THE COST, MEASURED. The three linux/amd64 images are 62.2 MB, 113.8 MB
-        # and 25.4 MB compressed, 201.4 MB in total, read from each registry's
-        # manifest rather than estimated. The job's own work measures about 21
+        # THE COST, MEASURED. The three linux/amd64 images are 99.3 MB, 113.8 MB
+        # and 25.4 MB compressed, 238.5 MB in total, read from each registry's
+        # manifest rather than estimated. The first number was 62.2 MB while the
+        # object store was MinIO's own image and is re-measured here rather than
+        # carried over, because a number nobody re-took is the kind of claim this
+        # repository treats as stale; the other two were re-taken by the same
+        # method and came back unchanged, which is what says the method agrees
+        # with whoever took them first. The job's own work measures about 21
         # minutes at its worst and the emulator step above it is bounded at 20,
         # so 45 keeps its headroom.
         #
@@ -790,18 +795,79 @@ jobs:
         # PINNED BY DIGEST. The reasoning and the refresh procedure are written
         # out above the af-cp-test container, and `just stores` names the same
         # three digests, which TestEveryPinnedImageAgreesOnOneDigest holds
-        # equal. It could not see the MinIO one until this commit widened its
-        # pattern: the name half is lowercase by the registry specification, the
-        # TAG half is not, and MinIO publishes no lowercase tag at all.
+        # equal. That gate could not see the MinIO reference at all until its
+        # pattern was widened: the name half is lowercase by the registry
+        # specification and the TAG half is not, and the reference here carried
+        # `RELEASE.2025-09-07T16-13-09Z`. Nothing in this repository names an
+        # uppercase tag any more, so the widening is now held open only by
+        # TestAnUppercaseTagIsStillHeldToOneDigest and its fixtures, which is
+        # said here because a pattern nothing exercises is a pattern somebody
+        # narrows again.
         #
-        # MINIO COMES FROM quay.io AND NOT FROM DOCKER HUB, which is a
-        # constraint rather than a preference. An anonymous pull token for
-        # docker.io/minio/minio comes back carrying an EMPTY access list, so a
-        # pull of `minio/minio` from Docker Hub needs a login this runner does
-        # not have. quay.io serves the same image anonymously. Written as a pull
-        # rather than as the command, because the pin gate reads a bare image
-        # after `docker` plus `run` even inside a comment, and it is right to:
-        # a bare name there cannot be told from a subcommand.
+        # MINIO NO LONGER COMES FROM MinIO, AND THAT IS NOT A PREFERENCE EITHER.
+        # Between 23:17 and 23:25 UTC on 2026-09-24 the publisher made
+        # `quay.io/minio/minio` and `quay.io/minio/mc` private, and this step
+        # began failing on every pull request with `unauthorized: access to the
+        # requested resource is not authorized` and exit code 125. The `Test`
+        # step below then reported `skipped`, so the whole `engine` required
+        # context was red having examined nothing, which is the one false red
+        # whose log ends at a pull rather than at a verdict.
+        #
+        # It is a deliberate vendor action rather than an outage, which is why
+        # nobody should re-run this. Quay's own API still lists 68 public
+        # repositories under that namespace, `operator`, `console`, `kes` and
+        # the commercial `aistor` among them, and `minio` and `mc` are not among
+        # them. The Docker Hub escape hatch had already closed, and the comment
+        # that used to sit here recorded why: an anonymous pull token for
+        # docker.io/minio/minio comes back carrying an EMPTY access list. Both
+        # official sources now answer 401 anonymously, measured by digest and by
+        # tag, against controls that answered 200.
+        #
+        # SO THE SUBSTITUTE HAD TO BE MinIO ITSELF, and the reason is the only
+        # reason these suites exist. TestS3Store drives the Signature Version 4
+        # signing that store_s3.go implements BY HAND, against a server that
+        # rejects a wrong signature exactly as S3 does, because a fixture cannot
+        # tell a correct signature from a plausible one. An S3 emulator that
+        # does not verify signatures would leave this step green and that suite
+        # passing while proving nothing about the signing, which is the vacuous
+        # gate this repository keeps finding in its own instruments. Measured
+        # before choosing, with a PUT carrying a structurally valid SigV4 header
+        # and a signature of 64 zeroes: MinIO answers 403 SignatureDoesNotMatch,
+        # the image below answers 403 SignatureDoesNotMatch, and adobe/s3mock
+        # answers 200 and will also create a bucket for a caller with no
+        # credential at all.
+        #
+        # WHY THIS BUILD OF IT. Bitnami builds MinIO's own source, so the
+        # signature path is the same program, and the `bitnamilegacy` namespace
+        # publishes 1027 tags including immutable versioned ones, which is what
+        # a digest pin needs. chainguard/minio is also real MinIO and also
+        # refuses a wrong signature, and was rejected because it publishes only
+        # `latest`: pinning a digest there trades today's 401 for a 404 the next
+        # time its older manifests are collected. The image self reports
+        # `DEVELOPMENT.2025-07-23T15-54-02Z` rather than a RELEASE stamp, which
+        # is Bitnami building without the release ldflags and not a development
+        # branch. THIS IS A STOPGAP: it removes a third party's ability to stop
+        # this repository's CI only until that namespace goes too, and the
+        # durable answer is a mirror of a chosen image in a registry we control.
+        #
+        # `server` IS STILL PASSED, AND DROPPING IT MAKES THE WAIT BELOW LIE.
+        # This image's entrypoint runs a setup phase when, and only when, its
+        # command is its own run.sh, and that phase starts MinIO in the
+        # background, configures `mc` against it, STOPS it, and only then starts
+        # the real one: 19 seconds elapsed between the background start and the
+        # stop when this was measured. The wait below breaks on the first
+        # response, so with the default command it is satisfied by the throwaway
+        # instance and `mc mb` then runs into the gap and fails with connection
+        # refused. That is a flaky red rather than a clean one, and it is this
+        # repository's own "an emulator that was started was called ready" with
+        # a new mechanism. The entrypoint's other branch is `exec minio "$@"`
+        # when the first argument is `server`, so naming the subcommand skips
+        # the setup phase entirely and the container behaves as MinIO's own
+        # image did, which is what keeps the existing wait honest.
+        #
+        # The directory is the image's own and not `/data`, because this image
+        # runs as uid 1001 and MinIO exits `FATAL Unable to initialize backend:
+        # file access denied` against a directory at the root it cannot write.
         #
         # THE CREDENTIALS BELOW ARE FIXTURES AND NOT SECRETS. They are the
         # defaults store_test.go already carries in tracked source, they reach a
@@ -812,8 +878,8 @@ jobs:
           set -euo pipefail
           docker run -d --name af-minio -p 49000:9000 \
             -e MINIO_ROOT_USER=aftestaccess -e MINIO_ROOT_PASSWORD=aftestsecret123 \
-            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e \
-            server /data
+            bitnamilegacy/minio:2025.7.23-debian-12-r5@sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20 \
+            server /bitnami/minio/data
           docker run -d --name af-azurite -p 41000:10000 \
             mcr.microsoft.com/azure-storage/azurite:3.37.0@sha256:830430c1da1a2d537e08f3e6764dd1f5ae00cf0346bcaf625b968ec3f0971fd5 \
             azurite-blob --blobHost 0.0.0.0
