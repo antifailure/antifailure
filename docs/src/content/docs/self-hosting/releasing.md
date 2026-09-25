@@ -505,9 +505,17 @@ deployed revision keep running against the new schema.
 
 ### There is no window between publishing and shipping
 
-The installer resolves `latest` from the GitHub releases API. That is good news
-with a sharp edge: a new tag is picked up with no further step and nothing to
-publish by hand, and it is picked up **the moment the release is created**. The
+The installer resolves `latest` by following the redirect on
+`github.com/antifailure/antifailure/releases/latest`, which lands on the tag of
+the release GitHub marks as the latest one. It deliberately does not ask
+`api.github.com`: that endpoint allows an unauthenticated caller sixty requests
+an hour for each IP address and answers 403 afterwards, so a shared address
+spends the budget without noticing and the install then reports that there is no
+release at all.
+
+Resolving it at all is good news with a sharp edge: a new tag is picked up with
+no further step and nothing to publish by hand, and it is picked up **the moment
+the release is created**. The
 next person to run the install command gets it, whether or not anybody has
 looked at it yet.
 

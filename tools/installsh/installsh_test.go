@@ -105,31 +105,6 @@ func fixture(t *testing.T) string {
 	return dir
 }
 
-// stub puts a curl on PATH that answers from the fixture directory instead of
-// the network. install.sh calls it two ways, `curl -fsSL URL -o FILE` and
-// `curl -fsSL URL`, and this handles both.
-func stub(t *testing.T, fixtures string) string {
-	t.Helper()
-	dir := t.TempDir()
-	script := `#!/bin/sh
-url=""; out=""
-while [ $# -gt 0 ]; do
-  case "$1" in
-    -o) out=$2; shift 2 ;;
-    -*) shift ;;
-    *) url=$1; shift ;;
-  esac
-done
-f="` + fixtures + `/${url##*/}"
-[ -f "$f" ] || exit 22
-if [ -n "$out" ]; then cp "$f" "$out"; else cat "$f"; fi
-`
-	if err := os.WriteFile(filepath.Join(dir, "curl"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return dir
-}
-
 // session is one install, in its own HOME, with its own PATH.
 type session struct {
 	t        *testing.T
@@ -143,6 +118,13 @@ type session struct {
 	// about a machine missing all three sha256 tools can hide them one call at
 	// a time and have the third hiding keep the first two.
 	hidden []string
+	// github stands in for github.com over a real socket.
+	github *githubStandIn
+	// asked is what AF_VERSION is set to. Empty means it is not set at all,
+	// which is the state every customer's first install is in: the script
+	// resolves "latest" itself. Every session used to set it, so the resolution
+	// was the one part of this installer no test could reach.
+	asked string
 }
 
 func newSession(t *testing.T) *session {
@@ -152,10 +134,13 @@ func newSession(t *testing.T) *session {
 		t:        t,
 		home:     t.TempDir(),
 		fixtures: fx,
-		stubs:    stub(t, fx),
+		stubs:    t.TempDir(),
 		root:     repoRoot(t),
 		env:      map[string]string{"SHELL": "/bin/zsh"},
+		asked:    version,
 	}
+	s.github = newStandIn(t, fx)
+	writeWrappers(t, s.stubs, s.github.base())
 	s.path = s.stubs + ":/usr/bin:/bin:/usr/sbin:/sbin"
 	return s
 }
@@ -189,8 +174,10 @@ func (s *session) run() (string, error) {
 	env := []string{
 		"HOME=" + s.home,
 		"PATH=" + s.path,
-		"AF_VERSION=" + version,
 		"TERM=dumb",
+	}
+	if s.asked != "" {
+		env = append(env, "AF_VERSION="+s.asked)
 	}
 	for k, v := range s.env {
 		env = append(env, k+"="+v)
