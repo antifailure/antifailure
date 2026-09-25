@@ -1138,6 +1138,7 @@ const runsRouter = router({
                    clients, transactions, transactions_failed, retries, deadlocks,
                    serialization_failures, statements_run, statements_failed,
                    rows_touched, tps, peak_open_transactions, backends_seen,
+                   lock_waits, lock_wait_ms,
                    duration_ms, source, error_reasons, refused_routes, recorded_at
             FROM workload_run_results
             WHERE workload_run_id = ${input.id}::uuid`)

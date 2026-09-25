@@ -561,6 +561,32 @@ describe('a result', () => {
     assert.equal(readResult({ requests: 10 }), null)
     assert.equal(readResult(null), null)
   })
+
+  test('a lock wait count that nobody measured stays null, and a zero stays zero', () => {
+    // The pair a page must never merge. Zero lock waits is the most
+    // reassuring number on the SQL workload tiles, and a decoder that
+    // coalesced an absent column to zero would print it about a run whose
+    // wait queues were never read. Both directions are asserted, because a
+    // decoder that simply dropped the field would satisfy only the first.
+    const unwatched = readResult({ kind: 'sql_workload', transactions: 900, clients: 3 })
+    assert.ok(unwatched)
+    assert.equal(unwatched.lockWaits, null)
+    assert.equal(unwatched.lockWaitMs, null)
+
+    const quiet = readResult({
+      kind: 'sql_workload', transactions: 900, clients: 3, lock_waits: 0, lock_wait_ms: 0,
+    })
+    assert.ok(quiet)
+    assert.equal(quiet.lockWaits, 0)
+    assert.equal(quiet.lockWaitMs, 0)
+
+    const blocked = readResult({
+      kind: 'sql_workload', transactions: 900, clients: 3, lock_waits: 14, lock_wait_ms: 5600,
+    })
+    assert.ok(blocked)
+    assert.equal(blocked.lockWaits, 14)
+    assert.equal(blocked.lockWaitMs, 5600)
+  })
 })
 
 describe('a route measurement', () => {

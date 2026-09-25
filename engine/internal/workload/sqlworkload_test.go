@@ -41,6 +41,7 @@ func sqlRunner(res *sqlload.Result, meanIncrease, errorRate float64) *fakeRunner
 // and one under it.
 func healthySQL() *sqlload.Result {
 	peak, seen := 7, 8
+	waits, waitMS := 12, 2400.0
 	return &sqlload.Result{
 		Source: sqlload.SourceStatementStatistics, Clients: 8,
 		Transactions: 900, TransactionsFailed: 4, Retries: 11,
@@ -71,6 +72,8 @@ func healthySQL() *sqlload.Result {
 		PeakActiveBackends:   &peak,
 		PeakOpenTransactions: &peak,
 		BackendsSeen:         &seen,
+		LockWaits:            &waits,
+		LockWaitMS:           &waitMS,
 	}
 }
 
@@ -154,6 +157,45 @@ func TestASQLWorkloadProjectsWhatTheServerSawAndNotAZero(t *testing.T) {
 	require.NoError(t, json.Unmarshal(body, &decoded))
 	require.Contains(t, decoded, "peak_open_transactions")
 	require.Nil(t, decoded["peak_open_transactions"])
+}
+
+// TestASQLWorkloadProjectsTheContentionAndNotAZero.
+//
+// The same rule, on the pair where breaking it is worst. Zero lock waits is
+// the most reassuring number a stored run can carry, so a run nobody watched
+// must project a null rather than that number: a comparison reading the null
+// as a zero would call the first watched run a regression from a clean one.
+func TestASQLWorkloadProjectsTheContentionAndNotAZero(t *testing.T) {
+	watched := runSQL(t, healthySQL(), 0.25, 0.01)
+	require.NotNil(t, watched.Measured.LockWaits)
+	require.Equal(t, 12, *watched.Measured.LockWaits)
+	require.NotNil(t, watched.Measured.LockWaitMs)
+	require.InDelta(t, 2400, *watched.Measured.LockWaitMs, 1e-9)
+
+	unwatched := healthySQL()
+	unwatched.LockWaits = nil
+	unwatched.LockWaitMS = nil
+	out := runSQL(t, unwatched, 0.25, 0.01)
+	require.Nil(t, out.Measured.LockWaits,
+		"a run nothing watched projected a lock wait count, so it now claims not to have blocked")
+	require.Nil(t, out.Measured.LockWaitMs)
+
+	body, err := json.Marshal(out.Measured)
+	require.NoError(t, err)
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(body, &decoded))
+	require.Contains(t, decoded, "lock_waits")
+	require.Nil(t, decoded["lock_waits"])
+
+	// A watched run that never queued keeps its zero, which is the arm that
+	// makes the assertions above mean something: a projection that simply
+	// dropped the field would satisfy every one of them.
+	none, noneMS := 0, 0.0
+	quiet := healthySQL()
+	quiet.LockWaits, quiet.LockWaitMS = &none, &noneMS
+	clean := runSQL(t, quiet, 0.25, 0.01)
+	require.NotNil(t, clean.Measured.LockWaits)
+	require.Equal(t, 0, *clean.Measured.LockWaits)
 }
 
 // TestASQLWorkloadPutsEachStatementInItsOwnRow.
@@ -280,6 +322,8 @@ func TestComparingTwoSQLWorkloads(t *testing.T) {
 	slower.Deadlocks = 26
 	slower.Retries = 60
 	slower.Rows = 12000
+	blocked, blockedMS := 31, 9100.0
+	slower.LockWaits, slower.LockWaitMS = &blocked, &blockedMS
 	slower.Overall = load.Latency{P50Ms: 16, P90Ms: 51, P95Ms: 77, P99Ms: 150, MaxMs: 400}
 	slower.PerStatement[0].Latency = load.Latency{P50Ms: 40, P95Ms: 160}
 	candidate := runSQL(t, slower, 0.25, 0.01)
@@ -301,6 +345,14 @@ func TestComparingTwoSQLWorkloads(t *testing.T) {
 	require.Equal(t, workload.DirectionWorse, moves["retries"].Direction)
 	require.Equal(t, workload.DirectionWorse, moves["p95_ms"].Direction)
 	require.Equal(t, workload.DirectionWorse, moves["transactions"].Direction)
+	// The contention, and the pair of rows that could not exist before. A
+	// build that made its clients queue longer for the same work is slower
+	// for a reason, and this is the only thing in the comparison that can say
+	// what the reason was.
+	require.Equal(t, workload.DirectionWorse, moves["lock_waits"].Direction)
+	require.Equal(t, workload.DirectionWorse, moves["lock_wait_ms"].Direction)
+	require.NotNil(t, moves["lock_waits"].Delta)
+	require.InDelta(t, 19, *moves["lock_waits"].Delta, 1e-9)
 
 	// rows_touched has no direction and is still carried. More rows is not
 	// better and fewer is not worse: it says whether the generated parameters

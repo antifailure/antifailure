@@ -197,6 +197,11 @@ function SQLWorkload({ result }: { result: RunResult }) {
   const failed = (result.transactionsFailed ?? 0) > 0;
   const contended = (result.deadlocks ?? 0) > 0 || (result.serializationFailures ?? 0) > 0;
   const foundNothing = result.rowsTouched !== null && result.rowsTouched === 0;
+  // Strictly greater than zero, never a truthiness test on a nullable number.
+  // `result.lockWaits &&` would be falsy for BOTH a run that never queued and
+  // a run nobody watched, which is the one distinction this tile exists to
+  // draw, and the note below would then be the only thing keeping them apart.
+  const blocked = result.lockWaits !== null && result.lockWaits > 0;
 
   return (
     <>
@@ -267,6 +272,18 @@ function SQLWorkload({ result }: { result: RunResult }) {
               : "returned or changed"
           }
           tone={foundNothing ? "warn" : undefined}
+        />
+        <Stat
+          label="Lock waits"
+          value={count(result.lockWaits)}
+          note={
+            result.lockWaits === null
+              ? "nothing read the wait queues"
+              : result.lockWaits === 0
+                ? "no client of this run was seen queueing"
+                : `${duration(result.lockWaitMs)} of waiting, sampled`
+          }
+          tone={blocked ? "warn" : undefined}
         />
         <Stat label="Took" value={duration(result.durationMs)} />
       </dl>

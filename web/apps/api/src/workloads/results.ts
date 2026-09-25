@@ -128,6 +128,13 @@ interface Aggregate {
   tps: number | null
   peakOpenTransactions: number | null
   backendsSeen: number | null
+  /** The contention the run was seen to suffer. Null means nothing watched the
+   *  wait queues, which is a different answer from zero for the same reason
+   *  the two above are, and a sharper one: zero lock waits is the most
+   *  reassuring thing a stored run can say, so an instrument that did not run
+   *  must not be able to produce it. */
+  lockWaits: number | null
+  lockWaitMs: number | null
   durationMs: number | null
   source: string | null
   errorReasons: Record<string, number>
@@ -224,6 +231,7 @@ function aggregateFor(kind: WorkloadKind, r: Record<string, unknown>): Aggregate
     deadlocks: null, serializationFailures: null,
     statementsRun: null, statementsFailed: null, rowsTouched: null, tps: null,
     peakOpenTransactions: null, backendsSeen: null,
+    lockWaits: null, lockWaitMs: null,
     durationMs: num(r.duration_ms, 0, 1e12),
     source: str(r.source, 200),
     // Failures by reason. Bounded and coerced per entry, because it is a map
@@ -342,6 +350,11 @@ function aggregateFor(kind: WorkloadKind, r: Record<string, unknown>): Aggregate
         // the column.
         peakOpenTransactions: whole(r.peak_open_transactions, 0, 1_000_000),
         backendsSeen: whole(r.backends_seen, 0, 1_000_000),
+        // Left null when the engine sent null, for the same reason and with
+        // more riding on it: a coalescing `?? 0` here would turn every
+        // unwatched run into a run that blocked nothing.
+        lockWaits: whole(r.lock_waits, 0, 2_147_483_647),
+        lockWaitMs: num(r.lock_wait_ms, 0, 1e12),
       }
     case 'exploration':
       return {
@@ -465,7 +478,7 @@ export async function writeReport(
       findings, goals, goals_reached,
       clients, transactions, transactions_failed, retries, deadlocks,
       serialization_failures, statements_run, statements_failed, rows_touched, tps,
-      peak_open_transactions, backends_seen,
+      peak_open_transactions, backends_seen, lock_waits, lock_wait_ms,
       duration_ms, source, error_reasons, refused_routes)
     VALUES (
       ${input.orgId}, ${input.runId}, ${input.kind}::workload_kind,
@@ -479,7 +492,7 @@ export async function writeReport(
       ${a.clients}, ${a.transactions}, ${a.transactionsFailed}, ${a.retries}, ${a.deadlocks},
       ${a.serializationFailures}, ${a.statementsRun}, ${a.statementsFailed},
       ${a.rowsTouched}, ${a.tps},
-      ${a.peakOpenTransactions}, ${a.backendsSeen},
+      ${a.peakOpenTransactions}, ${a.backendsSeen}, ${a.lockWaits}, ${a.lockWaitMs},
       ${a.durationMs}, ${a.source},
       ${JSON.stringify(a.errorReasons)}::jsonb,
       -- sql.param rather than the bare array. The template inlines a JavaScript

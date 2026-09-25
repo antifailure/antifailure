@@ -1212,6 +1212,12 @@ transaction at one instant, read from pg_stat_activity while it was going. N
 clients are not N concurrent sessions and that number is the evidence rather
 than the claim.
 
+The same connection asks pg_blocking_pids which of those backends were waiting
+for a lock and which ones were in front of them, so a run reports the
+contention it was under rather than only the deadlocks loud enough to end a
+transaction. Sampled, so the counts are floors rather than totals, and a run
+nobody watched reports nothing rather than zero.
+
 ```
 af load sql [flags]
 ```

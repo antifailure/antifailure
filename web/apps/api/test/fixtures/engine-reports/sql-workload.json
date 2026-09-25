@@ -48,6 +48,8 @@
     "goals": null,
     "goals_reached": null,
     "iterations": null,
+    "lock_wait_ms": 5600,
+    "lock_waits": 14,
     "max_ms": 744,
     "p50_ms": 22.4,
     "p90_ms": 61.8,

@@ -197,6 +197,12 @@ export function metricsFor(result: Record<string, unknown> | null): Measurement[
       { label: "Clients", value: n("clients") },
       { label: "Sessions on the server", value: n("backends_seen") },
       { label: "Open at once", value: n("peak_open_transactions") },
+      // The contention, and it follows the same null rule as the two above for
+      // a sharper reason. "Lock waits 0" is the most reassuring line on this
+      // page, so it is shown only when something actually read the wait
+      // queues; a run nobody watched prints not measured instead.
+      { label: "Lock waits", value: n("lock_waits") },
+      { label: "Time spent waiting", value: nullable(n("lock_wait_ms"), duration) },
       { label: "Statements", value: n("statements_run") },
       { label: "Rows touched", value: n("rows_touched") },
       { label: "p50", value: nullable(n("p50_ms"), duration) },
