@@ -365,6 +365,26 @@ func TestDiskFill_RefusesAFilesystemItWouldShareWithTheMachine(t *testing.T) {
 	require.Error(t, err, "a fill was accepted on a directory sharing the daemon's own disk")
 	require.Contains(t, err.Error(), "AF-CHS-005")
 	require.Contains(t, err.Error(), "every other container on this machine")
+
+	// WHICH refusal it is, and this is the assertion that covers the case a
+	// real manifest can actually reach.
+	//
+	// max_fill_bytes caps the fill at 10 GiB by schema, so on a machine with
+	// room the cap refuses this too and either refusal would satisfy the
+	// assertions above. The case that matters is the machine with NO room: when
+	// the daemon's disk is nearly full, free minus headroom falls under the cap
+	// and the cap stops refusing, and then the layout check is the only thing
+	// between the fault and the machine's last few gigabytes.
+	//
+	// It holds there for a reason that is about ordering rather than about
+	// arithmetic: the device check and the ownership check both run BEFORE
+	// freeBytes is called at all, so their verdict cannot depend on how full
+	// the disk is. Asserting that the refusal names the layout and NOT the cap
+	// is what pins that order down. Move either check below the free space read
+	// and this line fails.
+	require.NotContains(t, err.Error(), "and the cap is",
+		"the cap refused first, so on a nearly full disk, where the cap would not refuse, "+
+			"nothing here proves the layout check stops the fill")
 }
 
 // TestReadOnlyData_RefusesWhenTheWriteWouldStillSucceed is the storage fault
