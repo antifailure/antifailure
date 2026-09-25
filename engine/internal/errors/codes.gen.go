@@ -227,6 +227,9 @@ const (
 	// database.data_filesystem.size_bytes asks for: {used} bytes of data
 	// into {declared} bytes.
 	AFDB043 Code = "AF-DB-043"
+	// The build {image} could not open the data directory of golden
+	// {version}, and the server said: {said}
+	AFDB044 Code = "AF-DB-044"
 
 	// Detection
 	// No application could be detected in {path}.
@@ -1328,6 +1331,15 @@ var catalog = map[Code]Entry{
 		Docs:      "guides/chaos",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
+	},
+	AFDB044: {
+		Code:      AFDB044,
+		Area:      "DB",
+		Message:   "The build {image} could not open the data directory of golden {version}, and the server said: {said}",
+		NextStep:  "Read this as a finding about the two builds rather than as an environment that failed to start: one build wrote that data directory and the other refused to open it, so the two disagree about what is on disk. A catalog version, a block size, a WAL format or a page layout one of them does not accept all produce exactly this. Compare the two builds' pg_controldata output to see which, or build the golden on the build you are comparing against by setting database.image to it. Nothing was measured, and nothing can be until both builds read the same rows.",
+		Docs:      "providers/databases",
+		Retryable: false,
+		ExitCode:  ExitVerification,
 	},
 	AFDET001: {
 		Code:      AFDET001,

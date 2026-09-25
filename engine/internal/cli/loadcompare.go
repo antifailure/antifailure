@@ -39,6 +39,20 @@ type LoadCompareJSON struct {
 	Verdict    string                       `json:"verdict"`
 	Baseline   loadCompareSideJSON          `json:"baseline"`
 	Candidate  loadCompareSideJSON          `json:"candidate"`
+	// Axis is what differed between the two sides: "revision", "image" or
+	// "both". Always present, because a reader of the document must never have
+	// to infer which question the numbers answer, and a key that appeared only
+	// sometimes would make its absence mean "revision" by convention rather
+	// than by statement.
+	Axis string `json:"axis"`
+	// GoldenImage is the database build the golden BOTH sides branched was made
+	// on, and is absent for a manifest that names no image, which means the
+	// stock one for the declared major.
+	//
+	// It is the answer to "which build wrote these pages". With one data
+	// directory and two database builds, one of them wrote it and the other
+	// opened it, and no number in this document says which.
+	GoldenImage string `json:"golden_image,omitempty"`
 	// Golden is the database version BOTH sides branched from, which is what
 	// makes the difference worth anything.
 	Golden string `json:"golden,omitempty"`
@@ -109,10 +123,15 @@ type loadCompareSideJSON struct {
 	// How says how the base ref was resolved, so a reader can tell
 	// origin/main from a named tag without rerunning anything.
 	How string `json:"how,omitempty"`
+	// Image is the database build this side ran, absent when it is the stock
+	// image the declared major builds. Beside the revision because they are the
+	// two things a side IS, and a comparison can vary either.
+	Image string `json:"image,omitempty"`
 }
 
 func newLoadCompareCommand(e *Env) *cobra.Command {
 	var branch, baseRef, output string
+	var image, baselineImage string
 	var duration time.Duration
 	var scale float64
 	var seed int64
@@ -168,12 +187,23 @@ Throughput becomes committed transactions a second, judged against the same
 load.comparison.thresholds.throughput_drop. It needs a load.sql block and
 refuses without one.
 
+With --image and --baseline-image it compares two builds of the DATABASE rather
+than two builds of the application. Each defaults to the manifest's
+database.image, so naming one varies that side alone. When only the images
+differ the two sides run the same application revision, built from the same
+tree, and the base being the same commit is then allowed rather than refused:
+that is what makes the difference the database's. There is still one golden, so
+one build wrote its data directory and the other opens it, and a build that
+cannot open the other's data directory is reported as that finding rather than
+as an environment that would not start. The report names which axis differed.
+
 The base environment is torn down unless --keep says otherwise. The
 environment for this build is left running whether or not this brought it up.`),
 		Example: strings.TrimSpace(`
 af load compare
 af load compare --baseline origin/main --duration 60s
 af load compare --sql --concurrency 16
+af load compare --sql --baseline-image postgres:17-alpine
 af load compare --seed 7 --keep`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -213,7 +243,15 @@ af load compare --seed 7 --keep`),
 			res, err := o.LoadCompare(cmd.Context(), env.LoadCompareOptions{
 				Baseline: cfg.Baseline,
 				BaseRef:  orDefaultString(baseRef, cfg.BaseRef),
-				Duration: duration, Scale: scale, Seed: seed, Keep: keep,
+				// Passed as typed, and an untyped flag is the empty string,
+				// which the engine reads as "the manifest's database.image" for
+				// both sides. So the default is not a choice here either, for
+				// the reason changedInt documents: the difference is that this
+				// flag's zero value cannot be a real answer, because an image
+				// reference is never empty.
+				Image:         image,
+				BaselineImage: baselineImage,
+				Duration:      duration, Scale: scale, Seed: seed, Keep: keep,
 				Rounds: rounds, Warmup: warmup,
 				NoWarmup: noWarmup(cmd.Flags(), warmup),
 				// Passed only when they were typed, for the reason loadRate
@@ -232,13 +270,19 @@ af load compare --seed 7 --keep`),
 				// compare since the environment came up.
 				Progress: func(line string) { progressFor(e).Step(line) },
 			})
-			if errors.Is(err, env.ErrLoadBaselineSameCommit) {
+			if errors.Is(err, env.ErrLoadBaselineNothingVaried) {
 				// A branch level with its base is a legitimate state rather
 				// than a failure. Reporting it as one would fail the pipeline
 				// of everybody who reran a check on an unchanged branch.
+				//
+				// The hint names BOTH axes, because both of them are the same on
+				// both sides here and a hint that named only the commit would
+				// send somebody who meant to compare two database builds to the
+				// wrong flag.
 				e.Out.Status(e.Out.S(StyleDim, SymbolSkip),
 					"there are not two builds to compare",
-					"this branch is the same commit as its base")
+					"this branch is the same commit as its base, and both sides would run "+
+						"the same database image")
 				return nil
 			}
 			if res != nil && !res.BaselineTornDown && !keep && res.BaselineBranch != "" {
@@ -346,6 +390,16 @@ af load compare --seed 7 --keep`),
 	cmd.Flags().StringVar(&branch, "branch", "", "Branch to compare, defaulting to the checked out one")
 	cmd.Flags().StringVar(&baseRef, "baseline", "",
 		"Revision to compare against, overriding load.comparison.base_ref")
+	// The other axis, and it is two flags rather than one for the same reason
+	// --baseline is a flag at all: a side of a comparison is a thing you name,
+	// not a knob you tune. Naming one and leaving the other is the ordinary
+	// case, so each defaults to the manifest's database.image and a run that
+	// names neither is exactly the run that existed before these flags did.
+	cmd.Flags().StringVar(&image, "image", "",
+		"Database image this build runs, overriding database.image. The application is unchanged")
+	cmd.Flags().StringVar(&baselineImage, "baseline-image", "",
+		"Database image the base side runs, overriding database.image. "+
+			"With --image this compares two database builds over one golden")
 	cmd.Flags().DurationVar(&duration, "duration", 0,
 		"How long to send for on each side, overriding the manifest")
 	cmd.Flags().Float64Var(&scale, "scale", 0,
@@ -516,8 +570,12 @@ func loadCompareDoc(
 ) LoadCompareJSON {
 	return LoadCompareJSON{
 		Comparison: comparison, Judged: judged, Verdict: verdict,
-		Baseline:         loadCompareSideJSON{Rev: res.Rev, How: res.How},
-		Candidate:        loadCompareSideJSON{Rev: res.CandidateRev},
+		Baseline: loadCompareSideJSON{
+			Rev: res.Rev, How: res.How, Image: res.BaselineImage},
+		Candidate: loadCompareSideJSON{
+			Rev: res.CandidateRev, Image: res.CandidateImage},
+		Axis:             string(res.Axis),
+		GoldenImage:      res.GoldenImage,
 		Golden:           res.Golden,
 		BaselineTornDown: res.BaselineTornDown,
 		BaselineBranch:   res.BaselineBranch,
@@ -662,11 +720,7 @@ func renderLoadComparison(
 	e *Env, res *env.LoadCompareResult, c *workload.Comparison,
 	judged []workload.ComparisonVerdict, verdict string,
 ) {
-	e.Out.Println("")
-	e.Out.Printf("  %s against %s\n", shortRev(res.CandidateRev), shortRev(res.Rev))
-	if res.How != "" {
-		e.Out.Printf("  the base was resolved %s\n", res.How)
-	}
+	renderComparisonProvenance(e, res)
 
 	rows := [][]string{}
 	for _, m := range c.Measures {
@@ -703,6 +757,58 @@ func renderLoadComparison(
 	}
 
 	renderComparisonTail(e, c, judged, verdict)
+}
+
+// renderComparisonProvenance is the block above the tables that says what the
+// two sides WERE.
+//
+// Shared between the two workloads rather than written twice, for the reason
+// renderComparisonTail gives about itself: two copies is two places for a line
+// to go missing, and a missing provenance line reads as a clean run rather than
+// as an omission. It was already two identical copies before the axis existed.
+func renderComparisonProvenance(e *Env, res *env.LoadCompareResult) {
+	e.Out.Println("")
+	e.Out.Printf("  %s against %s\n", shortRev(res.CandidateRev), shortRev(res.Rev))
+	if res.How != "" {
+		e.Out.Printf("  the base was resolved %s\n", res.How)
+	}
+	for _, line := range comparisonAxisLines(res) {
+		e.Out.Printf("  %s\n", line)
+	}
+}
+
+// comparisonAxisLines says which axis differed, and returns NOTHING when no
+// database build was named.
+//
+// EMPTY IS THE POINT OF THE GUARD, not a shortcut. A film ships that shows this
+// report and reads its wording aloud, so a run that names no image prints what it
+// printed before this existed, to the character. Nothing is inferred by that
+// silence: the two revisions are already named on the line above, and a
+// comparison with one database build has only the revision left to vary. The
+// machine readable document carries the axis unconditionally, where a reader is
+// a program and a convention is worse than a field.
+func comparisonAxisLines(res *env.LoadCompareResult) []string {
+	if res.BaselineImage == res.CandidateImage && res.BaselineImage == res.GoldenImage {
+		return nil
+	}
+	var out []string
+	switch res.Axis {
+	case env.AxisImage:
+		out = append(out, "the axis that differed is the database build, "+
+			env.ImageWords(res.BaselineImage)+" against "+env.ImageWords(res.CandidateImage)+
+			", on one application revision")
+	case env.AxisBoth:
+		out = append(out, "BOTH axes differed, the revision and the database build, "+
+			env.ImageWords(res.BaselineImage)+" against "+env.ImageWords(res.CandidateImage))
+	default:
+		out = append(out, "the axis that differed is the revision, and both sides ran "+
+			"the database build "+env.ImageWords(res.CandidateImage))
+	}
+	if res.GoldenImage != res.BaselineImage || res.GoldenImage != res.CandidateImage {
+		out = append(out, "the golden was made on "+env.ImageWords(res.GoldenImage)+
+			", so a side on another build opened a data directory it did not write")
+	}
+	return out
 }
 
 // renderComparisonTail is everything after the tables: what broke, what could

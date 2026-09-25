@@ -1099,6 +1099,16 @@ Throughput becomes committed transactions a second, judged against the same
 load.comparison.thresholds.throughput_drop. It needs a load.sql block and
 refuses without one.
 
+With --image and --baseline-image it compares two builds of the DATABASE rather
+than two builds of the application. Each defaults to the manifest's
+database.image, so naming one varies that side alone. When only the images
+differ the two sides run the same application revision, built from the same
+tree, and the base being the same commit is then allowed rather than refused:
+that is what makes the difference the database's. There is still one golden, so
+one build wrote its data directory and the other opens it, and a build that
+cannot open the other's data directory is reported as that finding rather than
+as an environment that would not start. The report names which axis differed.
+
 The base environment is torn down unless --keep says otherwise. The
 environment for this build is left running whether or not this brought it up.
 
@@ -1110,15 +1120,18 @@ af load compare [flags]
 af load compare
 af load compare --baseline origin/main --duration 60s
 af load compare --sql --concurrency 16
+af load compare --sql --baseline-image postgres:17-alpine
 af load compare --seed 7 --keep
 ```
 
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--baseline` | - | Revision to compare against, overriding load.comparison.base_ref. |
+| `--baseline-image` | - | Database image the base side runs, overriding database.image. With --image this compares two database builds over one golden. |
 | `--branch` | - | Branch to compare, defaulting to the checked out one. |
 | `--concurrency` | `8` | Clients each side runs at once, overriding load.sql.clients. Needs --sql. |
 | `--duration` | `0s` | How long to send for on each side, overriding the manifest. |
+| `--image` | - | Database image this build runs, overriding database.image. The application is unchanged. |
 | `--keep` | `false` | Leave the base environment up, for looking at a difference. |
 | `--report` | - | Write the comparison here as well as to the terminal. |
 | `--rounds` | `0` | Interleaved rounds per side, 16 when not set. 1 measures each side once, base first. |

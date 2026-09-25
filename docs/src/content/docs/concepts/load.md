@@ -388,6 +388,29 @@ rather than a difference in the code. The candidate environment comes up first
 so that its golden is the one the base side is pinned to, which also means a
 scheduled golden refresh landing mid comparison cannot separate the two.
 
+### Varying the database instead of the application
+
+```
+af load compare --image postgres:17-alpine --baseline-image pgvector/pgvector:pg17
+```
+
+`--image` and `--baseline-image` name the database build each side runs, and
+each defaults to the manifest's `database.image`. They turn this comparison
+around: instead of two application revisions over one database, it becomes one
+application revision over two databases. When only the images differ the two
+sides run the same commit built from the same tree, and a base revision equal to
+this one is allowed rather than refused.
+
+There is still one golden, so one build wrote its data directory and the other
+opens it. The report names which axis differed, which build wrote the pages, and
+what a difference can and cannot be attributed to. A build that cannot open the
+other build's data directory is reported as `AF-DB-044` with the server's own
+words, rather than as an environment that would not start.
+
+The full account is under
+[SQL workloads](/concepts/sql-workloads/#comparing-two-database-builds), because
+the person who needs it is usually measuring the database directly.
+
 ### What the comparison cannot control
 
 Every report says this, because a number labelled a regression that is really

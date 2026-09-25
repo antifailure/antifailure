@@ -161,3 +161,16 @@ func (o *Orchestrator) InvokeRunnerCapturingDocument(
 
 // DescribeSkipForTest exposes the split of one verify.Scan skipped line.
 func DescribeSkipForTest(line string) (string, string, string) { return describeSkip(line) }
+
+// BaselineBuildRootForTest exposes baselineBuildRoot to the package's external
+// tests, so the choice between the candidate's own tree and a clean archive of
+// the base revision is proved against a real repository holding a real
+// uncommitted file rather than reasoned about.
+//
+// Reaching it through LoadCompare would need a provider, a runtime, a golden and
+// two container builds, to assert a choice between two directories.
+func (o *Orchestrator) BaselineBuildRootForTest(
+	ctx context.Context, rev string, revisionVaried bool,
+) (string, func(), error) {
+	return o.baselineBuildRoot(ctx, rev, revisionVaried)
+}

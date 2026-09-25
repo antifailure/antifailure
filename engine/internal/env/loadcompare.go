@@ -72,12 +72,11 @@ import (
 // interrupted teardown.
 const loadBaselineSuffix = " (load baseline)"
 
-// ErrLoadBaselineSameCommit is returned when the base resolves to the
-// candidate's own HEAD. A branch level with its base is a legitimate state
-// rather than a failure, so the caller reports "nothing to compare" instead of
-// an error, exactly as the side_effect family does.
-var ErrLoadBaselineSameCommit = errors.New(
-	"the base and this change are the same commit, so there are not two builds to compare")
+// The refusal for a comparison that varies nothing is
+// ErrLoadBaselineNothingVaried in loadcompareimage.go, where the two axes it has
+// to name both live. A branch level with its base is a legitimate state rather
+// than a failure, so the caller reports "nothing to compare" instead of an
+// error, exactly as the side_effect family does.
 
 // LoadCompareOptions are the choices a caller makes.
 type LoadCompareOptions struct {
@@ -85,6 +84,20 @@ type LoadCompareOptions struct {
 	// same vocabulary the oracle uses.
 	Baseline schema.BaselineSource
 	BaseRef  string
+	// Image and BaselineImage are the database build each side runs, each
+	// defaulting to the manifest's database.image, so a caller who names
+	// neither gets the run that existed before this field did.
+	//
+	// TWO FIELDS RATHER THAN ONE, and unlike Duration and Scale that is the
+	// point rather than a hazard. The knobs that describe the WORKLOAD are
+	// deliberately single, because two would let somebody compare eight clients
+	// against sixteen and call the answer a regression. The database build is
+	// not a knob, it is a side of the comparison, in exactly the way the
+	// revision is; expressing it per side is what makes the experiment
+	// possible, and the report says which axis varied so that nobody has to
+	// infer it from a table of latencies.
+	Image         string
+	BaselineImage string
 	// Duration, Scale and Seed are sent to BOTH sides unchanged. One field per
 	// side would let a caller compare two different workloads and call the
 	// answer a regression, so there is deliberately no way to express that.
@@ -152,6 +165,22 @@ type LoadCompareResult struct {
 	How string
 	// CandidateRev is this build's own HEAD, so a reader can name both sides.
 	CandidateRev string
+	// BaselineImage and CandidateImage are the database build each side ran, and
+	// GoldenImage the build the golden they share was made on. Empty means the
+	// stock image the declared major builds, which is what every manifest
+	// written before database.image existed means.
+	//
+	// GoldenImage is neither side's choice and is carried anyway, because it is
+	// the answer to "which build wrote these pages": with one data directory and
+	// two builds, one of them wrote it and the other opened it, and a reader who
+	// cannot tell which cannot judge the result.
+	BaselineImage  string
+	CandidateImage string
+	GoldenImage    string
+	// Axis is what differed between the two sides: the revision, the image, or
+	// both. Recorded rather than derivable, so that the report and the JSON say
+	// it in one voice and a reader never infers it from the numbers.
+	Axis CompareAxis
 	// Golden is the database version BOTH sides branched from. The single most
 	// important field for deciding whether a difference is worth anything.
 	Golden string
@@ -240,15 +269,39 @@ func (o *Orchestrator) LoadCompare(
 		return nil, err
 	}
 	head := gitOutput(o.opts.Root, "rev-parse", "HEAD")
-	if head != "" && head == rev {
-		return nil, ErrLoadBaselineSameCommit
+	// A checkout with no resolvable HEAD cannot be shown to be level with its
+	// base, so it is treated as varying the revision, which is what the previous
+	// refusal did with the same condition spelled the other way round.
+	revisionVaried := head == "" || head != rev
+	imgs := resolveCompareImages(o.opts.Manifest, opts, revisionVaried)
+	if !revisionVaried && !imgs.varied() {
+		return nil, ErrLoadBaselineNothingVaried
+	}
+	// Before either environment is built, because every refusal it can make is
+	// about a choice already typed and both environments cost minutes.
+	if err := checkCompareImages(ctx, o, imgs); err != nil {
+		return nil, err
+	}
+
+	// The side that opens the golden with a build other than the one it was made
+	// on runs its branches on that build, and a side that does not is untouched.
+	// The candidate's orchestrator is replaced rather than mutated: its options
+	// are the same options, so it addresses the same environment under the same
+	// identifier, and the caller's own orchestrator stays exactly as the caller
+	// configured it.
+	candidateOrch := o
+	if imgs.candidate != imgs.golden {
+		candidateOrch, err = o.withBranchImage(imgs.candidate)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// The candidate first, so the golden it uses is the one to pin. A base
 	// environment built before the candidate would have to guess, and a
 	// scheduled refresh between the two would then separate them.
 	progress("bringing this build up")
-	candidate, err := o.Up(ctx)
+	candidate, err := candidateOrch.Up(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -272,7 +325,10 @@ func (o *Orchestrator) LoadCompare(
 				"difference between the two would be a difference in their data")
 	}
 
-	tree, cleanTree, err := o.baselineTree(ctx, rev)
+	// The tree the base side's application is built from, which is the
+	// candidate's own when the revisions are equal. The reasoning and the test
+	// that says no to doing it the other way are on baselineBuildRoot.
+	tree, cleanTree, err := o.baselineBuildRoot(ctx, rev, revisionVaried)
 	if err != nil {
 		return nil, err
 	}
@@ -282,13 +338,26 @@ func (o *Orchestrator) LoadCompare(
 	if err != nil {
 		return nil, err
 	}
+	// Set on the constructed orchestrator rather than passed through
+	// baselineOrchestrator, whose three callers all want the same thing from it
+	// and none of the other two has a database build to name. Safe here because
+	// nothing New derives depends on it: the environment identifier hashes the
+	// project and the branch, and the provider reads this field when Up builds
+	// it, which has not happened yet.
+	if imgs.baseline != imgs.golden {
+		baseline.opts.BranchImage = imgs.baseline
+	}
 	// Before Up, because Up is what stamps the lifetime.
 	baseline.MarkEphemeral(opts.TTL)
 
 	result = &LoadCompareResult{
 		Rev: rev, How: how, CandidateRev: head,
 		Golden: candidate.Golden, BaselineBranch: baseline.opts.Branch,
-		SQL: opts.SQL,
+		SQL:            opts.SQL,
+		BaselineImage:  imgs.baseline,
+		CandidateImage: imgs.candidate,
+		GoldenImage:    imgs.golden,
+		Axis:           imgs.axis,
 	}
 	progress("bringing " + short(rev) + " up beside it as the base branch")
 	baseEnv, upErr := baseline.Up(ctx)
@@ -312,7 +381,12 @@ func (o *Orchestrator) LoadCompare(
 	}
 
 	if opts.SQL {
-		return result, o.compareSQL(ctx, result, baseline, opts, progress)
+		// The candidate's orchestrator rather than the caller's, because
+		// compareSQL builds the mix against THIS BUILD's own database and that
+		// database is the one the candidate side brought up. Reading it through
+		// an orchestrator configured for a different database build would derive
+		// the mix from a server nobody is sending transactions at.
+		return result, candidateOrch.compareSQL(ctx, result, baseline, opts, progress)
 	}
 
 	// One duration and one scale, resolved ONCE from this build's manifest and
@@ -328,7 +402,7 @@ func (o *Orchestrator) LoadCompare(
 	plan := comparePlanFor(opts, total)
 	result.Rounds, result.RoundDuration, result.Warmup = plan.rounds, plan.perRound, plan.warmup
 
-	sides := map[compareSide]*Orchestrator{sideBase: baseline, sideCandidate: o}
+	sides := map[compareSide]*Orchestrator{sideBase: baseline, sideCandidate: candidateOrch}
 	send := func(ctx context.Context, side compareSide, d time.Duration, seed int64) (
 		*load.Result, []load.Route, error,
 	) {
@@ -551,7 +625,7 @@ func interleaved[R any](
 func loadCompareNotes(r *LoadCompareResult) []string {
 	var notes []string
 	if r.SQL {
-		return sqlCompareNotes(r)
+		return append(sqlCompareNotes(r), imageCompareNotes(r)...)
 	}
 	switch {
 	case r.Rounds <= 1:
@@ -602,5 +676,7 @@ func loadCompareNotes(r *LoadCompareResult) []string {
 				"a change in what the application serves",
 			len(r.RefusedBaseline), len(r.RefusedCandidate)))
 	}
-	return notes
+	// Last, and empty unless a database build was named, which is what keeps
+	// the block every existing run prints identical to the character.
+	return append(notes, imageCompareNotes(r)...)
 }

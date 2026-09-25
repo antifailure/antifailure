@@ -261,6 +261,27 @@ func (o *Orchestrator) baselineOrchestrator(tree, golden, suffix string) (*Orche
 	return New(opts)
 }
 
+// withBranchImage is this same environment, with its database branches opened by
+// a different database build.
+//
+// THE SAME ENVIRONMENT, and that is the whole reason this is not another
+// baseline. The options are copied unchanged but for the one field, so the branch
+// name, the project name and therefore the environment identifier are identical:
+// it addresses the environment the caller already has rather than creating a
+// second one beside it, and `af up` on it afterwards is the same `af up`. Only
+// the database container is affected, and only because the branch is derived from
+// the golden on every Up rather than carried over.
+//
+// A copy rather than a mutation of the caller's orchestrator, because the caller
+// configured that one and may still be holding it: the load comparison reads the
+// environment identifier, the branch name and the thresholds off it while this
+// one runs the traffic.
+func (o *Orchestrator) withBranchImage(image string) (*Orchestrator, error) {
+	opts := o.opts
+	opts.BranchImage = image
+	return New(opts)
+}
+
 // comparisonConfig turns the manifest block into what the comparison reads.
 func comparisonConfig(cfg *schema.Oracle) oracle.Config {
 	out := oracle.Config{

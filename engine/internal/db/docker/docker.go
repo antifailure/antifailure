@@ -82,6 +82,17 @@ type Provider struct {
 	// image, when set, replaces the stock Postgres image this provider would
 	// otherwise build from version.
 	image string
+	// branchImage, when set, is the image branches of a golden run, with the
+	// golden's data directory copied onto it, instead of the golden itself.
+	//
+	// Separate from image and never defaulted from it, because the two say
+	// different things. image is what a golden is BUILT on, and it is part of
+	// what makes the golden what it is. branchImage is what OPENS a golden
+	// somebody else built, which is a comparison's question and nobody else's,
+	// so nothing infers it: a provider that quietly rebased whenever the
+	// manifest's image had moved since the golden was made would change what
+	// every existing project branches, silently, on an upgrade.
+	branchImage string
 	// extensions are created in a golden candidate before the source is
 	// copied into it.
 	extensions []string
@@ -121,6 +132,15 @@ type Options struct {
 	// on the first object whose extension is not there. The declared Version
 	// is still checked against what the image's server reports.
 	Image string
+	// BranchImage is the image branches of a golden run instead of the golden
+	// itself, with the golden's data directory copied onto it.
+	//
+	// It is how one build's data directory is opened by another build, which is
+	// what comparing two databases over one golden means: two goldens would be
+	// two sets of rows and then every difference is a difference in the data.
+	// Empty, which is every caller but a comparison, runs the golden as it
+	// always has.
+	BranchImage string
 	// Extensions are created in a golden candidate, in order, before the
 	// source is copied into it. An extension the image carries and nobody
 	// created has no types, no operators and no table access methods, so
@@ -169,7 +189,8 @@ func New(opts Options) (*Provider, error) {
 	return &Provider{
 		cli: cli, clock: opts.Clock, version: opts.Version,
 		portFrom: opts.PortFrom, seedSQL: opts.SeedSQL,
-		image: opts.Image, extensions: opts.Extensions, preload: opts.PreloadLibraries,
+		image: opts.Image, branchImage: opts.BranchImage,
+		extensions: opts.Extensions, preload: opts.PreloadLibraries,
 		storageBytes: opts.StorageBytes,
 		ports:        dockerutil.NewPortAllocator(opts.PortFrom),
 	}, nil
@@ -494,11 +515,65 @@ func (p *Provider) DestroyGolden(ctx context.Context, version string) error {
 			return aferrors.Coded(aferrors.AFDB005, "version", version, "count", "1")
 		}
 	}
+	// The copies of this version's data directory onto other builds go with it.
+	//
+	// PruneChildren does not reach them and cannot: a copy is built FROM the
+	// other build's image, so the golden is not its parent. Without this a
+	// destroyed golden leaves a full sized image per build that ever opened it,
+	// labelled managed, which is a leak the detector would report against this
+	// provider and nothing would ever collect.
+	for _, r := range p.rebased(ctx, version) {
+		if _, rerr := p.cli.ImageRemove(ctx, r.ref, client.ImageRemoveOptions{}); rerr != nil &&
+			!cerrdefs.IsNotFound(rerr) {
+			return fmt.Errorf("db.docker: remove the copy %s of golden %s: %w", r.ref, version, rerr)
+		}
+	}
 	_, err = p.cli.ImageRemove(ctx, tag, client.ImageRemoveOptions{PruneChildren: true})
 	if err != nil && !cerrdefs.IsNotFound(err) {
 		return fmt.Errorf("db.docker: remove the golden image %s: %w", version, err)
 	}
 	return nil
+}
+
+// rebasedImage is one copy of a golden's data directory onto another build.
+type rebasedImage struct {
+	ref     string
+	version string
+	created time.Time
+}
+
+// rebased names the copies of goldens onto other builds, all of them when
+// version is empty and one golden's when it is not.
+//
+// Best effort and never an error, because both callers already have a job: the
+// destroy above is removing a version and must not fail on a listing, and the
+// inventory is describing what exists. An empty answer from a daemon that would
+// not list is the same as no copies, which is the honest reading of "could not
+// look" for a caller that is only ever adding to a list.
+func (p *Provider) rebased(ctx context.Context, version string) []rebasedImage {
+	filters := []string{LabelKind, rebaseKind}
+	if version != "" {
+		filters = append(filters, LabelGolden, version)
+	}
+	images, err := p.cli.ImageList(ctx, client.ImageListOptions{
+		Filters: dockerutil.Filter(filters...),
+	})
+	if err != nil {
+		return nil
+	}
+	var out []rebasedImage
+	for _, img := range images.Items {
+		for _, tag := range img.RepoTags {
+			if !strings.HasPrefix(tag, RebaseRepo+":") {
+				continue
+			}
+			out = append(out, rebasedImage{
+				ref: tag, version: img.Labels[LabelGolden],
+				created: time.Unix(img.Created, 0).UTC(),
+			})
+		}
+	}
+	return out
 }
 
 // Branch creates a database for an environment from a golden version.
@@ -541,21 +616,49 @@ func (p *Provider) Branch(ctx context.Context, version, envID string) (provider.
 		return provider.Branch{}, fmt.Errorf("db.docker: inspect the golden image: %w", err)
 	}
 
+	// Which image this branch's server comes out of. The golden's own unless a
+	// caller asked for a different build to open it, in which case the golden's
+	// data directory is copied onto that build first and the branch starts from
+	// the result. The golden's LABELS are still read from the golden itself,
+	// above: a copy carries the files and not the record of how the server that
+	// wrote them was started, and starting a branch without a library the
+	// postmaster needs produces a server that refuses to start at all.
+	run := tag
+	if p.branchImage != "" {
+		run, err = p.rebase(ctx, tag, version)
+		if err != nil {
+			return provider.Branch{}, err
+		}
+	}
+
 	// The data directory's own filesystem, when the manifest asked for one.
 	//
 	// Before the container, because the container mounts it: a branch created
 	// first and given the volume afterwards would have spent its first start
 	// on the writable layer, which is the layout this key exists to leave.
+	//
+	// AFTER THE COPY ONTO THE OTHER BUILD AND FILLED FROM ITS RESULT, which is
+	// the one thing these two features have to agree about. A declared
+	// filesystem is mounted over the data directory, so it is the volume and not
+	// the image layer that the branch's server actually opens: filling it from
+	// the golden while the branch ran another build would leave the pairing
+	// resting on two images that agree by coincidence. They do hold byte
+	// identical data directories today, so nothing observable turns on it, and
+	// one statement of where this branch's data comes from still beats two.
+	// Safe because the anchor bypasses the image's entrypoint and never starts a
+	// postmaster, so a build that cannot open this data directory refuses it at
+	// branchReady, where the refusal is the designed finding, rather than inside
+	// a volume fill that would report it as a failed copy.
 	var storage string
 	if p.storageBytes > 0 {
-		storage, err = p.ensureStorage(ctx, envID, tag)
+		storage, err = p.ensureStorage(ctx, envID, run)
 		if err != nil {
 			return provider.Branch{}, err
 		}
 	}
 
 	name := branchName(envID)
-	c, err := p.start(ctx, name, tag, map[string]string{
+	c, err := p.start(ctx, name, run, map[string]string{
 		LabelKind:   "branch",
 		LabelEnv:    envID,
 		LabelGolden: version,
@@ -567,7 +670,7 @@ func (p *Provider) Branch(ctx context.Context, version, envID string) (provider.
 		EnvID: envID, From: version, ProviderRef: c.id, CreatedAt: p.clock.Now().UTC(),
 	}
 	conn := p.connString(c.port)
-	if err := p.waitReady(ctx, conn); err != nil {
+	if err := p.branchReady(ctx, conn, c.id, version); err != nil {
 		// The container exists and is recorded, so the caller can tear it
 		// down. Leaving it running and unusable would be worse.
 		return b, err
@@ -592,7 +695,7 @@ func (p *Provider) Branch(ctx context.Context, version, envID string) (provider.
 	// IF NOT EXISTS carries the cost of the ordinary case, which is a golden
 	// that already has every one of them: one statement each that finds the
 	// extension present and writes nothing.
-	if err := p.createExtensions(ctx, conn, p.imageFor(p.version)); err != nil {
+	if err := p.createExtensions(ctx, conn, p.branchImageOrDeclared()); err != nil {
 		// The branch is returned with the error for the same reason the
 		// readiness failure above returns it: the container exists, and a
 		// refusal that leaks the container it refused on is a leak nobody is
@@ -823,6 +926,19 @@ func (p *Provider) Inventory(ctx context.Context) ([]provider.Resource, error) {
 		out = append(out, provider.Resource{
 			Kind: "image/golden", ID: g.ProviderRef, CreatedAt: g.CreatedAt,
 			Labels: map[string]string{"version": g.ID, "size": strconv.FormatInt(g.SizeBytes, 10)},
+		})
+	}
+	// The copies of goldens onto other builds, reported as resources of their
+	// own, because they are full sized images this provider created and a
+	// resource a leak detector cannot see is a resource that leaks.
+	//
+	// ONE listing for all of them rather than one per golden: a daemon holding
+	// thirty goldens would otherwise make thirty calls to answer a question that
+	// one call answers, and `af env list` runs this.
+	for _, r := range p.rebased(ctx, "") {
+		out = append(out, provider.Resource{
+			Kind: "image/rebased", ID: r.ref, CreatedAt: r.created,
+			Labels: map[string]string{"version": r.version},
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })

@@ -2847,6 +2847,29 @@ rather than a difference in the code. The candidate environment comes up first
 so that its golden is the one the base side is pinned to, which also means a
 scheduled golden refresh landing mid comparison cannot separate the two.
 
+### Varying the database instead of the application
+
+` + "`" + "`" + "`" + `
+af load compare --image postgres:17-alpine --baseline-image pgvector/pgvector:pg17
+` + "`" + "`" + "`" + `
+
+` + "`" + `--image` + "`" + ` and ` + "`" + `--baseline-image` + "`" + ` name the database build each side runs, and
+each defaults to the manifest's ` + "`" + `database.image` + "`" + `. They turn this comparison
+around: instead of two application revisions over one database, it becomes one
+application revision over two databases. When only the images differ the two
+sides run the same commit built from the same tree, and a base revision equal to
+this one is allowed rather than refused.
+
+There is still one golden, so one build wrote its data directory and the other
+opens it. The report names which axis differed, which build wrote the pages, and
+what a difference can and cannot be attributed to. A build that cannot open the
+other build's data directory is reported as ` + "`" + `AF-DB-044` + "`" + ` with the server's own
+words, rather than as an environment that would not start.
+
+The full account is under
+[SQL workloads](/concepts/sql-workloads/#comparing-two-database-builds), because
+the person who needs it is usually measuring the database directly.
+
 ### What the comparison cannot control
 
 Every report says this, because a number labelled a regression that is really
@@ -4242,6 +4265,55 @@ BOTH sides. There is deliberately no way to set one per side: a comparison of
 eight clients against sixteen measures the client count. ` + "`" + `--scale` + "`" + ` is refused
 with ` + "`" + `--sql` + "`" + `, because it is a fraction of production's arrival rate and this
 workload has none.
+
+## Comparing two database builds
+
+` + "`" + "`" + "`" + `
+af load compare --sql --baseline-image postgres:17-alpine
+` + "`" + "`" + "`" + `
+
+` + "`" + `--image` + "`" + ` and ` + "`" + `--baseline-image` + "`" + ` name the database build each side runs, and
+each one defaults to the manifest's ` + "`" + `database.image` + "`" + `. Naming one varies that
+side and leaves the other where it was. This is the other axis of the same
+comparison: the ordinary run holds the database still and varies the
+application, and these two flags hold the application still and vary the
+database.
+
+Holding the application still is what makes the answer attributable, so when
+only the images differ the two sides run the same application revision, built
+from the same tree. A base revision equal to this one is normally refused,
+because there would be nothing to compare. With two images it is allowed, and
+it is the point: same commit, same rows, same workload, two database builds.
+
+There is still one golden, because two would be two sets of rows and then every
+difference in the report is a difference in the data. One build wrote that data
+directory, the one ` + "`" + `database.image` + "`" + ` names, and the other build opens it. The
+report says which axis differed and which build wrote the pages, so you never
+have to infer either from the numbers.
+
+A major version mismatch between the two images is refused before either
+environment is built. The golden is one data directory and a build of another
+major cannot open it, so there is nothing to learn from starting.
+
+### When the other build cannot open the data directory
+
+This is a finding rather than a failure, and for somebody hardening a storage
+engine it is often the most useful thing the tool will say.
+
+` + "`" + "`" + "`" + `
+  AF-DB-044  The build ptlive:candidate could not open the data directory of
+  golden gv_20260924103012_a1b2, and the server said: FATAL:  database files
+  are incompatible with server / DETAIL:  The database cluster was initialized
+  with BLCKSZ 8192, but the server was compiled with BLCKSZ 16384.
+` + "`" + "`" + "`" + `
+
+The server's own words are carried into the message, because the verdict line
+is the same sentence for a catalog version, a block size, a write ahead log
+format and a toast chunk size, and only the detail beneath it says which. It is
+kept apart from an environment that failed to start for an unrelated reason: a
+container that stops without the server refusing anything reports that instead,
+and the refusal is noticed when the container stops rather than after the
+readiness wait, so it never arrives as a timeout.
 
 ### What a SQL comparison cannot see
 
@@ -19103,6 +19175,16 @@ Throughput becomes committed transactions a second, judged against the same
 load.comparison.thresholds.throughput_drop. It needs a load.sql block and
 refuses without one.
 
+With --image and --baseline-image it compares two builds of the DATABASE rather
+than two builds of the application. Each defaults to the manifest's
+database.image, so naming one varies that side alone. When only the images
+differ the two sides run the same application revision, built from the same
+tree, and the base being the same commit is then allowed rather than refused:
+that is what makes the difference the database's. There is still one golden, so
+one build wrote its data directory and the other opens it, and a build that
+cannot open the other's data directory is reported as that finding rather than
+as an environment that would not start. The report names which axis differed.
+
 The base environment is torn down unless --keep says otherwise. The
 environment for this build is left running whether or not this brought it up.
 
@@ -19114,15 +19196,18 @@ af load compare [flags]
 af load compare
 af load compare --baseline origin/main --duration 60s
 af load compare --sql --concurrency 16
+af load compare --sql --baseline-image postgres:17-alpine
 af load compare --seed 7 --keep
 ` + "`" + "`" + "`" + `
 
 | Flag | Default | What it does |
 | --- | --- | --- |
 | ` + "`" + `--baseline` + "`" + ` | - | Revision to compare against, overriding load.comparison.base_ref. |
+| ` + "`" + `--baseline-image` + "`" + ` | - | Database image the base side runs, overriding database.image. With --image this compares two database builds over one golden. |
 | ` + "`" + `--branch` + "`" + ` | - | Branch to compare, defaulting to the checked out one. |
 | ` + "`" + `--concurrency` + "`" + ` | ` + "`" + `8` + "`" + ` | Clients each side runs at once, overriding load.sql.clients. Needs --sql. |
 | ` + "`" + `--duration` + "`" + ` | ` + "`" + `0s` + "`" + ` | How long to send for on each side, overriding the manifest. |
+| ` + "`" + `--image` + "`" + ` | - | Database image this build runs, overriding database.image. The application is unchanged. |
 | ` + "`" + `--keep` + "`" + ` | ` + "`" + `false` + "`" + ` | Leave the base environment up, for looking at a difference. |
 | ` + "`" + `--report` + "`" + ` | - | Write the comparison here as well as to the terminal. |
 | ` + "`" + `--rounds` + "`" + ` | ` + "`" + `0` + "`" + ` | Interleaved rounds per side, 16 when not set. 1 measures each side once, base first. |
@@ -22726,6 +22811,18 @@ The data directory does not fit in the filesystem database.data_filesystem.size_
 | Exit code | ` + "`" + `3` + "`" + ` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/chaos](/docs/guides/chaos) |
+
+### AF-DB-044
+
+The build {image} could not open the data directory of golden {version}, and the server said: {said}
+
+**What to do.** Read this as a finding about the two builds rather than as an environment that failed to start: one build wrote that data directory and the other refused to open it, so the two disagree about what is on disk. A catalog version, a block size, a WAL format or a page layout one of them does not accept all produce exactly this. Compare the two builds' pg_controldata output to see which, or build the golden on the build you are comparing against by setting database.image to it. Nothing was measured, and nothing can be until both builds read the same rows.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `7` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [providers/databases](/docs/providers/databases) |
 
 ## Detection
 

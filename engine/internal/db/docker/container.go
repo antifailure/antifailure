@@ -289,7 +289,18 @@ func (p *Provider) versionMatches(ctx context.Context, conn secrets.Value, want 
 		// declared major, in which case the two cannot disagree.
 		return nil
 	}
-	found := pgcopy.ServerMajor(ctx, conn)
+	return majorMatches(pgcopy.ServerMajor(ctx, conn), want, img)
+}
+
+// majorMatches is the comparison itself, and it is one function because two
+// callers make it.
+//
+// versionMatches asks it about a golden candidate, and CheckImage asks it about
+// an image named on a command line before either environment of a comparison is
+// built. A second copy of these three lines would be a second place for the
+// zero case to be got wrong, and the zero case is the one that decides whether a
+// transient read refuses a build.
+func majorMatches(found, want int, img string) error {
 	if found == 0 {
 		// Zero is "could not ask". The server answered every readiness probe a
 		// moment ago, so a failure here is a transient read rather than
@@ -297,7 +308,7 @@ func (p *Provider) versionMatches(ctx context.Context, conn secrets.Value, want 
 		// golden at all for a reason that is not about the version.
 		return nil
 	}
-	if found == want {
+	if want == 0 || found == want {
 		return nil
 	}
 	return aferrors.Coded(aferrors.AFDB039,

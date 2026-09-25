@@ -353,6 +353,55 @@ eight clients against sixteen measures the client count. `--scale` is refused
 with `--sql`, because it is a fraction of production's arrival rate and this
 workload has none.
 
+## Comparing two database builds
+
+```
+af load compare --sql --baseline-image postgres:17-alpine
+```
+
+`--image` and `--baseline-image` name the database build each side runs, and
+each one defaults to the manifest's `database.image`. Naming one varies that
+side and leaves the other where it was. This is the other axis of the same
+comparison: the ordinary run holds the database still and varies the
+application, and these two flags hold the application still and vary the
+database.
+
+Holding the application still is what makes the answer attributable, so when
+only the images differ the two sides run the same application revision, built
+from the same tree. A base revision equal to this one is normally refused,
+because there would be nothing to compare. With two images it is allowed, and
+it is the point: same commit, same rows, same workload, two database builds.
+
+There is still one golden, because two would be two sets of rows and then every
+difference in the report is a difference in the data. One build wrote that data
+directory, the one `database.image` names, and the other build opens it. The
+report says which axis differed and which build wrote the pages, so you never
+have to infer either from the numbers.
+
+A major version mismatch between the two images is refused before either
+environment is built. The golden is one data directory and a build of another
+major cannot open it, so there is nothing to learn from starting.
+
+### When the other build cannot open the data directory
+
+This is a finding rather than a failure, and for somebody hardening a storage
+engine it is often the most useful thing the tool will say.
+
+```
+  AF-DB-044  The build ptlive:candidate could not open the data directory of
+  golden gv_20260924103012_a1b2, and the server said: FATAL:  database files
+  are incompatible with server / DETAIL:  The database cluster was initialized
+  with BLCKSZ 8192, but the server was compiled with BLCKSZ 16384.
+```
+
+The server's own words are carried into the message, because the verdict line
+is the same sentence for a catalog version, a block size, a write ahead log
+format and a toast chunk size, and only the detail beneath it says which. It is
+kept apart from an environment that failed to start for an unrelated reason: a
+container that stops without the server refusing anything reports that instead,
+and the refusal is noticed when the container stops rather than after the
+readiness wait, so it never arrives as a timeout.
+
 ### What a SQL comparison cannot see
 
 Every report says this, and it is not the same list the HTTP comparison prints.

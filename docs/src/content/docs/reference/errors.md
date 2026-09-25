@@ -990,6 +990,18 @@ The data directory does not fit in the filesystem database.data_filesystem.size_
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/chaos](/docs/guides/chaos) |
 
+### AF-DB-044
+
+The build {image} could not open the data directory of golden {version}, and the server said: {said}
+
+**What to do.** Read this as a finding about the two builds rather than as an environment that failed to start: one build wrote that data directory and the other refused to open it, so the two disagree about what is on disk. A catalog version, a block size, a WAL format or a page layout one of them does not accept all produce exactly this. Compare the two builds' pg_controldata output to see which, or build the golden on the build you are comparing against by setting database.image to it. Nothing was measured, and nothing can be until both builds read the same rows.
+
+| | |
+| --- | --- |
+| Exit code | `7` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [providers/databases](/docs/providers/databases) |
+
 ## Detection
 
 ### AF-DET-001

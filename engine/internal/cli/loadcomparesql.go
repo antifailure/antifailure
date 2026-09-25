@@ -36,11 +36,7 @@ func renderSQLComparison(
 	e *Env, res *env.LoadCompareResult, c *workload.Comparison,
 	judged []workload.ComparisonVerdict, verdict string,
 ) {
-	e.Out.Println("")
-	e.Out.Printf("  %s against %s\n", shortRev(res.CandidateRev), shortRev(res.Rev))
-	if res.How != "" {
-		e.Out.Printf("  the base was resolved %s\n", res.How)
-	}
+	renderComparisonProvenance(e, res)
 
 	e.Out.Println("")
 	shape := fmt.Sprintf("  %s statements", describeSQLSource(res.SQLSource))
