@@ -16,7 +16,7 @@ import {
 import * as ios from '../src/drivers/ios.ts';
 import * as android from '../src/drivers/android.ts';
 import * as desktop from '../src/drivers/desktop.ts';
-import { runTerminal } from '../src/drivers/terminal.ts';
+import { runTerminal, EXIT_GRACE_MS, QUIET_MS } from '../src/drivers/terminal.ts';
 import { socketSink, decode, type LiveEvent } from '../src/live.ts';
 import type { WorkflowResult } from '../src/execute.ts';
 
@@ -549,19 +549,86 @@ test('a burst that arrives while the driver waits for the exit is still drawn', 
   // the only thing standing between the burst and the verdict is the wait
   // before the transcript is read.
   //
-  // Twenty thousand lines is what makes this certain rather than likely.
-  // Measured on this driver, dropping the wait before the transcript failed
-  // this 6 times out of 6 at this size and 4 times out of 6 at ten thousand.
-  const lines = 20_000;
+  // WHAT THIS TEST USED TO BE, because the shape is the lesson. It printed
+  // twenty thousand lines, and the size was justified in its own comment as a
+  // measurement: dropping the wait failed it 6 times out of 6 there and 4 of 6
+  // at ten thousand. Both numbers were taken on one machine, and neither is a
+  // fact about the driver. The size decides how LONG the burst takes to write,
+  // which is a property of the host, so the calibration made the test say two
+  // different things on two machines and neither of them was "the property
+  // holds". On a loaded machine the burst outlived the driver's fixed grace and
+  // the test reported the property FALSE; on an idle one the same twenty
+  // thousand lines were written in 297 ms, inside the grace, and the test
+  // passed without ever reaching the defect. It was a flake and a vacuous pass
+  // wearing one number.
+  //
+  // WHAT REPLACES IT, AND WHY IT IS PACED RATHER THAN SIZED. The program no
+  // longer prints as fast as it can. It prints a little, PAUSES, and repeats,
+  // and every number below is derived from a constant the driver exports rather
+  // than measured on a host:
+  //
+  //  * `gapMs` is twice QUIET_MS, so every pause is a silence the driver can
+  //    SEE and is nowhere near the silence it is entitled to END on. That is
+  //    the whole trick. The driver's wait may not end on it, but its emulator
+  //    catches up inside it, so the fixed point that used to be mistaken for a
+  //    drain becomes reachable ON PURPOSE instead of only when a loaded machine
+  //    happened to deschedule the writer. The condition that made this flaky is
+  //    now a scripted step.
+  //  * `paces * gapMs` exceeds EXIT_GRACE_MS, so a wait that went back to
+  //    ending on a fixed grace expires in the MIDDLE of the burst on any
+  //    machine at any load, rather than only on a slow one.
+  //  * `pacedLines` is small so the emulator drains inside a gap, and so the
+  //    pacing costs bytes nobody has to parse.
+  //  * `finalLines` is the one count left, and its job changed. It no longer
+  //    has to outlast a grace, which was the host dependent claim. It has to
+  //    take longer to PARSE than one turn of the event loop, so that a driver
+  //    which read the transcript without draining could not accidentally find
+  //    the last line already on the grid. Twenty thousand lines are 228930
+  //    bytes and parse in about 1.5 s, against a turn of the loop, which is
+  //    four orders of magnitude of room and no calibration at all. It is
+  //    bounded ABOVE by the budget, which is where the parse is paid.
+  //
+  // Both pauses are spent in a busy loop rather than a timer: the ordering is
+  // the whole test, and a timer is read only when the child's event loop reaches
+  // its timer phase. The expectation is the program's own last line rather than
+  // a line number, so the claim is about the END of the burst however it is
+  // sized.
+  const gapMs = QUIET_MS * 2;
+  const paces = 5;
+  const pacedLines = 200;
+  const finalLines = 20_000;
+  // The derivation, asserted rather than trusted. An edit that moves any of
+  // these numbers, or either driver constant, out of the relationship the
+  // comment above depends on takes this test's power with it, and a test that
+  // has quietly lost its power is the thing this file keeps being written to
+  // prevent. Both halves are claimed separately: a gap that is invisible and a
+  // gap the driver ends on are different ways to lose, and one assert that
+  // stopped at the first of them would leave the second unmeasured.
+  assert.ok(gapMs > QUIET_MS,
+    `a pause of ${gapMs} ms is shorter than the ${QUIET_MS} ms silence the driver can see, so the emulator never catches up inside one`);
+  assert.ok(gapMs < EXIT_GRACE_MS,
+    `a pause of ${gapMs} ms is a silence the driver is entitled to end on, so this program reads as finished mid burst`);
+  assert.ok(paces * gapMs > EXIT_GRACE_MS,
+    `a burst paced over ${paces * gapMs} ms does not outlast a reinstated ${EXIT_GRACE_MS} ms grace, so this test cannot catch one`);
   const quiet = String.raw`
+const stall = (ms) => { const until = Date.now() + ms; while (Date.now() < until); };
+const print = (n, from) => { for (let i = 1; i <= n; i++) process.stdout.write("line " + (from + i) + "\n"); };
 process.stdout.write("ready\n");
 process.stdin.setRawMode && process.stdin.setRawMode(true);
 process.stdin.once("data", () => {
   process.stdout.write("ack\n");
-  setTimeout(() => {
-    for (let i = 1; i <= 20000; i++) process.stdout.write("line " + i + "\n");
-    process.exit(0);
-  }, 250);
+  // Quiet first, so the driver's settle for the key is over before a byte of
+  // the burst arrives. That is the arrival order this test exists for.
+  stall(${gapMs});
+  let printed = 0;
+  for (let p = 0; p < ${paces}; p++) {
+    print(${pacedLines}, printed);
+    printed += ${pacedLines};
+    stall(${gapMs});
+  }
+  print(${finalLines}, printed);
+  process.stdout.write("the burst ended\n");
+  process.exit(0);
 });
 `;
   const results = await runTerminal({
@@ -571,11 +638,95 @@ process.stdin.once("data", () => {
       args: ['-e', quiet],
       screen: { rows: 10, cols: 40 },
       input: ['<enter>'],
-      expect: [`"line ${lines}"`],
-      maxMs: 20_000,
+      expect: ['"the burst ended"'],
+      // The ceiling, not an expectation. The driver spends what the pacing and
+      // the parse need and no more, which measured out at about 4 s on a loaded
+      // 16GB eight core Mac. A budget an order of magnitude past that is what
+      // lets the driver report blocked, rather than fail, on a machine that
+      // genuinely cannot finish.
+      maxMs: 60_000,
     }],
   });
   assert.equal(results[0]!.outcome.verdict, 'pass', results[0]!.outcome.detail);
+});
+
+/** NEVER_RETURNED is what this file calls a driver that did not come back.
+ *
+ *  It exists because "no answer" is not an answer, and a check whose only way
+ *  of refusing is to stop finishing has the very defect this lane was opened
+ *  for. An emulator drain with no ceiling can NEVER catch a producer faster
+ *  than itself: every poll finds the queue longer than it left it. Removing
+ *  that ceiling hung a run for four hundred seconds. Bounding the test alone
+ *  was not enough, and the measurement is worth keeping: node's own
+ *  `{ timeout }` did fire and did name the test, but the abandoned driver still
+ *  held the pseudo terminal, so the FILE never finished and the summary read
+ *  `pass 0  fail 0  cancelled 2`. A reader scanning counters sees no failure
+ *  there at all. Racing the call against a timer is what converts that into a
+ *  counted assertion naming the cause. */
+const NEVER_RETURNED = 'the driver never returned';
+
+/** withinReach runs a driver call against a timer, so a driver that never comes
+ *  back is a failed assertion rather than a run with no verdict in it. The
+ *  timer is UNREFERENCED, so a call that returns normally pays nothing for it
+ *  and does not hold the event loop open afterwards. */
+async function withinReach<T>(work: Promise<T>, ms: number): Promise<T | typeof NEVER_RETURNED> {
+  return Promise.race([
+    work,
+    new Promise<typeof NEVER_RETURNED>((resolve) => {
+      setTimeout(() => resolve(NEVER_RETURNED), ms).unref();
+    }),
+  ]);
+}
+
+// Two bounds, and they catch different things. The race below turns a driver
+// that never returns into a named assertion. node's own timeout is the backstop
+// for a hang anywhere else in the test, and it is longer than the race so the
+// assertion is the one that speaks. The run measures about 3 s, so both are an
+// order of magnitude of room and neither bounds anything that works.
+test('a program still writing when the budget runs out is blocked, not judged', { timeout: 30_000 }, async () => {
+  // THE DIFFERENCE BETWEEN THE TWO REDS, and the one the test above used to
+  // print the wrong one of. "The expectation was not met" is a claim about the
+  // program. "I stopped reading before the program stopped writing" is a claim
+  // about the run. The driver reported the first when it meant the second, at
+  // line 3892 of 20000, and a reader of that check would have gone looking for
+  // a bug in a program that was working.
+  //
+  // Nothing here is calibrated: the program never exits and never goes silent,
+  // so no budget can ever be enough and the outcome is the same on every
+  // machine at every load. The budget is small so the test is cheap.
+  const raced = await withinReach(runTerminal({
+    workflows: [{
+      name: 'never-stops',
+      command: execPath,
+      args: ['-e', 'for (;;) process.stdout.write("still going\\n");'],
+      screen: { rows: 10, cols: 40 },
+      expect: ['"the burst ended"'],
+      maxMs: 1_500,
+    }],
+  }), 20_000);
+  if (raced === NEVER_RETURNED) {
+    assert.fail(`${NEVER_RETURNED} for a program that never stops writing, so its emulator drain has no ceiling`);
+  }
+  const outcome = raced[0]!.outcome;
+  assert.equal(outcome.verdict, 'blocked', outcome.detail);
+  assert.equal(outcome.cause, 'budget-exhausted', outcome.detail);
+  // The detail has to name the real cause and MEASURE it. A blocked verdict
+  // whose text says nothing about why sends its reader to the same wrong place
+  // the failing verdict did.
+  assert.match(outcome.detail, /ran out with the program still writing/, outcome.detail);
+  const measured = /It had written (\d+) bytes and the 10 by 40 screen was (\d+) of them behind/
+    .exec(outcome.detail);
+  assert.ok(measured, `the report never said how far behind it stopped: ${outcome.detail}`);
+  const [written, behind] = [Number(measured[1]), Number(measured[2])];
+  // Both numbers have to be REAL, because a zero in either would satisfy the
+  // pattern above while measuring nothing. A program writing flat out for a
+  // second and a half puts the emulator far behind and puts something on the
+  // grid, so neither end of that is in doubt.
+  assert.ok(behind > 0, `the screen was reported fully caught up with a program still writing: ${outcome.detail}`);
+  assert.ok(written > behind,
+    `${behind} bytes behind out of ${written} written leaves nothing on the screen: ${outcome.detail}`);
+  assert.ok(!/was not found/.test(outcome.detail),
+    `the report blamed the expectation for a screen it never waited for: ${outcome.detail}`);
 });
 
 test('the job environment reaches the program on both paths', async () => {
