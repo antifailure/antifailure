@@ -120,6 +120,10 @@ type session struct {
 	hidden []string
 	// github stands in for github.com over a real socket.
 	github *githubStandIn
+	// wgetOnly is set once curl has been taken away, and run() re-checks it on
+	// every invocation. A session that means to exercise the wget half and
+	// silently runs curl instead proves nothing, and one already did.
+	wgetOnly bool
 	// asked is what AF_VERSION is set to. Empty means it is not set at all,
 	// which is the state every customer's first install is in: the script
 	// resolves "latest" itself. Every session used to set it, so the resolution
@@ -171,6 +175,9 @@ func (s *session) install() string {
 }
 
 func (s *session) run() (string, error) {
+	if s.wgetOnly && onPathIn(s.path, "curl") {
+		s.t.Fatal("curl is reachable again in a session that removed it, so the wget half of the installer is not what this ran")
+	}
 	env := []string{
 		"HOME=" + s.home,
 		"PATH=" + s.path,

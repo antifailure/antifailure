@@ -60,6 +60,12 @@ type githubStandIn struct {
 	// asked records every path requested, so a test can assert which host the
 	// script chose to ask rather than trusting that it chose the new one.
 	asked []string
+
+	// agents records the User-Agent of every request, which is the only thing
+	// that can say WHICH of the two implementations ran. A test that means to
+	// exercise the wget half and quietly runs the curl half is a dead control,
+	// and this package has already had one: see pointAt.
+	agents []string
 }
 
 func newStandIn(t *testing.T, fixtures string) *githubStandIn {
@@ -84,10 +90,17 @@ func (g *githubStandIn) paths() []string {
 	return append([]string(nil), g.asked...)
 }
 
+func (g *githubStandIn) agentsSeen() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]string(nil), g.agents...)
+}
+
 func (g *githubStandIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	g.mu.Lock()
 	tag, status, deny := g.tag, g.status, g.denySuffix
 	g.asked = append(g.asked, r.URL.Path)
+	g.agents = append(g.agents, r.UserAgent())
 	g.mu.Unlock()
 
 	if deny != "" && strings.HasSuffix(r.URL.Path, deny) {
@@ -157,9 +170,23 @@ func deadAddress(t *testing.T) string {
 // different session. A wget that is only a stub would prove nothing about wget:
 // the two implementations read a status out of completely different output, and
 // that difference is exactly where a fix in one and not the other hides.
-func writeWrappers(t *testing.T, dir, base string) {
+func writeWrappers(t *testing.T, dir, base string, only ...string) {
 	t.Helper()
+	wanted := func(name string) bool {
+		if len(only) == 0 {
+			return true
+		}
+		for _, o := range only {
+			if o == name {
+				return true
+			}
+		}
+		return false
+	}
 	write := func(name, real string) {
+		if !wanted(name) {
+			return
+		}
 		script := "#!/bin/sh\n" +
 			"# The real " + name + ", with github.com rewritten to the test server.\n" +
 			"# Arguments are rotated through \"$@\" so quoting survives.\n" +
@@ -201,9 +228,24 @@ func realTool(t *testing.T, name string) string {
 
 // pointAt rewrites the wrappers to send github.com somewhere else, which is how
 // the case with no answer at all is arranged.
+//
+// It rewrites only the wrappers this session still has, and that is not a
+// detail. It used to rewrite both, so calling it after onlyWget put the curl
+// wrapper back and the test ran the curl half of the installer while claiming to
+// run the wget half. It was found by a mutation: breaking the wget
+// implementation left that test green.
 func (s *session) pointAt(base string) {
 	s.t.Helper()
-	writeWrappers(s.t, s.stubs, base)
+	var keep []string
+	for _, name := range []string{"curl", "wget"} {
+		if _, err := os.Stat(filepath.Join(s.stubs, name)); err == nil {
+			keep = append(keep, name)
+		}
+	}
+	if len(keep) == 0 {
+		s.t.Fatal("this session has no fetcher wrapper left, so the installer could not run at all")
+	}
+	writeWrappers(s.t, s.stubs, base, keep...)
 }
 
 // onlyWget removes the curl wrapper and the system curl, so the second half of
@@ -223,6 +265,7 @@ func (s *session) onlyWget(t *testing.T) {
 	if err := os.Remove(filepath.Join(s.stubs, "curl")); err != nil {
 		t.Fatal(err)
 	}
+	s.wgetOnly = true
 	hide(t, s, "curl")
 	if !onPathIn(s.path, "wget") {
 		t.Fatal("wget is not reachable on the session PATH, so this test would prove nothing")

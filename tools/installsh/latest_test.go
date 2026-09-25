@@ -200,6 +200,7 @@ func TestTheWgetImplementationResolvesLatestAndReportsARateLimit(t *testing.T) {
 		s.onlyWget(t)
 		out := s.install()
 		contains(t, out, "Installed "+version)
+		wgetDidTheAsking(t, s)
 	})
 
 	t.Run("rate limited", func(t *testing.T) {
@@ -210,6 +211,7 @@ func TestTheWgetImplementationResolvesLatestAndReportsARateLimit(t *testing.T) {
 		refusesToResolve(t, s,
 			[]string{"403", "asked for too much"},
 			[]string{"published no release"})
+		wgetDidTheAsking(t, s)
 	})
 
 	t.Run("nothing answers", func(t *testing.T) {
@@ -221,6 +223,25 @@ func TestTheWgetImplementationResolvesLatestAndReportsARateLimit(t *testing.T) {
 			[]string{"nothing answered at"},
 			[]string{"published no release"})
 	})
+}
+
+// wgetDidTheAsking is the falsification for the test above rather than a
+// decoration. The User-Agent is the only thing in the exchange that says which
+// of the two implementations ran, and the reason it is asserted is that one of
+// these subtests silently ran curl: pointAt rewrote both wrappers, putting back
+// the curl that onlyWget had deleted. Breaking the wget implementation left the
+// subtest green, which is how it was found.
+func wgetDidTheAsking(t *testing.T, s *session) {
+	t.Helper()
+	agents := s.github.agentsSeen()
+	if len(agents) == 0 {
+		t.Fatal("the stand in was never asked anything, so nothing can be said about which tool asked it")
+	}
+	for _, a := range agents {
+		if !strings.Contains(a, "Wget") {
+			t.Errorf("a request arrived from %q rather than from wget, so this exercised the wrong half of the installer", a)
+		}
+	}
 }
 
 // The third answer that used to be collapsed: a release that exists and carries
