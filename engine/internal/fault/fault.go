@@ -171,6 +171,7 @@ var kindForRole = map[Role]string{
 var protectedKinds = map[string]string{
 	"sidecar":  "it carries the egress policy, and stopping it would let the environment reach hosts the manifest refused",
 	"emulator": "it stands in for a third party the environment must not reach, and stopping it would send the request looking for the real one",
+	"storage":  "it holds the database's data directory mounted, and stopping it would delete the data directory rather than crash the database, so every durability check after it would be reading an empty database and calling it a loss",
 }
 
 // Target says which container a fault is aimed at.
@@ -252,6 +253,7 @@ type Docker interface {
 	ExecAttach(ctx context.Context, execID string, options client.ExecAttachOptions) (client.ExecAttachResult, error)
 	ExecInspect(ctx context.Context, execID string, options client.ExecInspectOptions) (client.ExecInspectResult, error)
 	ContainerLogs(ctx context.Context, id string, options client.ContainerLogsOptions) (client.ContainerLogsResult, error)
+	VolumeInspect(ctx context.Context, volumeID string, options client.VolumeInspectOptions) (client.VolumeInspectResult, error)
 }
 
 // Errors the guard raises. They are sentinels so a caller can tell a refusal

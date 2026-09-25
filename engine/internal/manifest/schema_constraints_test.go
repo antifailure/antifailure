@@ -1617,7 +1617,7 @@ func TestSchemaConstraintReport(t *testing.T) {
 // block is measured in a base that drives it. Desktop is still measured in the
 // source base, where it always was. Read from this gate's own failure message
 // on this tree, not added to 888.
-const wantConstraints = 900
+const wantConstraints = 906
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and

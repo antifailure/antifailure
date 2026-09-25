@@ -220,6 +220,13 @@ const (
 	// Nothing reached the golden: the verification read 0 tables, and
 	// {origin} declares where its contents come from.
 	AFDB041 Code = "AF-DB-041"
+	// database.data_filesystem.size_bytes asks for {declared} bytes and
+	// the Docker daemon reports {memory} bytes of memory.
+	AFDB042 Code = "AF-DB-042"
+	// The data directory does not fit in the filesystem
+	// database.data_filesystem.size_bytes asks for: {used} bytes of data
+	// into {declared} bytes.
+	AFDB043 Code = "AF-DB-043"
 
 	// Detection
 	// No application could be detected in {path}.
@@ -831,7 +838,7 @@ var catalog = map[Code]Entry{
 		Code:      AFCHS005,
 		Area:      "CHS",
 		Message:   "The fault {fault} is refused because its effect would reach past {target}: {detail}",
-		NextStep:  "A fault may only affect the environment that declared it. Narrow the fault, or give the target the dedicated volume the fault needs.",
+		NextStep:  "A fault may only affect the environment that declared it. For disk_fill that means the data directory needs a filesystem of its own, which database.data_filesystem.size_bytes gives it: declare a size that holds the database with room left to fill, and the fill lands inside the environment instead of on the machine's disk. Narrow the fault if the refusal was the cap rather than the layout.",
 		Docs:      "guides/chaos",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
@@ -1301,6 +1308,24 @@ var catalog = map[Code]Entry{
 		Message:   "Nothing reached the golden: the verification read 0 tables, and {origin} declares where its contents come from.",
 		NextStep:  "Check what {origin} names: a seed command that exits 0 without writing, or a source database that turns out to be empty, both produce this. Then refresh again. The golden is not published and nothing can branch it, which is the point: a golden that holds nothing and reports itself verified is worse than one that fails, because the word verified is what the next environment relies on. To build a golden with no data behind it deliberately, declare neither database.source_url_env nor database.seed; a project that declares neither gets the schema its migrations build and no rows, and that is supported.",
 		Docs:      "concepts/goldens",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFDB042: {
+		Code:      AFDB042,
+		Area:      "DB",
+		Message:   "database.data_filesystem.size_bytes asks for {declared} bytes and the Docker daemon reports {memory} bytes of memory.",
+		NextStep:  "Lower database.data_filesystem.size_bytes to under half of that, or give the daemon more memory. The filesystem that key asks for is held in memory, which is what stops a disk_fill fault reaching the machine's disk; one larger than the machine would move the same problem from the disk to the memory, and a daemon killed for memory takes every other environment on it too.",
+		Docs:      "guides/chaos",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFDB043: {
+		Code:      AFDB043,
+		Area:      "DB",
+		Message:   "The data directory does not fit in the filesystem database.data_filesystem.size_bytes asks for: {used} bytes of data into {declared} bytes.",
+		NextStep:  "Raise database.data_filesystem.size_bytes above the size of the data directory, with room left over for the fault to fill. The copy is refused rather than truncated, because half a data directory is a database that starts and is missing rows.",
+		Docs:      "guides/chaos",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
 	},

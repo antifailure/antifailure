@@ -62,7 +62,7 @@ afterwards is a durability failure whatever caused it.
 | `container_pause` | Freezes every process with the cgroup freezer. Nothing is killed and no connection closes. | Thaws it. |
 | `network_partition` | Detaches the container from the environment's network. | Attaches it again, with the aliases it had. |
 | `read_only_data` | Removes write permission from the data directory. | Restores the mode it recorded. |
-| `disk_fill` | Fills the filesystem holding the data directory to a stated headroom. | Removes the file it wrote. |
+| `disk_fill` | Fills the filesystem holding the data directory to a stated headroom. Needs `database.data_filesystem.size_bytes`, below. | Removes the file it wrote. |
 
 `process_kill` and `container_kill` are the two kinds that stop Postgres
 uncleanly, so they are the two the recovery proof expects a replay from. The
@@ -89,12 +89,69 @@ emulator stands in for a third party the environment must not reach, so
 stopping one does not produce an outage: it produces a request that goes
 looking for the real host.
 
-`disk_fill` carries a fourth refusal. A container's writable layer is the
-daemon's own disk, so filling a directory on it fills the machine and every
-other container running on it. The fault checks that the directory is a mount
-of its own and refuses when it is not. That refusal is reported as
-`chaos.fault.unsafe`: the claim the fault was declared to establish was not
-established, and nothing else in the run was touched by it.
+`disk_fill` carries a fourth refusal, and a declaration that lifts it.
+
+A container's writable layer is the daemon's own disk, so filling a directory
+on it fills the machine and every other container running on it. The fault
+reads the mount at the data directory from the daemon and refuses unless it is
+a volume this environment created with a size fixed when it was created. A
+mount of its own is not enough on its own: a plain named volume is its own
+mount and is still a slice of the daemon's disk, so it would pass a device
+check and take the machine down having satisfied the guard. Both refusals are
+reported as `chaos.fault.unsafe`: the claim the fault was declared to establish
+was not established, and nothing else in the run was touched by it.
+
+## Giving the data directory a filesystem of its own
+
+```yaml
+database:
+  data_filesystem:
+    size_bytes: 536870912
+chaos:
+  enabled: true
+  faults:
+    - name: fill-the-data-volume
+      kind: disk_fill
+      target: database
+      headroom_bytes: 8388608
+      max_fill_bytes: 536870912
+```
+
+With that, the branch keeps its data directory on a filesystem of the declared
+size and `disk_fill` lands: the fill writes one file until the stated headroom
+is left, Postgres meets a real `No space left on device` on its next extend,
+and the undo removes the file and the free space comes back. Without it the
+data directory is on the writable layer and the fault is refused before it acts.
+
+The filesystem is held in memory, and that is the containment argument rather
+than an implementation detail. A volume on the daemon's disk cannot be filled
+without taking space from every other container on the machine; one in memory
+has a size fixed at creation and takes nothing from anything outside the
+environment. Three things follow, and they are the cost of the feature:
+
+- The whole database lives in it, so the size has to hold the data directory
+  with room left for the fault to fill. A copy that does not fit is refused by
+  name, with both numbers, rather than truncated.
+- A size of more than half the memory the Docker daemon reports is refused.
+  A filesystem in memory larger than the machine moves the same problem from
+  the disk to the memory, and a daemon killed for memory takes every other
+  environment with it.
+- The data directory does not survive the Docker daemon restarting. `af up`
+  builds it again from the golden.
+
+The branch pays a copy of the data directory when it comes up, where an
+ordinary branch pays nothing because the daemon's storage driver copies on
+write. So this is the layout for rehearsing a disk that fills, and not the one
+to measure how a disk performs.
+
+The environment also runs one container that holds that filesystem mounted and
+does nothing else. It is not decoration: the local volume driver unmounts a
+memory backed volume when the last container using it stops, so without it a
+`container_kill` or `container_stop` would delete the data directory rather
+than crash the database, the undo would start a container that initialised an
+empty one, and the durability proof would report every acknowledged commit
+lost. Faults refuse to touch it for the same reason they refuse to touch the
+egress sidecar.
 
 ## Nothing that changed nothing counts as survived
 
