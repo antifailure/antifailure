@@ -43,5 +43,11 @@ heavy round measures the branching on whichever side reached the page first;
 and autovacuum, the checkpointer and the background writer run on the server's
 schedule rather than the comparison's.
 
+The lock contention a run was seen to suffer is compared too, because each
+side's rounds are pooled before they are differenced and the pooling now adds
+the waits and the waiting time rather than losing them. A pool where some round
+never read the wait queues says its count is a floor, and one where no round did
+reports nothing rather than a build that blocked nothing.
+
 The HTTP comparison's report is unchanged, to the character, and a test now
 holds it that way.

@@ -1,6 +1,7 @@
 package sqlload
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -231,6 +232,143 @@ func TestThePeaksAreTheLargestAnyRoundSawAndAnUnwatchedRoundIsNamed(t *testing.T
 	require.Nil(t, none.BackendsSeen)
 	require.Nil(t, none.PeakOpenTransactions)
 	require.Equal(t, "no connection was free", none.ObserverNote)
+}
+
+// The contention tests, and what they are guarding against.
+//
+// `af load compare --sql` sends each side in several short rounds and pools
+// them with Merge, and the pooled result is what ProjectSQLLoad hands to
+// Compare. Compare emits a lock_waits row only when BOTH sides carry a number,
+// and a nil means "nobody watched the queues". So a Merge that simply did not
+// copy these fields across would make the one command that compares contention
+// between two builds report nothing at all, on rounds that every one of them
+// measured, and no existing test would have gone red: the half below Merge is
+// covered by workload's TestComparingTwoSQLWorkloads, the half above it by the
+// runner's own lock tests, and Merge sat silently between them.
+
+// blocked is a round that watched the wait queues and found contention.
+func blocked(waits int, ms float64, pairs ...LockWait) func(*Result) {
+	return func(r *Result) {
+		w, m := waits, ms
+		r.LockWaits, r.LockWaitMS = &w, &m
+		r.LockWaitPairs = pairs
+		r.LockWaitNote = LockWaitBound
+	}
+}
+
+func pair(blockedStmt, blockingStmt, lockType string, waits int, ms float64) LockWait {
+	return LockWait{
+		BlockedTransaction: "checkout", BlockedStatement: blockedStmt,
+		BlockingTransaction: "checkout", BlockingStatement: blockingStmt,
+		BlockingInRun: true, LockType: lockType, Mode: "ShareLock",
+		Waits: waits, WaitedMS: ms,
+	}
+}
+
+// THE COUNTS ADD. A wait is an event and a waiting millisecond is a millisecond
+// somebody spent queueing, so two rounds that queued twice and three times
+// queued five times between them. The fixture separates adding from every other
+// thing Merge could plausibly do with a pair of numbers: the sum is 5 and 1000,
+// the largest is 3 and 600, the first is 2 and 400 and the last is 3 and 600.
+func TestTheContentionAddsAcrossRoundsRatherThanTakingTheWorstOne(t *testing.T) {
+	held := pair("select", "hold", "transactionid", 2, 400)
+	heldAgain := pair("select", "hold", "transactionid", 1, 200)
+	row := pair("select", "update", "tuple", 3, 900)
+
+	pooled, err := Merge(
+		round(series(1, 10), blocked(2, 400, held)),
+		round(series(1, 10), blocked(3, 600, heldAgain, row)),
+	)
+	require.NoError(t, err)
+
+	require.NotNil(t, pooled.LockWaits,
+		"the rounds watched the queues and the pool says nobody did, which is the one "+
+			"answer a watched run must not be able to produce")
+	require.Equal(t, 5, *pooled.LockWaits)
+	require.NotNil(t, pooled.LockWaitMS)
+	require.InDelta(t, 1000.0, *pooled.LockWaitMS, 1e-9)
+
+	// The same pair seen in two rounds is ONE pair that waited in both, folded
+	// on its identity rather than listed twice, and the list is worst first.
+	require.Len(t, pooled.LockWaitPairs, 2)
+	require.Equal(t, "update", pooled.LockWaitPairs[0].BlockingStatement,
+		"the pairs are not worst first, so the row a reader acts on is not the top one")
+	require.InDelta(t, 900.0, pooled.LockWaitPairs[0].WaitedMS, 1e-9)
+	require.Equal(t, "hold", pooled.LockWaitPairs[1].BlockingStatement)
+	require.Equal(t, 3, pooled.LockWaitPairs[1].Waits)
+	require.InDelta(t, 600.0, pooled.LockWaitPairs[1].WaitedMS, 1e-9)
+
+	// The bound travels with the counts. A count of waits with no statement of
+	// what the instrument cannot see is a count somebody reads as a total.
+	require.Contains(t, pooled.LockWaitNote, "floors rather than totals")
+}
+
+// Nil rather than zero, pooled. A round that never read the queues is named and
+// not folded in, and a pool where none of them read is an absence rather than a
+// clean build.
+func TestAPoolOfRoundsThatNeverWatchedTheQueuesReportsNoContentionAtAll(t *testing.T) {
+	blind := round(series(1, 10), func(r *Result) {
+		r.LockWaitNote = "nothing watched the wait queues, so this run says nothing about " +
+			"whether it blocked"
+	})
+
+	partial, err := Merge(round(series(1, 10), blocked(2, 400)), blind)
+	require.NoError(t, err)
+	require.NotNil(t, partial.LockWaits,
+		"one round of two watched and the pool threw its measurement away")
+	require.Equal(t, 2, *partial.LockWaits)
+	require.Contains(t, partial.LockWaitNote, "1 of 2 rounds never read the wait queues")
+	require.Contains(t, partial.LockWaitNote, "floor")
+	require.Contains(t, partial.LockWaitNote, "nothing watched the wait queues")
+
+	none, err := Merge(blind, blind)
+	require.NoError(t, err)
+	require.Nil(t, none.LockWaits,
+		"no round read the queues and the pool reports a number, so an unwatched "+
+			"comparison would read as a build that blocked")
+	require.Nil(t, none.LockWaitMS)
+	require.Nil(t, none.LockWaitPairs)
+	require.Equal(t,
+		"nothing watched the wait queues, so this run says nothing about whether it blocked",
+		none.LockWaitNote)
+}
+
+// A watched pool that never queued keeps its measured zero, and keeps it as a
+// zero rather than as a nil. This is the arm that stops the rule above being
+// implemented as "any absence is nil": zero contention is the answer everybody
+// wants and a run that watched is entitled to give it.
+func TestAPoolThatWatchedAndNeverQueuedKeepsItsMeasuredZero(t *testing.T) {
+	quiet := round(series(1, 10), blocked(0, 0))
+	pooled, err := Merge(quiet, quiet)
+	require.NoError(t, err)
+	require.NotNil(t, pooled.LockWaits)
+	require.Equal(t, 0, *pooled.LockWaits)
+	require.NotNil(t, pooled.LockWaitMS)
+	require.NotNil(t, pooled.LockWaitPairs,
+		"a watched pool that never queued reports no pairs, and nil would say nobody looked")
+	require.Empty(t, pooled.LockWaitPairs)
+}
+
+// More distinct pairs than a result holds, and the pool gives up the ones that
+// waited LEAST. A round drops whichever pair it meets after its sixty fourth,
+// because it folds samples in as they arrive; a pool has every pair in hand, so
+// dropping the worst one would be discarding the finding and keeping the noise.
+func TestPoolingMorePairsThanAResultHoldsDropsTheSmallestAndSaysSo(t *testing.T) {
+	var many []LockWait
+	for i := 0; i <= maxLockPairs; i++ {
+		many = append(many, pair("select", fmt.Sprintf("hold %d", i), "tuple", 1, float64(i+1)))
+	}
+	pooled, err := Merge(
+		round(series(1, 10), blocked(1, 1, many...)),
+		round(series(1, 10), blocked(1, 1)),
+	)
+	require.NoError(t, err)
+	require.Len(t, pooled.LockWaitPairs, maxLockPairs)
+	require.InDelta(t, float64(len(many)), pooled.LockWaitPairs[0].WaitedMS, 1e-9,
+		"the worst pair is not at the top of a capped list")
+	require.InDelta(t, 2.0, pooled.LockWaitPairs[maxLockPairs-1].WaitedMS, 1e-9,
+		"the pool dropped a pair that waited longer than one it kept")
+	require.Contains(t, pooled.LockWaitNote, "1 further distinct blocking pairs")
 }
 
 func repeat(v float64, n int) []float64 {

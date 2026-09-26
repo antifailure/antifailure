@@ -444,6 +444,16 @@ func (t *lockTotals) list() []LockWait {
 	for _, p := range t.pairs {
 		out = append(out, *p)
 	}
+	sortLockWaits(out)
+	return out
+}
+
+// sortLockWaits puts the pairs worst first, and it is a function rather than a
+// closure inside list because Merge pools several rounds' pairs and has to
+// order the pool the same way. Two orderings of the same rows, one for a run
+// and one for a pool of rounds, is a difference a reader would attribute to
+// the builds being compared.
+func sortLockWaits(out []LockWait) {
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].WaitedMS != out[j].WaitedMS {
 			return out[i].WaitedMS > out[j].WaitedMS
@@ -453,5 +463,4 @@ func (t *lockTotals) list() []LockWait {
 		}
 		return lockKey(out[i]) < lockKey(out[j])
 	})
-	return out
 }

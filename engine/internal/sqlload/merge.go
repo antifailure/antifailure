@@ -183,6 +183,7 @@ func Merge(parts ...*Result) (*Result, error) {
 	sortStatements(out.PerStatement)
 
 	mergeObservation(out, parts)
+	mergeLockWaits(out, parts)
 	out.raw = pooled
 	return out, nil
 }
@@ -255,6 +256,101 @@ func mergeObservation(out *Result, parts []*Result) {
 				"other %d saw and are a floor rather than the run's own maximum: %s",
 			unobserved, len(parts), len(parts)-unobserved, joinNotes(notes))
 	}
+}
+
+// mergeLockWaits pools the contention the rounds were seen to suffer.
+//
+// THE COUNTS ADD, which is what makes them different from the peaks above. A
+// peak is the most at ONE INSTANT and instants do not add, so pooling them
+// takes the largest. A wait is an EVENT and a waiting millisecond is a
+// millisecond somebody spent queueing, so sixteen rounds that each queued
+// twice queued thirty two times between them. Taking the largest here would
+// report a whole comparison as no more contended than its single worst round.
+//
+// NIL RATHER THAN ZERO IS CARRIED THROUGH, and it has more riding on it here
+// than at any other layer that asserts it. This pooled result is what
+// ProjectSQLLoad hands to Compare, and measureDifferences emits no lock row
+// unless BOTH sides carry a number, so a pool that dropped the pointers would
+// turn the one command that compares contention between two builds into
+// silence. Not a missing feature: the answer meaning "nobody watched", given
+// by rounds that all watched.
+//
+// A round that was never sampled is named rather than folded in, for the same
+// reason mergeObservation names one: a count summed over twelve of sixteen
+// rounds is a floor, and the reader deciding whether this build blocked more
+// than the other one should be told which number they are holding.
+func mergeLockWaits(out *Result, parts []*Result) {
+	unwatched, dropped := 0, 0
+	var lost, bounds []string
+	waits, ms := 0, 0.0
+	pairs := map[string]*LockWait{}
+	for _, p := range parts {
+		if p.LockWaits == nil {
+			unwatched++
+			if p.LockWaitNote != "" && !contains(lost, p.LockWaitNote) {
+				lost = append(lost, p.LockWaitNote)
+			}
+			continue
+		}
+		waits += *p.LockWaits
+		if p.LockWaitMS != nil {
+			ms += *p.LockWaitMS
+		}
+		if p.LockWaitNote != "" && !contains(bounds, p.LockWaitNote) {
+			bounds = append(bounds, p.LockWaitNote)
+		}
+		for _, w := range p.LockWaitPairs {
+			key := lockKey(w)
+			held, ok := pairs[key]
+			if !ok {
+				copied := w
+				pairs[key] = &copied
+				continue
+			}
+			held.Waits += w.Waits
+			held.WaitedMS += w.WaitedMS
+		}
+	}
+	if unwatched == len(parts) {
+		out.LockWaitNote = joinNotes(lost)
+		return
+	}
+
+	out.LockWaits = &waits
+	out.LockWaitMS = &ms
+	// An empty list rather than a null one once any round has watched, which is
+	// the runner's own rule: at that point "no pairs" is a measurement saying
+	// nothing of this run was ever seen queueing.
+	out.LockWaitPairs = make([]LockWait, 0, len(pairs))
+	for _, p := range pairs {
+		out.LockWaitPairs = append(out.LockWaitPairs, *p)
+	}
+	sortLockWaits(out.LockWaitPairs)
+	// Sorted BEFORE the cap is applied, so what a pool of rounds gives up is
+	// the pairs that waited least. A round drops whichever pair it happens to
+	// meet after its sixty fourth, because it is folding samples in as they
+	// arrive and cannot know which will matter; a pool has every pair in hand
+	// and has no such excuse.
+	if len(out.LockWaitPairs) > maxLockPairs {
+		dropped = len(out.LockWaitPairs) - maxLockPairs
+		out.LockWaitPairs = out.LockWaitPairs[:maxLockPairs]
+	}
+
+	var note string
+	if unwatched > 0 {
+		note = fmt.Sprintf(
+			"%d of %d rounds never read the wait queues, so these counts are the sum over the "+
+				"other %d and are a floor rather than the whole run's: %s. ",
+			unwatched, len(parts), len(parts)-unwatched, joinNotes(lost))
+	}
+	if len(bounds) > 0 {
+		note += joinNotes(bounds)
+	}
+	if dropped > 0 {
+		note += fmt.Sprintf(" %d further distinct blocking pairs were seen across the rounds "+
+			"and not kept, because a result holds at most %d.", dropped, maxLockPairs)
+	}
+	out.LockWaitNote = note
 }
 
 func higher(a, b *int) *int {
