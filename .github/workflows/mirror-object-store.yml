@@ -80,8 +80,32 @@ jobs:
       # thing and never whether it arrived, which ci.yml says at length about
       # lychee; a fetch that fails here fails the job rather than mirroring
       # something else.
+      #
+      # `go install` PUTS IT SOMEWHERE THIS RUNNER DOES NOT LOOK, and the first
+      # dispatch of this workflow proved it. Run 36276418079 on bb225cf4e logged
+      # `Install crane` as a SUCCESS and then died in the step below with
+      # `crane: command not found` and exit code 127. Nothing was mirrored and
+      # the digest check after it read `skipped`, which is the same shape as the
+      # false red this whole file was written about: a job that failed at a
+      # fetch rather than at a verdict. `go install` writes to
+      # `$(go env GOPATH)/bin`, which is `/home/runner/go/bin` here and is not
+      # on the runner's PATH, so the install genuinely worked and the invocation
+      # could not find it.
+      #
+      # The binary is therefore called by its full path below, which is the
+      # shape crosslint.yml already uses for golangci-lint, rather than by
+      # appending to GITHUB_PATH. An absolute path cannot silently resolve to a
+      # different crane that some other step put on PATH first.
+      #
+      # AND IT IS RUN HERE, not merely installed. "The step that fetches it
+      # passed" is what was already believed when this failed; a version that
+      # prints is the cheapest possible proof that the file exists, is
+      # executable, and is the program it claims to be.
       - name: Install crane
-        run: go install github.com/google/go-containerregistry/cmd/crane@v0.22.1
+        run: |
+          set -euo pipefail
+          go install github.com/google/go-containerregistry/cmd/crane@v0.22.1
+          "$(go env GOPATH)/bin/crane" version
 
       # THE SOURCE IS WRITTEN BARE AND THAT IS DELIBERATE. Spelled this way it
       # is the same image KEY that ci.yml and the justfile already name, so
@@ -106,7 +130,7 @@ jobs:
           # `--all-tags` is NOT passed. One reference is copied, the one the
           # suites pin, because a mirror that quietly carried more than the
           # tree names is a mirror nobody can audit against the tree.
-          crane copy "$SOURCE" "${TARGET_REPO}:${TARGET_TAG}"
+          "$(go env GOPATH)/bin/crane" copy "$SOURCE" "${TARGET_REPO}:${TARGET_TAG}"
 
       # THE WHOLE CLAIM OF THIS WORKFLOW, CHECKED RATHER THAN STATED. If the
       # copy had re serialised the index, every child manifest could still be
@@ -126,7 +150,7 @@ jobs:
           TARGET_TAG: 2025.7.23-debian-12-r5
         run: |
           set -euo pipefail
-          got=$(crane digest "${TARGET_REPO}:${TARGET_TAG}")
+          got=$("$(go env GOPATH)/bin/crane" digest "${TARGET_REPO}:${TARGET_TAG}")
           echo "source index digest: $EXPECTED"
           echo "our copy's digest:   $got"
           if [ "$got" != "$EXPECTED" ]; then
@@ -139,7 +163,7 @@ jobs:
           # satisfy a digest comparison against itself if the expectation above
           # were ever updated to match a broken copy. This says what the index
           # actually contains.
-          arches=$(crane manifest "${TARGET_REPO}:${TARGET_TAG}" \
+          arches=$("$(go env GOPATH)/bin/crane" manifest "${TARGET_REPO}:${TARGET_TAG}" \
             | grep -o '"architecture":"[a-z0-9]*"' | sort -u)
           echo "$arches"
           echo "pin this in ci.yml and the justfile as ${TARGET_REPO}@${EXPECTED}"
