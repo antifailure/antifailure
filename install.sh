@@ -322,7 +322,18 @@ say "Downloading $name"
 # The third answer this script used to collapse into one: a release that exists
 # and has no build for this platform is not the same as a network that dropped
 # the download, and "could not download" was said to both.
-fetch "$base/$name.tar.gz" "$tmp/$name.tar.gz" \
+#
+# 2>/dev/null, and it is the whole point of the line rather than tidiness. curl
+# is invoked with -sS, which is silent but SHOWS errors, so a refused archive
+# printed `curl: (56) The requested URL returned error: 404` at the reader
+# immediately BEFORE the sentence below, which was written to replace exactly
+# that kind of noise. The number in it is curl's own error code and not the
+# status: the same 404 came out as 22 through one path and 56 through another,
+# so a reader who takes it for an HTTP status is reading a different number
+# every time. why_not re-asks the URL and reports the status itself, so nothing
+# is lost by silencing the tool, and the two other fetch call sites in this
+# script already silence it. This one was the odd one out.
+fetch "$base/$name.tar.gz" "$tmp/$name.tar.gz" 2>/dev/null \
   || die "$(why_not "$base/$name.tar.gz" "the build for $os $arch" "nothing was installed")"
 
 # The checksum is checked rather than assumed, and there is no path through

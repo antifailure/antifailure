@@ -192,7 +192,43 @@ func (s *session) run() (string, error) {
 	cmd := exec.Command("/bin/sh", "-c", "cat "+filepath.Join(s.root, "install.sh")+" | sh")
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
+	assertTheFetcherSaidNothingOfItsOwn(s.t, string(out))
 	return string(out), err
+}
+
+// assertTheFetcherSaidNothingOfItsOwn is checked on EVERY invocation rather than
+// in one test, for the same reason install() checks for raw shell errors: the
+// leak it catches appears on whichever failure path forgot to silence the tool,
+// and the tests that walk those paths were all asserting on the sentence they
+// wanted while saying nothing about what was printed above it.
+//
+// That is how this one survived. THREE tests drive an archive download to a
+// refusal, TestAReleaseWithNoBuildForThisPlatformSaysThat,
+// TestAVersionNobodyPublishedIsNotAMissingBuild and
+// TestADownloadRefusedByARateLimitIsNotReportedAsAMissingBuild, and all three
+// were green while the reader got `curl: (56) The requested URL returned error:
+// 404` in front of the message each of those tests exists to protect. A test
+// that only requires its own sentence to be PRESENT cannot see anything added
+// beside it.
+//
+// The two signatures are the tools' own voices and nothing else speaks them:
+// curl writes `curl: (<code>) ...` on stderr under -sS, and wget prefixes
+// `wget: ` in both the GNU and the BusyBox spellings. install.sh's own prose
+// contains neither, and the one occurrence of `wget: ` in the file is inside a
+// comment, which never reaches a terminal.
+//
+// This is deliberately not a check that stderr is EMPTY. The script writes its
+// own refusals there, and requiring silence would be a check on a different
+// question.
+func assertTheFetcherSaidNothingOfItsOwn(t *testing.T, out string) {
+	t.Helper()
+	for _, voice := range []string{"curl: (", "wget: "} {
+		if strings.Contains(out, voice) {
+			t.Errorf("the fetcher printed %q at the reader, so a raw tool error sits beside "+
+				"the sentence this script composes; silence the fetch with 2>/dev/null and let "+
+				"why_not report the status\n--- output ---\n%s", voice, out)
+		}
+	}
 }
 
 func (s *session) read(rel string) string {

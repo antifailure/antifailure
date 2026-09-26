@@ -255,6 +255,38 @@ func TestABusyBoxWgetReportsARateLimitRatherThanAnAbsence(t *testing.T) {
 		[]string{"published no release", "named no release"})
 }
 
+// And the Alpine machine that gets PAST the version lookup and is refused the
+// archive, which is a different place in the script and the only place a BusyBox
+// wget speaks in its own voice.
+//
+// It exists because the other two BusyBox tests are both refused at the lookup,
+// so neither reaches a download, and the assertion in run() that neither fetcher
+// prints its own error had nothing driving its wget half. BusyBox wget ignores -q
+// for its error line and writes `wget: server returned error: ...` regardless, so
+// this is the session where forgetting to discard the fetcher's stderr would put
+// that line in front of the message, exactly as the curl half did.
+func TestABusyBoxWgetRefusedTheArchiveSaysWhoRefusedIt(t *testing.T) {
+	s := newSession(t)
+	s.asked = ""
+	s.onlyBusyBoxWget(t)
+	s.github.set(func(g *githubStandIn) { g.denySuffix = name() + ".tar.gz" })
+
+	out, err := s.run()
+	if err == nil {
+		t.Fatalf("the installer succeeded although the archive was refused:\n%s", out)
+	}
+	// The version resolved, so this really is the download failing rather than
+	// the lookup, and the two are easy to confuse in this file.
+	contains(t, out, "Downloading "+name())
+	contains(t, out, "403")
+	contains(t, out, "asked for too much")
+	absent(t, out, "does not include")
+	absent(t, out, "there is no release")
+	if _, statErr := os.Stat(filepath.Join(s.binDir(), "af")); statErr == nil {
+		t.Error("af was installed although the archive was never downloaded")
+	}
+}
+
 // A redirect is the one part of this exchange the far end chooses, so the tag it
 // names is input rather than a version. A segment that is not tag shaped is
 // refused rather than pasted into the download URL this script composes next.
