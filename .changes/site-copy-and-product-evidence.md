@@ -14,6 +14,9 @@ a small schema change to a recorded table rewrite and lock finding in one
 diagram. Firewall routing shows simulated payments, captured emails, and
 blocked calls, with a separate composition for narrow screens.
 The closing panel uses an agent-to-twin diagram instead of the aurora image.
+The Isolated Twin section shows a focused version of the real console with
+recorded demo environments. It replaces the animated lifecycle mockup and
+reflows the environment table into readable records on phones.
 
 The mobile menu removes repeated links and keeps keyboard focus inside the
 open menu. The sign-in privacy summary uses an accessible dialog, and the
