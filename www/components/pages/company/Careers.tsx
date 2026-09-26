@@ -63,7 +63,7 @@ export function CareersPage() {
         path="/careers"
         eyebrow="Careers"
         title="Build the proof before the deploy."
-        lead="Two founding roles, one on the product and one on how developers find it. The compensation is on this page rather than behind a conversation, because it decides this for most people and they should not have to ask."
+        lead="Join as a founding engineer or help developers discover Antifailure. Both roles offer equity and currently have no salary."
         actions={
           <>
             <Button href="#apply" theme="filled">
@@ -85,17 +85,10 @@ export function CareersPage() {
         <div className="mt-14 grid grid-cols-[minmax(0,720px)_minmax(260px,420px)] gap-x-20 gap-y-10 max-lg:mt-10 max-lg:grid-cols-1">
           <Prose>
             <p>
-              These are the ranges, not a finalized offer, and the specific
-              number inside a range would be agreed with you. What is fixed is
-              the part above: no salary is paid for either role today.
+              Your equity offer will be agreed within the published range. Neither role currently pays a salary.
             </p>
             <p>
-              Nothing on this page says when that changes, because nothing has
-              decided it. There is no vesting schedule here, no funding
-              announcement, no location requirement and no benefits list, and
-              their absence is the honest state rather than an omission. If you
-              need any of those to be true, this is the wrong time to join and
-              it costs you nothing to have read one screen.
+              Salary timing, vesting, working location, and benefits have not been finalized. We will discuss these terms before you decide to join.
             </p>
           </Prose>
           <div className="self-start">
@@ -111,7 +104,7 @@ export function CareersPage() {
       <PageSection tone="panel">
         <PageHeading
           kicker="Two roles"
-          title="<strong>One builds the product, one builds how developers reach it.</strong> Both are early enough to own an area outright."
+          title="<strong>Two founding roles. Room to own your work.</strong>"
         />
         <ul className="mt-14 grid grid-cols-2 gap-5 max-lg:mt-10 max-md:grid-cols-1">
           {ROLES.map((role) => (
@@ -170,11 +163,7 @@ export function CareersPage() {
                   does not ask for.
                 </p>
                 <p>
-                  What you send goes to a private review queue that an
-                  authorized operator reads. It is not a public issue, a mailing
-                  list, or an analytics event. Applications are removed after
-                  180 days by scheduled maintenance, and you can ask for yours
-                  to be removed sooner.
+                  Applications are reviewed privately and deleted after 180 days. You can request earlier deletion.
                 </p>
               </Prose>
             </div>
@@ -188,7 +177,7 @@ export function CareersPage() {
             href: "/about",
             title: "About the project",
             description:
-              "What Antifailure is, the category it claims, and the limits it states rather than footnotes.",
+              "Why we are building Antifailure.",
           },
           {
             href: "/product/architecture",
@@ -200,7 +189,7 @@ export function CareersPage() {
             href: "/privacy",
             title: "What we hold about you",
             description:
-              "Including the application itself: what is stored, who reads it, and when it expires.",
+              "How we store, review, and delete application data.",
           },
         ]}
       />

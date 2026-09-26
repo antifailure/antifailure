@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { cn } from "@/lib/cn";
 
 const EASE = "cubic-bezier(0.16, 1, 0.3, 1)";

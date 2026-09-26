@@ -125,8 +125,7 @@ export function AuthScreen() {
               Sign in
             </h1>
             <p className="mt-4 text-[14px] leading-6 text-black/55">
-              Continue with the GitHub account you signed up with. You land in
-              the organization you belong to.
+              Use GitHub to access your Antifailure workspace.
             </p>
 
             <a
@@ -152,9 +151,8 @@ export function AuthScreen() {
               >
                 Request a demo
               </a>{" "}
-              and we set your team up on the hosted plane. If somebody invited
-              you to their organization, open the link they sent instead: it
-              puts you in theirs rather than in one of your own.
+              to see Antifailure with your team. Joining an existing workspace?
+              Open your invitation link.
             </p>
 
             {/* The two cases the button above does not serve, named rather
@@ -164,26 +162,24 @@ export function AuthScreen() {
                 known day, which is the only route on this site that does. */}
             <div className="mt-9 border-t border-black/10 pt-6">
               <p className="text-[13.5px] leading-6 text-black/55">
-                Buying for a team with seats, single sign-on, a security review
-                or an agreement to sign?{" "}
+                Need single sign-on, a security review, or a team agreement?{" "}
                 <a
                   className="text-black underline decoration-black/25 underline-offset-4 hover:decoration-black"
                   href="/contact#enterprise"
                 >
                   Talk to us
                 </a>{" "}
-                and a person answers.
+                about your requirements.
               </p>
               <p className="mt-4 text-[13.5px] leading-6 text-black/55">
-                The engine itself needs none of this. It is open source, it runs
-                entirely on your own machine, and the{" "}
+                Run the open-source engine locally with the{" "}
                 <a
                   className="text-black underline decoration-black/25 underline-offset-4 hover:decoration-black"
                   href="/docs/getting-started/quickstart"
                 >
                   quickstart
                 </a>{" "}
-                goes from nothing to a working environment without an account.
+                . No account required.
               </p>
             </div>
 

@@ -93,7 +93,7 @@ export function TwinLiveSplit() {
 
             <section className="flex min-w-0 flex-col bg-[#f7f7f5]">
               <header className="flex h-10 items-center py-0 pr-3 pl-3.5">
-                <h3 className="font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-[#C43D3D]">
+                <h3 className="font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-danger-ink">
                   Live processors
                 </h3>
               </header>
@@ -111,14 +111,14 @@ export function TwinLiveSplit() {
                     <span className="min-w-0 truncate font-mono text-[12px] tracking-extra-tight text-gray-new-40 line-through">
                       {host}
                     </span>
-                    <svg viewBox="0 0 12 12" className="size-3.5 shrink-0 text-[#C43D3D]" aria-hidden>
+                    <svg viewBox="0 0 12 12" className="size-3.5 shrink-0 text-danger-ink" aria-hidden>
                       <path d="M2 2 L10 10 M10 2 L2 10" stroke="currentColor" strokeWidth="1.5" />
                     </svg>
                   </li>
                 ))}
               </ul>
               <div className="mt-auto border-t-2 border-[#C43D3D] bg-white px-3.5 py-2.5">
-                <div className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#C43D3D]">
+                <div className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-danger-ink">
                   0 packets out
                 </div>
                 <p className="mt-1 text-[12px] leading-4 text-gray-new-40">

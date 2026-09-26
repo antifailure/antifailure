@@ -15,8 +15,8 @@ export function FirewallPage() {
       <PageHero
         path="/product/firewall"
         eyebrow="Side-Effect Firewall"
-        title="The twin cannot act on the real world."
-        lead="No default public egress. Clone-local DNS. A stateful Stripe that answers offline, mail rendered and captured rather than sent. Unknown destinations are denied and written to the attempted-effect ledger."
+        title="Test integrations without reaching real customers."
+        lead="Use a local Stripe simulator, capture outgoing email, and choose how each external service responds. Antifailure blocks destinations you have not configured."
         framed={false}
         visual={<PFW01 />}
       />
@@ -25,7 +25,7 @@ export function FirewallPage() {
         <Split visual={<PFW05 />}>
           <PageHeading
             kicker="Attempted-effect ledger"
-            title="<strong>Every outbound attempt is recorded, including the denials.</strong> Seven per-host modes, from refusing outright to answering from an offline pack. Never a live processor."
+            title="<strong>Choose how each integration behaves.</strong> Inspect the requests your gateway allowed, simulated, captured, or blocked."
           />
         </Split>
         <ul className="mt-10 grid grid-cols-3 items-start gap-x-16 gap-y-10 max-xl:grid-cols-1">
@@ -40,25 +40,15 @@ export function FirewallPage() {
           </li>
         </ul>
         <Illustrative>
-          Six rows chosen to show mocked calls, captured messages and denials. The hosts, the modes
-          and the decision log are real:{" "}
-          <code className="font-mono text-[12px] text-black/70">af net log</code> prints every
-          request the gateway decided, allowed as well as refused, and{" "}
-          <code className="font-mono text-[12px] text-black/70">af ci</code> summarises them on the
-          pull request. A packet that never reaches the gateway, such as a connection straight to a
-          public address, leaves no row: it fails at the network instead, which is stronger and is
-          the section below. A denied destination is denied inside the twin; it does not on its own
-          fail the check.
-        </Illustrative>
+            Example gateway log. Direct connections blocked by network isolation do not appear in this log.
+          </Illustrative>
       </PageSection>
 
       <PageSection tone="ruled">
         <Split visual={<PFW06 />}>
-          <PageHeading title="<strong>Containment is not a rule you can edit.</strong> A direct-IP attempt does not get out." />
+          <PageHeading title="<strong>Isolation reaches beyond proxy settings.</strong>" />
           <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-            Clone-local DNS is not enough if the twin dials an address. The gateway matches domain, IP,
-            protocol, method, and operation. Unknown destinations, unresolved secrets, or missing isolation
-            block the run. Convenience does not silently override containment.
+            Services run on an isolated network, with outbound connections routed through the gateway. Policy controls destinations and operations, including requests from clients that ignore proxy settings.
           </p>
           <ul className="mt-10 grid grid-cols-2 gap-x-8 gap-y-8 max-xl:grid-cols-1">
             {CONTROLS.map((item) => (
@@ -77,15 +67,12 @@ export function FirewallPage() {
       <PageSection tone="panel">
         <Split
           visual={
-            <Callout label="Existential failure" tone="block">
-              Charging cards, emailing users, or invoking production webhooks from a twin is a failed
-              containment model. A request reaches a live endpoint only where the manifest names that host,
-              and where a mode intercepts, the application holds a placeholder credential. The ledger is the
-              proof.
+            <Callout label="Payment testing" tone="block">
+              Configure payment hosts to use a simulator or sandbox. The application uses placeholder credentials for intercepted calls, and the gateway records its decisions.
             </Callout>
           }
         >
-          <PageHeading title="<strong>Charging a live processor is an existential failure.</strong> Not a warning. Not a retry." />
+          <PageHeading title="<strong>Keep payment tests inside the test environment.</strong>" />
         </Split>
       </PageSection>
 

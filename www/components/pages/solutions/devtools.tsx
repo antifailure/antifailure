@@ -13,11 +13,11 @@ export function DevtoolsPage() {
       <SplitHero
         path="/solutions/devtools"
         eyebrow="Solutions · Developer tools"
-        title="Schema changes on large tables."
+        title="Test schema changes at the scale your users depend on."
         paragraphs={[
-          "The flagship wedge, felt first by teams whose users notice p99 immediately.",
-          "Measure the strongest lock held per table, how long it was held, whether another session was left waiting on it, and how the query plans moved.",
-          "Start with Postgres volume, plans, and pools, then expand.",
+          "See how a migration behaves on realistic Postgres data.",
+          "Measure locks, blocked sessions, table rewrites, and query plan changes.",
+          "Review the findings before merging your pull request.",
         ]}
         visual={<QueryPlanTree />}
       />
@@ -35,19 +35,19 @@ export function DevtoolsPage() {
 
       <FeatureRow
         reverse
-        kicker="Narrow adapters, complete stack"
-        title="Exceptional Postgres instrumentation first."
+        kicker="Postgres testing"
+        title="Inspect the database behind your application."
         items={[
-          { title: "The first supported stack should be exceptional", body: "A broad compatibility list with unreliable connectors would destroy trust." },
-          { title: "Postgres first", body: "Volume, plans, and pools, then expand." },
-          { title: "Publish what the twin reproduced", body: "Do not pretend unsupported components are cloned." },
+          { title: "Measure the migration", body: "Run each pending statement against a masked database branch and record its impact." },
+          { title: "Postgres first", body: "Check query plans and lock duration at realistic row counts." },
+          { title: "Review test coverage", body: "See which parts of your stack ran and which checks need more setup." },
         ]}
         visual={<ExpandContractColumns />}
       />
 
       <FeatureRow
         kicker="The wedge"
-        title="Locks, plans, and rollback feasibility before it ships."
+        title="Locks, plans, and release compatibility before deployment."
         items={[
           { title: "Lock duration", body: "The strongest mode held per table, how long it was held, and whether another session waited on it." },
           { title: "Schema coexistence", body: "Whether old instances can still read the new schema shows up here first." },

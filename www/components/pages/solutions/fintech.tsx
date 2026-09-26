@@ -9,19 +9,19 @@ export function FintechPage() {
         flip
         path="/solutions/fintech"
         eyebrow="Solutions · Fintech"
-        title="Billing, ledgers, and side effects that must never hit live processors."
+        title="Rehearse billing changes before money moves."
         paragraphs={[
-          "The firewall simulates Stripe. Safe State masks account identifiers.",
-          "The oracle compares ledger writes.",
-          "Duplicate events are incidents. They belong in a report, not in production.",
+          "Test payment flows with masked account data and a local Stripe simulator.",
+          "Check the resulting ledger entries against your expected outcomes.",
+          "Find duplicate charges, missed events, and inconsistent balances in an isolated run.",
         ]}
         visual={<PacketPath />}
       />
 
       <FeatureRow
         stack
-        kicker="Simulators, not live processors"
-        title="Charging a card from a twin is an existential failure."
+        kicker="Payment integrations"
+        title="Run the payment flow inside your test environment."
         items={[
           { title: "The mode is set per host", body: "block, allow, capture, mock, emulate, sandbox or synth, written against the host in antifailure.yaml." },
           { title: "Nothing leaves without a rule", body: "Egress defaults to block, so a processor nobody configured is refused on its first run rather than passed through." },
@@ -33,22 +33,22 @@ export function FintechPage() {
       <FeatureRow
         reverse
         kicker="Containment"
-        title="Containment is the product surface."
+        title="Check the result across your services."
         items={[
           { title: "Ledger comparison", body: "The oracle compares writes, events, and third-party effects against baseline." },
-          { title: "Irreversible writes", body: "Candidate billing events that old code cannot reconcile show up before ship." },
-          { title: "Mid-market first", body: "Technically sophisticated billing teams. Not a regulated-enterprise procurement motion." },
+          { title: "Irreversible writes", body: "Test whether the previous release can still read the updated schema." },
+          { title: "Your billing workflows", body: "Define the payment and subscription journeys that matter to your team." },
         ]}
         visual={<TwinLiveSplit />}
       />
 
       <FeatureRow
-        kicker="Existential failure"
-        title="Not a warning. A failed containment model."
+        kicker="Request evidence"
+        title="See how every gateway request was handled."
         items={[
-          { title: "There is no warning level for this", body: "A twin that reaches a live processor has not failed a check. Its containment did not hold." },
-          { title: "The customer finds out", body: "A real card, a real inbox and a real partner endpoint are the three places a contained run becomes somebody else's incident." },
-          { title: "So the default refuses", body: "A host with no rule against it is blocked, which is the only default that stays safe as the integration list grows." },
+          { title: "Inspect the decision", body: "Review whether each request was blocked, captured, simulated, or allowed by policy." },
+          { title: "Capture notifications", body: "Read captured messages and inspect webhook payloads during the test." },
+          { title: "Block unknown hosts", body: "New destinations remain blocked until you configure how they should behave." },
         ]}
         visual={<ReceiptTape />}
       />

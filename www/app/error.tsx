@@ -33,12 +33,10 @@ export default function Error({
           Something broke
         </p>
         <h1 className="mt-4 max-w-[20ch] text-[40px] font-medium leading-[1.05] tracking-tighter text-black max-lg:text-[32px] max-sm:text-[26px]">
-          This page failed to render.
+          We could not load this page.
         </h1>
         <p className="mt-5 max-w-[54ch] text-[15px] leading-[1.6] tracking-extra-tight text-gray-new-40">
-          That is our fault, not yours, and it is worth telling us about. The
-          rest of the site is unaffected, and the documentation is plain HTML
-          that does not depend on any of this.
+          Try again, or open the documentation. If the problem continues, send us a report.
         </p>
 
         {error.digest ? (

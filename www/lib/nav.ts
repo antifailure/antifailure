@@ -101,7 +101,7 @@ export const HEADER_MENUS: HeaderMenu[] = [
     featured: [
       {
         title: "Give us one nervous deploy",
-        description: "A real upcoming migration, not a generic demo.",
+        description: "See Antifailure on a change relevant to your team.",
         href: "/request-demo",
         visual: "twin",
       },

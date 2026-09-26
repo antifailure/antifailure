@@ -39,8 +39,8 @@ function TonePill({
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium whitespace-nowrap",
         tone === "PASS" && "bg-[#E4F1EB] text-[#285D49]",
-        tone === "WARN" && "bg-[#f4edd6] text-[#8A6A12]",
-        tone === "BLOCK" && "bg-[#f8e4e4] text-[#C43D3D]",
+        tone === "WARN" && "bg-[#f4edd6] text-ochre-ink",
+        tone === "BLOCK" && "bg-[#f8e4e4] text-danger-ink",
         className,
       )}
     >

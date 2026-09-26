@@ -97,8 +97,8 @@ export function TwinsPage() {
       <PageHero
         path="/product/twins"
         eyebrow="Twin Orchestrator"
-        title="A disposable production twin for every risky change."
-        lead="Build the change, branch a sanitized database, isolate the network, replace production credentials, journal every resource as it comes up, and tear all of it down when the report is done."
+        title="An isolated environment for every change."
+        lead="Run your new build with a masked database and its own network. Antifailure tracks the resources it creates and removes them after testing."
         framed={false}
         visual={<PTW01 />}
       />
@@ -107,7 +107,7 @@ export function TwinsPage() {
         <Split visual={<PTW02 />}>
           <PageHeading
             kicker="Lifecycle"
-            title="<strong>Every transition is idempotent and recoverable.</strong> A resource is journaled the moment it exists, not after the run succeeds."
+            title="<strong>From repository to test result.</strong>"
           />
         </Split>
         <ul className="mt-10 grid grid-cols-4 gap-x-16 gap-y-8 max-xl:grid-cols-2 max-md:grid-cols-1">
@@ -123,30 +123,24 @@ export function TwinsPage() {
           ))}
         </ul>
         <Illustrative>
-          These are the lifecycle events one run emits, so a reader can run{" "}
-          <code className="font-mono text-[12px] text-black/70">af up</code> and{" "}
-          <code className="font-mono text-[12px] text-black/70">af down</code> and watch each of
-          them arrive in the log. The last two are where a run stops: it was torn down, or it
-          failed, which is emitted from any point before it. The run identifier is invented.
-        </Illustrative>
+            Example lifecycle log.
+          </Illustrative>
       </PageSection>
 
       <PageSection tone="ruled">
         <Split visual={<PTW03 items={ISOLATION} />}>
           <PageHeading
-            title="<strong>Isolation is a spec, not a hope.</strong> An unresolved secret fails closed and stops the run."
+            title="<strong>Keep each run separate from production.</strong>"
           />
           <p className="mt-6 max-w-[640px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-            The shared suite defines thirty-eight runtime conformance behaviours. These seven isolation
-            properties are implemented by the Docker runtime. Kubernetes and cloud runtimes are written;
-            their live verification has separate limits documented in the provider guides.
+            Each environment has its own credentials, network, and resource ownership. See the runtime guides for provider support and verification status.
           </p>
         </Split>
       </PageSection>
 
       <PageSection tone="panel">
         <Split visual={<PTW04 />}>
-          <PageHeading title="<strong>A preview URL is not the product.</strong> The twin exists to answer whether the deployment is safe, then it is destroyed." />
+          <PageHeading title="<strong>A test result you can review on the pull request.</strong>" />
           <p className="mt-6 max-w-[520px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
             The output is a pass or a fail on the pull request, with the rows and the trace behind
             it.
@@ -161,16 +155,12 @@ export function TwinsPage() {
 
       <PageSection>
         <Split visual={<PTW05 />}>
-          <PageHeading title="<strong>Cleanup is a first-class safety property.</strong> Resource deletion is not a background convenience." />
+          <PageHeading title="<strong>Remove the environment when the run ends.</strong>" />
           <p className="mt-6 max-w-[520px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-            Every resource is written to the journal as it is created, so a run that dies halfway
-            still has a list of what it made. Teardown replays that journal in reverse and counts
-            what it removed. A continuous integration step counts the managed containers and networks
-            afterwards and fails the build if any are left.
+            Antifailure records resources as it creates them. Teardown uses that journal to remove them, even after an interrupted run, and reports what was deleted.
           </p>
           <Illustrative className="mt-8">
-            A teardown of one run. The journal, the reverse replay and the count of what was removed
-            are real; the resource names and the timestamps are written.
+            Example teardown log with sample resource names and timestamps.
           </Illustrative>
           <div className="mt-8 grid grid-cols-2 gap-x-8 gap-y-5 max-xl:grid-cols-1">
             <div>
@@ -182,9 +172,7 @@ export function TwinsPage() {
             <div>
               <MonoLabel tone="reader" className="uppercase tracking-[0.14em]">limit</MonoLabel>
               <p className="mt-1.5 text-[15px] leading-6 tracking-extra-tight text-black">
-                Every environment is created with a lifetime, 24 hours unless the manifest says
-                otherwise, and af env reap removes the ones past it. Nothing runs that on its own:
-                a person or a schedule does.
+                Environments expire after 24 hours by default. Schedule af env reap to remove expired environments, or run it manually.
               </p>
             </div>
           </div>

@@ -69,12 +69,12 @@ const POINTS = [
     body: "Every risky change runs against an isolated, production-shaped copy, then the copy is torn down.",
   },
   {
-    title: "Fail closed, customer-hosted",
-    body: "Production data stays inside your boundary. An unverified golden cannot be branched, and the twin has no route out.",
+    title: "Your data stays in your infrastructure",
+    body: "Mask production data in your own environment and control which external services each test can reach.",
   },
   {
-    title: "Evidence, not a green checkmark",
-    body: "Every verdict arrives with the rows it read, the trace it took and a recording of the attempt.",
+    title: "Results you can inspect",
+    body: "Review findings, traces, and recordings from the checks that ran.",
   },
 ];
 
@@ -137,10 +137,8 @@ export function RequestDemo() {
             <h1 className="text-[28px] font-normal leading-dense tracking-tighter text-black max-sm:text-[26px]">
               Request a demo
             </h1>
-            <p className="mt-2.5 max-w-[540px] text-[14px] leading-6 tracking-extra-tight text-gray-new-40">
-              Tell us who you are and what you run. A person reads every request
-              and replies to set up a walkthrough on a deployment your team is
-              nervous about.
+            <p className="mt-2.5 max-w-[540px] text-[14px] leading-6 tracking-extra-tight text-gray-new-40 max-sm:text-base">
+              Tell us about your stack and the changes you want to test. We will arrange a walkthrough for your team.
             </p>
 
             <div className="mt-5">

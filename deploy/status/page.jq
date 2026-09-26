@@ -539,8 +539,10 @@ a { color: inherit; }
   display: flex;
   align-items: center;
   gap: 16px;
+  flex-wrap: wrap;
   padding: 26px 0 24px;
 }
+.top h1 { margin: 0; font-size: inherit; line-height: inherit; }
 .wm { font-size: 19px; font-weight: 600; letter-spacing: -0.03em; text-decoration: none; }
 .wm span { font-weight: 400; color: var(--muted); }
 .sub {
@@ -804,7 +806,7 @@ footer { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--rule);
 <main>
 
 <div class=\"top\">
-  <a class=\"wm\" href=\"https://antifailure.dev\">Antifailure <span>Status</span></a>
+  <h1><a class=\"wm\" href=\"https://antifailure.dev\">Antifailure <span>Status</span></a></h1>
   <a class=\"sub\" href=\"feed.xml\">Subscribe to updates</a>
 </div>
 "
@@ -818,11 +820,11 @@ footer { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--rule);
 
 + (($openIncidents + $openMaint) | map("<section class=\"active\">" + banner(.) + "</section>") | join(""))
 
-+ "<p class=\"sec-note\"><span class=\"gloss\">Operational means the most recent check passed, not that a component is up right now. Between two checks this page knows nothing, so read every status with the time beside it.</span><span>"
++ "<p class=\"sec-note\"><span class=\"gloss\">Operational means the most recent check passed, not that a component is up right now. Check the timestamp beside each component.</span><span>"
 + (if $recordStart != null and $recordStart <= ($nowS - ($stripDays * 86400))
    then "Uptime over the past \($stripDays) days."
    elif $recordStart != null
-   then "Uptime since \($recordStart | dayStamp | esc), which is all the record there is."
+   then "Uptime since \($recordStart | dayStamp | esc)."
    else "No uptime recorded yet." end)
 + "</span><a href=\"https://github.com/antifailure/antifailure/tree/status-data\">Every reading</a></p>"
 

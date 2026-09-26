@@ -95,7 +95,7 @@ export function SequenceDiagram() {
               Trace · matching.worker
             </div>
             <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.12em] text-gray-new-40">
-              3 hops · <span className="text-[#C43D3D]">1 denied</span>
+              3 hops · <span className="text-danger-ink">1 denied</span>
             </span>
           </div>
 
@@ -210,7 +210,7 @@ export function SequenceDiagram() {
                 <span
                   className={cn(
                     "mt-0.5 w-5 shrink-0 font-mono text-[10px] tabular-nums",
-                    msg.tone === "block" ? "text-[#C43D3D]" : "text-[#285D49]",
+                    msg.tone === "block" ? "text-danger-ink" : "text-[#285D49]",
                   )}
                 >
                   {String(i + 1).padStart(2, "0")}
@@ -219,7 +219,7 @@ export function SequenceDiagram() {
                   <div
                     className={cn(
                       "font-mono text-[12px] tracking-extra-tight",
-                      msg.tone === "block" ? "text-[#C43D3D]" : "text-black",
+                      msg.tone === "block" ? "text-danger-ink" : "text-black",
                     )}
                   >
                     {msg.label}
@@ -239,7 +239,7 @@ export function SequenceDiagram() {
           <p className="mt-1.5 text-[12px] leading-4 text-gray-new-40 md:mt-2 md:leading-5">
             Production partner hostnames never resolve. The attempt is ledgered.
           </p>
-          <div className="mt-2.5 hidden rounded-full border border-[#C43D3D]/30 bg-white px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] text-[#C43D3D] md:inline-flex">
+          <div className="mt-2.5 hidden rounded-full border border-[#C43D3D]/30 bg-white px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] text-danger-ink md:inline-flex">
             denied
           </div>
         </aside>

@@ -35,7 +35,7 @@ export function Illustrative({
       )}
     >
       <span className="shrink-0 border border-black/15 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.14em] text-black/55">
-        {label}
+        {label === "Illustrative" ? "Example" : label}
       </span>
       {children ? <span className="min-w-0 max-w-[640px]">{children}</span> : null}
     </p>

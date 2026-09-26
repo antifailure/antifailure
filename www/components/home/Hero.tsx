@@ -9,7 +9,7 @@ import { HeroServices } from "./HeroServices";
 export function Hero() {
   return (
     <section className="hero relative mt-16 safe-paddings max-xl:mt-14">
-      <Container className="relative z-30 pt-96 pb-10 max-xl:pt-54 max-lg:pt-52 max-md:pt-53 max-md:pb-8" size="1600">
+      <Container className="relative z-30 pt-64 pb-10 max-xl:pt-48 max-lg:pt-40 max-md:pt-32 max-md:pb-8" size="1600">
         <SectionLabel>Pre-production deployment safety</SectionLabel>
         <h1 className="mt-5 max-w-[1240px] text-[68px] leading-dense tracking-tighter max-xl:max-w-[1100px] max-xl:text-[60px] max-lg:max-w-[920px] max-lg:text-[48px] max-md:mt-4 max-md:max-w-full max-md:text-[42px] max-sm:text-[32px]">
           <span className="whitespace-nowrap max-xl:whitespace-normal">
@@ -35,11 +35,11 @@ export function Hero() {
             first command of the quickstart beside it, so it belongs beside it.
             Below `md` all three stack full width, as the buttons already did. */}
         <div className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-3 max-lg:mt-7 max-lg:gap-x-4 max-md:flex-col max-md:items-stretch max-md:gap-y-3 max-md:[&_a]:w-full">
-          <Button href="/docs/getting-started/quickstart" theme="filled">
-            Start the quickstart
-          </Button>
-          <Button href="/request-demo" theme="outlined">
+          <Button href="/request-demo" theme="filled">
             Request a demo
+          </Button>
+          <Button href="/docs/getting-started/quickstart" theme="outlined">
+            Try it locally
           </Button>
           {/* No fill and no border of its own: the variant now carries Button's
               outlined theme, so this only has to stop being 34.2% of the row. */}
@@ -51,18 +51,11 @@ export function Hero() {
 
             The two sentences are in the order a visitor needs them: what they
             can have today with no account, then how the hosted plane is
-            reached, which is by talking to somebody as a matter of how it is
-            sold rather than because signing up is refused. See
-            components/pages/company/RequestDemo.tsx for where that value
-            actually lives. */}
-        <p className="mt-5 max-w-[760px] text-[15px] leading-6 tracking-extra-tight text-gray-new-40 max-lg:mt-4 max-lg:max-w-[520px] max-md:text-[14px]">
-          The engine is open source and runs in your own continuous integration
-          today, with no account.
-          {/* Broken at the sentence, the same way the h1 above is, rather than
-              left to text-balance, which put the first sentence's "The" alone
-              at the end of a line. */}
-          <br className="max-lg:hidden" />{" "}
-          The hosted control plane is a managed service: book a demo and we set your team up on it.
+            reached now that self-serve is off. */}
+        <p className="mt-5 max-w-[760px] text-[18px] leading-7 tracking-extra-tight text-gray-new-20 max-lg:mt-4 max-lg:max-w-[620px] max-md:text-base">
+          Antifailure runs migrations, user journeys, and traffic on an isolated
+          copy of your stack, with masked production data. Review the failures
+          and evidence before you merge.
         </p>
         {/* mt-36 was 144 pixels of nothing between two short sentences and the
             five things this product is. The gap is the section rhythm now, and

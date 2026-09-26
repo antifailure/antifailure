@@ -15,6 +15,7 @@ import {
 } from "@/components/pages/kit";
 import { cn } from "@/lib/cn";
 import { CONDITIONAL_PROCESSORS } from "@/lib/legal-facts";
+import { BUSINESS_ADDRESS, CONTACT_EMAIL } from "@/lib/site";
 
 const NOT_CLAIMED = [
   "Zero rollback. No deployment can ever fail.",
@@ -125,7 +126,7 @@ export function PrivacyPage() {
               ],
               [
                 "This site",
-                "Nothing, until you use the contact form. That writes your name, work email, company, an optional seat count and your message into the control plane's own database, with the page it came from and the time. The role that serves public requests can insert into that table and cannot read it back, so no request to this site can ever return somebody else's contact details.",
+                "Contact and demo forms store the details you submit, the source page, and the submission time in the control plane database. Public requests cannot read stored leads. Website measurement is described separately below.",
               ],
             ]}
           />
@@ -153,7 +154,7 @@ export function PrivacyPage() {
         </div>
       </PageSection>
       <PageSection tone="panel">
-        <PageHeading title="<strong>No card ever reaches this product.</strong>" />
+        <PageHeading title="<strong>Payments are handled by Stripe.</strong>" />
         <Prose className="mt-10">
           <p>
             That part is unconditional and it is architectural rather than a promise: checkout and
@@ -188,7 +189,7 @@ export function PrivacyPage() {
       <PageSection tone="ruled">
         <PageHeading
           kicker="This site"
-          title="<strong>It counts page views itself,</strong> PostHog watches the rest, and both stop if you say so."
+          title="<strong>Website analytics and your privacy controls.</strong>"
         />
         <Prose className="mt-10">
           <p>
@@ -337,7 +338,7 @@ export function TermsPage() {
               ],
               [
                 "Paying",
-                "A paid plan is bought through Stripe's own hosted checkout and managed in Stripe's customer portal. No card ever reaches this product. These terms are not a paid-service agreement: the contracting entity, the governing law and the liability cap are all still blank below, and a contract with no party to it is not one. A purchase is governed by whatever is agreed in writing at the time.",
+                "Paid plans use Stripe-hosted checkout and its customer portal. Card details are entered directly with Stripe. Purchases are governed by the applicable written agreement; this draft page is not a paid-service agreement.",
               ],
               [
                 "The enterprise edition",
@@ -424,16 +425,17 @@ export function TermsPage() {
       <PageSection tone="panel">
         <PageHeading
           kicker="Liability"
-          title="<strong>The shape of the cap, with the numbers left out.</strong>"
+          title="<strong>Business details and applicable terms.</strong>"
         />
         <Prose className="mt-10">
           <p>
-            Four values decide this section and none of them exists yet, so they are left visibly
-            blank rather than filled with something that reads as settled: the contracting entity{" "}
-            <Blank>entity name</Blank>, its registered address <Blank>registered address</Blank>,
-            the governing law and venue <Blank>jurisdiction</Blank>, and the figure the cap is set
-            at <Blank>liability cap</Blank>. A cap written before a lawyer has chosen the
-            jurisdiction it will be read in is a number, not a protection.
+            Business address: {BUSINESS_ADDRESS}. Contact:{" "}
+            <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>.
+          </p>
+          <p>
+            The contracting entity is <Blank>entity name</Blank>. The proposed
+            governing law is Delaware. Venue and the liability cap remain subject
+            to the applicable written agreement and legal review.
           </p>
         </Prose>
         <div className="mt-14 max-md:mt-10">

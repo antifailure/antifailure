@@ -58,7 +58,7 @@ export function Twins() {
           <Heading
             icon="twins"
             label="Isolated Twin"
-            title="<strong>A disposable production twin.</strong> Build the candidate, restore safe state, contain side effects, and destroy everything when the report is done."
+            title="<strong>Your stack. Your data shape. One isolated run.</strong> Give each change its own environment, then remove it when testing ends."
           />
           <div className="relative mt-14 min-w-0 max-xl:mt-12 max-lg:mt-10 max-md:mt-8 max-sm:mt-11">
             <TwinIdeStage />
@@ -68,8 +68,7 @@ export function Twins() {
                 Close. What is real is the order the work happens in and the
                 three seals, each of which a conformance behaviour proves. */}
             <Illustrative className="mt-6">
-              The order is real, and so are the containment seals: build, restore safe state,
-              contain, destroy. The percentages are a shaped run.
+              Example environment lifecycle.
             </Illustrative>
           </div>
           <ul className="mt-10 grid grid-cols-3 gap-x-16 max-xl:mt-8 max-xl:grid-cols-1 max-xl:gap-y-7 max-lg:mt-10">

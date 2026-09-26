@@ -1,7 +1,6 @@
 import { Container } from "@/components/layout/Container";
 import { Heading } from "@/components/layout/Heading";
-import { Illustrative } from "@/components/layout/Illustrative";
-import { MigrationBento } from "@/components/home/visuals/MigrationBento";
+import { MigrationEvidence } from "@/components/home/visuals/MigrationEvidence";
 
 export function Migrations() {
   return (
@@ -17,14 +16,10 @@ export function Migrations() {
           <Heading
             icon="migrations"
             label="Migration Safety"
-            title="<strong>Catch exclusive locks before they take checkout down.</strong> The strongest lock held per table, whether another session was left waiting on it, and how the plans moved."
+            title="<strong>See what your migration will do.</strong> Find slow locks, table rewrites, and query regressions before you deploy."
           />
           <div className="relative mt-14 min-w-0 max-xl:mt-12 max-lg:mt-10 max-md:mt-8 max-sm:mt-11">
-            <MigrationBento />
-            <Illustrative label="Example finding" className="mt-6">
-              One migration rehearsed, with the numbers chosen. The hold time and whether the table
-              was rewritten are measured too.
-            </Illustrative>
+            <MigrationEvidence />
           </div>
         </div>
       </Container>

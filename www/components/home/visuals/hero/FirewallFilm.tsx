@@ -31,7 +31,7 @@ export function FirewallFilm({ active }: FilmProps) {
 
   return (
     <div ref={ref} className="absolute inset-0 overflow-hidden font-sans select-none" aria-hidden>
-      <div className="absolute inset-0" style={moveStyle({ opacity: 1 - page * 0.92, scale: 1 + page * 0.18, x: -page * 8 })}>
+      <div className="absolute inset-0" style={moveStyle({ opacity: 1 - page, scale: 1 + page * 0.18, x: -page * 8 })}>
         <svg viewBox="0 0 240 120" className="absolute inset-0 h-full w-full" aria-hidden>
           {PATHS.map((d, i) => (
             <path
@@ -80,7 +80,7 @@ export function FirewallFilm({ active }: FilmProps) {
         </div>
 
         <div className="absolute top-[8%] right-2 flex w-[118px] flex-col gap-1.5">
-          {CARDS.map((card, i) => (
+          {CARDS.map((card) => (
             <div
               key={card.id}
               className="rounded-[10px] border border-black/[0.08] bg-white px-2 py-1.5"

@@ -59,7 +59,7 @@ export function DualWriteBoard() {
               <section className="min-w-0 overflow-hidden rounded-t-[10px] bg-white">
                 <div className="relative flex h-8 items-center px-2.5">
                   <span className="absolute inset-y-0 left-0 w-1 bg-[#f4edd6]" aria-hidden />
-                  <h3 className="pl-1 font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#8A6A12]">
+                  <h3 className="pl-1 font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-ochre-ink">
                     Candidate
                   </h3>
                 </div>
@@ -82,7 +82,7 @@ export function DualWriteBoard() {
                     one row the oracle returns
                   </div>
                 </div>
-                <span className="shrink-0 rounded-full border border-[#8A6A12]/35 bg-white px-2 py-0.5 font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#8A6A12]">
+                <span className="shrink-0 rounded-full border border-[#8A6A12]/35 bg-white px-2 py-0.5 font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-ochre-ink">
                   miss
                 </span>
               </div>
@@ -97,7 +97,7 @@ export function DualWriteBoard() {
                   order_992
                 </span>
                 <span className="font-mono text-[12px] tracking-extra-tight text-[#285D49]">ok</span>
-                <span className="font-mono text-[12px] tracking-extra-tight text-[#8A6A12]">miss</span>
+                <span className="font-mono text-[12px] tracking-extra-tight text-ochre-ink">miss</span>
               </div>
             </div>
           </div>
@@ -164,7 +164,7 @@ function WriteCell({
         <div
           className={cn(
             "font-mono text-[12px] tracking-extra-tight",
-            tone === "miss" ? "text-[#8A6A12]" : "text-black",
+            tone === "miss" ? "text-ochre-ink" : "text-black",
           )}
         >
           {out}
@@ -191,7 +191,7 @@ function Hinge({ same }: { same: boolean }) {
       <span
         className={cn(
           "font-mono text-[11px] leading-none",
-          same ? "text-[#285D49]" : "text-[#8A6A12]",
+          same ? "text-[#285D49]" : "text-ochre-ink",
         )}
       >
         {same ? "=" : "≠"}

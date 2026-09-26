@@ -259,7 +259,7 @@ export function CircularMap({
           </svg>
 
           <div className="mx-auto mt-2 flex max-w-[480px] flex-wrap items-center justify-center gap-x-5 gap-y-1.5 px-1 font-mono text-[10px] font-medium uppercase tracking-[0.12em]">
-            <span className="inline-flex items-center gap-2 text-[#8A6A12]">
+            <span className="inline-flex items-center gap-2 text-ochre-ink">
               <span className="w-5 border-t border-dashed border-[#8A6A12]" aria-hidden />
               staging
             </span>

@@ -11,22 +11,22 @@ const STAGGER_MS = 5900;
 export const HERO_SERVICES = [
   {
     title: "Isolated Twin",
-    description: "A temporary copy of the application stack for every risky change.",
+    description: "Your services and database, isolated for each change.",
     kind: "twin" as const,
   },
   {
     title: "Safe State",
-    description: "Sanitized, referentially consistent, production-shaped Postgres.",
+    description: "Masked Postgres data with relationships intact.",
     kind: "state" as const,
   },
   {
     title: "Side-Effect Firewall",
-    description: "A stateful Stripe and captured mail instead of charging cards.",
+    description: "Simulated payments, captured messages, controlled external calls.",
     kind: "firewall" as const,
   },
   {
     title: "Load",
-    description: "Traffic shaped like production's own access log, sent at the twin.",
+    description: "Your production traffic mix against the new build.",
     kind: "workload" as const,
   },
   {
@@ -86,14 +86,6 @@ export function HeroServices() {
             </p>
             <span className="relative block aspect-[5/4] w-full overflow-hidden rounded-[12px] border border-black/[0.08] bg-white font-sans shadow-[0_1px_0_rgba(0,0,0,0.03)] transition-[border-color] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] [@media(hover:hover)]:group-hover:border-black/[0.16]">
               <MiniFilm kind={item.kind} active={started} />
-              <span
-                className="pointer-events-none absolute inset-0"
-                style={{
-                  background:
-                    "linear-gradient(to right, transparent 62%, #f7f7f5 100%), linear-gradient(to bottom, transparent 70%, #f7f7f5 100%)",
-                }}
-                aria-hidden
-              />
             </span>
           </li>
         );

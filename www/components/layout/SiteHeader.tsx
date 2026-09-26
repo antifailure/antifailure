@@ -7,7 +7,7 @@ import { Button } from "./Button";
 import { Container } from "./Container";
 import { Logo } from "./Logo";
 import { cn } from "@/lib/cn";
-import { FOOTER_MENUS, GITHUB_URL, HEADER_MENUS } from "@/lib/nav";
+import { GITHUB_URL, HEADER_MENUS } from "@/lib/nav";
 import { HeaderMini, MenuCardArt, ProductMiniStyles } from "@/components/home/visuals/headerMinis";
 import { Chevron, GitHubIcon } from "../icons";
 
@@ -40,7 +40,8 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
   const pathname = usePathname();
   const [open, setOpen] = useState<number | null>(null);
   const [mobile, setMobile] = useState(false);
-  const [mobileSection, setMobileSection] = useState<number | null>(0);
+  const [mobileSection, setMobileSection] = useState<number | null>(null);
+  const headerRef = useRef<HTMLElement>(null);
   const [height, setHeight] = useState(0);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const panelRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -109,6 +110,29 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
   }, [mobile]);
 
   useEffect(() => {
+    if (!mobile) return;
+    const trigger = document.activeElement as HTMLElement | null;
+    const background = Array.from(document.querySelectorAll<HTMLElement>("main, footer, .skip-to-content"));
+    const previous = background.map((element) => element.inert);
+    background.forEach((element) => { element.inert = true; });
+    const trap = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const controls = Array.from(headerRef.current?.querySelectorAll<HTMLElement>("a[href], button:not(:disabled), [tabindex='0']") ?? [])
+        .filter((element) => element.getClientRects().length > 0);
+      const first = controls[0];
+      const last = controls.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    document.addEventListener("keydown", trap);
+    return () => {
+      background.forEach((element, index) => { element.inert = previous[index]; });
+      document.removeEventListener("keydown", trap);
+      if (trigger?.isConnected) trigger.focus();
+    };
+  }, [mobile]);
+
+  useEffect(() => {
     const mq = window.matchMedia("(min-width: 1280px)");
     const onChange = () => {
       if (mq.matches) closeNow();
@@ -123,7 +147,7 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
     // <header> on the inner element the panel's nineteen links belonged to no
     // landmark at all: every other nav on the page sits inside header, main or
     // footer, and the navigation itself did not.
-    <header className={cn("sticky top-0 z-50", overlay && "-mb-16 max-xl:-mb-14")}>
+    <header ref={headerRef} className={cn("sticky top-0 z-50", overlay && "-mb-16 max-xl:-mb-14")}>
       <ProductMiniStyles />
       <div
         className={cn(
@@ -449,36 +473,16 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                           </div>
                         </div>
                       ))}
-                      {menu.featured?.length
-                        ? menu.featured.map((card) => (
-                            <Link prefetch={false}
-                              key={card.href}
-                              href={card.href}
-                              onClick={closeNow}
-                              className="rounded-[12px] border border-black/[0.08] bg-[#f7f7f5] p-4 text-[15px] tracking-tight"
-                            >
-                              {card.title}
-                              <span className="mt-1 block text-[13px] text-gray-new-50">{card.description}</span>
-                            </Link>
-                          ))
-                        : null}
                     </div>
                   ) : null}
                 </div>
               );
             })}
-            <div className="mt-8 flex flex-col gap-3">
-              {FOOTER_MENUS[0].items.map((item) => (
-                <Link prefetch={false} key={item.href} href={item.href} className="text-[16px] text-gray-new-40" onClick={closeNow}>
-                  {item.text}
-                </Link>
-              ))}
-            </div>
             {/* The same pair as the wide header, in the same order, because a
                 phone menu that offers a different primary action from the one
                 above 1280 is two products wearing one name. "Install the
                 engine" is a link in the menu above this. */}
-            <div className="mt-8 flex gap-3">
+            <div className="mt-8 flex gap-3 max-sm:flex-col">
               <Button href="/signin" theme="outlined" className="flex-1">
                 Sign in
               </Button>

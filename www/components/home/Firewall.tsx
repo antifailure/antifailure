@@ -16,7 +16,7 @@ export function Firewall() {
           <Heading
             icon="firewall"
             label="Side-Effect Firewall"
-            title="<strong>Fail closed on side effects.</strong> The twin cannot charge cards, email users, or invoke production webhooks. Unknown destinations are blocked."
+            title="<strong>Test payments and messages safely.</strong> Route external calls to sandboxes, mocks, or a captured inbox. Unlisted destinations stay blocked."
           />
           <div className="mt-8 max-xl:mt-6 max-lg:mt-5">
             <FailClosedScene />

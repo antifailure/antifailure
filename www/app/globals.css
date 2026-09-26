@@ -34,6 +34,8 @@
      #33bf00 on #e4f1eb measures 2.10:1, under the 3:1 a meaningful graphic
      needs, while this measures 4.35:1. */
   --color-ochre: #8a6a12;
+  --color-ochre-ink: #71530a;
+  --color-danger-ink: #a22f2f;
   --color-green-45: #00e599;
   --color-green-52: #34d59a;
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;

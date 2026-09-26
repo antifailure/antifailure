@@ -49,12 +49,8 @@ export function Cta() {
               the install line beneath it is its first command. */}
           <div className="flex shrink-0 flex-col items-end gap-y-4 max-lg:w-full max-lg:items-stretch">
             <div className="flex items-center gap-4 max-md:flex-col max-md:items-stretch max-md:gap-y-3 max-md:[&_a]:w-full">
-              <Button href="/docs/getting-started/quickstart" theme="white">
-                Start the quickstart
-              </Button>
-              <Button href="/request-demo" theme="outlined-inverse">
-                Request a demo
-              </Button>
+              <Button href="/request-demo" theme="white">Request a demo</Button>
+              <Button href="/docs/getting-started/quickstart" theme="outlined-inverse">Try it locally</Button>
             </div>
             <CopyCodeButton variant="terminal" className="max-lg:w-full" />
           </div>

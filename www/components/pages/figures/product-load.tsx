@@ -29,10 +29,10 @@ function FigureChrome({ id, tab, rail }: { id: string; tab: string; rail: string
         <span className="truncate">{tab}</span>
       </div>
       <div className="mb-2 flex shrink-0 items-baseline gap-2">
-        <span className="border-b-2 border-[#33bf00] pb-0.5 font-mono text-[10px] font-medium tracking-[0.12em] text-black">
+        <span className="border-b-2 border-[#33bf00] pb-0.5 font-mono text-[12px] font-medium tracking-[0.12em] text-black">
           {rail}
         </span>
-        <span className="hidden font-mono text-[9px] tracking-[0.14em] text-black/30 sm:inline" aria-hidden>
+        <span className="hidden font-mono text-[11px] tracking-[0.14em] text-gray-new-50 sm:inline" aria-hidden>
           FIG. {id}
         </span>
       </div>
@@ -80,9 +80,9 @@ function LoadFigure({
 function RunMetric({ term, value, detail }: { term: string; value: string; detail: string }) {
   return (
     <div className="min-w-0 rounded-[9px] border border-black/[0.06] bg-white px-3 py-2.5 shadow-[0_1px_0_rgba(0,0,0,0.03)]">
-      <dt className="font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-gray-new-50">{term}</dt>
+      <dt className="font-mono text-[11px] font-medium uppercase tracking-[0.12em] text-gray-new-50">{term}</dt>
       <dd className="mt-1 text-[16px] font-medium tracking-extra-tight text-black">{value}</dd>
-      <dd className="mt-0.5 font-mono text-[9px] leading-3.5 text-gray-new-50">{detail}</dd>
+      <dd className="mt-0.5 font-mono text-[11px] leading-3.5 text-gray-new-50">{detail}</dd>
     </div>
   );
 }
@@ -90,7 +90,7 @@ function RunMetric({ term, value, detail }: { term: string; value: string; detai
 function ShareMeter({ share }: { share: number }) {
   return (
     <div aria-label={`${share}% of observed requests`}>
-      <div className="flex items-center justify-between gap-2 font-mono text-[10px] tabular-nums">
+      <div className="flex items-center justify-between gap-2 font-mono text-[12px] tabular-nums">
         <span className="text-gray-new-50">share</span>
         <span className="text-black">{share}%</span>
       </div>
@@ -124,7 +124,7 @@ function LatencyComparison({
           : `Candidate p95 ${candidate} milliseconds; production baseline ${baseline} milliseconds`
       }
     >
-      <div className="flex items-baseline justify-between gap-2 font-mono text-[10px] tabular-nums">
+      <div className="flex items-baseline justify-between gap-2 font-mono text-[12px] tabular-nums">
         <span className="text-gray-new-50">p95</span>
         <span className={breach ? "text-[#A93434]" : "text-black"}>
           {candidate}ms
@@ -157,7 +157,7 @@ function Verdict({ delta }: { delta: number | null }) {
     <div className="flex items-center gap-2 sm:block sm:text-right">
       <span
         className={cn(
-          "inline-flex rounded-[6px] border px-2 py-1 font-mono text-[9px] font-medium uppercase tracking-[0.08em]",
+          "inline-flex rounded-[6px] border px-2 py-1 font-mono text-[11px] font-medium uppercase tracking-[0.08em]",
           delta === null && "border-black/10 bg-black/[0.025] text-gray-new-50",
           breach && "border-[#C95B5B]/30 bg-[#F8E4E4] text-[#A93434]",
           delta !== null && !breach && "border-[#66A58C]/30 bg-[#E4F1EB] text-[#285D49]",
@@ -165,7 +165,7 @@ function Verdict({ delta }: { delta: number | null }) {
       >
         {text}
       </span>
-      <div className="font-mono text-[10px] tabular-nums text-gray-new-50 sm:mt-1">{deltaText}</div>
+      <div className="font-mono text-[12px] tabular-nums text-gray-new-50 sm:mt-1">{deltaText}</div>
     </div>
   );
 }
@@ -197,7 +197,7 @@ function RouteRow({ datum, index }: { datum: RouteDatum; index: number }) {
             />
             <div className="truncate font-mono text-[11px] font-medium tracking-extra-tight text-black">{datum.route}</div>
           </div>
-          <p className="mt-1 pl-4 font-mono text-[9px] text-gray-new-50">
+          <p className="mt-1 pl-4 font-mono text-[11px] text-gray-new-50">
             {index === 0 ? "largest p95 increase" : datum.baseline === null ? "allowed route without baseline" : "production baseline compared"}
           </p>
         </div>
@@ -228,7 +228,7 @@ function RouteMixBand() {
       </div>
       <div className="grid gap-1.5 px-3 py-2.5 sm:grid-cols-2">
         {ROUTES.map((route) => (
-          <div key={route.route} className="flex min-w-0 items-center gap-2 font-mono text-[9px] text-gray-new-50">
+          <div key={route.route} className="flex min-w-0 items-center gap-2 font-mono text-[11px] text-gray-new-50">
             <span
               className={cn("size-1.5 shrink-0 rounded-full", route.delta !== null && route.delta > P95_THRESHOLD ? "bg-[#C95B5B]" : "bg-[#66A58C]")}
               aria-hidden
@@ -254,9 +254,9 @@ export function PLD01() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <FigCmd>$ af load</FigCmd>
-          <h3 className="mt-1 text-[14px] font-medium tracking-tight text-black">Production-shaped route comparison</h3>
+          <p className="mt-1 text-[14px] font-medium tracking-tight text-black">Production-shaped route comparison</p>
         </div>
-        <div className="flex items-center gap-2 font-mono text-[10px] text-gray-new-50">
+        <div className="flex items-center gap-2 font-mono text-[12px] text-gray-new-50">
           <span className="size-1.5 rounded-full bg-[#33bf00]" aria-hidden />
           run complete
         </div>
@@ -272,12 +272,12 @@ export function PLD01() {
       <section className="mt-3 rounded-[12px] border border-black/[0.07] bg-[#FAFAF8] p-3" aria-labelledby="route-results-heading">
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
-            <h4 id="route-results-heading" className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-black/62">
+            <p id="route-results-heading" className="font-mono text-[12px] font-medium uppercase tracking-[0.12em] text-black/62">
               Route mix + p95 comparison
-            </h4>
-            <p className="mt-0.5 font-mono text-[9px] text-gray-new-50">weighted arrivals · baseline marker in black · 0 to 450ms scale</p>
+            </p>
+            <p className="mt-0.5 font-mono text-[11px] text-gray-new-50">weighted arrivals · baseline marker in black · 0 to 450ms scale</p>
           </div>
-          <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-gray-new-50">candidate vs production</span>
+          <span className="font-mono text-[11px] uppercase tracking-[0.1em] text-gray-new-50">candidate vs production</span>
         </div>
         <div className="mt-3">
           <RouteMixBand />
@@ -291,12 +291,12 @@ export function PLD01() {
 
       <div className="mt-3 grid gap-2 sm:grid-cols-[0.9fr_1.1fr]">
         <div className="rounded-[10px] border border-[#66A58C]/25 bg-[#F1F7F4] px-3 py-2.5">
-          <div className="font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-[#285D49]">allowed to send</div>
-          <p className="mt-1 font-mono text-[10px] leading-4 text-black/65">GET /** · POST /api/search</p>
+          <div className="font-mono text-[11px] font-medium uppercase tracking-[0.12em] text-[#285D49]">allowed to send</div>
+          <p className="mt-1 font-mono text-[12px] leading-4 text-black/65">GET /** · POST /api/search</p>
         </div>
         <div className="rounded-[10px] border border-[#C95B5B]/22 bg-[#FFF8F7] px-3 py-2.5">
-          <div className="font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-[#A93434]">refused before send</div>
-          <p className="mt-1 break-words font-mono text-[10px] leading-4 text-black/65">
+          <div className="font-mono text-[11px] font-medium uppercase tracking-[0.12em] text-[#A93434]">refused before send</div>
+          <p className="mt-1 break-words font-mono text-[12px] leading-4 text-black/65">
             POST /billing/upgrade · POST /api/payments/intent
           </p>
         </div>
@@ -310,10 +310,10 @@ function YamlLine({ line, number }: { line: string; number: number }) {
 
   return (
     <div className="grid grid-cols-[2rem_minmax(0,1fr)]">
-      <span className="select-none py-0.5 pr-2 text-right font-mono text-[9px] leading-[19px] text-black/24" aria-hidden>
+      <span className="select-none py-0.5 pr-2 text-right font-mono text-[11px] leading-[19px] text-gray-new-50" aria-hidden>
         {number}
       </span>
-      <code className="min-w-0 whitespace-pre-wrap break-words py-0.5 pr-2 pl-2.5 font-mono text-[10px] leading-[19px] tracking-extra-tight text-black/70">
+      <code className="min-w-0 whitespace-pre-wrap break-words py-0.5 pr-2 pl-2.5 font-mono text-[12px] leading-[19px] tracking-extra-tight text-black/70">
         {match ? (
           <>
             {match[1]}
@@ -348,7 +348,7 @@ function CapabilityMark({ value }: { value: string }) {
   return (
     <span
       className={cn(
-        "inline-flex rounded-[6px] border px-2 py-1 font-mono text-[9px] font-medium uppercase tracking-[0.08em]",
+        "inline-flex rounded-[6px] border px-2 py-1 font-mono text-[11px] font-medium uppercase tracking-[0.08em]",
         negative ? "border-[#C95B5B]/24 bg-[#FFF8F7] text-[#A93434]" : "border-[#66A58C]/30 bg-[#E4F1EB] text-[#285D49]",
       )}
     >
@@ -365,13 +365,13 @@ function CapabilityCard({ capability }: { capability: (typeof CAPABILITIES)[numb
     // overflow-hidden cut the capability marks off rather than scrolling.
     <li className="min-w-0 rounded-[10px] border border-black/[0.06] bg-white p-3 shadow-[0_1px_0_rgba(0,0,0,0.03)]">
       <div className="flex min-w-0 items-start justify-between gap-2">
-        <div className="min-w-0 font-mono text-[10px] font-medium tracking-extra-tight text-black">{capability.name}</div>
+        <div className="min-w-0 font-mono text-[12px] font-medium tracking-extra-tight text-black">{capability.name}</div>
         <div className="flex shrink-0 gap-1.5">
           <CapabilityMark value={capability.otel} />
           <CapabilityMark value={capability.access} />
         </div>
       </div>
-      <p className="mt-2 font-mono text-[9px] leading-4 text-gray-new-50">{capability.detail}</p>
+      <p className="mt-2 font-mono text-[11px] leading-4 text-gray-new-50">{capability.detail}</p>
     </li>
   );
 }
@@ -390,9 +390,9 @@ export function PLD02({ source }: { source: string }) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <FigCmd>$ af load</FigCmd>
-          <h3 className="mt-1 text-[14px] font-medium tracking-tight text-black">Manifest compilation</h3>
+          <p className="mt-1 text-[14px] font-medium tracking-tight text-black">Manifest compilation</p>
         </div>
-        <span className="rounded-[6px] border border-[#66A58C]/30 bg-[#E4F1EB] px-2 py-1 font-mono text-[9px] font-medium uppercase tracking-[0.1em] text-[#285D49]">
+        <span className="rounded-[6px] border border-[#66A58C]/30 bg-[#E4F1EB] px-2 py-1 font-mono text-[11px] font-medium uppercase tracking-[0.1em] text-[#285D49]">
           local input
         </span>
       </div>
@@ -400,10 +400,10 @@ export function PLD02({ source }: { source: string }) {
       <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1.08fr)_minmax(13rem,0.92fr)]">
         <section className="min-w-0 overflow-hidden rounded-[11px] border border-black/[0.07] bg-[#FAFAF8]" aria-labelledby="manifest-source-heading">
           <div className="flex items-center justify-between gap-2 border-b border-black/[0.065] bg-[#F2F3F0] px-3 py-2.5">
-            <h4 id="manifest-source-heading" className="font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-black/58">
+            <p id="manifest-source-heading" className="font-mono text-[11px] font-medium uppercase tracking-[0.12em] text-black/58">
               workload manifest
-            </h4>
-            <span className="font-mono text-[9px] text-gray-new-50">repository</span>
+            </p>
+            <span className="font-mono text-[11px] text-gray-new-50">repository</span>
           </div>
           <div className="py-2">
             {lines.map((line, index) => (
@@ -414,10 +414,10 @@ export function PLD02({ source }: { source: string }) {
 
         <section className="min-w-0 rounded-[11px] border border-black/[0.07] bg-[#FAFAF8] p-3" aria-labelledby="source-capabilities-heading">
           <div className="flex items-center justify-between gap-2">
-            <h4 id="source-capabilities-heading" className="font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-black/58">
+            <p id="source-capabilities-heading" className="font-mono text-[11px] font-medium uppercase tracking-[0.12em] text-black/58">
               source capabilities
-            </h4>
-            <div className="flex gap-1.5 font-mono text-[8px] uppercase tracking-[0.1em] text-gray-new-50">
+            </p>
+            <div className="flex gap-1.5 font-mono text-[11px] uppercase tracking-[0.1em] text-gray-new-50">
               <span>otel</span>
               <span>access</span>
             </div>
@@ -430,7 +430,7 @@ export function PLD02({ source }: { source: string }) {
           <div className="mt-2 rounded-[10px] border border-[#C95B5B]/22 bg-[#FFF8F7] px-3 py-2.5">
             <div className="flex items-start gap-2">
               <span className="mt-1 block size-1.5 shrink-0 rounded-full bg-[#C95B5B]" aria-hidden />
-              <p className="font-mono text-[9px] leading-4 text-[#7E3434]">
+              <p className="font-mono text-[11px] leading-4 text-[#7E3434]">
                 AF-MAN-002 · access_log + p95_increase is refused before anything is built.
               </p>
             </div>
@@ -440,10 +440,10 @@ export function PLD02({ source }: { source: string }) {
 
       <section className="mt-3 rounded-[11px] border border-black/[0.07] bg-[#FAFAF8] p-3" aria-labelledby="compile-path-heading">
         <div className="flex items-center justify-between gap-2">
-          <h4 id="compile-path-heading" className="font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-black/58">
+          <p id="compile-path-heading" className="font-mono text-[11px] font-medium uppercase tracking-[0.12em] text-black/58">
             compile path
-          </h4>
-          <span className="font-mono text-[9px] text-gray-new-50">no outbound lookup</span>
+          </p>
+          <span className="font-mono text-[11px] text-gray-new-50">no outbound lookup</span>
         </div>
         <ol className="mt-3 grid gap-2 sm:grid-cols-4">
           {PIPELINE.map((item, index) => (
@@ -452,15 +452,15 @@ export function PLD02({ source }: { source: string }) {
               className="relative min-w-0 rounded-[10px] border border-black/[0.06] bg-white px-3 py-2.5 shadow-[0_1px_0_rgba(0,0,0,0.03)]"
             >
               <div className="flex items-center gap-2">
-                <span className="flex size-5 shrink-0 items-center justify-center rounded-full border border-[#66A58C]/45 bg-[#E4F1EB] font-mono text-[8px] font-medium text-[#285D49]">
+                <span className="flex size-5 shrink-0 items-center justify-center rounded-full border border-[#66A58C]/45 bg-[#E4F1EB] font-mono text-[11px] font-medium text-[#285D49]">
                   {item.step}
                 </span>
                 {index < PIPELINE.length - 1 ? (
                   <span className="absolute top-1/2 right-[-8px] z-[1] hidden h-px w-3 bg-black/18 sm:block" aria-hidden />
                 ) : null}
-                <span className="font-mono text-[9px] font-medium uppercase tracking-[0.1em] text-black/65">{item.label}</span>
+                <span className="font-mono text-[11px] font-medium uppercase tracking-[0.1em] text-black/65">{item.label}</span>
               </div>
-              <p className="mt-1.5 pl-7 font-mono text-[9px] leading-4 text-gray-new-50">{item.detail}</p>
+              <p className="mt-1.5 pl-7 font-mono text-[11px] leading-4 text-gray-new-50">{item.detail}</p>
             </li>
           ))}
         </ol>

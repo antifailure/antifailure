@@ -55,8 +55,8 @@ export default function ChangelogPage() {
       <PageHero
         path="/changelog"
         eyebrow="Changelog"
-        title="Everything that has changed, and what it means if you are using it."
-        lead="Each entry is written when the change is made, by whoever made it, and says what it does rather than that it exists. Newest first."
+        title="What is new in Antifailure."
+        lead="New features, improvements, and fixes, newest first."
         actions={null}
       />
 
@@ -165,8 +165,8 @@ function ReleaseSection({ release }: { release: Release }) {
       {release.emptyBecause ? (
         <p className="mt-6 max-w-[720px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40 max-md:text-[16px]">
           {release.emptyBecause === "predates the convention"
-            ? "Cut before this repository started writing a fragment for every change. Nothing was recorded at the time, and nothing has been invented for it since."
-            : "Everything in this release was internal: real changes with nothing a user could observe. They are kept in the repository and left off this page."}
+            ? "This release predates the published changelog."
+            : "This release contains internal changes. See the repository for details."}
         </p>
       ) : null}
 

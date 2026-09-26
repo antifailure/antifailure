@@ -16,7 +16,7 @@ export function Features() {
           <Heading
             icon="features"
             label="Safety properties"
-            title="<strong>Whether this deployment is safe to ship</strong> against real data, real concurrency, real workers, and the deploy itself."
+            title="<strong>Make the call with evidence.</strong> Review what ran, what failed, and how to reproduce it."
           />
           <SafetyCards className="mt-16 max-xl:mt-12 max-lg:mt-10 max-md:mt-8" />
         </div>

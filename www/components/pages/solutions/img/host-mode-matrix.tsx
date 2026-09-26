@@ -95,7 +95,7 @@ export function HostModeMatrix() {
             <div className="flex items-center gap-2.5 border-l-2 border-[#C43D3D] bg-white px-3 py-1.5">
               <Gutter n={2} />
               <span className="pl-3 font-mono text-[12px] tracking-extra-tight text-black">
-                default: <span className="text-[#C43D3D]">block</span>
+                default: <span className="text-danger-ink">block</span>
               </span>
             </div>
             <div className="flex items-center gap-2.5 px-3 py-1.5">
@@ -129,7 +129,7 @@ export function HostModeMatrix() {
                   className={cn(
                     "truncate text-center font-mono text-[9px] uppercase tracking-[0.08em]",
                     mode === "block"
-                      ? "border-b-2 border-[#C43D3D] pb-0.5 text-[#C43D3D]"
+                      ? "border-b-2 border-[#C43D3D] pb-0.5 text-danger-ink"
                       : "text-gray-new-40",
                   )}
                 >
@@ -218,7 +218,7 @@ export function HostModeMatrix() {
             A host with no rule is blocked on first contact.
           </p>
           <div className="mt-3 rounded-[8px] bg-[#f7f7f5] px-2.5 py-2 font-mono text-[10px] tracking-extra-tight text-[#285D49]">
-            default: <span className="text-[#C43D3D]">block</span>
+            default: <span className="text-danger-ink">block</span>
           </div>
         </div>
       </div>

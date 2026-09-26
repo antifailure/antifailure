@@ -123,16 +123,16 @@ export function looksLikeEmail(value: string): boolean {
  */
 export function validateDemoRequest(fields: DemoRequestFields): string | null {
   const firstName = fields.firstName.trim();
-  if (!firstName) return "Tell us your first name so a reply is addressed to somebody.";
+  if (!firstName) return "Enter your first name.";
   const lastName = fields.lastName.trim();
-  if (!lastName) return "Tell us your last name too.";
+  if (!lastName) return "Enter your last name.";
   if ((firstName + " " + lastName).length > DEMO_LIMITS.name) {
     return `A name has to be under ${DEMO_LIMITS.name} characters.`;
   }
 
   const email = fields.email.trim();
-  if (!email) return "We need a work email to reply to.";
-  if (!looksLikeEmail(email)) return "That does not look like an email address.";
+  if (!email) return "Enter your work email.";
+  if (!looksLikeEmail(email)) return "Enter a valid email address.";
   if (email.length > DEMO_LIMITS.email) {
     return `An email address has to be under ${DEMO_LIMITS.email} characters.`;
   }

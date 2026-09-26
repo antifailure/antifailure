@@ -11,10 +11,10 @@ export function SaasPage() {
       <SplitHero
         path="/solutions/saas"
         eyebrow="Solutions · B2B SaaS"
-        title="Daily deploys. Expanding schemas. Staging that drifted years ago."
+        title="Keep shipping as your database grows."
         paragraphs={[
-          "The first twin should catch the migration that locks subscriptions during peak traffic.",
-          "Against sanitized tenant-shaped state, not a fixture dump.",
+          "Rehearse schema changes and account workflows on a masked copy of your data.",
+          "Keep tenant relationships and unusual billing states in your tests.",
           "Checkout and seat changes run against sanitized accounts.",
         ]}
         visual={
@@ -58,7 +58,7 @@ export function SaasPage() {
               title: "Daily / weekly",
               rows: [
                 ["Deploys", "Daily"],
-                ["Tenants", "N long-tail"],
+                ["Tenants", "Rare states"],
                 ["Schema", "Old + new"],
               ],
             }}
@@ -69,11 +69,11 @@ export function SaasPage() {
       <FeatureRow
         reverse
         kicker="Staging"
-        title="Staging differs in too many dimensions at once."
+        title="Test the conditions your next release will meet."
         items={[
           { title: "Unit, integration, and a manual staging check", body: "A change can pass all three and still fail in production." },
-          { title: "Tenant shape, concurrency, and schema coexistence", body: "The twin reproduces all three, then reports whether the deploy is safe." },
-          { title: "Old + new", body: "The previous release runs against the new schema, so a column it can no longer select is a finding and not a rollback." },
+          { title: "Data, traffic, and release compatibility", body: "Bring those checks into one environment and review the result on your pull request." },
+          { title: "Old + new", body: "Run the previous release against the new schema to catch incompatible reads before deployment." },
         ]}
         visual={
           <CircularMap
@@ -112,8 +112,8 @@ export function SaasPage() {
 
       <RelatedGrid
         items={[
-          { href: "/product/migrations", title: "Migration Safety", description: "The lock on subscriptions is the first finding." },
-          { href: "/request-demo", title: "Request a demo", description: "Thirty minutes on a deployment you name, with the person building it." },
+          { href: "/product/migrations", title: "Migration Safety", description: "Bring a change you are about to ship." },
+          { href: "/request-demo", title: "Request a demo", description: "See how Antifailure would test it in a demo with the founder." },
           { href: "/solutions", title: "All solutions", description: "Teams and jobs." },
         ]}
       />

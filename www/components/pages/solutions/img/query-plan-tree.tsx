@@ -69,7 +69,7 @@ export function QueryPlanTree() {
             <p className="min-w-0 truncate font-mono text-[10px] leading-4 tracking-extra-tight text-black sm:text-[11px] sm:leading-5">
               lock ACCESS EXCLUSIVE · 4.2s · another session waiting
             </p>
-            <span className="hidden shrink-0 rounded-full bg-white px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.12em] text-[#8A6A12] sm:inline">
+            <span className="hidden shrink-0 rounded-full bg-white px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.12em] text-ochre-ink sm:inline">
               ACCESS EXCLUSIVE
             </span>
           </footer>
@@ -133,7 +133,7 @@ function TimeBar({
       <span
         className={cn(
           "shrink-0 font-mono text-[11px] tabular-nums tracking-extra-tight",
-          tone === "pass" ? "text-[#285D49]" : "text-[#C43D3D]",
+          tone === "pass" ? "text-[#285D49]" : "text-danger-ink",
         )}
       >
         {ms}
@@ -228,7 +228,7 @@ function ScanNode({
               pass
             </span>
           ) : (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-white px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.12em] text-[#C43D3D]">
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-white px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.12em] text-danger-ink">
               <span className="size-1.5 rounded-full bg-[#C43D3D]" aria-hidden />
               block
             </span>

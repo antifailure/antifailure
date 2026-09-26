@@ -8,19 +8,19 @@ export function SafeStatePage() {
       <PageHero
         path="/product/safe-state"
         eyebrow="Safe State Engine"
-        title="Production-shaped Postgres without production identities."
-        lead="Snapshot restore, referentially consistent subsetting, and deterministic masking inside the customer boundary. A live session is deleted outright, and a key is replaced by a keyed hash that grants nothing. The output is a sanitization evidence report, not a dataset."
+        title="Realistic test data. Private customer details."
+        lead="Restore and mask Postgres data in your own infrastructure. Keep the relationships and edge cases your tests need while replacing personal details and credentials."
         framed={false}
         visual={<PSS01 />}
       />
       <PageSection>
-        <PageHeading title="<strong>Realistic enough to fail for the right reasons.</strong> Toy fixtures miss the row that breaks the constraint." />
+        <PageHeading title="<strong>Keep the data that reveals the bug.</strong>" />
         <FeatureGrid
           items={[
             { title: "Snapshot restore", body: "Logical restore for portability, or provider-native copy-on-write branches when supported." },
             { title: "Referential subsets", body: "Keep joins valid. Long-tail and malformed historical state stay in the subset." },
             { title: "Deterministic masking", body: "Format-preserving replacement inside the customer boundary." },
-            { title: "Nothing that grants access survives", body: "A session token is deleted. A key, a secret and a password become a keyed hash of the same length that unlocks nothing." },
+            { title: "Remove production credentials", body: "A session token is deleted. A key, a secret and a password become a keyed hash of the same length that unlocks nothing." },
             { title: "Free-text PII", body: "Scan for emails, cards, phones, and keys that schema rules miss." },
             { title: "Evidence report", body: "The tables, columns and rows sampled, every detector finding, and a signed sanitization attestation. A rule naming a column the schema no longer has is refused by name." },
           ]}
@@ -28,17 +28,12 @@ export function SafeStatePage() {
       </PageSection>
       <PageSection tone="ruled">
         <Split visual={<PSS02 />}>
-          <PageHeading title="<strong>A 12% subset that still joins.</strong> Dropped parents take their children. Rare rows stay." />
+          <PageHeading title="<strong>Smaller datasets with the relationships intact.</strong>" />
           <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-            Subsetting is available and off by default, so a first run masks the whole database and
-            you turn subsetting on with a seed table when you want it. With it on, the twin keeps
-            referential integrity, long-tail billing states, and malformed history, the records that
-            actually break migrations, while volume stays bounded.
+            Mask the full database or choose a subset starting from a seed table. Subsetting follows relationships and preserves rare records that can expose migration failures.
           </p>
           <Illustrative className="mt-6">
-            Six rows of a worked example, with the ratio chosen. What a real subset keeps depends on
-            the shape of your own data. What is fixed is the rule: a dropped parent takes its
-            children, and a rare row is kept on purpose rather than sampled away.
+            Example subset. Removing a parent also removes its dependent rows.
           </Illustrative>
           <div className="mt-8">
             <Callout label="Unverified goldens" tone="block">
@@ -50,11 +45,9 @@ export function SafeStatePage() {
       </PageSection>
       <PageSection>
         <Split visual={<PSS03 />}>
-          <PageHeading title="<strong>Postgres first.</strong> Deep enterprise data platforms can be an external provider, not a rebuild." />
+          <PageHeading title="<strong>A complete preparation flow for Postgres.</strong>" />
           <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-            The built-in engine covers common Postgres cases: restore, subset, mask, delete credentials,
-            scan the result back with the detectors that would find a leak, then destroy. Matching a dedicated test-data platform’s connector depth
-            is not the point. What this returns is a decision about a deployment, not a dataset.
+            Restore a snapshot, choose the rows to keep, and apply masking rules. Antifailure then samples the result for sensitive data and records the checks in a signed attestation.
           </p>
         </Split>
       </PageSection>
@@ -62,7 +55,7 @@ export function SafeStatePage() {
         <Split visual={<PSS04 />}>
           <PageHeading
             kicker="Customer-hosted masking"
-            title="<strong>Masking never leaves your cloud.</strong> The control plane receives evidence, not records."
+            title="<strong>Mask your data where it already lives.</strong>"
           />
           <p className="mt-6 max-w-[520px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
             Deterministic masking runs inside the customer-hosted data plane. Raw snapshots, secrets, and
@@ -70,8 +63,7 @@ export function SafeStatePage() {
           </p>
           <div className="mt-8">
             <Callout label="Customer boundary">
-              Production data stays in the customer boundary. What crosses the trust boundary is a
-              sanitization attestation: hashes, coverage, and whether it verified. Not the rows.
+              The hosted control plane receives the attestation, including hashes, coverage, and verification results.
             </Callout>
           </div>
         </Split>
@@ -79,9 +71,9 @@ export function SafeStatePage() {
 
       <RelatedGrid
         items={[
-          { href: "/product/firewall", title: "Side-Effect Firewall", description: "The twin cannot act on the real world." },
+          { href: "/product/firewall", title: "Side-Effect Firewall", description: "Control external calls during a test run." },
           { href: "/product/twins", title: "Isolated Twin", description: "Where the sanitized state is restored." },
-          { href: "/product/migrations", title: "Migration Safety", description: "What a branch with production's shape shows." },
+          { href: "/product/migrations", title: "Migration Safety", description: "Measure locks, rewrites, and query plan changes." },
         ]}
       />
     </PageShell>
