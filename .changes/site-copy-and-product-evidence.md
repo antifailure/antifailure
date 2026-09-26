@@ -4,7 +4,8 @@ The website now leads with the MCP workflow and explains each capability in
 shorter, more direct language. Product, solutions, pricing, forms, and articles
 focus on what a team can test and the findings it can review. The main hero
 headline and its animated green artwork remain, with a reduced-motion fallback.
-The hero has two actions and less empty space above the headline. The demo
+The hero offers the install command and a demo request, with less empty space
+above the headline. The demo
 section plays the owner-provided recording with its original audio and video.
 
 Five compact feature diagrams replace the miniature app windows, with

@@ -1,6 +1,7 @@
 import { Button } from "@/components/layout/Button";
 import { Container } from "@/components/layout/Container";
 import { SectionLabel } from "@/components/layout/SectionLabel";
+import { CopyCodeButton } from "./media/CopyCodeButton";
 import { HeroDemoVideo } from "./HeroDemoVideo";
 import { HeroFilm } from "./media/HeroFilm";
 import { HeroServices } from "./HeroServices";
@@ -21,9 +22,7 @@ export function Hero() {
           <Button href="/request-demo" theme="filled">
             Request a demo
           </Button>
-          <Button href="/docs/reference/mcp" theme="outlined">
-            Connect your agent
-          </Button>
+          <CopyCodeButton variant="white" className="w-auto max-w-full max-xl:w-auto max-lg:w-auto max-md:w-full" />
         </div>
         <p className="mt-5 max-w-[760px] text-base leading-6 tracking-extra-tight text-gray-new-20 max-lg:mt-4 max-lg:max-w-[520px]">
           Give your coding agent a production twin through MCP. Test migrations,
