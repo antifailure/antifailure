@@ -4,10 +4,16 @@ import { pageTitle } from "@/lib/site";
 /**
  * /signup moved to /request-demo.
  *
- * Self-serve organization creation is off (`AF_SELF_SERVE_SIGNUP` defaults
- * off), so a page headed "Create an account" was describing a door that does
- * not open for a stranger. The hosted plane is entered by a booked demo now,
- * and existing operators still sign in with GitHub at /signin.
+ * Sending strangers to a demo request is a decision about the funnel rather
+ * than a consequence of a closed door, and this comment said the opposite until
+ * somebody checked. `AF_SELF_SERVE_SIGNUP` is ON: the value is
+ * `self_serve_signup` in `infra/terraform/stacks/control-plane/staging.tfvars`
+ * and `production.tfvars`, both `true` since 61f8578c6 on 2026-09-02. The
+ * default in `variables.tf` is `false` and that is what misled the change that
+ * wrote this page. A default is not a value. See
+ * components/pages/company/RequestDemo.tsx for the whole of it.
+ *
+ * Existing operators still sign in with GitHub at /signin.
  *
  * The production host serves the 301 in public/staticwebapp.config.json, so
  * almost nobody reaches the markup below. It exists for the same reason the

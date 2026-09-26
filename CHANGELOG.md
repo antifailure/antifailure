@@ -636,7 +636,14 @@ reach the control plane shape.
 Every "Start free" and "Create an account" button pointed a stranger at a door
 that does not open: self serve signup is gated off, so a GitHub exchange from
 `/signup` created nothing while the header, the hero, the pricing and the footer
-all promised an account anybody could make. The hosted plane is reached by
+all promised an account anybody could make. (Correction, 2026-09-24: self serve
+signup was NOT gated off. It was on in staging and in production when this
+shipped and it is on now, set as `self_serve_signup` in each environment's tfvars
+under `infra/terraform/stacks/control-plane` since 2 September 2026. The variable
+declares a default of off and that default is what was read; neither deployment
+uses it. Sending a stranger to the demo request page is a deliberate choice about
+how the hosted plane is sold, not a consequence of the flag. The sentence above
+is left as it was published.) The hosted plane is reached by
 talking to a person now, and the site says so. A `/request-demo` page carries the
 sign in screen's split shell and a request form a sales team reads, posting to
 the same `POST /v1/leads` the enterprise form does with a demo source, and it is

@@ -5,12 +5,36 @@ import { DemoRequestForm } from "./DemoRequestForm";
  * The demo request page, which is where the site now sends everyone who used
  * to be pointed at self-serve sign-up.
  *
- * WHY THIS PAGE EXISTS. The hosted control plane no longer opens itself to a
- * stranger: `AF_SELF_SERVE_SIGNUP` is off, so a GitHub exchange creates no
- * organization on its own, and a "Start free" button that promised one was
- * describing a door that does not open. Every self-serve sign-up call to
- * action across the site now leads here instead, and existing operators keep
+ * WHY THIS PAGE EXISTS, and it is NOT because the door is shut. Sending
+ * strangers here rather than at a self-serve sign-up is a decision about the
+ * funnel: the hosted plane is sold by talking to somebody. Every self-serve
+ * call to action across the site leads here, and existing operators keep
  * signing in with GitHub at /signin.
+ *
+ * READ THE VALUE, NOT THE DEFAULT, because this comment used to say the
+ * opposite and was believed. `AF_SELF_SERVE_SIGNUP` is ON in both deployments.
+ * It comes from `self_serve_signup` in
+ * `infra/terraform/stacks/control-plane/staging.tfvars` and
+ * `production.tfvars`, both `true` since 61f8578c6 on 2026-09-02, which is
+ * where to look when this matters. The `variables.tf` DEFAULT is `false`, and
+ * that is the trap: the change that built this page read the default, wrote
+ * that self-serve was off in SEVEN comments across six files here, and shipped
+ * the same sentence into the v1.5.0 release notes, where it stays because
+ * released notes are not rewritten. A default is not a value. Only the per
+ * environment override is.
+ *
+ * So the door beside this page is open, and it provisions rather than merely
+ * permits: `web/apps/api/src/auth/signin.ts` calls
+ * provisionPersonalOrganization for anybody who finishes the GitHub exchange
+ * holding no memberships, which is a real tenant on the free plan. The control
+ * plane publishes the same fact on /auth/session, the console reads it to
+ * choose its "No organization yet" copy, and
+ * `.github/workflows/signup.yml` ASSERTS it is true every morning. Turning the
+ * flag off is therefore a change to that workflow in the same commit, or main
+ * goes red the next day.
+ *
+ * Vir kept this funnel deliberately on 2026-09-24, with both facts in front of
+ * him. It is a choice, not a consequence.
  *
  * WHY IT IS A FORM AND NOT A CALENDAR. Booking a call lives on /contact, where
  * cal.com already runs, and it stays the one place on the site that reaches a
