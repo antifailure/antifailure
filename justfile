@@ -365,8 +365,31 @@ db-down:
 # verifies nothing would leave this recipe working and that suite green while
 # proving nothing. Measured with a PUT carrying a valid SigV4 header and a
 # signature of 64 zeroes: MinIO refuses it 403 SignatureDoesNotMatch, this image
-# refuses it identically, and adobe/s3mock accepts it with 200. It is a stopgap,
-# and the durable answer is a mirror in a registry we control.
+# refuses it identically, and adobe/s3mock accepts it with 200.
+#
+# AND IT IS PULLED FROM OUR OWN REGISTRY NOW, which is what the sentence that
+# used to end that paragraph asked for. It said the Bitnami pin was a stopgap and
+# that the durable answer was a mirror in a registry we control.
+# `mirror-object-store.yml` made that copy, and the reference below is
+# `ghcr.io/antifailure/minio` at the SAME index digest, because `crane copy`
+# moves manifests as bytes and a digest is taken over those bytes. The image a
+# developer starts here is therefore byte for byte the one #579 measured.
+#
+# NO `docker login` IS NEEDED FOR IT, and that is deliberate rather than
+# incidental. Our copy is readable anonymously, which was checked with a token
+# request carrying no credential: the manifest reads 200 with a
+# `docker-content-digest` equal to the digest below, both child manifests are
+# present for amd64 and arm64, and every blob of both reads 200. A private
+# mirror would have reintroduced the exact failure this escaped, because a fresh
+# clone has no login, and the same measurement of the SAME copy on a Mac
+# confirmed it runs and reports `DEVELOPMENT.2025-07-23T15-54-02Z` and refuses a
+# signature of 64 zeroes with 403 SignatureDoesNotMatch.
+#
+# TestTheMirrorAndThePinsNameOneImage in tools/gatecheck is what holds this
+# reference and the mirror's own source to one digest. The gate that used to do
+# it, TestEveryPinnedImageAgreesOnOneDigest, groups on the name before the colon,
+# so it stopped being able to see the two together the moment this line named a
+# different registry from the source the mirror copies.
 #
 # THESE CREDENTIALS ARE FIXTURES AND NOT SECRETS, stated because a scanner
 # cannot tell the difference and neither can somebody reading the diff. They
@@ -389,7 +412,7 @@ stores:
     # and cannot write one at the root. ci.yml says all of this at length.
     docker run -d --name af-minio -p 49000:9000 \
       -e MINIO_ROOT_USER=aftestaccess -e MINIO_ROOT_PASSWORD=aftestsecret123 \
-      bitnamilegacy/minio:2025.7.23-debian-12-r5@sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20 \
+      ghcr.io/antifailure/minio:2025.7.23-debian-12-r5@sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20 \
       server /bitnami/minio/data > /dev/null
     # No `-f`, because the wait is for a RESPONSE rather than for a 200, which
     # is also what the suite's own reachability probe asks for.

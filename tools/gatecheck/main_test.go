@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -2458,6 +2459,389 @@ func TestAnUppercaseTagIsStillHeldToOneDigest(t *testing.T) {
 	pg := digestsByImage(map[string]string{"ci.yml": "        image: postgres:17-alpine@" + a + "\n"})
 	if _, ok := pg["postgres"]; !ok {
 		t.Errorf("the lowercase case regressed; got %v", pg)
+	}
+}
+
+// mirrorWorkflow is the file that copies a third party image into a registry we
+// control. Matched by base name rather than by a path, so a gate that cannot
+// find it says so instead of quietly having nothing to check.
+const mirrorWorkflow = "mirror-object-store.yml"
+
+// mirrorDeclaration is what that workflow says about the one image it copies:
+// the reference it copies FROM, the repository and tag it copies TO, and the
+// digest it reads back off the target and compares.
+//
+// Read as one declaration out of one file in one pass, rather than as four
+// greps. Two greps over two reads can disagree about which workflow they were
+// looking at, and every comparison below is only meaningful about a single
+// declaration.
+type mirrorDeclaration struct {
+	sourceName   string // the part before the @, tag included
+	sourceDigest string
+	targetRepo   string // as written, so it still carries the workflow expression
+	targetTag    string
+	expected     string
+}
+
+// mirrorEnvValue reads one `KEY: value` entry out of a workflow body and
+// requires every occurrence of it to agree.
+//
+// EVERY OCCURRENCE, because the target is named in two steps: the one that
+// pushes and the one that reads the digest back off it. If those two ever named
+// different repositories the workflow would push one image and verify another,
+// and both steps would report success. That is the same shape as a gate that
+// measures against a base fixture it has already broken.
+//
+// Comment lines are skipped, because this file explains itself at length and
+// quotes its own keys while doing it.
+func mirrorEnvValue(body, key string) (string, string) {
+	var seen []string
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") || !strings.HasPrefix(trimmed, key+":") {
+			continue
+		}
+		seen = append(seen, strings.TrimSpace(strings.TrimPrefix(trimmed, key+":")))
+	}
+	if len(seen) == 0 {
+		return "", fmt.Sprintf("%s is not declared at all, so nothing about the mirror could be read", key)
+	}
+	for _, value := range seen[1:] {
+		if value != seen[0] {
+			return "", fmt.Sprintf(
+				"%s is declared both as %q and as %q, so the step that copies and the step "+
+					"that verifies are not talking about the same image", key, seen[0], value)
+		}
+	}
+	return seen[0], ""
+}
+
+// imageBaseName is the repository name without the registry, which is what makes
+// `ghcr.io/antifailure/minio` and `bitnamilegacy/minio` recognisable as copies of
+// one image rather than as two unrelated things. It is the same reduction
+// infraKind uses in the detector.
+func imageBaseName(ref string) string {
+	name := strings.SplitN(ref, ":", 2)[0]
+	return name[strings.LastIndex(name, "/")+1:]
+}
+
+// imageTag is the tag of a reference, or the empty string when it names none.
+func imageTag(ref string) string {
+	last := ref[strings.LastIndex(ref, "/")+1:]
+	if i := strings.Index(last, ":"); i >= 0 {
+		return last[i+1:]
+	}
+	return ""
+}
+
+// mirrorConsistency reports every way a mirror declaration and the pins that
+// consume it can disagree.
+//
+// THE GATE THIS REPLACES COULD NOT SEE THE PAIR ANY MORE, and that is the whole
+// reason this exists. TestEveryPinnedImageAgreesOnOneDigest groups references by
+// the name before the colon, so while ci.yml, the justfile and this workflow's
+// own source all said `bitnamilegacy/minio` it held all three equal and a half
+// finished bump failed. The moment the two consumers were switched to
+// `ghcr.io/<owner>/minio` they became a DIFFERENT KEY from the source the mirror
+// copies, each key was internally consistent, and nothing was left holding the
+// image the suites run equal to the image the mirror was told to copy. Both
+// halves of that split still pass their own gate, which is exactly the shape of
+// defect nobody finds.
+//
+// So this asks the question the split created, in the terms the workflow itself
+// declares rather than against anything hardcoded here:
+//
+//   - the digest the mirror verifies its copy against is the digest it copies,
+//     or the workflow would pass having copied something else;
+//   - the copy is pushed under the version it was copied from, or the registry
+//     and the tree disagree about which release this is;
+//   - every other site that pins an image of this name pins that same digest;
+//   - and every one of them names OUR copy rather than the upstream, because a
+//     reference that still points at the third party is a reference the third
+//     party can still take away, which is the entire failure being escaped.
+//
+// The last of those is the one a digest comparison cannot make: a consumer left
+// on `bitnamilegacy/minio` at the correct digest satisfies every equality above
+// and mirrors nothing.
+func mirrorConsistency(bodies map[string]string) []string {
+	var mirrorKey string
+	for name := range bodies {
+		if filepath.Base(name) == mirrorWorkflow {
+			mirrorKey = name
+			break
+		}
+	}
+	if mirrorKey == "" {
+		// Not an empty result. "There is no mirror workflow to read" and "the
+		// mirror agrees with the pins" are different answers and only one of
+		// them is a pass, which is the defect this repository keeps finding in
+		// its own instruments.
+		return []string{mirrorWorkflow + " was not among the files read, so this gate checked nothing"}
+	}
+
+	var bad []string
+	body := bodies[mirrorKey]
+	var m mirrorDeclaration
+	read := func(key string) string {
+		value, why := mirrorEnvValue(body, key)
+		if why != "" {
+			bad = append(bad, why)
+		}
+		return value
+	}
+	source := read("SOURCE")
+	m.targetRepo = read("TARGET_REPO")
+	m.targetTag = read("TARGET_TAG")
+	m.expected = read("EXPECTED")
+	if i := strings.Index(source, "@"); i >= 0 {
+		m.sourceName, m.sourceDigest = source[:i], source[i+1:]
+	} else if source != "" {
+		bad = append(bad, fmt.Sprintf(
+			"the mirror copies %q, which names no digest, so it would copy whatever the "+
+				"publisher last pushed to that tag", source))
+	}
+	if len(bad) > 0 {
+		// A declaration that could not be read cannot be compared against
+		// anything, and reporting the comparisons anyway would bury the cause.
+		return bad
+	}
+
+	if m.sourceDigest != m.expected {
+		bad = append(bad, fmt.Sprintf(
+			"the mirror copies %s and then verifies its copy against %s, so it would report "+
+				"success having copied something other than the image it checks",
+			m.sourceDigest, m.expected))
+	}
+	if tag := imageTag(m.sourceName); tag != m.targetTag {
+		bad = append(bad, fmt.Sprintf(
+			"the source is tagged %q and the copy is pushed as %q, so the registry would "+
+				"disagree with this tree about which version our copy is", tag, m.targetTag))
+	}
+
+	base := imageBaseName(m.targetRepo)
+	files := make([]string, 0, len(bodies))
+	for name := range bodies {
+		files = append(files, name)
+	}
+	sort.Strings(files)
+	consumers := 0
+	for _, file := range files {
+		if file == mirrorKey {
+			// The source line is the one reference in this repository that is
+			// allowed to name the upstream, because naming it is the job.
+			continue
+		}
+		for _, found := range pinnedImage.FindAllStringSubmatch(bodies[file], -1) {
+			name, digest := found[1], found[2]
+			if imageBaseName(name) != base {
+				continue
+			}
+			consumers++
+			if digest != m.expected {
+				bad = append(bad, fmt.Sprintf(
+					"%s pins %s at %s, which is not the %s the mirror copies; either the pin "+
+						"was bumped without running the mirror or the mirror was run and this "+
+						"site was left behind", file, name, digest, m.expected))
+			}
+			if !strings.HasPrefix(name, "ghcr.io/") {
+				bad = append(bad, fmt.Sprintf(
+					"%s pins %s, which is the upstream rather than our copy at %s; a mirror "+
+						"nothing pulls from leaves the third party able to stop this repository "+
+						"exactly as before", file, name, m.targetRepo))
+			}
+		}
+	}
+	if consumers == 0 {
+		bad = append(bad, fmt.Sprintf(
+			"nothing outside %s pins an image called %q, so the mirror copies something this "+
+				"repository does not run", mirrorWorkflow, base))
+	}
+	return bad
+}
+
+// TestTheMirrorAndThePinsNameOneImage is the gate that holds the image the
+// suites run equal to the image the mirror was told to copy.
+//
+// WHAT IT IS FOR, said plainly, because the thing it guards is invisible in a
+// green run. The engine job's object storage fixture is the only independent
+// verifier of the Signature Version 4 signing that
+// engine/internal/golden/store_s3.go implements by hand, and it is load bearing
+// only because the server it runs REFUSES a wrong signature. So the identity of
+// that image is not a packaging detail: swap it for something permissive and
+// TestS3Store passes having proved nothing about the signing. A mirror is the
+// right answer to a publisher who can take the image away, and its own new risk
+// is that the tree and the registry drift apart, which this refuses.
+func TestTheMirrorAndThePinsNameOneImage(t *testing.T) {
+	bodies := map[string]string{}
+	for _, file := range filesThatStartContainers(t) {
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bodies[filepath.ToSlash(file)] = string(body)
+	}
+	for _, why := range mirrorConsistency(bodies) {
+		t.Error(why)
+	}
+}
+
+// TestTheMirrorPinCheckSaysNo points the gate above at every tree it exists to
+// refuse, and then at the shape this repository actually has.
+//
+// It drives mirrorConsistency itself rather than re-implementing the comparison.
+// An arm that reimplements the check proves the copy works and says nothing
+// about the gate, which is the defect this file keeps finding in its own
+// instruments.
+func TestTheMirrorPinCheckSaysNo(t *testing.T) {
+	const digest = "sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20"
+	const other = "sha256:cf3dadcfa1fb0324f43958bad1abba986d53c4ecc04d4d50b46c7dcda28bd3cd"
+
+	// The real shape, reduced to the lines that carry meaning: a source with a
+	// tag and a digest, a target named twice because two steps name it, and an
+	// expectation read back off the copy.
+	mirror := func(source, repo, tag, expected string) string {
+		return "        env:\n" +
+			"          SOURCE: " + source + "\n" +
+			"          TARGET_REPO: " + repo + "\n" +
+			"          TARGET_TAG: " + tag + "\n" +
+			"        env:\n" +
+			"          EXPECTED: " + expected + "\n" +
+			"          TARGET_REPO: " + repo + "\n" +
+			"          TARGET_TAG: " + tag + "\n"
+	}
+	source := "bitnamilegacy/minio:2025.7.23-debian-12-r5@" + digest
+	repo := "ghcr.io/${{ github.repository_owner }}/minio"
+	tag := "2025.7.23-debian-12-r5"
+	consumer := func(name, dig string) string {
+		return "          docker run -d --name af-minio -p 49000:9000 \\\n" +
+			"            " + name + "@" + dig + " \\\n" +
+			"            server /bitnami/minio/data\n"
+	}
+
+	good := map[string]string{
+		"a/" + mirrorWorkflow: mirror(source, repo, tag, digest),
+		"a/ci.yml":            consumer("ghcr.io/antifailure/minio:"+tag, digest),
+		"a/justfile":          consumer("ghcr.io/antifailure/minio:"+tag, digest),
+	}
+	if got := mirrorConsistency(good); len(got) != 0 {
+		// First, because a gate that refuses the correct tree gets switched off
+		// and every arm below then proves nothing.
+		t.Fatalf("a consistent tree was refused, so this gate cries wolf: %v", got)
+	}
+
+	for _, c := range []struct {
+		name   string
+		bodies map[string]string
+	}{
+		{
+			// The bump that ran the mirror and forgot a site, which is the
+			// original half finished bump in its new clothes.
+			name: "a consumer pinned to a digest the mirror does not copy",
+			bodies: map[string]string{
+				"a/" + mirrorWorkflow: mirror(source, repo, tag, digest),
+				"a/ci.yml":            consumer("ghcr.io/antifailure/minio:"+tag, digest),
+				"a/justfile":          consumer("ghcr.io/antifailure/minio:"+tag, other),
+			},
+		},
+		{
+			// THE ARM NO DIGEST COMPARISON CAN MAKE. Every digest here agrees
+			// and the tree is still wrong, because a site left on the upstream
+			// is a site the publisher can still close.
+			name: "a consumer naming the upstream at the correct digest",
+			bodies: map[string]string{
+				"a/" + mirrorWorkflow: mirror(source, repo, tag, digest),
+				"a/ci.yml":            consumer("ghcr.io/antifailure/minio:"+tag, digest),
+				"a/justfile":          consumer("bitnamilegacy/minio:"+tag, digest),
+			},
+		},
+		{
+			// The wiring removed. A gate that reads a missing file as a clean
+			// tree is the "clean because the instrument could not look" defect,
+			// and this is the arm that proves it does not.
+			name: "no mirror workflow at all",
+			bodies: map[string]string{
+				"a/ci.yml":   consumer("ghcr.io/antifailure/minio:"+tag, digest),
+				"a/justfile": consumer("ghcr.io/antifailure/minio:"+tag, digest),
+			},
+		},
+		{
+			// The workflow pushes to one repository and verifies another.
+			name: "the two declarations of the target repository disagreeing",
+			bodies: map[string]string{
+				"a/" + mirrorWorkflow: "          SOURCE: " + source + "\n" +
+					"          TARGET_REPO: " + repo + "\n" +
+					"          TARGET_TAG: " + tag + "\n" +
+					"          EXPECTED: " + digest + "\n" +
+					"          TARGET_REPO: ghcr.io/somebody-else/minio\n",
+				"a/ci.yml":   consumer("ghcr.io/antifailure/minio:"+tag, digest),
+				"a/justfile": consumer("ghcr.io/antifailure/minio:"+tag, digest),
+			},
+		},
+		{
+			// The workflow's own self check aimed at something it did not copy,
+			// which would pass in CI and pin a digest nobody reviewed.
+			name: "the verification digest differing from the source digest",
+			bodies: map[string]string{
+				"a/" + mirrorWorkflow: mirror(source, repo, tag, other),
+				"a/ci.yml":            consumer("ghcr.io/antifailure/minio:"+tag, digest),
+				"a/justfile":          consumer("ghcr.io/antifailure/minio:"+tag, digest),
+			},
+		},
+		{
+			// A mirror of a moving tag copies whatever was last pushed, so the
+			// digest the tree pins is a coincidence of the day it ran.
+			name: "a source naming no digest",
+			bodies: map[string]string{
+				"a/" + mirrorWorkflow: mirror("bitnamilegacy/minio:"+tag, repo, tag, digest),
+				"a/ci.yml":            consumer("ghcr.io/antifailure/minio:"+tag, digest),
+				"a/justfile":          consumer("ghcr.io/antifailure/minio:"+tag, digest),
+			},
+		},
+		{
+			// The copy published under a version it is not, which is how a
+			// reader comparing the registry to the tree is misled.
+			name: "the copy pushed under a different tag from the source",
+			bodies: map[string]string{
+				"a/" + mirrorWorkflow: mirror(source, repo, "latest", digest),
+				"a/ci.yml":            consumer("ghcr.io/antifailure/minio:"+tag, digest),
+				"a/justfile":          consumer("ghcr.io/antifailure/minio:"+tag, digest),
+			},
+		},
+		{
+			// A mirror nothing consumes, which is the state #581 deliberately
+			// left main in and which this pull request is closing. It has to be
+			// refused rather than tolerated, or the switch can be reverted in
+			// one line with every gate still green.
+			name: "nothing pinning the mirrored image at all",
+			bodies: map[string]string{
+				"a/" + mirrorWorkflow: mirror(source, repo, tag, digest),
+				"a/ci.yml":            consumer("postgres:17-alpine", digest),
+			},
+		},
+		{
+			// A declaration missing outright, rather than disagreeing.
+			name: "no expectation declared",
+			bodies: map[string]string{
+				"a/" + mirrorWorkflow: "          SOURCE: " + source + "\n" +
+					"          TARGET_REPO: " + repo + "\n" +
+					"          TARGET_TAG: " + tag + "\n",
+				"a/ci.yml":   consumer("ghcr.io/antifailure/minio:"+tag, digest),
+				"a/justfile": consumer("ghcr.io/antifailure/minio:"+tag, digest),
+			},
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := mirrorConsistency(c.bodies); len(got) == 0 {
+				t.Fatalf("this should have been refused and was not: %v", c.bodies)
+			}
+		})
+	}
+
+	// And the reduction that makes two registries comparable has not been
+	// widened into one that reports every tree: two genuinely different images
+	// are not held to one digest by accident of sharing a word.
+	if imageBaseName("ghcr.io/antifailure/minio:1@x") == imageBaseName("ghcr.io/antifailure/control-plane:1@x") {
+		t.Error("two different repository names reduced to one base, so unrelated images would be held equal")
 	}
 }
 
