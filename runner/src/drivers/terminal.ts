@@ -82,8 +82,12 @@ const DEFAULT_MAX_MS = 30_000;
 /** How long the driver waits for the screen to stop changing before it decides
  *  a redraw is finished. Quiet rather than a fixed sleep: a program that
  *  redraws in one millisecond is not waited on for two hundred, and one that
- *  takes two hundred is not read half drawn. */
-const QUIET_MS = 120;
+ *  takes two hundred is not read half drawn.
+ *
+ *  Exported because a silence shorter than this is not a silence the driver can
+ *  see, so a test that has to make the driver observe one derives its pause
+ *  from this rather than from a number of its own. */
+export const QUIET_MS = 120;
 
 /** The ceiling on one settle, for a program that never goes quiet: a clock, a
  *  progress spinner, an animation. Past it the screen is read as it stands,
@@ -111,6 +115,47 @@ const SETTLE_CEILING_MS = 3_000;
  *  for one it handles, because the wait ends the moment the first byte of the
  *  redraw arrives. */
 const KEY_RESPONSE_MS = 1_000;
+
+/** How long a program that has been sent its last key must stay SILENT before
+ *  the driver accepts that it has nothing more to say.
+ *
+ *  THIS IS A WINDOW OF SILENCE AND NOT A BUDGET FOR OUTPUT, and confusing the
+ *  two is the defect it used to be. The same number was once the whole wait:
+ *  the driver gave the program six hundred milliseconds to exit and then read
+ *  the transcript however much of its output was still arriving. A program that
+ *  answers a key, falls quiet and only THEN prints was therefore judged on the
+ *  fraction that had made it, and the report said the expectation was not met,
+ *  which is a different fact from "I did not wait for the rest of it".
+ *  Reproduced on a 16GB eight core Mac at load average 90: the transcript was
+ *  read at line 3892 of 20000 and the run reported fail, three times in eight
+ *  runs, on a tree byte for byte identical to one that had passed.
+ *
+ *  So the wait now ends on a fact about the program, an exit or a silence this
+ *  long, and never on a clock that ran while the program was talking.
+ *
+ *  WHY IT IS FIVE TIMES QUIET_MS AND NOT QUIET_MS. A redraw's quiet window has
+ *  to be short, because every keystroke pays it. This one is paid once per
+ *  workflow, and it answers a harder question: whether the program has FINISHED
+ *  rather than whether one redraw has. Measured at QUIET_MS, a burst that was
+ *  descheduled mid flight on a loaded machine went silent for longer than a
+ *  redraw takes, the driver read that as the end, and the transcript was judged
+ *  at line 523 of 20000. Raising the bar to a silence no descheduled writer is
+ *  likely to reach is what closed that, and the residual is stated where the
+ *  test that covers it lives.
+ *
+ *  runner/test/drivers.test.ts derives the timing of its late burst from this
+ *  and from QUIET_MS, so the test covering this boundary cannot quietly lose
+ *  its power when either number moves. */
+export const EXIT_GRACE_MS = 600;
+
+/** How the wait for a program's last word ended.
+ *
+ *  `exited` and `quiet` are both a program that has finished talking, and they
+ *  are the only two states in which the transcript means what it says.
+ *  `still-writing` is the budget running out with output still arriving, which
+ *  is not a verdict about the program at all and must never be reported as
+ *  one. */
+type LastWord = 'exited' | 'quiet' | 'still-writing';
 
 /** runTerminal drives every terminal workflow and returns a result for each,
  *  in the same shape the web driver produces so the counting and the report do
@@ -379,12 +424,28 @@ async function driveOnAScreen(
   // fired: two chunks parsed out of order would render a screen the program
   // never drew. Awaiting the chain is what makes a snapshot mean "everything
   // received so far has been drawn".
+  //
+  // `received` and `parsedBytes` are what let the driver say HOW FAR BEHIND the
+  // emulator was when it had to stop reading. A driver that cannot measure that
+  // has no way to report "I did not see all of it" and reports "it was not
+  // there" instead.
   let parsed: Promise<void> = Promise.resolve();
   let lastDataAt = Date.now();
+  let received = 0;
+  let parsedBytes = 0;
+  let closing = false;
   let exited: { code: number; signal: number | undefined } | undefined;
   child.onData((data: string) => {
     lastDataAt = Date.now();
-    parsed = parsed.then(() => screen.write(data));
+    received += data.length;
+    parsed = parsed.then(async () => {
+      // Nothing reaches the emulator once the driver has stopped reading it: a
+      // disposed emulator throws, and the backlog behind a budget that has
+      // already run out is precisely what must not be parsed.
+      if (closing) return;
+      await screen.write(data);
+      parsedBytes += data.length;
+    });
   });
   child.onExit((e: { exitCode: number; signal?: number }) => {
     exited = { code: e.exitCode, signal: e.signal };
@@ -417,17 +478,46 @@ async function driveOnAScreen(
   // the chunks queued at the instant of the call are on the grid. Awaiting
   // until the chain stops changing is the fixed point that makes a snapshot
   // mean what the comment above claims it means.
-  const drawn = async () => {
+  //
+  // AND THE FIXED POINT IS NOT A DRAIN, which is the distinction this lost. The
+  // chain holds what has been DELIVERED, so its fixed point says the emulator
+  // has caught up with whatever has arrived. A program that is still writing
+  // has not arrived yet, so the parser catching up with it proves only that the
+  // parser is faster than the producer. Measured under load, with the bytes
+  // counted on both sides: the emulator caught a burst still in flight at 41718
+  // of 228906 bytes, the driver read the transcript there, and the run reported
+  // the expectation unmet at line 3892 of 20000. So this is a DRAIN only once
+  // nothing more can arrive, and `lastWord` is what establishes that before the
+  // transcript is read.
+  //
+  // AND IT IS BOUNDED, because an unbounded version CANNOT TERMINATE against a
+  // program that writes faster than the emulator parses. Every poll finds the
+  // chain longer than it left it, the fixed point is never reached, and the
+  // driver waits forever on a program that is behaving normally. That is not a
+  // hypothetical: `for (;;) process.stdout.write(...)` under a ten row screen
+  // hung a run for over four hundred seconds until it was killed, and a run that
+  // never ends reports nothing about anything.
+  //
+  // SAY EXACTLY WHAT `by` BOUNDS, because claiming more would be the same defect
+  // one level up. It bounds the LOOP, not the parse. A chain that is already
+  // queued is awaited as one unit and cannot be cut in half, so the ceiling is
+  // observed BETWEEN polls: it stops this waiting for a producer it can never
+  // catch, and it does not abandon a parse in progress. For a program that has
+  // exited that is exactly right, because the queue is then finite and finishing
+  // it IS the drain. A caller that needs to know how far behind the grid was
+  // reads `received` and `parsedBytes`, which are the measurement rather than a
+  // flag, and a flag returned from here would have had no reader at all.
+  const drawn = async (by: number): Promise<void> => {
     for (;;) {
       const chain = parsed;
       await chain;
-      if (parsed === chain) return;
+      if (parsed === chain || Date.now() >= by) return;
     }
   };
   const settle = async (since: number, responseMs: number) => {
     const ceiling = Date.now() + SETTLE_CEILING_MS;
     for (;;) {
-      await drawn();
+      await drawn(Math.min(ceiling, deadline));
       if (exited) return;
       if (Date.now() >= ceiling || Date.now() >= deadline) return;
       const answered = lastDataAt > since;
@@ -436,6 +526,34 @@ async function driveOnAScreen(
       } else if (Date.now() - lastDataAt >= QUIET_MS) {
         return;
       }
+      await sleep(10);
+    }
+  };
+
+  // THE WAIT FOR THE PROGRAM'S LAST WORD, and why it is not a fixed grace. A
+  // program that is STILL WRITING has not finished, however long it has been
+  // going, and reading its transcript then reports a fraction of its output as
+  // the whole of it. So this ends on a FACT ABOUT THE PROGRAM rather than on a
+  // number: it EXITED, which node-pty defers until the pseudo terminal has
+  // closed and so until the last data event has fired, which is what makes an
+  // exit a complete drain; or it went QUIET for longer than a redraw takes,
+  // which is the same evidence every settle above runs on.
+  //
+  // Only the budget the author declared bounds it, and reaching that bound with
+  // output still arriving is reported as exactly that.
+  //
+  // The silence is measured from the program's LAST BYTE rather than from here,
+  // and that is what keeps the ordering this exists for reachable. A program
+  // that answered the key and fell silent has already been quiet for QUIET_MS
+  // when the key's settle returns, so it is given the REST of the window to
+  // start printing, and a program that never printed at all waits no longer
+  // than one that answered.
+  const lastWord = async (): Promise<LastWord> => {
+    for (;;) {
+      if (exited) return 'exited';
+      const silent = Date.now() - lastDataAt >= EXIT_GRACE_MS;
+      if (Date.now() >= deadline) return silent ? 'quiet' : 'still-writing';
+      if (silent) return 'quiet';
       await sleep(10);
     }
   };
@@ -467,22 +585,35 @@ async function driveOnAScreen(
     capture();
   }
 
+  let stillWriting = false;
   if (!exited && !ranOutOfTime) {
     // The last key may have been the one that quits. Give the program the
     // moment it needs to actually go, so a workflow that ends by quitting
     // reports the exit code it chose rather than the signal we sent it.
-    await waitForExit(() => exited !== undefined, Math.min(600, Math.max(0, deadline - Date.now())));
+    stillWriting = await lastWord() === 'still-writing';
   }
 
   // The program's last bytes are what the expectation is usually about, and
-  // waiting for the exit above waits for the PROCESS rather than for the
+  // waiting for its last word above waits for the PROCESS rather than for the
   // emulator. Draining here is what stops the transcript being judged with
   // the final redraw still queued.
-  await drawn();
+  //
+  // It is SKIPPED for a program that was still writing when the budget ran out,
+  // and that is not a shortcut. Such a program has an unbounded backlog behind
+  // it, so parsing the backlog would cost the budget again and still not buy the
+  // program's last word. What it bought instead is the measurement below.
+  if (!stillWriting) await drawn(deadline);
+  const behind = received - parsedBytes;
+  const written = received;
   const everything = screen.everything();
   const transcript = [...shown, everything].join('\n');
   capture();
 
+  // Every chunk still queued becomes a no-op from here, so awaiting the chain
+  // waits only for the one already inside the emulator. That is what has to
+  // land before the emulator is disposed under it.
+  closing = true;
+  await parsed;
   if (!exited) child.kill();
   screen.dispose();
 
@@ -499,6 +630,19 @@ async function driveOnAScreen(
     return {
       cause: 'budget-exhausted',
       detail: `The budget of ${budgetMs} ms ran out with keys still to send, so the workflow never finished.`,
+      output: transcript,
+    };
+  }
+  if (stillWriting) {
+    // "I could not look" and "it was not there" are different facts, and this
+    // branch is the first of them. The program had neither exited nor gone
+    // quiet, so the screen is a snapshot of something in progress, and saying
+    // the expectation went unmet would be a claim about output nobody waited
+    // for. The two byte counts are the measurement that makes it checkable
+    // instead of a shrug.
+    return {
+      cause: 'budget-exhausted',
+      detail: `The budget of ${budgetMs} ms ran out with the program still writing. It had written ${written} bytes and the ${drew} screen was ${behind} of them behind, so what it drew is not its last word.`,
       output: transcript,
     };
   }
@@ -565,11 +709,4 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
-}
-
-/** waitForExit polls rather than sleeping the whole grace period, so a program
- *  that quits at once is not waited on for the ceiling. */
-async function waitForExit(done: () => boolean, withinMs: number): Promise<void> {
-  const until = Date.now() + withinMs;
-  while (!done() && Date.now() < until) await sleep(10);
 }
