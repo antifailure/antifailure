@@ -115,7 +115,7 @@ export function OverviewPage() {
         path="/product"
         eyebrow="Product"
         title="See how your change behaves before you deploy."
-        lead="Build an isolated copy of your stack with masked production data. Rehearse migrations, test user journeys, and review the results on your pull request."
+        lead="Connect your coding agent through MCP. Give it an isolated copy of your stack to rehearse migrations, test user journeys, and return evidence before you merge."
         framed={false}
         visual={<POV01 />}
       />

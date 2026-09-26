@@ -67,7 +67,7 @@ function PagesClose() {
           <div className="flex min-w-0 flex-col items-start gap-4 max-lg:w-full">
             <div className="flex gap-x-5 max-sm:w-full max-sm:flex-col max-sm:gap-y-3 max-sm:[&_a]:w-full max-sm:[&_button]:w-full">
               <Button href="/request-demo" theme="filled">Request a demo</Button>
-              <Button href="/docs/getting-started/quickstart" theme="outlined">Try it locally</Button>
+              <Button href="/docs/reference/mcp" theme="outlined">Connect your agent</Button>
             </div>
             {/* The border, the fill and the hover come from the `white`
                 variant now. They were restated here as `border-black/12
@@ -142,7 +142,7 @@ export function PageHero({
           {actions ?? (
             <>
               <Button href="/request-demo" theme="filled">Request a demo</Button>
-              <Button href="/docs/getting-started/quickstart" theme="outlined">Try it locally</Button>
+              <Button href="/docs/reference/mcp" theme="outlined">Connect your agent</Button>
             </>
           )}
         </div>

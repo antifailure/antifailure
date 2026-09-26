@@ -16,7 +16,7 @@ export function Migrations() {
           <Heading
             icon="migrations"
             label="Migration Safety"
-            title="<strong>See what your migration will do.</strong> Find slow locks, table rewrites, and query regressions before you deploy."
+            title="<strong>Your agent writes the migration.</strong> Antifailure shows what it does to the database."
           />
           <div className="relative mt-14 min-w-0 max-xl:mt-12 max-lg:mt-10 max-md:mt-8 max-sm:mt-11">
             <MigrationEvidence />

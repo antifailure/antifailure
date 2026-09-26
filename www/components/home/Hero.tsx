@@ -10,7 +10,7 @@ export function Hero() {
   return (
     <section className="hero relative mt-16 safe-paddings max-xl:mt-14">
       <Container className="relative z-30 pt-64 pb-10 max-xl:pt-48 max-lg:pt-40 max-md:pt-32 max-md:pb-8" size="1600">
-        <SectionLabel>Pre-production deployment safety</SectionLabel>
+        <SectionLabel>Deployment testing for coding agents</SectionLabel>
         <h1 className="mt-5 max-w-[1240px] text-[68px] leading-dense tracking-tighter max-xl:max-w-[1100px] max-xl:text-[60px] max-lg:max-w-[920px] max-lg:text-[48px] max-md:mt-4 max-md:max-w-full max-md:text-[42px] max-sm:text-[32px]">
           <span className="whitespace-nowrap max-xl:whitespace-normal">
             Know what happens before you deploy,
@@ -38,8 +38,8 @@ export function Hero() {
           <Button href="/request-demo" theme="filled">
             Request a demo
           </Button>
-          <Button href="/docs/getting-started/quickstart" theme="outlined">
-            Try it locally
+          <Button href="/docs/reference/mcp" theme="outlined">
+            Connect your agent
           </Button>
           {/* No fill and no border of its own: the variant now carries Button's
               outlined theme, so this only has to stop being 34.2% of the row. */}
@@ -53,9 +53,9 @@ export function Hero() {
             can have today with no account, then how the hosted plane is
             reached now that self-serve is off. */}
         <p className="mt-5 max-w-[760px] text-[18px] leading-7 tracking-extra-tight text-gray-new-20 max-lg:mt-4 max-lg:max-w-[620px] max-md:text-base">
-          Antifailure runs migrations, user journeys, and traffic on an isolated
-          copy of your stack, with masked production data. Review the failures
-          and evidence before you merge.
+          Give your coding agent the tools to test migrations, user flows, and
+          load against masked production data. Antifailure returns the findings
+          through MCP, so your agent can fix the change before it ships.
         </p>
         {/* mt-36 was 144 pixels of nothing between two short sentences and the
             five things this product is. The gap is the section rhythm now, and

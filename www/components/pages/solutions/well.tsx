@@ -196,7 +196,7 @@ function HeroCopy({
           for the hosted plane. */}
       <div className="mt-8 flex flex-wrap gap-3 xl:mt-auto xl:pt-10 max-sm:flex-col max-sm:[&_a]:w-full">
         <Button href="/request-demo" theme="filled">Request a demo</Button>
-              <Button href="/docs/getting-started/quickstart" theme="outlined">Try it locally</Button>
+              <Button href="/docs/reference/mcp" theme="outlined">Connect your agent</Button>
       </div>
     </div>
   );

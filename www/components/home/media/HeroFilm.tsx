@@ -1,15 +1,11 @@
-"use client";
-
 import { Picture } from "@/components/Picture";
-import SoftAurora from "@/components/SoftAurora";
 
 /**
  * One `sizes` string, used by both copies of the image below, and they have to
  * stay identical.
  *
- * The same aurora is rendered twice: once in the wide desktop frame that the
- * SoftAurora canvas sits on top of, and once as a plain image for phones,
- * where the canvas is not worth the battery. Only one of the two is ever
+ * The same artwork is rendered twice: once in the wide desktop frame and
+ * once in the phone crop. Only one of the two is ever
  * visible, but `hidden` is a paint instruction and not a fetch one, so the
  * browser downloads whatever candidate each of them resolves to regardless.
  *
@@ -31,17 +27,6 @@ export function HeroFilm() {
           priority
           sizes={AURORA_SIZES}
           className="object-cover object-center"
-        />
-        <SoftAurora
-          className="absolute inset-0"
-          color1="#33bf00"
-          color2="#00e599"
-          brightness={0.9}
-          speed={0.45}
-          scale={1.35}
-          bandHeight={0.38}
-          bandSpread={1.15}
-          enableMouseInteraction
         />
         <div className="pointer-events-none absolute inset-0 opacity-30 mix-blend-overlay noise" />
         {/*

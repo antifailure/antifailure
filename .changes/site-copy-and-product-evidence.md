@@ -14,3 +14,7 @@ The mobile menu removes repeated links and keeps keyboard focus inside the open
 menu. Sign-in now opens an accessible privacy summary that reflects the site's
 current analytics. Contact details include the owner-provided email and business
 address; the mail check accepts the verified inbound route.
+
+The homepage now leads with the MCP workflow. All five feature blurbs use three
+lines with aligned illustrations, and the migration section pairs the proposed
+SQL with observed lock durations and the findings returned to a coding agent.

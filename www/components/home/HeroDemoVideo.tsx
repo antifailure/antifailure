@@ -259,13 +259,11 @@ export function HeroDemoVideo() {
               over gray-new-40 continuation is how every other section head on
               this page reads. */}
           <h2 className="text-[34px] font-normal leading-dense tracking-tighter text-gray-new-40 max-lg:text-[28px] max-md:text-[26px]">
-            <strong className="font-normal text-black-pure">A risky pull request, stopped before it merges.</strong>{" "}
-            Eighty five seconds.
+            <strong className="font-normal text-black-pure">See Antifailure catch a costly migration.</strong>
           </h2>
           <p className="mt-6 text-base tracking-extra-tight text-gray-new-40 max-md:mt-5">
-            Antifailure makes a copy of production, the same size and the same
-            shape and the same load, with every real name replaced. Your change
-            runs there whether a person wrote it or an agent did.
+            Follow a schema change from pull request to rehearsal. See the lock
+            it holds, the finding it produces, and the environment being removed.
           </p>
         </div>
         {/* The site's own list mark, which is SectionLabel's arrow in the neon

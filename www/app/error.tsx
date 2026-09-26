@@ -3,16 +3,7 @@
 import { useEffect } from "react";
 import Link from "next/link";
 
-// The reason this file exists rather than being left to the framework: the
-// homepage renders a WebGL scene, and a browser that cannot give it a context
-// throws during render. Without a boundary here, the whole page becomes Next's
-// stock "Application error: a client-side exception has occurred", which is a
-// black screen with a sentence on it. That is what a visitor with hardware
-// acceleration turned off used to get.
-//
-// The scene itself now degrades instead of throwing, so this should be
-// unreachable. It is here because "should be unreachable" is exactly the
-// claim an error boundary exists to stop us relying on.
+// Keep a recoverable page if a client component fails to render.
 export default function Error({
   error,
   reset,
