@@ -18,3 +18,5 @@ address; the mail check accepts the verified inbound route.
 The homepage now leads with the MCP workflow. All five feature blurbs use three
 lines with aligned illustrations, and the migration section pairs the proposed
 SQL with observed lock durations and the findings returned to a coding agent.
+Compact diagrams replace the five animated miniature windows. The hero keeps
+its original artwork without running an idle WebGL animation.
