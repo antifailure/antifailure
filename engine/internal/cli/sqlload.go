@@ -51,6 +51,16 @@ type SQLLoadJSON struct {
 	BackendsSeen         *int   `json:"backends_seen"`
 	ObserverNote         string `json:"observer_note,omitempty"`
 
+	// The contention, carried the same way and for a sharper reason: a
+	// consumer that read a null lock wait count as a zero would be told this
+	// build blocked nothing by a run nobody watched. LockWaitNote is present
+	// on every run, because a count of waits with no statement of what the
+	// instrument can see is a count somebody reads as a total.
+	LockWaits     *int               `json:"lock_waits"`
+	LockWaitMS    *float64           `json:"lock_wait_ms"`
+	LockWaitPairs []sqlload.LockWait `json:"lock_wait_pairs,omitempty"`
+	LockWaitNote  string             `json:"lock_wait_note,omitempty"`
+
 	Breaches []sqlload.Breach `json:"breaches,omitempty"`
 	// InertMeanIncrease says a mean_increase threshold was in force and no
 	// transaction carried a baseline for it to be measured against.
@@ -94,7 +104,13 @@ a reader can tell a fast query from a query that found nothing.
 The run reports how many of its own backends the server had inside a
 transaction at one instant, read from pg_stat_activity while it was going. N
 clients are not N concurrent sessions and that number is the evidence rather
-than the claim.`),
+than the claim.
+
+The same connection asks pg_blocking_pids which of those backends were waiting
+for a lock and which ones were in front of them, so a run reports the
+contention it was under rather than only the deadlocks loud enough to end a
+transaction. Sampled, so the counts are floors rather than totals, and a run
+nobody watched reports nothing rather than zero.`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			// The same defence in depth af load run takes. A workload is sent
@@ -232,6 +248,8 @@ func sqlLoadJSON(res *sqlload.Result, plan *env.SQLLoadPlan, breaches []sqlload.
 		ClientsStopped: res.ClientsStopped, StoppedBecause: res.StoppedBecause,
 		PeakActiveBackends: res.PeakActiveBackends, PeakOpenTransactions: res.PeakOpenTransactions,
 		BackendsSeen: res.BackendsSeen, ObserverNote: res.ObserverNote,
+		LockWaits: res.LockWaits, LockWaitMS: res.LockWaitMS,
+		LockWaitPairs: res.LockWaitPairs, LockWaitNote: res.LockWaitNote,
 		Breaches: breaches, InertMeanIncrease: inert, Unverified: res.Unverified(),
 	}
 	if plan != nil && doc.Clients == 0 {
@@ -282,6 +300,7 @@ func printSQLLoad(e *Env, res *sqlload.Result, plan *env.SQLLoadPlan) {
 		e.Out.Printf("  %d deadlocks and %d serialization failures, every one of them retried.\n",
 			res.Deadlocks, res.SerializationFailures)
 	}
+	printSQLLockWaits(e, res)
 	for _, reason := range sortedKeys(res.Errors) {
 		e.Out.Printf("  %s %d attempts: %s\n",
 			e.Out.S(StyleWarn, SymbolWarn), res.Errors[reason], reason)
@@ -305,6 +324,122 @@ func printSQLLoad(e *Env, res *sqlload.Result, plan *env.SQLLoadPlan) {
 			"nor a latency: %s.\n",
 			e.Out.S(StyleBad, SymbolFail), res.UnverifiedDetail())
 	}
+}
+
+// printSQLLockWaits renders the contention, including when there was none.
+//
+// Three outcomes and all three are printed, which is the whole reason this
+// function is not an `if len(pairs) > 0`. Waiting is a finding, no waiting is a
+// finding, and an unwatched run is not a finding at all, and the third is the
+// one that has to look different from the second: a reader told nothing about
+// lock waits will conclude there were none.
+func printSQLLockWaits(e *Env, res *sqlload.Result) {
+	e.Out.Println("")
+	if res.LockWaits == nil {
+		// The note carries the reason when there is one, and there is not
+		// always one: a result assembled by something other than a run has no
+		// observer to have failed. The sentence has to stand on its own
+		// either way, because "Lock waits were not measured: ." is a line that
+		// reads as a bug in this renderer rather than as an absent
+		// measurement.
+		if res.LockWaitNote == "" {
+			e.Out.Printf("  %s Lock waits were not measured, so this run does not say "+
+				"whether it blocked.\n", e.Out.S(StyleWarn, SymbolWarn))
+			return
+		}
+		e.Out.Printf("  %s Lock waits were not measured: %s.\n",
+			e.Out.S(StyleWarn, SymbolWarn), e.Out.Wrap(res.LockWaitNote, 4))
+		return
+	}
+	if *res.LockWaits == 0 {
+		e.Out.Printf("  No client of this run was ever seen waiting for a lock.\n")
+		e.Out.Printf("  %s\n", e.Out.S(StyleDim, fmt.Sprintf(
+			"Sampled every %s, so a wait shorter than that can have happened and not been seen.",
+			sqlload.LockWaitInterval)))
+		return
+	}
+
+	e.Out.Printf("  %d times a client of this run queued for a lock, %s of waiting between "+
+		"them across %d backends.\n",
+		*res.LockWaits, roundedMS(*res.LockWaitMS), deref(res.BackendsSeen))
+
+	// A list rather than a table, and that was measured rather than chosen. A
+	// pair carries two statement names, a lock type, a relation and a mode,
+	// and at eighty columns a five column table renders every one of them as
+	// "bump the counter..." with the part that identifies it cut off. A table
+	// whose cells are all ellipses is a table that says a run blocked and
+	// will not say on what, which is the only thing anybody came for.
+	shown := res.LockWaitPairs
+	if len(shown) > maxLockPairsPrinted {
+		shown = shown[:maxLockPairsPrinted]
+	}
+	e.Out.Println("")
+	for _, w := range shown {
+		e.Out.Printf("    %s\n",
+			e.Out.Wrap(lockSide(w.BlockedTransaction, w.BlockedStatement, true, ""), 6))
+		e.Out.Printf("      waited on %s\n", e.Out.Wrap(
+			lockSide(w.BlockingTransaction, w.BlockingStatement, w.BlockingInRun, w.BlockingState), 8))
+		e.Out.Printf("      %s\n", e.Out.S(StyleDim, e.Out.Wrap(fmt.Sprintf(
+			"queued on %s, %d times, %s", lockOn(w), w.Waits, roundedMS(w.WaitedMS)), 8)))
+	}
+	if len(shown) < len(res.LockWaitPairs) {
+		e.Out.Printf("    %d more pairs, in af load sql -o json.\n",
+			len(res.LockWaitPairs)-len(shown))
+	}
+	e.Out.Println("")
+	e.Out.Printf("  %s\n", e.Out.S(StyleDim, e.Out.Wrap(res.LockWaitNote, 2)))
+}
+
+// maxLockPairsPrinted bounds the list a terminal gets. The engine keeps more
+// than this and the JSON carries all of them; what is left out is counted on
+// the line under it, because a list that quietly stopped is a list somebody
+// reads as complete.
+const maxLockPairsPrinted = 10
+
+// lockSide names one end of a blocking pair for a reader.
+//
+// Every branch here is a different fact rather than a different formatting of
+// one. A statement is the mix's own label. A holder inside the run with no
+// statement is idle in transaction, which is to say holding its locks and
+// doing nothing, and that is usually the finding. A holder outside the run is
+// somebody else's session, and saying so is what stops a reader looking for a
+// bug in a mix that has none.
+func lockSide(transaction, statement string, inRun bool, state string) string {
+	if !inRun {
+		if state != "" {
+			return "another session on this database, " + state
+		}
+		return "another session on this database"
+	}
+	if statement == "" {
+		if state != "" {
+			return "a client of this run, " + state
+		}
+		return "a client of this run, between statements"
+	}
+	if transaction == "" {
+		return statement
+	}
+	return transaction + " / " + statement
+}
+
+// lockOn says what was queued for, which is the part that tells a reader
+// whether they are looking at a row conflict or a table lock.
+func lockOn(w sqlload.LockWait) string {
+	on := w.LockType
+	if w.Relation != "" {
+		on += " on " + w.Relation
+	}
+	if w.Mode != "" {
+		on += ", " + w.Mode
+	}
+	return on
+}
+
+// roundedMS prints a duration a person reads rather than a float somebody has
+// to divide.
+func roundedMS(ms float64) string {
+	return (time.Duration(ms * float64(time.Millisecond))).Round(time.Millisecond).String()
 }
 
 func describeSQLSource(source string) string {

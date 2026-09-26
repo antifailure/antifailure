@@ -46,6 +46,13 @@ const maxRetries = 3
 // slow enough that the sampling is not itself the load.
 const observeInterval = 200 * time.Millisecond
 
+// LockWaitInterval is that same interval, published because it is the
+// resolution of every contention number this package reports and a surface
+// that prints one of them has to be able to say what it could not see. A
+// second constant holding the same duration would be a sentence that goes
+// wrong the first time somebody tunes the interval.
+const LockWaitInterval = observeInterval
+
 // Options configure one run.
 type Options struct {
 	// URL is the connection string for the branch. It is revealed by the
@@ -190,6 +197,32 @@ type Result struct {
 	BackendsSeen         *int `json:"backends_seen"`
 	// ObserverNote says why the observation is missing, when it is.
 	ObserverNote string `json:"observer_note,omitempty"`
+
+	// LockWaits is how many times one of this run's backends was seen to
+	// START waiting for a lock, and LockWaitMS is one sample interval for
+	// every sample any of them was still waiting in.
+	//
+	// The number this result could not produce before. A deadlock and a
+	// serialization failure END a transaction, so the client sees them and
+	// they were counted; a transaction that merely queued behind another one
+	// committed normally and told nobody. A build that holds a lock a little
+	// longer moves the percentiles and changes no other number here, which is
+	// a regression with no cause attached to it.
+	//
+	// Nil rather than zero when nothing watched, for a sharper reason than
+	// the counts above. Zero contention is the answer everybody wants, so it
+	// is the one an instrument that never ran must not be able to produce.
+	LockWaits  *int     `json:"lock_waits"`
+	LockWaitMS *float64 `json:"lock_wait_ms"`
+	// LockWaitPairs is who waited on whom, worst first, named by the mix's own
+	// statement labels. Nil when nothing watched and empty when nothing
+	// queued, which are the same two answers the pointers above keep apart.
+	LockWaitPairs []LockWait `json:"lock_wait_pairs,omitempty"`
+	// LockWaitNote is what the instrument can and cannot see, and it is
+	// populated on every run rather than only on a failure. A count of waits
+	// with no statement of its resolution is a count somebody reads as a
+	// total.
+	LockWaitNote string `json:"lock_wait_note,omitempty"`
 }
 
 // TransactionResult is one transaction kind's numbers.
@@ -273,9 +306,16 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		return nil, err
 	}
 
+	// Which backend each client holds, and what each one is running, so the
+	// observer can name a blocked statement rather than a pid. Built from the
+	// connections that already exist, before anything executes, so a wait in
+	// the first millisecond of the run is attributable.
+	labelStatements(opts.Mix)
+	live := newStatements(conns)
+
 	// Opened here, beside the clients' own connections, rather than inside the
 	// watching goroutine. See newObserver for the run this ordering cost.
-	obs := newObserver(ctx, opts)
+	obs := newObserver(ctx, opts, live)
 
 	started := opts.Clock.Now()
 	work, stop := context.WithCancel(ctx)
@@ -324,7 +364,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		clients.Add(1)
 		go func(index int, conn *pgx.Conn) {
 			defer clients.Done()
-			runClient(work, opts, index, conn, m)
+			runClient(work, opts, index, conn, m, track{all: live, index: index})
 		}(i, conn)
 	}
 	clients.Wait()
@@ -458,7 +498,7 @@ func readPool(ctx context.Context, conn *pgx.Conn, query string) ([]any, error) 
 const maxPoolValues = 1000
 
 // runClient is one connection's whole life.
-func runClient(ctx context.Context, opts Options, index int, conn *pgx.Conn, m *meter) {
+func runClient(ctx context.Context, opts Options, index int, conn *pgx.Conn, m *meter, tr track) {
 	// One generator per client, seeded from the run's seed and the client's
 	// index, rather than one generator shared between the clients behind a
 	// mutex. The same decision load.PlanScenario makes per session and for the
@@ -490,7 +530,7 @@ func runClient(ctx context.Context, opts Options, index int, conn *pgx.Conn, m *
 		}
 
 		tx := p.next(rng)
-		outcome := runTransaction(ctx, opts.Clock, conn, tx, rng, m)
+		outcome := runTransaction(ctx, opts.Clock, conn, tx, rng, m, tr)
 		if outcome.fatal != "" {
 			m.clientStopped(outcome.fatal)
 			return
@@ -519,7 +559,10 @@ type outcome struct {
 // same work, and drawing new values would also make the value stream depend on
 // how many times a transaction lost a race, which is a timing question: two
 // runs of one seed would bind different values from the first retry onward.
-func runTransaction(ctx context.Context, c clock.Clock, conn *pgx.Conn, tx Transaction, rng *rand.Rand, m *meter) outcome {
+func runTransaction(
+	ctx context.Context, c clock.Clock, conn *pgx.Conn, tx Transaction,
+	rng *rand.Rand, m *meter, tr track,
+) outcome {
 	bound, err := bindAll(tx, rng)
 	if err != nil {
 		// A parameter that cannot produce a value is a mix that should never
@@ -534,7 +577,7 @@ func runTransaction(ctx context.Context, c clock.Clock, conn *pgx.Conn, tx Trans
 			return outcome{}
 		}
 		started := c.Now()
-		err := executeOnce(ctx, c, conn, tx, bound, m)
+		err := executeOnce(ctx, c, conn, tx, bound, m, tr)
 		if err == nil {
 			m.committed(tx.Name, msSince(c, started))
 			return outcome{}
@@ -562,7 +605,10 @@ func runTransaction(ctx context.Context, c clock.Clock, conn *pgx.Conn, tx Trans
 }
 
 // executeOnce runs the statements of one transaction inside one BEGIN.
-func executeOnce(ctx context.Context, c clock.Clock, conn *pgx.Conn, tx Transaction, bound [][]any, m *meter) error {
+func executeOnce(
+	ctx context.Context, c clock.Clock, conn *pgx.Conn, tx Transaction,
+	bound [][]any, m *meter, tr track,
+) error {
 	dbTx, err := conn.Begin(ctx)
 	if err != nil {
 		return err
@@ -570,7 +616,15 @@ func executeOnce(ctx context.Context, c clock.Clock, conn *pgx.Conn, tx Transact
 	for i, st := range tx.Statements {
 		args := bound[i]
 		started := c.Now()
+		// Published before the statement is sent and withdrawn after it
+		// returns, which is exactly the window in which this backend can be
+		// found waiting for a lock. Between two statements the client
+		// publishes nothing, and that nothing is the answer: a backend idle
+		// in transaction is holding its locks and running no statement to
+		// name.
+		tr.begin(st.ref)
 		tag, err := dbTx.Exec(ctx, st.SQL, args...)
+		tr.end()
 		if err != nil {
 			// The run ending is not the statement failing, and the check is
 			// here because runTransaction already makes exactly this decision

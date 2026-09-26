@@ -190,7 +190,7 @@ export const KIND_FACTS: Record<
     reproducible:
       "Exactly, as a sequence. The same mix at the same seed picks the same transactions in the same order on every client. What it does not reproduce is the values a derived mix binds: the statistics normalise them away, so it generates values of the types the server reported.",
     measures:
-      "Transactions per second and transaction latency, the cost of each statement, deadlocks and retries, and how many of its own backends the server had inside a transaction at once.",
+      "Transactions per second and transaction latency, the cost of each statement, deadlocks and retries, how many of its own backends the server had inside a transaction at once, and the lock waits it was seen to suffer.",
   },
 };
 
@@ -920,6 +920,16 @@ export interface RunResult {
    *  the second as the first. */
   peakOpenTransactions: number | null;
   backendsSeen: number | null;
+  /** What the run was seen to WAIT for, read from the wait queues by the same
+   *  connection while it ran. A deadlock and a serialization failure end a
+   *  transaction, so they were always countable; a transaction that merely
+   *  queued committed normally and left no trace, which is why a slower build
+   *  could never say it was slower because it blocked. Null is nobody
+   *  watched, and it is a different answer from zero with more riding on it:
+   *  zero is the most reassuring number on this page and a page that drew a
+   *  null as a zero would print it about a run nothing measured. */
+  lockWaits: number | null;
+  lockWaitMs: number | null;
 
   durationMs: number | null;
   /** Where the traffic mix came from, so a reader can tell production's shape
@@ -972,6 +982,8 @@ export function readResult(v: unknown): RunResult | null {
     tps: num(o.tps),
     peakOpenTransactions: num(pick(o, "peak_open_transactions", "peakOpenTransactions")),
     backendsSeen: num(pick(o, "backends_seen", "backendsSeen")),
+    lockWaits: num(pick(o, "lock_waits", "lockWaits")),
+    lockWaitMs: num(pick(o, "lock_wait_ms", "lockWaitMs")),
     durationMs: num(pick(o, "duration_ms", "durationMs")),
     source: str(o.source),
     errorReasons: readErrorReasons(pick(o, "error_reasons", "errorReasons")),

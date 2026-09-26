@@ -961,6 +961,17 @@ func TestTheObserverCanBeTurnedOffAndTheResultSaysItWasNotMeasured(t *testing.T)
 	require.Nil(t, res.PeakOpenTransactions)
 	require.Nil(t, res.BackendsSeen)
 	require.Contains(t, res.ObserverNote, "never sampled")
+
+	// The contention numbers take the same arm, because they are the ones
+	// where the mistake is expensive. A zero here would read as "this build
+	// blocked nothing", which is the most reassuring thing this result can
+	// say, produced by an instrument that never ran.
+	require.Nil(t, res.LockWaits, "an unmeasured run reported as having queued nothing")
+	require.Nil(t, res.LockWaitMS)
+	require.Nil(t, res.LockWaitPairs)
+	require.Contains(t, res.LockWaitNote, "says nothing about whether it blocked")
+	require.NotContains(t, res.LockWaitNote, "pg_blocking_pids",
+		"an unwatched run carried the instrument's limits as though it had run")
 }
 
 // TestThinkTimeDelaysTheClientAndStaysOutOfTheLatency makes two claims and
@@ -1037,4 +1048,197 @@ func keys(m map[string]int) []string {
 
 func randomUUIDForTest(i int) string {
 	return fmt.Sprintf("00000000-0000-4000-8000-%012d", i)
+}
+
+// The lock contention tests, and the reason they are here rather than beside a
+// fake.
+//
+// The claim is that the run can say WHO WAITED FOR WHOM while it was going.
+// Every part of that is the server's: which backend is in a lock queue, which
+// backends are in front of it, what kind of lock it is and which relation it
+// names. A fake would let the aggregation pass while proving nothing about
+// pg_blocking_pids, which is the one call in this instrument that this
+// repository had never made before.
+//
+// Three cases, and the middle one is the one that makes the other two mean
+// anything. A test that only ever runs the contended case has proved the
+// instrument can say yes; a test that only runs the quiet one has proved it
+// can stay silent. Both are needed, plus the run where nobody watched at all,
+// because "no contention" and "not measured" are the pair this result exists
+// to keep apart.
+
+// contendingMix is one row, taken and then held, so every client after the
+// first has to queue for it.
+//
+// pg_sleep INSIDE the transaction rather than think time between them. Think
+// time happens after COMMIT, when the row lock is already gone, so a mix that
+// used it would produce a run with no contention at all. The hold is 300ms
+// against a 200ms sample interval, which is what makes the wait visible: a
+// wait shorter than the interval is exactly what this instrument says it
+// cannot see.
+func contendingMix(t *testing.T) *sqlload.Mix {
+	t.Helper()
+	mix, _, err := sqlload.ParseScript([]byte(`
+sql_workload: everybody wants row one
+transactions:
+  - transaction: bump the counter
+    statements:
+      - {label: take the row, sql: "UPDATE counters SET n = n + 1 WHERE id = 1"}
+      - {label: hold it, sql: "SELECT pg_sleep(0.3)"}
+`))
+	require.NoError(t, err)
+	return mix
+}
+
+// TestLockContentionInsideTheRunIsSeenAndBothStatementsAreNamed is the yes arm.
+func TestLockContentionInsideTheRunIsSeenAndBothStatementsAreNamed(t *testing.T) {
+	url, _ := database(t)
+	res, err := sqlload.Run(context.Background(), sqlload.Options{
+		URL: url, Mix: contendingMix(t), Clients: 3, Duration: 3 * time.Second,
+		Seed: 11, Clock: clock.New(),
+	})
+	require.NoError(t, err)
+
+	require.NotNilf(t, res.LockWaits,
+		"nothing read the wait queues, so this run proves nothing: %s", res.LockWaitNote)
+	require.Positive(t, *res.LockWaits,
+		"three clients queueing for one row for three seconds never waited, so either "+
+			"they did not overlap or the wait was not seen")
+	require.NotNil(t, res.LockWaitMS)
+	require.Positive(t, *res.LockWaitMS)
+	require.NotEmpty(t, res.LockWaitPairs, "waits were counted and no pair was named")
+
+	// The pair is the part a person acts on, so it is asserted by name rather
+	// than by count. A number that says contention happened and cannot say
+	// between what is a number nobody can do anything with.
+	var found bool
+	for _, w := range res.LockWaitPairs {
+		if w.BlockedStatement != "take the row" {
+			continue
+		}
+		require.Equal(t, "bump the counter", w.BlockedTransaction)
+		require.True(t, w.BlockingInRun,
+			"the holder was one of this run's own clients and was reported as a stranger")
+		require.Positive(t, w.Waits)
+		require.Positive(t, w.WaitedMS)
+		// A row conflict queues on the holder's transaction id, and a second
+		// waiter queues behind the first on a tuple lock. Either is the truth
+		// about this mix and neither is a relation lock, which is the whole
+		// reason this sampler does not filter on locktype the way the
+		// migration rehearsal's does.
+		require.Contains(t, []string{"transactionid", "tuple"}, w.LockType)
+		if w.BlockingStatement != "" {
+			// Either label, and the second one is a finding rather than a
+			// looseness in this assertion. Three clients queue in a chain: the
+			// one at the front is holding the row while it sleeps, and the one
+			// behind it is itself blocked on "take the row" while a third
+			// queues behind both. pg_blocking_pids reports every backend in
+			// front, so a blocked backend correctly appears as a blocker. An
+			// assertion that allowed only the sleeper would be asserting that
+			// the chain does not exist.
+			require.Contains(t, []string{"hold it", "take the row"}, w.BlockingStatement,
+				"the holder was named as a statement this mix does not contain")
+		}
+		found = true
+	}
+	require.True(t, found,
+		"no pair named the statement that was waiting, so the join to the mix's own "+
+			"labels did not happen")
+
+	require.Contains(t, res.LockWaitNote, "pg_blocking_pids")
+	require.Contains(t, res.LockWaitNote, "floors rather than totals")
+
+	t.Logf("%d waits, %.0f backend ms waiting, %d pairs",
+		*res.LockWaits, *res.LockWaitMS, len(res.LockWaitPairs))
+	for _, w := range res.LockWaitPairs {
+		t.Logf("  %q waited on %q (%s, holder %s, in run %v) %s %d times, %.0fms",
+			w.BlockedStatement, w.BlockingStatement, w.LockType, w.BlockingState,
+			w.BlockingInRun, w.Mode, w.Waits, w.WaitedMS)
+	}
+}
+
+// TestAWorkloadThatNeverQueuedReportsNoWaitsRatherThanNoAnswer is the no arm.
+//
+// The same instrument, the same number of clients, a mix of reads that take
+// only AccessShareLock and conflict with nothing. It has to come back with a
+// zero that is a MEASUREMENT: a nil here would mean the yes arm above proved
+// only that the instrument fires, not that it fires on contention.
+func TestAWorkloadThatNeverQueuedReportsNoWaitsRatherThanNoAnswer(t *testing.T) {
+	url, _ := database(t)
+	res, err := sqlload.Run(context.Background(), sqlload.Options{
+		URL: url, Mix: readMix(t), Clients: 3, Duration: 2 * time.Second,
+		Seed: 12, Clock: clock.New(),
+	})
+	require.NoError(t, err)
+
+	require.Positive(t, res.Transactions, "a run that did nothing cannot say it did not queue")
+	require.NotNilf(t, res.LockWaits,
+		"the wait queues were never read, so this is not a zero: %s", res.LockWaitNote)
+	require.Zero(t, *res.LockWaits,
+		"reads that conflict with nothing were reported as having queued")
+	require.NotNil(t, res.LockWaitMS)
+	require.Zero(t, *res.LockWaitMS)
+	require.Empty(t, res.LockWaitPairs)
+	require.Equal(t, sqlload.LockWaitBound, res.LockWaitNote,
+		"a clean run has to carry the instrument's own limits, not a failure note")
+}
+
+// TestARunBlockedFromOutsideItselfDoesNotReportItAsItsOwn is the attribution.
+//
+// A session that is not part of the run takes the row and sits on it. Every
+// client then waits on a stranger, and the report has to say so: the WAITER is
+// this run's, because the query asks about nobody else's backends, and the
+// HOLDER is not, because it was not one of the clients. A pair that claimed
+// the run blocked itself here would be blaming the mix for somebody else's
+// open transaction, which is the wrong fix printed confidently.
+func TestARunBlockedFromOutsideItselfDoesNotReportItAsItsOwn(t *testing.T) {
+	url, outsider := database(t)
+	ctx := context.Background()
+
+	held, err := outsider.Begin(ctx)
+	require.NoError(t, err)
+	_, err = held.Exec(ctx, "UPDATE counters SET n = n + 1 WHERE id = 1")
+	require.NoError(t, err)
+
+	// Released part way through, so the run still commits something and this
+	// test is not silently measuring a run that did nothing at all.
+	var release sync.WaitGroup
+	release.Add(1)
+	go func() {
+		defer release.Done()
+		time.Sleep(1200 * time.Millisecond)
+		_ = held.Rollback(ctx)
+	}()
+
+	res, err := sqlload.Run(ctx, sqlload.Options{
+		URL: url, Mix: contendingMix(t), Clients: 2, Duration: 3 * time.Second,
+		Seed: 13, Clock: clock.New(),
+	})
+	release.Wait()
+	require.NoError(t, err)
+
+	require.NotNilf(t, res.LockWaits, "nothing read the wait queues: %s", res.LockWaitNote)
+	require.Positive(t, *res.LockWaits)
+
+	var stranger bool
+	for _, w := range res.LockWaitPairs {
+		if w.BlockingInRun {
+			continue
+		}
+		stranger = true
+		require.Empty(t, w.BlockingStatement,
+			"a backend outside the run was given one of this mix's statement labels")
+		require.NotEmpty(t, w.BlockingState,
+			"the holder was outside the run, so its state is the only thing that can "+
+				"say what it was doing")
+	}
+	require.True(t, stranger,
+		"an outside session held the row for more than a second and every wait was "+
+			"attributed to the run's own clients")
+
+	t.Logf("%d waits while an outside session held the row", *res.LockWaits)
+	for _, w := range res.LockWaitPairs {
+		t.Logf("  %q waited on in-run=%v state=%q %s %s, %d times",
+			w.BlockedStatement, w.BlockingInRun, w.BlockingState, w.LockType, w.Mode, w.Waits)
+	}
 }

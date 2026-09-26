@@ -72,6 +72,10 @@ const (
 	maxSQLTransactionsReported = 20
 	maxSQLStatementsReported   = 30
 	maxSQLRefusedReported      = 20
+	// The blocking pairs are bounded the same way. The engine already caps
+	// what one run keeps; this is the second cap, on what a model is handed,
+	// and the total is reported beside it so a truncation is never silent.
+	maxSQLLockPairsReported = 12
 )
 
 // sqlWorkloadRequest is one workload, already validated and bounded.
@@ -140,6 +144,12 @@ func newRunSQLWorkloadTool(p *Project, eng *Engine, send sendSQLWorkload) *Tool 
 			"transaction at one instant, read from pg_stat_activity while the run was " +
 			"going: N clients are not N concurrent sessions and that number is the " +
 			"evidence rather than the claim. " +
+			"The same connection asks pg_blocking_pids which of those backends were " +
+			"waiting for a lock and which ones were in front of them, so the result " +
+			"carries the contention the run was under and names the blocked statement " +
+			"and the statement that blocked it. Sampled, so the counts are floors " +
+			"rather than totals, and a run nothing watched reports that rather than a " +
+			"zero: no contention and not measured are different answers. " +
 			"Nothing reaches production and no production credential is used. " +
 			"Bring an environment up first with start_environment; without one this " +
 			"reports INCONCLUSIVE rather than a clean result, and so does a project " +
@@ -514,6 +524,21 @@ func sqlWorkloadMetrics(out sqlWorkloadOutcome, breaches []sqlload.Breach) []Met
 			Name: "backends_seen", Value: float64(*res.BackendsSeen), Unit: "backends",
 		})
 	}
+	// The contention, under the same rule and with more riding on it. A zero
+	// here reads as "this build blocked nothing", which is the most
+	// reassuring thing this tool can say, so it is emitted only when a
+	// sample actually landed. The note beside the numbers carries what the
+	// sampling could not see.
+	if res.LockWaits != nil {
+		metrics = append(metrics, Metric{
+			Name: "lock_waits", Value: float64(*res.LockWaits), Unit: "waits",
+		})
+	}
+	if res.LockWaitMS != nil {
+		metrics = append(metrics, Metric{
+			Name: "lock_wait_ms", Value: *res.LockWaitMS, Unit: "backend milliseconds",
+		})
+	}
 	if len(breaches) > 0 {
 		zero := 0.0
 		metrics = append(metrics, Metric{
@@ -597,6 +622,7 @@ type sqlWorkloadDoc struct {
 	Refused           []sqlRefusedDoc     `json:"refused_statements,omitempty"`
 	RefusedTotal      int                 `json:"refused_total"`
 	Observation       sqlObservationDoc   `json:"concurrency_observed"`
+	Contention        sqlContentionDoc    `json:"lock_contention"`
 	Thresholds        sqlThresholdsDoc    `json:"thresholds"`
 	Breaches          []sqlBreachDoc      `json:"breaches,omitempty"`
 	Notes             []string            `json:"notes,omitempty"`
@@ -652,6 +678,45 @@ type sqlObservationDoc struct {
 	PeakActiveBackends   *int   `json:"peak_executing_backends,omitempty"`
 	BackendsSeen         *int   `json:"backends_seen,omitempty"`
 	Note                 string `json:"note,omitempty"`
+}
+
+// sqlContentionDoc is what the run was seen to wait for.
+//
+// Observed is a boolean beside the pointers rather than a thing to infer from
+// them, because a model given a missing field will supply the friendliest
+// value for it. Zero waits and an unwatched run have to be two different
+// sentences here, and Note is what makes the second one impossible to read as
+// the first.
+type sqlContentionDoc struct {
+	Observed   bool     `json:"observed"`
+	LockWaits  *int     `json:"lock_waits,omitempty"`
+	LockWaitMS *float64 `json:"lock_wait_ms,omitempty"`
+	// PairsTotal is how many distinct blocking pairs the run kept and Pairs is
+	// the worst of them, so a truncated list cannot be read as the whole.
+	PairsTotal int              `json:"blocking_pairs_total"`
+	Pairs      []sqlLockPairDoc `json:"blocking_pairs,omitempty"`
+	Note       string           `json:"note"`
+}
+
+// sqlLockPairDoc is one blocked statement and the statement in front of it.
+//
+// The labels come from the mix, which is repository content read by a model,
+// so they are neutralised and clipped the way every other label in this file
+// is. The lock type, the mode and the relation name come from the server's own
+// catalogue and are neutralised for the same reason: a relation can be named
+// anything a customer's migration called it.
+type sqlLockPairDoc struct {
+	BlockedTransaction  string  `json:"blocked_transaction,omitempty"`
+	BlockedStatement    string  `json:"blocked_statement,omitempty"`
+	BlockingTransaction string  `json:"blocking_transaction,omitempty"`
+	BlockingStatement   string  `json:"blocking_statement,omitempty"`
+	BlockingState       string  `json:"blocking_state,omitempty"`
+	BlockingInRun       bool    `json:"blocking_in_run"`
+	Relation            string  `json:"relation,omitempty"`
+	LockType            string  `json:"lock_type"`
+	Mode                string  `json:"mode"`
+	Waits               int     `json:"waits"`
+	WaitedMS            float64 `json:"waited_ms"`
 }
 
 type sqlThresholdsDoc struct {
@@ -784,6 +849,14 @@ func describeSQLWorkload(
 		doc.Observation.Note = "Read from pg_stat_activity while the run was going. This is " +
 			"how many of this run's own backends the server had inside a transaction at " +
 			"one instant, which is the evidence that the clients really overlapped."
+	}
+
+	doc.Contention = describeSQLContention(res)
+	if doc.Contention.PairsTotal > len(doc.Contention.Pairs) {
+		doc.Notes = append(doc.Notes, fmt.Sprintf(
+			"%d distinct blocking pairs were seen and the %d that cost the most waiting "+
+				"are shown. Read the rest with af load sql -o json.",
+			doc.Contention.PairsTotal, len(doc.Contention.Pairs)))
 	}
 
 	for _, b := range breaches {
@@ -929,4 +1002,44 @@ func (f *orchestratorFactory) sendSQLWorkload(
 	return sqlWorkloadOutcome{
 		Result: res, Plan: plan, MeanIncrease: meanIncrease, ErrorRate: errorRate,
 	}, nil
+}
+
+// describeSQLContention renders the wait queue reading for a model.
+//
+// The unwatched run is written out as a sentence rather than left as an
+// absence. A model handed a result with no contention section will say the run
+// found no contention, which is the single most reassuring thing it could say
+// and would be an invention. Observed false plus a note that says so is what
+// makes that sentence unavailable.
+func describeSQLContention(res *sqlload.Result) sqlContentionDoc {
+	out := sqlContentionDoc{
+		Observed:   res.LockWaits != nil,
+		LockWaits:  res.LockWaits,
+		LockWaitMS: res.LockWaitMS,
+		PairsTotal: len(res.LockWaitPairs),
+		Note:       neutralize(res.LockWaitNote, 800),
+	}
+	if !out.Observed {
+		return out
+	}
+	pairs := res.LockWaitPairs
+	if len(pairs) > maxSQLLockPairsReported {
+		pairs = pairs[:maxSQLLockPairsReported]
+	}
+	for _, w := range pairs {
+		out.Pairs = append(out.Pairs, sqlLockPairDoc{
+			BlockedTransaction:  neutralize(w.BlockedTransaction, 128),
+			BlockedStatement:    neutralize(w.BlockedStatement, 128),
+			BlockingTransaction: neutralize(w.BlockingTransaction, 128),
+			BlockingStatement:   neutralize(w.BlockingStatement, 128),
+			BlockingState:       neutralize(w.BlockingState, 64),
+			BlockingInRun:       w.BlockingInRun,
+			Relation:            neutralize(w.Relation, 128),
+			LockType:            neutralize(w.LockType, 64),
+			Mode:                neutralize(w.Mode, 64),
+			Waits:               w.Waits,
+			WaitedMS:            w.WaitedMS,
+		})
+	}
+	return out
 }

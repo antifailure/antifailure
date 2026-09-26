@@ -273,6 +273,8 @@ describe("a report an engine actually sent", () => {
       tps: 'tps',
       peak_open_transactions: 'peakOpenTransactions',
       backends_seen: 'backendsSeen',
+      lock_waits: 'lockWaits',
+      lock_wait_ms: 'lockWaitMs',
       findings: 'findings',
       duration_ms: 'durationMs',
       source: 'source',
@@ -358,6 +360,12 @@ describe("a report an engine actually sent", () => {
     // What the SERVER reported, rather than the client count above it.
     assert.equal(report.aggregate.peakOpenTransactions, 8)
     assert.equal(report.aggregate.backendsSeen, 8)
+    // The contention, which is the number that says WHY a slower run was
+    // slower. A deadlock ends a transaction and was always countable; a
+    // transaction that merely queued committed normally and left no trace
+    // anywhere else in this aggregate.
+    assert.equal(report.aggregate.lockWaits, 14)
+    assert.equal(report.aggregate.lockWaitMs, 5600)
     // The percentiles are a transaction's latency here and they live in the
     // same five columns, because a percentile is a percentile.
     assert.equal(report.aggregate.p50Ms, 22.4)
@@ -408,6 +416,28 @@ describe("a report an engine actually sent", () => {
     const zeroed = decodeReport('sql_workload', { ...payload, result: flat })
     assert.equal(zeroed.aggregate.peakOpenTransactions, 0)
     assert.equal(zeroed.aggregate.backendsSeen, 0)
+  })
+
+  it('an unwatched SQL run reports no contention rather than none', () => {
+    // The same flattening, on the pair where it is worst. "This build blocked
+    // nothing" is the most reassuring sentence the stored history can carry,
+    // so a run whose wait queues were never read must arrive as null. A `?? 0`
+    // anywhere on this path would hand every unwatched run a clean bill of
+    // health, and the comparison would then read the first watched run as a
+    // regression away from it.
+    const payload = wire('sql-workload')
+    const unwatched = { ...sent(payload), lock_waits: null, lock_wait_ms: null }
+    const report = decodeReport('sql_workload', { ...payload, result: unwatched })
+    assert.equal(report.aggregate.lockWaits, null)
+    assert.equal(report.aggregate.lockWaitMs, null)
+
+    // And the zero, which is a measurement: this run was watched and never
+    // queued. A decoder that dropped the column would pass the two assertions
+    // above and fail these two.
+    const quiet = { ...sent(payload), lock_waits: 0, lock_wait_ms: 0 }
+    const measured = decodeReport('sql_workload', { ...payload, result: quiet })
+    assert.equal(measured.aggregate.lockWaits, 0)
+    assert.equal(measured.aggregate.lockWaitMs, 0)
   })
 
   it('the fixtures are the real wire and not a document this suite invented', () => {

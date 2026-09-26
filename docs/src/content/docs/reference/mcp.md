@@ -398,8 +398,9 @@ that ran nothing and reported green is a check everybody believes is running.
 
 Runs a concurrent SQL workload against the branch's database and reports
 transactions per second, transaction and per statement latency percentiles,
-deadlocks, serialization failures, retries and the rows the statements actually
-touched. This is `af load sql` on this surface.
+deadlocks, serialization failures, retries, the rows the statements actually
+touched, and the lock waits it was seen to suffer with the blocking pairs named.
+This is `af load sql` on this surface.
 
 Use it rather than `run_load_test` for a change to an index, a lock, a storage
 parameter or a query. `run_load_test` sends HTTP traffic, so the number it

@@ -1143,6 +1143,12 @@ export const workloadRunResults = pgTable('workload_run_results', {
    *  looked, which is a different answer from zero. */
   peakOpenTransactions: integer('peak_open_transactions'),
   backendsSeen: integer('backends_seen'),
+  /** The contention the run was seen to suffer, added by 0049. Null means
+   *  nothing read the wait queues, which is a different answer from zero and
+   *  the one that matters most: zero lock waits is the most reassuring thing
+   *  a stored run can say. */
+  lockWaits: integer('lock_waits'),
+  lockWaitMs: doublePrecision('lock_wait_ms'),
   durationMs: doublePrecision('duration_ms'),
   source: text('source'),
   errorReasons: jsonb('error_reasons').notNull().default({}),

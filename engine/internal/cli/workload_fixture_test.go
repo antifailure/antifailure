@@ -94,6 +94,12 @@ func sqlWorkloadResult(t *testing.T) *workload.Result {
 	require.NoError(t, err)
 
 	peak, seen := 8, 8
+	// The contention carries NUMBERS in this fixture rather than nulls, and
+	// that is the point of a seam fixture. The control plane's decoder is
+	// tested against these bytes, and a fixture whose every new field is null
+	// proves only that the decoder tolerates an absence: it would have passed
+	// against a decoder that dropped the column on the floor.
+	lockWaits, lockWaitMS := 14, 5600.0
 	res, err := workload.Execute(context.Background(), workload.Options{
 		Plan: plan,
 		Runner: &fixtureRunner{
@@ -142,6 +148,17 @@ func sqlWorkloadResult(t *testing.T) *workload.Result {
 						"replaying it would write values nobody chose",
 				}},
 				PeakActiveBackends: &peak, PeakOpenTransactions: &peak, BackendsSeen: &seen,
+				LockWaits: &lockWaits, LockWaitMS: &lockWaitMS,
+				LockWaitPairs: []sqlload.LockWait{{
+					BlockedTransaction:  "UPDATE orders SET status = $1 WHERE id = $2",
+					BlockedStatement:    "UPDATE orders SET status = $1 WHERE id = $2",
+					BlockingTransaction: "UPDATE orders SET status = $1 WHERE id = $2",
+					BlockingStatement:   "UPDATE orders SET status = $1 WHERE id = $2",
+					BlockingState:       "active", BlockingInRun: true,
+					LockType: "transactionid", Mode: "ShareLock",
+					Waits: 9, WaitedMS: 4200,
+				}},
+				LockWaitNote: sqlload.LockWaitBound,
 			},
 			meanIncrease: 0.25,
 			errorRate:    0.01,

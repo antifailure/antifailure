@@ -475,7 +475,8 @@ export const MCP_TOOLS: readonly McpToolFact[] = [
       'itself. Clients on their own connections run whole transactions directly against the ' +
       'branch\'s database rather than through the application, and it reports transactions per ' +
       'second, transaction and per statement latency percentiles, deadlocks, serialization ' +
-      'failures, retries and the rows the statements actually touched.',
+      'failures, retries, the rows the statements actually touched, and the lock waits it was ' +
+      'seen to suffer with the blocking pairs named.',
     refuses:
       'Its arguments name no connection string, branch, statement, source or threshold; the ' +
       'statements come from the manifest\'s load.sql block or from pg_stat_statements on the ' +

@@ -53,6 +53,7 @@ func sqlProject() *Project {
 // else is not silently testing the unverified branch.
 func sqlResult() *sqlload.Result {
 	seen, open, active := 8, 6, 4
+	waits, waitMS := 9, 3400.0
 	return &sqlload.Result{
 		Source: "declared", Clients: 8, Duration: 60 * time.Second,
 		Transactions: 4200, TransactionsFailed: 3, Retries: 11,
@@ -70,6 +71,14 @@ func sqlResult() *sqlload.Result {
 			Rows: 2100, Latency: load.Latency{P95Ms: 12},
 		}},
 		BackendsSeen: &seen, PeakOpenTransactions: &open, PeakActiveBackends: &active,
+		LockWaits: &waits, LockWaitMS: &waitMS, LockWaitNote: sqlload.LockWaitBound,
+		LockWaitPairs: []sqlload.LockWait{{
+			BlockedTransaction: "checkout", BlockedStatement: "select order",
+			BlockingTransaction: "checkout", BlockingStatement: "select order",
+			BlockingState: "idle in transaction", BlockingInRun: true,
+			Relation: "orders", LockType: "transactionid", Mode: "ShareLock",
+			Waits: 6, WaitedMS: 2200,
+		}},
 	}
 }
 
@@ -670,4 +679,75 @@ func (h *sqlHarness) call(t *testing.T, name string, args map[string]any) map[st
 	sc, ok := result["structuredContent"].(map[string]any)
 	require.Truef(t, ok, "no structured content in %v", result)
 	return sc
+}
+
+// TestSQLWorkloadContention_KeepsNoContentionApartFromNotMeasured.
+//
+// The same rule the observation above follows, on the pair of numbers where
+// getting it wrong is most expensive. "This build blocked nothing" is the most
+// reassuring sentence this tool can hand a model, so it has to be unavailable
+// to a run whose wait queues were never read. A missing section is not enough:
+// a model given no contention section will supply the friendly value itself,
+// which is why Observed is a field and the note is always written.
+func TestSQLWorkloadContention_KeepsNoContentionApartFromNotMeasured(t *testing.T) {
+	t.Parallel()
+	out := sqlOutcome()
+	out.Result.LockWaits, out.Result.LockWaitMS, out.Result.LockWaitPairs = nil, nil, nil
+	out.Result.LockWaitNote = "nothing watched the wait queues, so this run says nothing " +
+		"about whether it blocked"
+
+	names := metricNames(sqlWorkloadMetrics(out, nil))
+	require.NotContains(t, names, "lock_waits",
+		"an unwatched run emitted a lock wait metric, which a reader reads as zero")
+	require.NotContains(t, names, "lock_wait_ms")
+
+	doc := describeSQLWorkload(out, nil, false)
+	require.False(t, doc.Contention.Observed)
+	require.Nil(t, doc.Contention.LockWaits)
+	require.Empty(t, doc.Contention.Pairs)
+	require.Contains(t, doc.Contention.Note, "says nothing about whether it blocked")
+
+	// The other direction, or an implementation that dropped the contention
+	// section altogether would pass every assertion above.
+	watched := sqlOutcome()
+	watchedNames := metricNames(sqlWorkloadMetrics(watched, nil))
+	require.Contains(t, watchedNames, "lock_waits")
+	require.Contains(t, watchedNames, "lock_wait_ms")
+
+	got := describeSQLWorkload(watched, nil, false)
+	require.True(t, got.Contention.Observed)
+	require.Equal(t, 9, *got.Contention.LockWaits)
+	require.InDelta(t, 3400, *got.Contention.LockWaitMS, 1e-9)
+	require.Len(t, got.Contention.Pairs, 1)
+	require.Equal(t, "select order", got.Contention.Pairs[0].BlockedStatement)
+	require.Equal(t, "idle in transaction", got.Contention.Pairs[0].BlockingState)
+	require.Equal(t, "orders", got.Contention.Pairs[0].Relation)
+	require.True(t, got.Contention.Pairs[0].BlockingInRun)
+	require.Contains(t, got.Contention.Note, "pg_blocking_pids",
+		"a measured run has to carry what the instrument could not see")
+}
+
+// TestSQLWorkloadContention_AZeroIsAMeasurementAndIsReported.
+//
+// The arm that makes the one above mean something. A watched run that never
+// queued must emit the metric WITH a zero, because that zero is a finding: it
+// is the evidence a build did not block. An implementation that emitted the
+// metric only when it was positive would look identical to the correct one in
+// every test that only ever ran a contended fixture.
+func TestSQLWorkloadContention_AZeroIsAMeasurementAndIsReported(t *testing.T) {
+	t.Parallel()
+	out := sqlOutcome()
+	none, noneMS := 0, 0.0
+	out.Result.LockWaits, out.Result.LockWaitMS = &none, &noneMS
+	out.Result.LockWaitPairs = []sqlload.LockWait{}
+
+	names := metricNames(sqlWorkloadMetrics(out, nil))
+	require.Contains(t, names, "lock_waits",
+		"a run that was watched and never queued reported nothing, so its zero is lost")
+	require.Contains(t, names, "lock_wait_ms")
+
+	doc := describeSQLWorkload(out, nil, false)
+	require.True(t, doc.Contention.Observed)
+	require.Equal(t, 0, *doc.Contention.LockWaits)
+	require.Zero(t, doc.Contention.PairsTotal)
 }

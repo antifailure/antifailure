@@ -780,6 +780,11 @@ func projectSQL(res *Result, out *sqlload.Result) {
 	// throw the distinction away one layer before the console.
 	m.PeakOpenTransactions = out.PeakOpenTransactions
 	m.BackendsSeen = out.BackendsSeen
+	// The contention, carried by pointer for the same reason and with more at
+	// stake: a null flattened to zero here would be a claim that this build
+	// blocked nothing, made by a run nobody watched.
+	m.LockWaits = out.LockWaits
+	m.LockWaitMs = out.LockWaitMS
 	if len(out.Errors) > 0 {
 		m.Errors = out.Errors
 	}
