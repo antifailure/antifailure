@@ -16,7 +16,7 @@ export function Migrations() {
           <Heading
             icon="migrations"
             label="Migration Safety"
-            title="<strong>Your agent writes the migration.</strong> Antifailure shows what it does to the database."
+            title="<strong>Catch the migration that stalls your app.</strong> Your agent can rehearse it before you deploy."
           />
           <div className="relative mt-14 min-w-0 max-xl:mt-12 max-lg:mt-10 max-md:mt-8 max-sm:mt-11">
             <MigrationEvidence />

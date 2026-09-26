@@ -16,7 +16,7 @@ export function Firewall() {
           <Heading
             icon="firewall"
             label="Side-Effect Firewall"
-            title="<strong>Test payments and messages safely.</strong> Route external calls to sandboxes, mocks, or a captured inbox. Unlisted destinations stay blocked."
+            title="<strong>Test payments without charging customers.</strong> Check emails without sending them to users."
           />
           <div className="mt-8 max-xl:mt-6 max-lg:mt-5">
             <FailClosedScene />

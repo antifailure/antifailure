@@ -1,7 +1,6 @@
 import { Button } from "@/components/layout/Button";
 import { Container } from "@/components/layout/Container";
 import { SectionLabel } from "@/components/layout/SectionLabel";
-import { CopyCodeButton } from "./media/CopyCodeButton";
 import { HeroDemoVideo } from "./HeroDemoVideo";
 import { HeroFilm } from "./media/HeroFilm";
 import { HeroServices } from "./HeroServices";
@@ -9,7 +8,7 @@ import { HeroServices } from "./HeroServices";
 export function Hero() {
   return (
     <section className="hero relative mt-16 safe-paddings max-xl:mt-14">
-      <Container className="relative z-30 pt-64 pb-10 max-xl:pt-48 max-lg:pt-40 max-md:pt-32 max-md:pb-8" size="1600">
+      <Container className="relative z-30 pt-[var(--hero-top)] pb-10 max-xl:pt-54 max-lg:pt-52 max-md:pt-53 max-md:pb-8" size="1600">
         <SectionLabel>Deployment testing for coding agents</SectionLabel>
         <h1 className="mt-5 max-w-[1240px] text-[68px] leading-dense tracking-tighter max-xl:max-w-[1100px] max-xl:text-[60px] max-lg:max-w-[920px] max-lg:text-[48px] max-md:mt-4 max-md:max-w-full max-md:text-[42px] max-sm:text-[32px]">
           <span className="whitespace-nowrap max-xl:whitespace-normal">
@@ -18,22 +17,6 @@ export function Hero() {
           <br className="max-xl:hidden" />{" "}
           on a disposable production twin.
         </h1>
-        {/* The free path first, because it needs nothing from us at all. The
-            primary button used to be "Request access", which led to an
-            invitation wall, so the page pitched a product and then pointed at
-            a locked door. The engine is MIT licensed and the quickstart needs
-            no account, so that is the action, and the install line under it is
-            the first command of it rather than a third call to action.
-            The button beside it went through "Request hosted access" and then
-            "Create an account", and the second outlived its truth: self-serve
-            is off, so a stranger cannot create an organization on their own,
-            and the way into the hosted plane is a booked demo. So it says
-            "Request a demo" and leads to the page that books one. */}
-        {/* THREE CONTROLS ON ONE LINE. The install command sat on its own row
-            below the two buttons, square where they are round, which read as a
-            leftover rather than as the third thing you can do here. It is the
-            first command of the quickstart beside it, so it belongs beside it.
-            Below `md` all three stack full width, as the buttons already did. */}
         <div className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-3 max-lg:mt-7 max-lg:gap-x-4 max-md:flex-col max-md:items-stretch max-md:gap-y-3 max-md:[&_a]:w-full">
           <Button href="/request-demo" theme="filled">
             Request a demo
@@ -41,25 +24,12 @@ export function Hero() {
           <Button href="/docs/reference/mcp" theme="outlined">
             Connect your agent
           </Button>
-          {/* No fill and no border of its own: the variant now carries Button's
-              outlined theme, so this only has to stop being 34.2% of the row. */}
-          <CopyCodeButton variant="white" className="w-auto max-w-full max-xl:w-auto max-md:w-full" />
         </div>
-        {/* The state of the product, worded to match the pricing page rather
-            than beside it: two descriptions of one product state is how the
-            first of them goes stale.
-
-            The two sentences are in the order a visitor needs them: what they
-            can have today with no account, then how the hosted plane is
-            reached now that self-serve is off. */}
-        <p className="mt-5 max-w-[760px] text-[18px] leading-7 tracking-extra-tight text-gray-new-20 max-lg:mt-4 max-lg:max-w-[620px] max-md:text-base">
-          Give your coding agent the tools to test migrations, user flows, and
-          load against masked production data. Antifailure returns the findings
-          through MCP, so your agent can fix the change before it ships.
+        <p className="mt-5 max-w-[760px] text-base leading-6 tracking-extra-tight text-gray-new-20 max-lg:mt-4 max-lg:max-w-[520px]">
+          Give your coding agent a production twin through MCP. Test migrations,
+          user flows, and load on masked data, then use the findings to fix the
+          change before you ship.
         </p>
-        {/* mt-36 was 144 pixels of nothing between two short sentences and the
-            five things this product is. The gap is the section rhythm now, and
-            the same one the film below it uses. */}
         <div className="relative mt-20 max-lg:mt-16 max-md:mt-14 max-sm:mt-12">
           <HeroServices />
         </div>

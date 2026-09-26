@@ -36,6 +36,10 @@
   --color-ochre: #8a6a12;
   --color-ochre-ink: #71530a;
   --color-danger-ink: #a22f2f;
+  --color-positive-ink: #285d49;
+  --color-alert-on-dark: #f2c675;
+  --color-forest: #14382d;
+  --color-forest-line: #426358;
   --color-green-45: #00e599;
   --color-green-52: #34d59a;
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
@@ -71,6 +75,11 @@ body {
 
 html {
   scroll-padding-top: 64px;
+}
+
+.hero {
+  --hero-top: clamp(240px, calc(100svh - 542px), 288px);
+  --hero-shift: calc(var(--hero-top) - 384px);
 }
 
 @media (max-width: 1279px) {

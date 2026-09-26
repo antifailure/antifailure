@@ -1,22 +1,21 @@
 # improved
 
-The website explains what each test does in shorter, more direct language.
-Product, solutions, pricing, contact, and form messages now focus on the next
-decision a reader needs to make. Demo requests are the primary marketing action,
-with the local quickstart still available beside them.
+The website now leads with the MCP workflow and explains each capability in
+shorter, more direct language. Product, solutions, pricing, forms, and articles
+focus on what a team can test and the findings it can review. The main hero
+headline and its animated green artwork remain, with a reduced-motion fallback.
+The hero has two actions and less empty space above the headline. The demo
+section plays the owner-provided recording with its original audio and video.
 
-The homepage migration section shows an excerpt from a recorded CLI run in
-place of the fictional issue-tracker interface. Product diagrams have larger
-labels, lighter frames, and corrected contrast. Shared section headings and
-mobile layouts use a more consistent scale.
+Five compact feature diagrams replace the miniature app windows, with
+three-line descriptions and aligned baselines. The migration section connects
+a small schema change to a recorded table rewrite and lock finding in one
+diagram. Firewall routing shows simulated payments, captured emails, and
+blocked calls, with a separate composition for narrow screens.
+The closing panel uses an agent-to-twin diagram instead of the aurora image.
 
-The mobile menu removes repeated links and keeps keyboard focus inside the open
-menu. Sign-in now opens an accessible privacy summary that reflects the site's
-current analytics. Contact details include the owner-provided email and business
-address; the mail check accepts the verified inbound route.
-
-The homepage now leads with the MCP workflow. All five feature blurbs use three
-lines with aligned illustrations, and the migration section pairs the proposed
-SQL with observed lock durations and the findings returned to a coding agent.
-Compact diagrams replace the five animated miniature windows. The hero keeps
-its original artwork without running an idle WebGL animation.
+The mobile menu removes repeated links and keeps keyboard focus inside the
+open menu. The sign-in privacy summary uses an accessible dialog, and the
+privacy notice distinguishes masked session recordings from submitted form
+details. Owner-provided business contact details are included. The status page
+has a main heading and a header that fits narrow screens.

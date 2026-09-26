@@ -330,12 +330,12 @@ export function HeroDemoVideo() {
           <video
             ref={videoRef}
             className={cn("relative block w-full bg-white object-contain", fullscreen ? "h-screen" : "aspect-video")}
-            src="/home/launch-film.mp4"
-            poster="/home/launch-film.jpg"
+            src="/home/antifailure-demo.mp4"
+            poster="/home/antifailure-demo.jpg"
             muted={muted}
             playsInline
             preload="none"
-            aria-label="The Antifailure launch film. A copy of production is built, the change runs against it on a pull request, a migration is caught holding an exclusive lock on 48 million rows, and the copy is destroyed."
+            aria-label="Antifailure demo: rehearsing a database migration on a production twin."
           />
 
           {/* The one control that has to sit on the picture, because it is the
