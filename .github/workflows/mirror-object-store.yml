@@ -41,10 +41,33 @@
 #
 # WHY IT IS DISPATCHED BY HAND AND NOT SCHEDULED. A schedule is a second thing
 # that can break silently, and a mirror that stopped running would be invisible
-# until the day it was needed. This runs when a person runs it, and the
-# procedure for the next time the pin moves is written beside the pin in
-# ci.yml. Refreshing the pin is a person's job here for the same reason the
-# image digests are, which ci.yml already explains at length.
+# until the day it was needed. This runs when a person runs it. Refreshing the
+# pin is a person's job here for the same reason the image digests are, which
+# ci.yml already explains at length.
+#
+# HOW TO MOVE THE PIN, and this is not the procedure ci.yml describes for an
+# image pulled straight from its publisher. TestTheMirrorAndThePinsNameOneImage
+# refuses every intermediate state deliberately, so the four edits cannot be
+# landed one at a time and there is an ordering that works:
+#
+#  1. On a BRANCH, change SOURCE and EXPECTED below to the new index digest.
+#  2. Dispatch this workflow against THAT BRANCH, not against main. A
+#     `workflow_dispatch` workflow has to exist on the default branch to appear
+#     at all, but the ref you dispatch decides which version of the file runs,
+#     so the new digest can be copied before anything on main mentions it. This
+#     is how the first copy was made: run 36276893187 ran off a branch.
+#  3. Read the run's step summary for the digest pair, and confirm the copy
+#     independently rather than taking the step's word for it. An anonymous
+#     token and a manifest read is enough, and anonymous is the point: a runner
+#     and a fresh clone have no login.
+#  4. In the SAME commit, move the two consumer pins, in ci.yml's object storage
+#     step and the justfile's `stores` recipe, to the new digest.
+#
+# Doing 4 before 2 pins a digest that does not exist in our registry yet and
+# reds the engine job on the very commit that moves it, which is the trap #581
+# avoided by changing no pin at all. Doing 4 without 1 is a half finished bump,
+# which is what the gate above refuses and what this repository has been bitten
+# by before.
 name: mirror the object store
 
 on:
