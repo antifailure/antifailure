@@ -214,7 +214,7 @@ export function PrivacyPage() {
             to the current browser tab.
           </p>
           <p>
-            PostHog, Inc. processes this website analytics data in the United
+            PostHog, Inc. receives and processes this website analytics data in the United
             States through PostHog Cloud US. Requests go through our endpoint at{" "}
             <code>app.antifailure.dev</code>, which forwards the analytics to
             PostHog without forwarding your IP address.
