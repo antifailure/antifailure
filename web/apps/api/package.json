@@ -22,6 +22,7 @@
     "openapi:check": "node scripts/openapi.ts ../../../www/public/openapi.json --check"
   },
   "dependencies": {
+    "@antifailure/website": "*",
     "@antifailure/db": "*",
     "@antifailure/policy": "*",
     "@hono/node-server": "^2.1.1",

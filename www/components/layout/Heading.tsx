@@ -1,5 +1,7 @@
 import { cn } from "@/lib/cn";
 import { HeadingIcon, type HeadingIconName } from "@/components/home/media/icons";
+import { CmsText } from "@/components/cms/Editable";
+import { sourceRichText } from "@/lib/cms/richtext";
 
 /**
  * A section head.
@@ -16,12 +18,16 @@ export function Heading({
   theme = "light",
   icon,
   className,
+  cmsKey,
+  sectionId,
 }: {
   title: string;
   label?: string;
   theme?: "light" | "dark";
   icon?: HeadingIconName;
   className?: string;
+  cmsKey?: string;
+  sectionId?: string;
 }) {
   return (
     <div
@@ -44,12 +50,19 @@ export function Heading({
                 theme === "light" ? "text-black/60" : "text-gray-new-50",
               )}
             >
-              {label}
+              {cmsKey && sectionId ? <CmsText cmsKey={`${cmsKey}.label`} label="Section label" sectionId={sectionId} defaultValue={label} /> : label}
             </span>
           ) : null}
         </div>
       ) : null}
-      <h2
+      {cmsKey && sectionId ? <CmsText as="h2" cmsKey={cmsKey} label="Section heading" sectionId={sectionId} defaultValue={sourceRichText(title)}
+        className={cn(
+          "text-[42px] font-normal leading-dense tracking-tighter text-pretty [&>strong]:font-normal",
+          "max-xl:text-[36px] max-lg:text-[30px] max-lg:text-wrap max-md:text-[27px]",
+          theme === "light" && "text-gray-new-40 [&>strong]:text-black-pure",
+          theme === "dark" && "text-gray-new-50 [&>strong]:text-black",
+        )}
+      /> : <h2
         className={cn(
           "text-[42px] font-normal leading-dense tracking-tighter text-pretty [&>strong]:font-normal",
           "max-xl:text-[36px] max-lg:text-[30px] max-lg:text-wrap max-md:text-[27px]",
@@ -57,7 +70,7 @@ export function Heading({
           theme === "dark" && "text-gray-new-50 [&>strong]:text-black",
         )}
         dangerouslySetInnerHTML={{ __html: title }}
-      />
+      />}
     </div>
   );
 }

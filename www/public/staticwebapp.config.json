@@ -3,6 +3,18 @@
   "trailingSlash": "never",
   "routes": [
     {
+      "route": "/cms-preview*",
+      "headers": {
+        "cache-control": "no-store",
+        "x-robots-tag": "noindex, nofollow",
+        "content-security-policy": "frame-ancestors https://app.antifailure.dev"
+      }
+    },
+    {
+      "route": "/cms-version.json",
+      "headers": { "cache-control": "no-store" }
+    },
+    {
       "route": "/product/crowdi",
       "redirect": "/product/load",
       "statusCode": 301

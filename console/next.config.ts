@@ -3,8 +3,9 @@ import path from "node:path";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  outputFileTracingRoot: path.resolve(__dirname),
-  turbopack: { root: path.resolve(__dirname) },
+  outputFileTracingRoot: path.resolve(__dirname, ".."),
+  turbopack: { root: path.resolve(__dirname, "..") },
+  transpilePackages: ["@antifailure/website"],
 
   // A static export, served by the control plane's own Hono process from
   // /app/console-out. That is not a deployment convenience, it is the security

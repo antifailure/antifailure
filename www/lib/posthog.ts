@@ -105,7 +105,7 @@
  */
 
 import type { PostHog, PostHogConfig } from "posthog-js";
-import { measurementStatus, onMeasurementChanged } from "./beacon";
+import { isWebsitePreview, measurementStatus, onMeasurementChanged } from "./beacon";
 
 /** The project API key. Public by design: it ships in browser JavaScript, it
  *  can only write events into one project, and it reads nothing back.
@@ -231,10 +231,16 @@ export function posthogOptions(origin: string): Partial<PostHogConfig> | null {
     autocapture: true,
     capture_pageview: "history_change",
     capture_pageleave: true,
+    // Evaluated for every capture, including replay snapshots. The root
+    // selector also covers a render that commits before its URL changes.
+    before_send: (event) => isWebsitePreview() || previewPaused || previewContentMounted() ? null : event,
 
     // ON. The masking below is what makes it safe to have on.
     disable_session_recording: false,
     session_recording: {
+      // The entire draft subtree, including media URLs, is excluded even
+      // during the interval between a route change and its React effects.
+      blockSelector: ".af-cms-preview",
       // THE LINE THE LEGAL COPY DEPENDS ON. Set explicitly, not inherited.
       maskAllInputs: true,
       // And again by type, so that a future edit setting maskAllInputs to false
@@ -327,6 +333,25 @@ export function posthogOptions(origin: string): Partial<PostHogConfig> | null {
 let client: PostHog | null = null;
 let starting = false;
 let subscribed = false;
+let previewPaused = false;
+
+function previewContentMounted(): boolean {
+  return typeof document !== "undefined" && typeof document.querySelector === "function" &&
+    document.querySelector(".af-cms-preview") !== null;
+}
+
+/** Preview is a temporary page boundary, never a persistent consent change.
+ * stopSessionRecording may flush a buffer; before_send refuses that flush
+ * while paused. The permanent blockSelector keeps draft DOM out of the
+ * recorder even when an older asynchronous flush finishes after navigation. */
+function pausePreviewAnalytics(): void {
+  if (!client || previewPaused) return;
+  previewPaused = true;
+  try { client.stopSessionRecording(); } catch { /* The per-event gate remains closed. */ }
+  try {
+    client.set_config({ autocapture: false, capture_pageview: false, capture_pageleave: false });
+  } catch { /* The per-event gate remains closed. */ }
+}
 
 /**
  * THE GATE.
@@ -348,15 +373,29 @@ let subscribed = false;
  */
 export async function startProductAnalytics(): Promise<void> {
   if (typeof window === "undefined") return;
-  if (client || starting) return;
+  if (!measurementStatus().measuring || previewContentMounted()) {
+    if (isWebsitePreview() || previewContentMounted()) pausePreviewAnalytics();
+    return;
+  }
+  if (client) {
+    if (previewPaused) {
+      previewPaused = false;
+      client.set_config({ autocapture: true, capture_pageview: "history_change", capture_pageleave: true });
+      client.startSessionRecording();
+    }
+    return;
+  }
+  if (starting) return;
   if (!POSTHOG_KEY) return;
-  if (!measurementStatus().measuring) return;
 
   starting = true;
   try {
     const options = posthogOptions(window.location.origin);
     if (!options) return;
     const posthog = (await import("posthog-js")).default;
+    // Navigation or a privacy choice may have happened while the chunk was
+    // loading. The first check cannot authorize this later initialization.
+    if (!measurementStatus().measuring || previewContentMounted()) return;
     posthog.init(POSTHOG_KEY, options);
     client = posthog;
   } catch {
@@ -442,8 +481,10 @@ export function stopProductAnalytics(): void {
 export function watchMeasurement(): () => void {
   if (subscribed) return () => {};
   subscribed = true;
-  return onMeasurementChanged((measuring) => {
+  const unsubscribe = onMeasurementChanged((measuring, reason) => {
     if (measuring) void startProductAnalytics();
+    else if (reason === "preview" || isWebsitePreview()) pausePreviewAnalytics();
     else stopProductAnalytics();
   });
+  return () => { unsubscribe(); subscribed = false; };
 }

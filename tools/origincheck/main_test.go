@@ -167,6 +167,16 @@ func plane(allowed ...string) *httptest.Server {
 			return
 		}
 		w.Header().Set("access-control-allow-origin", origin)
+		if r.Method == http.MethodGet {
+			switch r.URL.Path {
+			case "/v1/website/published":
+				w.WriteHeader(http.StatusOK)
+				return
+			case "/v1/website/media/:id":
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
 }
@@ -186,6 +196,36 @@ func TestLivePassesAPlaneThatAnswersEveryHostname(t *testing.T) {
 	defer s.Close()
 	if code := cmdLive(root, s.URL); code != 0 {
 		t.Fatalf("a plane that answers both has to pass, got exit %d", code)
+	}
+}
+
+func TestLiveCatchesCMSMediaBlockedOnlyOnWWW(t *testing.T) {
+	root := tree(t, "antifailure.dev\nwww.antifailure.dev\n", bothOrigins, bothOrigins)
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("origin")
+		if origin == "https://www.antifailure.dev" && r.URL.Path == "/v1/website/media/:id" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		w.Header().Set("access-control-allow-origin", origin)
+		switch r.URL.Path {
+		case "/v1/website/published":
+			if r.Method != http.MethodGet {
+				t.Errorf("published content was not probed with GET")
+			}
+			w.WriteHeader(http.StatusOK)
+		case "/v1/website/media/:id":
+			if r.Method != http.MethodGet {
+				t.Errorf("media was not probed with GET")
+			}
+			w.WriteHeader(http.StatusBadRequest)
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer s.Close()
+	if code := cmdLive(root, s.URL); code != 1 {
+		t.Fatalf("a CMS image blocked only on www must fail, got exit %d", code)
 	}
 }
 

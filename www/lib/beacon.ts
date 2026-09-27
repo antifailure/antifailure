@@ -388,7 +388,7 @@ export function setMeasurement(on: boolean): void {
 let announcing = false;
 
 /** Anything that has to start and stop with the reader's decision. */
-type MeasurementListener = (measuring: boolean) => void;
+type MeasurementListener = (measuring: boolean, reason?: MeasurementOff) => void;
 
 const measurementListeners = new Set<MeasurementListener>();
 
@@ -400,6 +400,7 @@ const measurementListeners = new Set<MeasurementListener>();
  * answer, and calling them again with it is how a recorder gets started twice.
  */
 export function onMeasurementChanged(listener: MeasurementListener): () => void {
+  attachPreviewBoundary();
   measurementListeners.add(listener);
   return () => {
     measurementListeners.delete(listener);
@@ -414,10 +415,10 @@ export function onMeasurementChanged(listener: MeasurementListener): () => void 
  * setMeasurement into the click handler on the privacy page, because a control
  * that throws where the reader can see it reads as an opt out that failed.
  */
-function announceMeasurement(measuring: boolean): void {
+function announceMeasurement(measuring: boolean, reason?: MeasurementOff): void {
   for (const listener of measurementListeners) {
     try {
-      listener(measuring);
+      listener(measuring, reason);
     } catch {
       // See above. There is no recovery and nothing to report to a reader.
     }
@@ -483,6 +484,8 @@ function browserAskedNotToBeTracked(): boolean {
  * watch nothing happen, and conclude the switch is decoration.
  */
 export type MeasurementOff =
+  /** A private editor preview, independent of the reader's preference. */
+  | "preview"
   /** This reader stored a preference not to be measured, in this browser. */
   | "reader"
   /** The browser asks not to be tracked, through GPC or Do Not Track. */
@@ -511,6 +514,7 @@ export interface MeasurementStatus {
  * browser's.
  */
 function measurementOff(): MeasurementOff | null {
+  if (isWebsitePreview()) return "preview";
   if (typeof window === "undefined" || !ENDPOINT) return "build";
   if (browserAskedNotToBeTracked()) return "browser";
   if (memoryOptOut || storedOptOut()) return "reader";
@@ -541,7 +545,61 @@ export function measurementStatus(): MeasurementStatus {
  */
 let measuring: boolean | null = null;
 
+/** Only the current page path decides. Draft query parameters and messages
+ * never become analytics input, and a preview never changes a saved opt-out. */
+export function isWebsitePreview(pathname?: string): boolean {
+  const path = pathname ?? (typeof location === "undefined" ? "" : location.pathname);
+  const normalized = path.replace(/\/+$/, "").replace(/\.html$/, "");
+  return normalized === "/cms-preview" || normalized.startsWith("/cms-preview/");
+}
+
+let previewSuppressed = false;
+let previewBoundaryWindow: Window | null = null;
+
+function syncPreviewBoundary(preview = isWebsitePreview()): boolean {
+  if (preview) discardCapture();
+  if (preview === previewSuppressed) return preview;
+  previewSuppressed = preview;
+  // Recorders must stop before a new preview DOM can be captured. Announcing
+  // this transient boundary is different from storing a reader's preference.
+  announceMeasurement(preview ? false : measurementAllowed(), preview ? "preview" : undefined);
+  return preview;
+}
+
+function attachPreviewBoundary(): void {
+  if (typeof window === "undefined" || previewBoundaryWindow === window) return;
+  previewBoundaryWindow = window;
+  const history = window.history;
+  if (history) {
+    for (const name of ["pushState", "replaceState"] as const) {
+      const original = history[name];
+      history[name] = function (...args: Parameters<History[typeof name]>): void {
+        const destination = args[2];
+        if (destination != null) {
+          try {
+            const url = new URL(String(destination), location.href);
+            if (url.origin === location.origin && isWebsitePreview(url.pathname)) syncPreviewBoundary(true);
+          } catch {
+            // The browser still validates the actual navigation below.
+          }
+        }
+        try {
+          original.apply(this, args);
+        } finally {
+          syncPreviewBoundary();
+        }
+      };
+    }
+  }
+  window.addEventListener("popstate", () => syncPreviewBoundary(), { capture: true });
+  window.addEventListener("pageshow", () => syncPreviewBoundary(), { capture: true });
+}
+
 function measurementAllowed(): boolean {
+  attachPreviewBoundary();
+  // This check must precede the cache: client navigation can enter preview
+  // after a public page has already cached an affirmative measurement answer.
+  if (syncPreviewBoundary()) return false;
   if (measuring !== null) return measuring;
   if (typeof window === "undefined" || !ENDPOINT) {
     measuring = false;
@@ -804,6 +862,7 @@ function fresh(events: Wire[], now: number): Wire[] {
  * anything produced since.
  */
 async function flush(): Promise<void> {
+  if (!measurementAllowed()) { discardCapture(); return; }
   if (stopped || queue.length === 0) return;
   const now = Date.now();
   const pending = fresh(queue, now);
@@ -815,6 +874,7 @@ async function flush(): Promise<void> {
 
   const failed: Wire[] = [];
   for (let i = 0; i < pending.length; i += MAX_BATCH) {
+    if (!measurementAllowed()) { discardCapture(); return; }
     const batch = pending.slice(i, i + MAX_BATCH);
     const outcome = await post(batch);
     if (outcome === "stop") {
@@ -825,6 +885,7 @@ async function flush(): Promise<void> {
     if (outcome === "retry") failed.push(...batch);
   }
 
+  if (!measurementAllowed()) { discardCapture(); return; }
   if (failed.length === 0) {
     attempts = 0;
     return;
@@ -875,6 +936,7 @@ type Outcome = "sent" | "retry" | "stop";
  * page stops rather than spending five attempts learning it again.
  */
 async function post(events: Wire[]): Promise<Outcome> {
+  if (!measurementAllowed()) return "sent";
   try {
     const response = await fetch(ENDPOINT, {
       method: "POST",
@@ -909,6 +971,7 @@ async function post(events: Wire[]): Promise<Outcome> {
  * because there is no page left to retry from.
  */
 function flushOnUnload(): void {
+  if (!measurementAllowed()) { discardCapture(); return; }
   if (stopped || queue.length === 0) return;
   const pending = fresh(queue, Date.now());
   queue = [];

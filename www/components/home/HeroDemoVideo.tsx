@@ -2,6 +2,8 @@
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
+import { CmsSection, CmsText } from "@/components/cms/Editable";
+import { useCms, useCmsCollection, useCmsMedia, useCmsString } from "@/components/cms/CmsProvider";
 import { cn } from "@/lib/cn";
 import { useViewportVideoPlayback } from "./useViewportVideoPlayback";
 
@@ -115,14 +117,17 @@ function FilmControl({
   onClick,
   label,
   children,
+  cmsKey,
 }: {
   onClick: () => void;
   label: string;
   children: ReactNode;
+  cmsKey: string;
 }) {
   return (
     <button
       type="button"
+      data-cms-field={cmsKey}
       className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-x-2 border border-black/40 bg-black/[0.02] px-4 font-mono text-[12px] font-medium tracking-extra-tight whitespace-nowrap text-black transition-colors duration-200 hover:border-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-neon max-sm:gap-x-1.5 max-sm:px-3 max-sm:text-[11px]"
       onClick={onClick}
     >
@@ -133,12 +138,35 @@ function FilmControl({
 }
 
 const DEMO_STEPS = [
-  "A copy of production, same size and shape",
-  "Your change runs there first",
-  "Then the copy deletes itself",
+  { id: "production-copy", text: "A copy of production, same size and shape" },
+  { id: "change-runs", text: "Your change runs there first" },
+  { id: "cleanup", text: "Then the copy deletes itself" },
 ];
 
 export function HeroDemoVideo() {
+  const cms = useCms();
+  const videoMedia = useCmsMedia("hero-demo.video", { type: "media", source: "builtin", kind: "video", src: "/home/antifailure-demo-20260926.mp4", alt: "Antifailure demo: rehearsing a database migration on a production twin." }, { label: "Demo video", sectionId: "hero-demo" });
+  const posterMedia = useCmsMedia("hero-demo.poster", { type: "media", source: "builtin", kind: "image", src: "/home/antifailure-demo.jpg", alt: "Antifailure migration rehearsal" }, { label: "Video poster", sectionId: "hero-demo" });
+  // Reattach playback observers to the actual media node after replacing,
+  // removing, or restoring the file in a live editing session.
+  return <HeroDemoContent key={`${videoMedia.value?.kind ?? ""}:${videoMedia.url ?? "none"}`} videoMedia={videoMedia} posterMedia={posterMedia} showPlaceholder={cms.isPreview && cms.editing} />;
+}
+
+function HeroDemoContent({ videoMedia, posterMedia, showPlaceholder }: {
+  videoMedia: ReturnType<typeof useCmsMedia>;
+  posterMedia: ReturnType<typeof useCmsMedia>;
+  showPlaceholder: boolean;
+}) {
+  const hasMedia = Boolean(videoMedia.url);
+  const isVideo = hasMedia && (videoMedia.value?.kind === "video" || (!videoMedia.value?.kind && /\.(mp4|webm)(?:[?#]|$)/i.test(videoMedia.url ?? "")));
+  const steps = useCmsCollection("hero-demo.steps", "Demo steps", "hero-demo", DEMO_STEPS);
+  const playLabel = useCmsString("hero-demo.controls.play", "Play", { label: "Play control", sectionId: "hero-demo" });
+  const pauseLabel = useCmsString("hero-demo.controls.pause", "Pause", { label: "Pause control", sectionId: "hero-demo" });
+  const restartLabel = useCmsString("hero-demo.controls.restart", "Restart", { label: "Restart control", sectionId: "hero-demo" });
+  const soundOnLabel = useCmsString("hero-demo.controls.sound-on", "Sound on", { label: "Unmute control", sectionId: "hero-demo" });
+  const soundOffLabel = useCmsString("hero-demo.controls.sound-off", "Sound off", { label: "Mute control", sectionId: "hero-demo" });
+  const fullscreenLabel = useCmsString("hero-demo.controls.fullscreen", "Fullscreen", { label: "Fullscreen control", sectionId: "hero-demo" });
+  const playFilmLabel = useCmsString("hero-demo.controls.play-film", "PLAY THE FILM", { label: "Video play overlay", sectionId: "hero-demo" });
   const frameRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [muted, setMuted] = useState(true);
@@ -238,12 +266,12 @@ export function HeroDemoVideo() {
   // the film's bottom on the row's bottom as well, so the pair meet at every
   // width and the slack moves above the picture, where the heading already is.
   return (
-      <div className="relative mt-20 grid w-full grid-cols-[minmax(220px,330px)_minmax(0,1fr)] items-end gap-x-16 max-xl:mt-16 max-xl:grid-cols-1 max-xl:gap-y-8 max-md:mt-12">
+      <CmsSection as="div" sectionId="hero-demo" label="Demo video" group="hero" className={cn("relative mt-20 grid w-full items-end gap-x-16 max-xl:mt-16 max-xl:grid-cols-1 max-xl:gap-y-8 max-md:mt-12", hasMedia || showPlaceholder ? "grid-cols-[minmax(220px,330px)_minmax(0,1fr)]" : "grid-cols-1")}>
       {/* Packed to the top rather than spread. `justify-between` stretched this
           column to the film's height and pushed the beats to its foot, so they
           sat level with the bottom of the picture with a hand's width of
           nothing above them. They belong under the sentence they continue. */}
-      <div className="flex h-full max-w-[390px] flex-col max-xl:h-auto max-xl:max-w-[720px]">
+      <div className={cn("flex h-full flex-col max-xl:h-auto max-xl:max-w-[720px]", hasMedia || showPlaceholder ? "max-w-[390px]" : "max-w-[720px]")}>
         <div>
           {/* NO EYEBROW. It said "THE FILM" in tracked uppercase sans over a
               heading that already says what this is, and this site does not
@@ -258,22 +286,22 @@ export function HeroDemoVideo() {
               and tracking-tighter are the tokens, and a black lead sentence
               over gray-new-40 continuation is how every other section head on
               this page reads. */}
-          <h2 className="text-[34px] font-normal leading-dense tracking-tighter text-gray-new-40 max-lg:text-[28px] max-md:text-[26px]">
+          <CmsText as="h2" cmsKey="hero-demo.heading" label="Demo headline" sectionId="hero-demo" defaultValue="See Antifailure catch a costly migration." className="text-[34px] font-normal leading-dense tracking-tighter text-gray-new-40 max-lg:text-[28px] max-md:text-[26px]">
             <strong className="font-normal text-black-pure">See Antifailure catch a costly migration.</strong>
-          </h2>
-          <p className="mt-6 text-base tracking-extra-tight text-gray-new-40 max-md:mt-5">
+          </CmsText>
+          <CmsText as="p" cmsKey="hero-demo.description" label="Demo introduction" sectionId="hero-demo" defaultValue="Follow a schema change from pull request to rehearsal. See the lock it holds, the finding it produces, and the environment being removed." className="mt-6 text-base tracking-extra-tight text-gray-new-40 max-md:mt-5">
             Follow a schema change from pull request to rehearsal. See the lock
             it holds, the finding it produces, and the environment being removed.
-          </p>
+          </CmsText>
         </div>
         {/* The site's own list mark, which is SectionLabel's arrow in the neon
             token, rather than a two pixel disc in #668f5d. That colour is in
             no palette in this repository and was written here once. */}
         <ul className="mt-7 space-y-3.5 max-md:mt-7 max-md:space-y-4">
-          {DEMO_STEPS.map((step) => (
-            <li key={step} className="flex items-start gap-x-3 text-base tracking-extra-tight text-black">
+          {steps.map((step) => (
+            <li key={step.id} className="flex items-start gap-x-3 text-base tracking-extra-tight text-black">
               <BeatMark />
-              <span>{step}</span>
+              <CmsText cmsKey={`hero-demo.steps.${step.id}.text`} label="Demo step" sectionId="hero-demo" defaultValue={DEMO_STEPS.find((source) => source.id === step.id)?.text ?? step.text ?? ""} />
             </li>
           ))}
         </ul>
@@ -294,24 +322,25 @@ export function HeroDemoVideo() {
             above stay where they are; only the gap between them and the
             controls grows to whatever the picture's height leaves. Below `xl`
             the column is not beside anything, so it goes back to a fixed gap. */}
-        <div className="mt-auto grid grid-cols-2 gap-2 pt-6 max-md:mt-0 max-md:pt-7 max-xl:mt-0 max-xl:flex max-xl:flex-wrap max-xl:items-center max-xl:pt-8 max-sm:grid max-sm:grid-cols-2">
-          <FilmControl onClick={togglePlay} label={playing ? "Pause" : "Play"}>
+        {isVideo && <div className="mt-auto grid grid-cols-2 gap-2 pt-6 max-md:mt-0 max-md:pt-7 max-xl:mt-0 max-xl:flex max-xl:flex-wrap max-xl:items-center max-xl:pt-8 max-sm:grid max-sm:grid-cols-2">
+          <FilmControl onClick={togglePlay} cmsKey={playing ? "hero-demo.controls.pause" : "hero-demo.controls.play"} label={playing ? pauseLabel : playLabel}>
             {playing ? <PauseIcon /> : <PlayIcon />}
           </FilmControl>
-          <FilmControl onClick={restartVideo} label="Restart">
+          <FilmControl onClick={restartVideo} cmsKey="hero-demo.controls.restart" label={restartLabel}>
             <RestartIcon />
           </FilmControl>
-          <FilmControl onClick={toggleVolume} label={muted ? "Sound on" : "Sound off"}>
+          <FilmControl onClick={toggleVolume} cmsKey={muted ? "hero-demo.controls.sound-on" : "hero-demo.controls.sound-off"} label={muted ? soundOnLabel : soundOffLabel}>
             <VolumeIcon on={!muted} />
           </FilmControl>
-          <FilmControl onClick={openFullscreen} label="Fullscreen">
+          <FilmControl onClick={openFullscreen} cmsKey="hero-demo.controls.fullscreen" label={fullscreenLabel}>
             <FullscreenIcon />
           </FilmControl>
-        </div>
+        </div>}
       </div>
-      <div className="min-w-0">
+      {hasMedia ? <div className="min-w-0">
         <div
           ref={frameRef}
+          data-cms-field="hero-demo.video"
           className={cn(
             "relative overflow-hidden border border-black/10 bg-[#f3f2ec]",
             fullscreen && "flex h-screen items-center justify-center border-0 bg-black",
@@ -327,16 +356,16 @@ export function HeroDemoVideo() {
               this far, so playback is started by the viewport observer instead
               and preload is none until then. The poster is what the section
               shows until that happens, so the slot is never empty. */}
-          <video
+          {isVideo ? <video
             ref={videoRef}
             className={cn("relative block w-full bg-white object-contain", fullscreen ? "h-screen" : "aspect-video")}
-            src="/home/antifailure-demo-20260926.mp4"
-            poster="/home/antifailure-demo.jpg"
+            src={videoMedia.url || undefined}
+            poster={posterMedia.value?.kind === "video" ? undefined : posterMedia.url || undefined}
             muted={muted}
             playsInline
             preload="none"
-            aria-label="Antifailure demo: rehearsing a database migration on a production twin."
-          />
+            aria-label={videoMedia.alt || "Antifailure demo"}
+          /> : <img src={videoMedia.url} alt={videoMedia.alt} className="block h-auto w-full" loading="lazy" />}
 
           {/* The one control that has to sit on the picture, because it is the
               picture that has to look pressable. It is the install button's
@@ -344,7 +373,7 @@ export function HeroDemoVideo() {
               a frosted disc: there is no backdrop-blur anywhere else in this
               tree and a translucent black circle over a cream still is the
               first thing that reads as decoration somebody reached for. */}
-          {!playing && (
+          {isVideo && !playing && (
             <button
               type="button"
               className="group absolute inset-0 z-10 grid place-items-center focus:outline-none"
@@ -353,14 +382,14 @@ export function HeroDemoVideo() {
             >
               <span className="inline-flex min-h-11 items-center gap-x-3 border border-black/40 bg-white px-5 font-mono text-[13px] font-medium tracking-extra-tight whitespace-nowrap text-black transition-colors duration-200 group-hover:border-black group-hover:bg-[#F6FDFA] group-focus-visible:outline group-focus-visible:outline-2 group-focus-visible:outline-neon max-sm:px-4 max-sm:text-[11px]">
                 <PlayIcon />
-                PLAY THE FILM
+                <span data-cms-field="hero-demo.controls.play-film">{playFilmLabel}</span>
               </span>
             </button>
           )}
 
           {/* Once it is running the picture pauses on a click, which is what a
               video does everywhere else. */}
-          {playing && (
+          {isVideo && playing && (
             <button
               type="button"
               className="absolute inset-0 z-0 cursor-default focus:outline-none"
@@ -370,7 +399,7 @@ export function HeroDemoVideo() {
           )}
         </div>
 
-      </div>
-    </div>
+      </div> : showPlaceholder ? <div data-cms-field="hero-demo.video" data-cms-placeholder>Select an image or video for this section.</div> : null}
+    </CmsSection>
   );
 }

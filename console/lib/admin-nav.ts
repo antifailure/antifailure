@@ -312,6 +312,13 @@ export const ADMIN_NAV: AdminNavGroup[] = [
     slug: "administration",
     items: [
       {
+        label: "Website",
+        href: "/admin/administration/website",
+        Icon: IconOverview,
+        permission: "admin.website.read",
+        summary: "Edit the homepage, shared navigation, typography and media. Preview changes and publish when ready.",
+      },
+      {
         label: "Applications",
         href: "/admin/administration/applications",
         Icon: IconOperators,

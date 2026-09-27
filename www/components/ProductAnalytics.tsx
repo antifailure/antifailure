@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
+import { usePathname } from "next/navigation";
 import { startProductAnalytics, watchMeasurement } from "@/lib/posthog";
 
 /**
@@ -11,11 +12,9 @@ import { startProductAnalytics, watchMeasurement } from "@/lib/posthog";
  * component mounted per page would start on the first route and then be torn
  * down and rebuilt on every subsequent one.
  *
- * NO SUSPENSE BOUNDARY HERE, unlike its neighbour. PageViews reads usePathname,
- * which opts the tree into client rendering and needs a boundary for a static
- * export to build. This reads nothing from the router: `capture_pageview` is
- * set to `history_change`, so the library watches the History API that the app
- * router already drives and counts route changes without being told.
+ * A route effect resumes recording only after public content replaces the
+ * preview DOM. The synchronous History API boundary stops it before entering
+ * preview, and the library still counts public route changes on its own.
  *
  * IT RENDERS NOTHING AND IT LOADS NOTHING UNTIL THE GATE SAYS SO. The import of
  * posthog-js is dynamic and lives behind the check in lib/posthog.ts, so a
@@ -23,14 +22,19 @@ import { startProductAnalytics, watchMeasurement } from "@/lib/posthog";
  * not fetch the library at all. There is no recorder to stop because there is
  * no recorder.
  */
-export function ProductAnalytics(): null {
+function ProductAnalyticsBoundary(): null {
+  const pathname = usePathname();
   useEffect(() => {
     // Subscribed BEFORE the start, so that the switch on the privacy page works
     // even in the case where the gate refused and nothing started. A reader who
     // arrives opted out, reads the page and then turns measurement on has
     // changed the answer, and nothing would be listening if this ran second.
-    watchMeasurement();
-    void startProductAnalytics();
+    return watchMeasurement();
   }, []);
+  useEffect(() => { void startProductAnalytics(); }, [pathname]);
   return null;
+}
+
+export function ProductAnalytics() {
+  return <Suspense fallback={null}><ProductAnalyticsBoundary /></Suspense>;
 }

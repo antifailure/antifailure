@@ -77,6 +77,10 @@ var tfvarsPaths = []string{
 type crossOriginRoute struct {
 	path    string
 	visible string
+	// Empty means the existing POST preflight. Public CMS reads are simple GETs.
+	method string
+	// A nonzero status proves a read returned the answer its caller expects.
+	expect int
 }
 
 // Every route on the control plane that answers a cross origin browser.
@@ -99,9 +103,11 @@ type crossOriginRoute struct {
 // The list is also printed on every run: what was NOT checked has to be as
 // readable as what was.
 var crossOriginRoutes = []crossOriginRoute{
-	{"/v1/site/events", "The analytics beacon. A refusal is invisible to the visitor, and silently drops every count from this hostname."},
-	{"/v1/leads", "The enterprise contact form. A refusal shows the visitor \"Could not reach the server\", which is the sentence that form shows for a dropped connection."},
-	{"/v1/applications", "The careers application form. A refusal shows a failure on a form somebody has just filled in."},
+	{path: "/v1/site/events", visible: "The analytics beacon. A refusal is invisible to the visitor, and silently drops every count from this hostname."},
+	{path: "/v1/leads", visible: "The enterprise contact form. A refusal shows the visitor \"Could not reach the server\", which is the sentence that form shows for a dropped connection."},
+	{path: "/v1/applications", visible: "The careers application form. A refusal shows a failure on a form somebody has just filled in."},
+	{path: "/v1/website/published", visible: "The homepage keeps showing old content when the published document is blocked on this hostname.", method: http.MethodGet, expect: http.StatusOK},
+	{path: "/v1/website/media/:id", visible: "Published images, video and fonts cannot load when this hostname is refused.", method: http.MethodGet, expect: http.StatusBadRequest},
 }
 
 // inventoryPath is the site's own list of every control plane route it calls.
@@ -452,7 +458,7 @@ func cmdLive(root, api string) int {
 	for _, host := range hosts {
 		origin := "https://" + host
 		for _, route := range crossOriginRoutes {
-			status, allow, err := preflight(client, api+route.path, origin)
+			status, allow, err := originRequest(client, api+route.path, origin, route.method)
 			switch {
 			case err != nil:
 				unknown++
@@ -468,6 +474,12 @@ func cmdLive(root, api string) int {
 				fmt.Fprintf(os.Stderr, "  ????  %s %s: NOT CHECKED, this plane answers 404, so the route is not\n", origin, route.path)
 				fmt.Fprintf(os.Stderr, "        deployed here and the origin was never compared. That is a deploy\n")
 				fmt.Fprintf(os.Stderr, "        lag rather than an origin refusal, and it is not a pass.\n")
+			case status >= 500:
+				unknown++
+				fmt.Fprintf(os.Stderr, "  ????  %s %s: NOT CHECKED, the control plane answered %d.\n", origin, route.path, status)
+			case route.expect != 0 && status != route.expect:
+				failures++
+				fmt.Fprintf(os.Stderr, "  FAIL  %s %s: answered %d, expected %d for this public read. %s\n", origin, route.path, status, route.expect, route.visible)
 			case allow == origin:
 				fmt.Printf("  ok    %s %s: %d, allow-origin echoes this origin\n", origin, route.path, status)
 			case allow == "":
@@ -504,18 +516,23 @@ func cmdLive(root, api string) int {
 	return 0
 }
 
-// preflight sends what a browser sends before a cross origin POST, and reads
-// back the one header that decides whether the browser will make the real
-// request. Not a GET: a GET is not the request that was failing, and a route
-// can answer a GET perfectly while refusing every preflight.
-func preflight(client *http.Client, url, origin string) (int, string, error) {
-	req, err := http.NewRequest(http.MethodOptions, url, nil)
+// originRequest sends a POST preflight or a public CMS GET with the browser's
+// Origin. Both must echo the exact hostname; a GET must also return its expected
+// content status, since CORS headers on an error page do not make content work.
+func originRequest(client *http.Client, url, origin, method string) (int, string, error) {
+	requestMethod := http.MethodOptions
+	if method == http.MethodGet {
+		requestMethod = http.MethodGet
+	}
+	req, err := http.NewRequest(requestMethod, url, nil)
 	if err != nil {
 		return 0, "", err
 	}
 	req.Header.Set("origin", origin)
-	req.Header.Set("access-control-request-method", "POST")
-	req.Header.Set("access-control-request-headers", "content-type")
+	if requestMethod == http.MethodOptions {
+		req.Header.Set("access-control-request-method", "POST")
+		req.Header.Set("access-control-request-headers", "content-type")
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, "", err

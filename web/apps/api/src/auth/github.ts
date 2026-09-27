@@ -189,6 +189,7 @@ export interface GitHubClient {
     workflow: string,
     ref: string,
     inputs: Record<string, string>,
+    signal?: AbortSignal,
   ): Promise<void>
   /**
    * What would stop a dispatch, asked before anybody presses anything.
@@ -215,6 +216,7 @@ export interface GitHubClient {
     repository: string,
     workflow: string,
     ref?: string,
+    signal?: AbortSignal,
   ): Promise<DispatchBlocker | null>
   /**
    * Uninstalls the App from an account, for an organization that is being
@@ -264,7 +266,7 @@ export interface GitHubConfig {
    *  GitHub App is configured, and membersOf says so rather than returning an
    *  empty list. */
   installationTokens?: {
-    for(installationId: number): Promise<string>
+    for(installationId: number, signal?: AbortSignal): Promise<string>
     /**
      * The installation covering a repository, or null when the App is not
      * installed on it.
@@ -278,7 +280,7 @@ export interface GitHubConfig {
      * the App was never given and 200 for one it holds no Actions permission
      * on. Both were checked against the real API before this was written.
      */
-    onRepository(repository: string): Promise<InstalledOn | null>
+    onRepository(repository: string, signal?: AbortSignal): Promise<InstalledOn | null>
     /**
      * Drops the cached token, so the next call mints a new one.
      *
@@ -589,7 +591,9 @@ export class RealGitHubClient implements GitHubClient {
     workflow: string,
     ref: string,
     inputs: Record<string, string>,
+    signal?: AbortSignal,
   ): Promise<void> {
+    signal?.throwIfAborted()
     const tokens = this.config.installationTokens
     if (!tokens) {
       throw new GitHubError(blockerFor('no-app-configured', { repository, workflow }).message)
@@ -602,6 +606,7 @@ export class RealGitHubClient implements GitHubClient {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ ref, inputs }),
+      signal,
     })
     // 204 and nothing else. GitHub returns no body and no run id, so there is
     // deliberately nothing here to return: the run appears in the customer's
@@ -626,13 +631,14 @@ export class RealGitHubClient implements GitHubClient {
     // state. Ask.
     let blocker: DispatchBlocker | null = null
     try {
-      blocker = await this.dispatchBlocker(installationId, repository, workflow, ref)
+      blocker = await this.dispatchBlocker(installationId, repository, workflow, ref, signal)
     } catch {
       // A diagnosis that fails must not replace the refusal it was explaining.
       // Falling through leaves the caller with GitHub's own sentence, which is
       // worse than the specific message and much better than an exception
       // about the lookup, which would name a request the person never made.
     }
+    signal?.throwIfAborted()
     if (blocker) throw new GitHubError(blocker.message)
     throw refusal('github-refused', subject, said)
   }
@@ -642,12 +648,14 @@ export class RealGitHubClient implements GitHubClient {
     repository: string,
     workflow: string,
     ref?: string,
+    signal?: AbortSignal,
   ): Promise<DispatchBlocker | null> {
+    signal?.throwIfAborted()
     const subject: Subject = { repository, workflow, ref }
     const tokens = this.config.installationTokens
     if (!tokens) return blockerFor('no-app-configured', subject)
 
-    const installed = await tokens.onRepository(repository)
+    const installed = await tokens.onRepository(repository, signal)
     if (!installed) {
       // Not installed, or not a repository GitHub will show this App at all.
       // One more call separates them, because "add the repository to the
@@ -655,7 +663,7 @@ export class RealGitHubClient implements GitHubClient {
       // A public repository answers 200 here whether or not the App holds it,
       // which is precisely why this is the second question and not the first.
       return blockerFor(
-        (await this.reachable(installationId, `/repos/${encodePath(repository)}`))
+        (await this.reachable(installationId, `/repos/${encodePath(repository)}`, signal))
           ? 'app-not-installed'
           : 'repository-not-visible',
         subject,
@@ -668,12 +676,12 @@ export class RealGitHubClient implements GitHubClient {
     }
     const workflowPath =
       `/repos/${encodePath(repository)}/actions/workflows/${encodeURIComponent(workflow)}`
-    if (!(await this.reachable(installationId, workflowPath))) {
+    if (!(await this.reachable(installationId, workflowPath, signal))) {
       return blockerFor('workflow-missing', subject)
     }
     if (ref !== undefined && ref !== '') {
       const branchPath = `/repos/${encodePath(repository)}/branches/${encodeURIComponent(ref)}`
-      if (!(await this.reachable(installationId, branchPath))) {
+      if (!(await this.reachable(installationId, branchPath, signal))) {
         return blockerFor('branch-missing', subject)
       }
     }
@@ -727,13 +735,13 @@ export class RealGitHubClient implements GitHubClient {
         },
       })
 
-    const res = await send(await tokens.for(installationId))
+    const res = await send(await tokens.for(installationId, init.signal ?? undefined))
     if (res.status !== 401) return res
     // Once, and only once. A second 401 is a credential this process cannot
     // fix by asking again, and a loop would turn a bad private key into a
     // request storm against GitHub.
     tokens.forget(installationId)
-    return send(await tokens.for(installationId))
+    return send(await tokens.for(installationId, init.signal ?? undefined))
   }
 
   /**
@@ -745,8 +753,8 @@ export class RealGitHubClient implements GitHubClient {
    * commit a file that is already committed. A gate whose findings are
    * sometimes invented is worse than one that occasionally says nothing.
    */
-  private async reachable(installationId: number, path: string): Promise<boolean> {
-    const res = await this.authed(installationId, path)
+  private async reachable(installationId: number, path: string, signal?: AbortSignal): Promise<boolean> {
+    const res = await this.authed(installationId, path, { signal })
     return res.status !== 404
   }
 

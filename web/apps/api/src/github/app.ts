@@ -154,7 +154,8 @@ export class InstallationTokens {
     return this.config.apiBase ?? 'https://api.github.com'
   }
 
-  async for(installationId: number): Promise<string> {
+  async for(installationId: number, signal?: AbortSignal): Promise<string> {
+    signal?.throwIfAborted()
     const now = this.clock.now().getTime()
     const cached = this.cache.get(installationId)
     if (cached && cached.expiresAt - 60_000 > now) return cached.token
@@ -163,6 +164,7 @@ export class InstallationTokens {
       new URL(`/app/installations/${installationId}/access_tokens`, this.apiBase),
       {
         method: 'POST',
+        signal,
         headers: {
           authorization: `Bearer ${appJwt(this.config, this.clock)}`,
           accept: 'application/vnd.github+json',
@@ -208,9 +210,11 @@ export class InstallationTokens {
    * would keep telling somebody their grant is missing for an hour after they
    * granted it, which is the moment they are most likely to be looking.
    */
-  async onRepository(repository: string): Promise<InstalledOn | null> {
+  async onRepository(repository: string, signal?: AbortSignal): Promise<InstalledOn | null> {
+    signal?.throwIfAborted()
     const path = `/repos/${repository.split('/').map(encodeURIComponent).join('/')}/installation`
     const res = await this.fetchImpl(new URL(path, this.apiBase), {
+      signal,
       headers: {
         authorization: `Bearer ${appJwt(this.config, this.clock)}`,
         accept: 'application/vnd.github+json',

@@ -1,10 +1,11 @@
+import { CmsMedia, CmsSection } from "@/components/cms/Editable";
 import { Container } from "@/components/layout/Container";
 import { Heading } from "@/components/layout/Heading";
 import { MigrationEvidence } from "@/components/home/visuals/MigrationEvidence";
 
 export function Migrations() {
   return (
-    <section
+    <CmsSection sectionId="migrations" label="Migration safety" group="page"
       className="relative scroll-mt-16 pt-10 pb-10 max-xl:pt-8 max-xl:pb-8 max-lg:pt-7 max-lg:pb-7 max-md:pt-6 max-md:pb-6 safe-paddings max-lg:scroll-mt-0"
       id="migrations"
     >
@@ -14,15 +15,16 @@ export function Migrations() {
       >
         <div className="min-w-0">
           <Heading
+            cmsKey="migrations.heading" sectionId="migrations"
             icon="migrations"
             label="Migration Safety"
             title="<strong>Catch the migration that stalls your app.</strong> Your agent can rehearse it before you deploy."
           />
           <div className="relative mt-14 min-w-0 max-xl:mt-12 max-lg:mt-10 max-md:mt-8 max-sm:mt-11">
-            <MigrationEvidence />
+            <CmsMedia cmsKey="migrations.visual" label="Migration visual" sectionId="migrations"><MigrationEvidence /></CmsMedia>
           </div>
         </div>
       </Container>
-    </section>
+    </CmsSection>
   );
 }

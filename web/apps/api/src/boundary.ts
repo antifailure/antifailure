@@ -377,6 +377,46 @@ export const ROUTE_BOUNDARY: Record<string, RouteBoundary> = {
     grounds: 'different-credential',
     reason: 'Reports which operator is signed in, for the admin console. It reads the operator cookie and nothing else, so a session cookie or a bearer token reaches it as an anonymous caller.',
   },
+  'POST /v1/admin/website/media': {
+    audience: 'excluded',
+    grounds: 'different-credential',
+    reason: 'Website owners upload media with an operator session, same-origin check and operator CSRF token. Customer credentials cannot reach this editor transport.',
+  },
+  'ALL /v1/admin/website/media': {
+    audience: 'excluded',
+    grounds: 'not-an-endpoint',
+    reason: 'The early owner/session/origin/CSRF guard for the upload route. It reads no body and does not serve an independent operation.',
+  },
+  'GET /v1/website/published': {
+    audience: 'excluded',
+    grounds: 'console-transport',
+    reason: 'The marketing renderer reads its published overrides from the CMS. Both ends ship from this repository and the document is not a customer integration surface.',
+  },
+  'HEAD /v1/website/published': {
+    audience: 'excluded',
+    grounds: 'console-transport',
+    reason: 'Conditional metadata for the same published website document, used by the marketing renderer and its deployment checks.',
+  },
+  'OPTIONS /v1/website/published': {
+    audience: 'excluded',
+    grounds: 'not-an-endpoint',
+    reason: 'The exact-origin browser preflight for the published website document; no authenticated operation or independent content is served.',
+  },
+  'GET /v1/website/media/:id': {
+    audience: 'excluded',
+    grounds: 'console-transport',
+    reason: 'The marketing renderer loads immutable published assets, while the editor previews private assets with short-lived scoped capability URLs.',
+  },
+  'HEAD /v1/website/media/:id': {
+    audience: 'excluded',
+    grounds: 'console-transport',
+    reason: 'Metadata for the media resource above, with the same public or asset-scoped capability checks and no response body.',
+  },
+  'OPTIONS /v1/website/media/:id': {
+    audience: 'excluded',
+    grounds: 'not-an-endpoint',
+    reason: 'The exact-origin preflight for website fonts and media ranges; it never grants cross-origin cookies or an upload capability.',
+  },
   // Stepping into a customer's account, and stepping back out. Plain routes
   // rather than procedures because both end in a Set-Cookie for the CUSTOMER's
   // session, and because the operator gate refuses every admin procedure while

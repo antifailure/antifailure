@@ -25,17 +25,21 @@ export function CopyCodeButton({
   copyText = INSTALL,
   variant = "white",
   className,
+  cmsKey,
 }: {
   code?: string;
   copyText?: string;
   variant?: "white" | "green" | "terminal";
   className?: string;
+  cmsKey?: string;
 }) {
   const [copied, setCopied] = useState(false);
 
   return (
     <button
       type="button"
+      data-cms-action={cmsKey}
+      data-cms-key={cmsKey}
       aria-label={`Copy: ${copyText}`}
       className={cn(
         "group inline-flex min-h-11 max-w-full cursor-pointer items-center gap-x-3 overflow-hidden font-mono text-[13px] font-medium tracking-extra-tight whitespace-nowrap",

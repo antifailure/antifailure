@@ -59,6 +59,8 @@ export interface ConsoleOptions {
   build: ConsoleBuild
   /** Where the analytics event goes when a key is stored from these pages. */
   analytics: Analytics
+  /** Explicit marketing origins, used only for loopback previews in local development. */
+  siteOrigins?: readonly string[]
 }
 
 /**
@@ -71,21 +73,44 @@ export interface ConsoleOptions {
  * console (which this replaces) or shipping a policy that blocks the
  * application from starting.
  *
- * Everything else stays shut. No 'unsafe-eval', no third-party origin of any
- * kind, connect-src is this origin only, and frame-ancestors is none, so the
- * console cannot be framed and cannot talk to anywhere else.
+ * The website editor frames the actual marketing site and shows its built-in
+ * artwork. Those two directives name that exact origin. Upload previews use
+ * local blob URLs. Connections still stay on this origin and nobody can frame
+ * the console itself.
  */
-export const CONSOLE_CSP = [
-  "default-src 'none'",
-  "script-src 'self' 'unsafe-inline'",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: https://avatars.githubusercontent.com",
-  "font-src 'self'",
-  "connect-src 'self'",
-  "form-action 'self'",
-  "base-uri 'none'",
-  "frame-ancestors 'none'",
-].join('; ')
+export function consoleCsp(secureCookies = true, siteOrigins: readonly string[] = []): string {
+  const previewOrigins = new Set(['https://antifailure.dev'])
+  if (!secureCookies) {
+    for (const value of siteOrigins) {
+      try {
+        const url = new URL(value)
+        // A development exception must be both explicitly configured and local.
+        // Parsing also prevents whitespace or directives entering the policy.
+        if ((url.protocol === 'http:' || url.protocol === 'https:') &&
+            ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) &&
+            url.pathname === '/' && !url.search && !url.hash && !url.username && !url.password) {
+          previewOrigins.add(url.origin)
+        }
+      } catch { /* Invalid origins never loosen the policy. */ }
+    }
+  }
+  const previews = [...previewOrigins].join(' ')
+  return [
+    "default-src 'none'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline'",
+    `img-src 'self' data: blob: https://avatars.githubusercontent.com ${previews}`,
+    `media-src 'self' blob: ${previews}`,
+    "font-src 'self'",
+    "connect-src 'self'",
+    `frame-src ${previews}`,
+    "form-action 'self'",
+    "base-uri 'none'",
+    "frame-ancestors 'none'",
+  ].join('; ')
+}
+
+export const CONSOLE_CSP = consoleCsp()
 
 interface Viewer {
   userId: string
@@ -96,6 +121,7 @@ interface Viewer {
 
 export function mountConsole(app: Hono<ApiEnv>, options: ConsoleOptions): void {
   const { pool, clock, build } = options
+  const csp = consoleCsp(options.secureCookies, options.siteOrigins)
 
   async function viewerFor(c: Context): Promise<Viewer | null> {
     const token = readCookie(c.req.header('cookie'), SESSION_COOKIE)
@@ -351,7 +377,7 @@ export function mountConsole(app: Hono<ApiEnv>, options: ConsoleOptions): void {
     c.header('content-type', asset.contentType)
     c.header('cache-control', asset.cacheControl)
     c.header('etag', asset.etag)
-    c.header('content-security-policy', CONSOLE_CSP)
+    c.header('content-security-policy', csp)
     c.header('x-frame-options', 'DENY')
     c.header('x-content-type-options', 'nosniff')
     c.header('referrer-policy', 'strict-origin-when-cross-origin')

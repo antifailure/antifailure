@@ -77,7 +77,7 @@ describe("the operator portal's navigation", () => {
     // groups, plus the overview above them, is the information architecture;
     // any other number here means the parser has stopped seeing the file and
     // every assertion after it is vacuous.
-    assert.equal(ENTRIES.length, 25, "expected the overview plus twenty four sections");
+    assert.equal(ENTRIES.length, 26, "expected the overview plus twenty five sections");
     assert.equal(GROUPS.length, 6);
     for (const g of GROUPS) {
       assert.ok(g.items.length > 0, `no entries were read out of the ${g.label} group`);
@@ -188,8 +188,8 @@ describe("the operator portal's navigation", () => {
     );
     assert.equal(
       GROUPS.reduce((n, g) => n + g.items.length, 0),
-      24,
-      "the information architecture has twenty four sections in six groups",
+      25,
+      "the information architecture has twenty five sections in six groups",
     );
   });
 });

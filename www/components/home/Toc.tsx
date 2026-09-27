@@ -10,6 +10,7 @@ const SECTIONS = [
   { id: "workload", title: "Load" },
   { id: "firewall", title: "Side-Effect Firewall" },
 ];
+type TocSection = { id: string; title: string };
 
 /**
  * Sticky header plus the rail pinned under it: 56px and 46px.
@@ -49,7 +50,7 @@ function scrollToSection(id: string) {
  * top passes its own link. The mobile rail is a bar pinned under the header, so
  * a section becomes current when its top passes the bar.
  */
-function useSectionState(tocRef: React.RefObject<HTMLDivElement | null>) {
+function useSectionState(tocRef: React.RefObject<HTMLDivElement | null>, sections: readonly TocSection[]) {
   const [state, setState] = useState({ deskIndex: 0, railIndex: 0, progress: 0 });
 
   useEffect(() => {
@@ -62,7 +63,7 @@ function useSectionState(tocRef: React.RefObject<HTMLDivElement | null>) {
 
       let deskIndex = 0;
       let railIndex = 0;
-      SECTIONS.forEach((section, index) => {
+      sections.forEach((section, index) => {
         const el = document.getElementById(section.id);
         if (!el) return;
         const top = el.getBoundingClientRect().top;
@@ -72,8 +73,8 @@ function useSectionState(tocRef: React.RefObject<HTMLDivElement | null>) {
         if (link && top <= link.getBoundingClientRect().top) deskIndex = index;
       });
 
-      const first = document.getElementById(SECTIONS[0].id);
-      const last = document.getElementById(SECTIONS[SECTIONS.length - 1].id);
+      const first = sections[0] ? document.getElementById(sections[0].id) : null;
+      const last = sections.length ? document.getElementById(sections[sections.length - 1].id) : null;
       let progress = 0;
       if (first && last) {
         const start = first.getBoundingClientRect().top + window.scrollY;
@@ -97,21 +98,21 @@ function useSectionState(tocRef: React.RefObject<HTMLDivElement | null>) {
       window.removeEventListener("scroll", update);
       window.removeEventListener("resize", update);
     };
-  }, [tocRef]);
+  }, [tocRef, sections]);
 
   return state;
 }
 
-export function TocWrapper({ children }: { children: React.ReactNode }) {
+export function TocWrapper({ children, sections = SECTIONS }: { children: React.ReactNode; sections?: readonly TocSection[] }) {
   const tocRef = useRef<HTMLDivElement>(null);
-  const { deskIndex, railIndex, progress } = useSectionState(tocRef);
+  const { deskIndex, railIndex, progress } = useSectionState(tocRef, sections);
 
   return (
     <div className="relative">
       <div className="absolute top-0 bottom-0 left-[calc(50%-min(100vw,1600px)/2+32px)] h-full max-xl:hidden">
-        <Toc activeIndex={deskIndex} tocRef={tocRef} />
+        <Toc activeIndex={deskIndex} tocRef={tocRef} sections={sections} />
       </div>
-      <SectionRail activeIndex={railIndex} progress={progress} />
+      <SectionRail activeIndex={railIndex} progress={progress} sections={sections} />
       {children}
     </div>
   );
@@ -126,7 +127,7 @@ export function TocWrapper({ children }: { children: React.ReactNode }) {
  * screen, keeps the current one scrolled into view, and draws how far through
  * the argument the reader has come.
  */
-function SectionRail({ activeIndex, progress }: { activeIndex: number; progress: number }) {
+function SectionRail({ activeIndex, progress, sections }: { activeIndex: number; progress: number; sections: readonly TocSection[] }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const chipRefs = useRef<(HTMLAnchorElement | null)[]>([]);
   const [edges, setEdges] = useState({ left: false, right: true });
@@ -167,7 +168,7 @@ function SectionRail({ activeIndex, progress }: { activeIndex: number; progress:
         }}
         className="no-scrollbars flex items-stretch gap-x-1 overflow-x-auto px-8 max-md:px-5"
       >
-        {SECTIONS.map((section, index) => {
+        {sections.map((section, index) => {
           const isActive = index === activeIndex;
           return (
             <a
@@ -208,14 +209,16 @@ function SectionRail({ activeIndex, progress }: { activeIndex: number; progress:
 function Toc({
   activeIndex,
   tocRef,
+  sections,
 }: {
   activeIndex: number;
   tocRef: React.RefObject<HTMLDivElement | null>;
+  sections: readonly TocSection[];
 }) {
   return (
     <div className="sticky top-0 z-10 pt-40 pb-60" ref={tocRef}>
       <ul className="flex w-[224px] flex-col gap-y-1.5">
-        {SECTIONS.map((section, index) => {
+        {sections.map((section, index) => {
           const isActive = index === activeIndex;
           return (
             <li key={section.id}>

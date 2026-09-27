@@ -12,6 +12,7 @@
 export interface StubRecord {
   inits: { key: string; options: Record<string, unknown> }[]
   stopped: number
+  started: number
   optedOut: number
   /** Recorder buffers thrown away. The switch promises this and the vendor's
    *  own opt out does not do it outside its cookieless path. */
@@ -27,12 +28,12 @@ declare global {
 }
 
 export function stubRecord(): StubRecord {
-  globalThis.__posthogStub ??= { inits: [], stopped: 0, optedOut: 0, discarded: 0, reconfigured: [] }
+  globalThis.__posthogStub ??= { inits: [], stopped: 0, started: 0, optedOut: 0, discarded: 0, reconfigured: [] }
   return globalThis.__posthogStub
 }
 
 export function resetStub(): void {
-  globalThis.__posthogStub = { inits: [], stopped: 0, optedOut: 0, discarded: 0, reconfigured: [] }
+  globalThis.__posthogStub = { inits: [], stopped: 0, started: 0, optedOut: 0, discarded: 0, reconfigured: [] }
 }
 
 export default {
@@ -49,6 +50,9 @@ export default {
   },
   stopSessionRecording(): void {
     stubRecord().stopped += 1
+  },
+  startSessionRecording(): void {
+    stubRecord().started += 1
   },
   opt_out_capturing(): void {
     stubRecord().optedOut += 1

@@ -35,6 +35,9 @@ export const ADMIN_PERMISSIONS = [
   // owner alone.
   'admin.leads.read',
   'admin.leads.write',
+  'admin.website.read',
+  'admin.website.write',
+  'admin.website.publish',
 
   // The operator directory: who can reach this portal, and with what role.
   'admin.operators.read',
@@ -180,6 +183,7 @@ export type AdminPermission = (typeof ADMIN_PERMISSIONS)[number]
  * and this comment does not.
  */
 export const RESERVED_PREFIXES: Record<string, string> = {
+  'admin.website': 'administration',
   'admin.portal': 'the foundation',
   'admin.operators': 'the foundation',
   'admin.audit': 'the foundation',
@@ -247,6 +251,9 @@ export type AdminRole = (typeof ADMIN_ROLES)[number]
  * lists would disagree and the documentation is the one that would be wrong.
  */
 export const ADMIN_PERMISSION_DESCRIPTIONS: Record<AdminPermission, string> = {
+  'admin.website.read': 'Read website drafts, publication history and the private media library.',
+  'admin.website.write': 'Edit website drafts and manage uploaded images, videos and fonts.',
+  'admin.website.publish': 'Publish or restore the public website and retry its static refresh.',
   'admin.recruitment.read': 'Read private applications for founding roles.',
   'admin.recruitment.write': 'Mark applications reviewed or delete applicant personal data.',
   'admin.leads.read': 'Read enterprise and demo requests, the private queue of people who asked to buy.',

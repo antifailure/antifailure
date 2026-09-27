@@ -100,6 +100,26 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
     rate: 2, burst: 10, key: 'ip',
     reason: 'Ending your own operator session. Cheap, idempotent, and refusing it would leave somebody signed in who is trying to sign out, so this is loose enough never to fire in practice.',
   },
+  'POST /v1/admin/website/media': {
+    rate: 1, burst: 12, key: 'ip',
+    reason: 'An owner may select several small files together. This admits a normal batch; the authenticated media reader separately caps file size and in-flight buffering.',
+  },
+  'GET /v1/website/published': {
+    rate: 10, burst: 60, key: 'ip',
+    reason: 'A small published document is fetched on website load and revalidated with an ETag. A burst accommodates visitors sharing an address.',
+  },
+  'OPTIONS /v1/website/published': {
+    rate: 10, burst: 60, key: 'ip',
+    reason: 'The website may preflight a conditional document read; this is a cheap exact-origin check without a database query.',
+  },
+  'GET /v1/website/media/:id': {
+    rate: 20, burst: 100, key: 'ip',
+    reason: 'A page loads several immutable images and a video may make repeated byte-range requests. This admits normal playback while bounding database reads.',
+  },
+  'OPTIONS /v1/website/media/:id': {
+    rate: 10, burst: 60, key: 'ip',
+    reason: 'An exact-origin preflight permits published fonts and video range requests without granting cross-origin credentials.',
+  },
   'POST /v1/admin/impersonation/start': {
     rate: 0.2, burst: 5, key: 'ip',
     reason: 'Stepping into a customer account is a deliberate act that takes minutes and is preceded by somebody typing a reason. One every five seconds is far above honest use, and the burst covers an operator who mistyped the account twice before getting it right.',
@@ -562,15 +582,18 @@ export const BODY_LIMITS: Record<string, BodyLimit> = {
  * console class: an extension route and a console page both get the default,
  * because neither has said otherwise, and the default is the point.
  *
- * The one null is the hosted MCP mount. mountHostedMcp registers a 32 KiB
+ * The hosted MCP mount registers a 32 KiB
  * limit of its own on /mcp and /auth/mcp/*, sized to a JSON-RPC message, and
  * it is registered there rather than here because it exists only when an App
  * base URL is configured. Bounding it here as well would buffer the same body
  * twice, once to a megabyte and once to thirty-two kilobytes, and the tighter
- * of the two is the one that decides.
+ * of the two is the one that decides. Website uploads also bound their own
+ * stream, after an early owner/session/origin/CSRF guard. Reading them here
+ * would buffer a video twice and would lose the per-format media ceiling.
  */
 export function bodyLimitFor(method: string, path: string): number | null {
   if (path === '/mcp' || path.startsWith('/auth/mcp/')) return null
+  if (method === 'POST' && path === '/v1/admin/website/media') return null
   const exact = BODY_LIMITS[`${method} ${path}`]
   if (exact) return exact.maxBytes
   const segments = path.split('/')

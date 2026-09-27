@@ -171,6 +171,8 @@ import type { PostHogSink } from './analytics/posthog-sink.ts'
 import { decideSignIn, extensionRoutes } from './extensions.ts'
 import { validateLead, recordLead, leadMessage, type LeadNotifier } from './enterprise/leads.ts'
 import { mountApplicationRoutes } from './recruitment/routes.ts'
+import { mountWebsitePublished } from './admin/website-public.ts'
+import { mountWebsiteMedia, websiteMediaUploadGuard } from './admin/website-media.ts'
 import {
   limitFor, bucketFor, bodyLimitFor, servedRoute, ENDPOINT_LIMITS, type EndpointLimit,
 } from './limits.ts'
@@ -600,6 +602,14 @@ export function createServer(options: ServerOptions) {
   // and nothing else. Empty means no browser on another origin is answered,
   // which is the refusing default rather than a reflected Origin.
   const siteOrigins: readonly string[] = options.siteOrigins ?? []
+  const websiteMedia = {
+    pool: options.pool,
+    adminPool: options.adminPool ?? null,
+    clock,
+    appBaseUrl: options.appBaseUrl ?? '',
+    siteOrigins,
+    secureCookies: secure,
+  }
   // Read once. It is the bounded set of label values, and reading it per
   // request would be the metrics endpoint doing work proportional to traffic.
   const declaredRoutes = Object.keys(ENDPOINT_LIMITS)
@@ -829,6 +839,10 @@ export function createServer(options: ServerOptions) {
     }
     return next()
   })
+
+  // A video upload has a larger allowance than JSON. Resolve the operator and
+  // check origin, CSRF and permission before any middleware reads its stream.
+  app.use('/v1/admin/website/media', websiteMediaUploadGuard(websiteMedia))
 
   // -------------------------------------------------------------------------
   // How much body a request may carry, before anything reads it.
@@ -1932,6 +1946,8 @@ export function createServer(options: ServerOptions) {
   }
 
   mountApplicationRoutes(app, { pool: options.pool, clock, siteOrigins })
+  mountWebsitePublished(app, { pool: options.pool, siteOrigins })
+  mountWebsiteMedia(app, websiteMedia)
 
   app.options('/v1/leads', (c) => {
     if (!allowLeadOrigin(c)) return c.body(null, 403)
@@ -3661,6 +3677,7 @@ export function createServer(options: ServerOptions) {
       clock,
       analytics,
       secureCookies: secure,
+      siteOrigins,
       keyring: options.keyring ?? null,
       build: options.consoleBuild ?? {
         dir: '',

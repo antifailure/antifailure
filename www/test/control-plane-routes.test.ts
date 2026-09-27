@@ -17,7 +17,7 @@
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { CONTROL_PLANE_ROUTES, controlPlaneUrl } from '../lib/control-plane-routes'
+import { CONTROL_PLANE_ROUTES, controlPlaneUrl, websiteMediaUrl } from '../lib/control-plane-routes'
 import { CONTROL_PLANE_URL } from '../lib/site'
 
 describe('the control plane URLs the site builds', () => {
@@ -26,6 +26,16 @@ describe('the control plane URLs the site builds', () => {
     assert.equal(controlPlaneUrl('leads.create'), `${CONTROL_PLANE_URL}/v1/leads`)
     assert.equal(controlPlaneUrl('site.events'), `${CONTROL_PLANE_URL}/v1/site/events`)
     assert.equal(controlPlaneUrl('auth.github'), `${CONTROL_PLANE_URL}/auth/github`)
+    assert.equal(controlPlaneUrl('website.published'), `${CONTROL_PLANE_URL}/v1/website/published`)
+    assert.equal(controlPlaneUrl('website.media'), `${CONTROL_PLANE_URL}/v1/website/media/:id`)
+  })
+
+  it('binds a valid media UUID without allowing paths or query parameters', () => {
+    const id = '188e5dcb-4c07-41fa-8e87-5adf80d160c3'
+    assert.equal(websiteMediaUrl(id), `${CONTROL_PLANE_URL}/v1/website/media/${id}`)
+    for (const invalid of [':id', '../secret', `${id}?signature=anything`, 'https://example.com', '']) {
+      assert.throws(() => websiteMediaUrl(invalid), /asset UUID/)
+    }
   })
 
   it('point at the production control plane when nothing is configured', () => {

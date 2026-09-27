@@ -1824,3 +1824,67 @@ export const auditStreamCursor = pgTable('audit_stream_cursor', {
   deliveredSeq: bigint('delivered_seq', { mode: 'number' }).notNull().default(0),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
 })
+
+// Global marketing content. Access is defined by migration 0050, independently
+// from every tenant role: only published content is readable by the app pool.
+export const websiteDraft = pgTable('website_draft', {
+  id: text('id').primaryKey(),
+  revision: bigint('revision', { mode: 'number' }).notNull().default(0),
+  document: jsonb('document').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedBy: text('updated_by'),
+})
+export const websitePublished = pgTable('website_published', {
+  id: text('id').primaryKey(),
+  revision: bigint('revision', { mode: 'number' }).notNull().default(0),
+  document: jsonb('document').notNull(),
+  contentHash: text('content_hash').notNull(),
+})
+export const websiteHistory = pgTable('website_history', {
+  revision: bigint('revision', { mode: 'number' }).primaryKey(),
+  draftRevision: bigint('draft_revision', { mode: 'number' }).notNull(),
+  document: jsonb('document').notNull(),
+  contentHash: text('content_hash').notNull(),
+  sourceVersion: text('source_version'),
+  restoredFrom: bigint('restored_from', { mode: 'number' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  createdBy: text('created_by').notNull(),
+})
+export const websiteMutations = pgTable('website_mutations', {
+  requestId: uuid('request_id').primaryKey(),
+  actorId: uuid('actor_id').notNull(),
+  operation: text('operation').notNull(),
+  digest: text('digest').notNull(),
+  response: jsonb('response').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+export const websiteAssets = pgTable('website_assets', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  sha256: text('sha256').notNull().unique(),
+  name: text('name').notNull(),
+  kind: text('kind').notNull(),
+  mimeType: text('mime_type').notNull(),
+  sizeBytes: integer('size_bytes').notNull(),
+  width: integer('width'),
+  height: integer('height'),
+  bytes: bytea('bytes').notNull(),
+  isPublic: boolean('is_public').notNull().default(false),
+  archived: boolean('archived').notNull().default(false),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  createdBy: text('created_by').notNull(),
+}, (t) => [uniqueIndex('website_assets_created_idx').on(t.createdAt, t.id)])
+export const websiteSecrets = pgTable('website_secrets', {
+  key: text('key').primaryKey(),
+  value: bytea('value').notNull(),
+})
+export const websiteRefreshJobs = pgTable('website_refresh_jobs', {
+  revision: bigint('revision', { mode: 'number' }).primaryKey(),
+  status: text('status').notNull().default('queued'),
+  attempts: integer('attempts').notNull().default(0),
+  nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
+  leaseUntil: timestamp('lease_until', { withTimezone: true }),
+  leaseToken: uuid('lease_token'),
+  dispatchedAt: timestamp('dispatched_at', { withTimezone: true }),
+  lastError: text('last_error'),
+  deployedAt: timestamp('deployed_at', { withTimezone: true }),
+}, (t) => [uniqueIndex('website_refresh_due_idx').on(t.status, t.nextAttemptAt, t.revision)])
