@@ -13,3 +13,6 @@ requests while short copy edits stay on the smaller model. Every suggestion
 still requires review before it enters a draft.
 It can also propose a new page or article as a private, editable draft, with
 route collision checks and a publish gate for incomplete content.
+The network gate's denied-probe test now keeps its port allocated on one
+loopback address and probes another, so a new positive-control listener cannot
+accidentally claim the supposedly denied endpoint during a busy CI run.

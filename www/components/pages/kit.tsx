@@ -34,9 +34,8 @@ import { cn } from "@/lib/cn";
  */
 export function PageShell({ children }: { children: ReactNode }) {
   return (
-    <SiteLayout overlay={false}>
+    <SiteLayout overlay={false} closing={<PagesClose />}>
       {children}
-      <PagesClose />
     </SiteLayout>
   );
 }

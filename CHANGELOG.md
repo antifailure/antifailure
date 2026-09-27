@@ -46,6 +46,9 @@ redacted build logs (#600).
 - The PostgreSQL crash test measures availability at its actual probe
   resolution rather than requiring a 100 ms sampler to catch a shorter
   recovery window (#601).
+- The network gate test keeps its probe port allocated on one loopback
+  address, so a new positive-control listener cannot accidentally reuse the
+  denied endpoint (#602).
 
 ## v1.8.1
 

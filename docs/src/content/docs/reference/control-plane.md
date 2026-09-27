@@ -575,7 +575,7 @@ isolated iframe rather than in the surrounding page.
 The **Pages** view lists built routes and individual Writing articles. Owners
 can create a page at a new path or an article under `/blog`, then edit its
 title, introduction, summary, rich body, date and topics. A draft URL is
-previewable before it exists publicly. Publishing rebuilds its HTML, Markdown
+available for preview before it exists publicly. Publishing rebuilds its HTML, Markdown
 version and sitemap entry; new articles also enter the Writing index and RSS
 feed. The editor links newly authored pages from the site's Pages index so
 visitors and crawlers can reach them. Existing pages retain source defaults

@@ -2,6 +2,7 @@
 
 import { authoredPageContent, emptyPageBody, pageContentKey, setFieldOverride, type AuthoredPage, type FieldDefinition, type WebsiteDocument } from "@antifailure/website";
 import { inputClass } from "@/components/ui";
+import { sourceArticleDefault } from "@/lib/website-page";
 import { RichTextInput } from "./RichTextInput";
 import type { PageOption } from "./PageLibrary";
 
@@ -36,15 +37,7 @@ export function SourceArticleDetails({ document, path, definitions, source, disa
   onChange(next: WebsiteDocument, key: string): void;
 }) {
   const key = (field: string) => pageContentKey(path, field);
-  const fallback = (field: string) => {
-    const found = definitions.find((definition) => definition.key === key(field));
-    if (typeof found?.defaultValue === "string") return found.defaultValue;
-    if (field === "title") return source?.title ?? "";
-    if (field === "description" || field === "summary") return source?.description ?? "";
-    if (field === "tags") return source?.tags?.join(", ") ?? "";
-    if (field === "published") return source?.published ?? "";
-    return "";
-  };
+  const fallback = (field: string) => sourceArticleDefault(path, field, definitions, source);
   const value = (field: string) => typeof document.fields[key(field)] === "string" ? String(document.fields[key(field)]) : fallback(field);
   const update = (field: string, text: string) => onChange(setFieldOverride(document, key(field), text, fallback(field)), key(field));
   return <div className="cms-page-details">

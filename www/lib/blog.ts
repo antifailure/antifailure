@@ -46,6 +46,12 @@ const SOURCE_POSTS: readonly Post[] = [
   EGRESS_MODES,
 ];
 
+/** Defaults stay separate from the built snapshot so Reset really returns to
+ * source copy after a later static refresh. */
+export function getSourcePost(slug: string): Post | undefined {
+  return SOURCE_POSTS.find((post) => post.slug === slug);
+}
+
 const document = normalizeWebsiteDocument(snapshot.document).document;
 const sourcePost = (post: Post): Post => {
   const path = `/blog/${post.slug}`;

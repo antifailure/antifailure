@@ -6,10 +6,12 @@ import { SitewideSections } from "@/components/cms/SitewideSections";
 
 export function SiteLayout({
   children,
+  closing,
   overlay = true,
   className,
 }: {
   children: ReactNode;
+  closing?: ReactNode;
   overlay?: boolean;
   className?: string;
 }) {
@@ -17,7 +19,7 @@ export function SiteLayout({
     <div className="relative flex min-h-screen flex-col">
       <SiteHeader overlay={overlay} />
       <main id="main" tabIndex={-1} className={cn("flex min-w-0 flex-1 flex-col", className)}>
-        <SitewideSections>{children}</SitewideSections>
+        <SitewideSections closing={closing}>{children}</SitewideSections>
       </main>
       <SiteFooter />
     </div>

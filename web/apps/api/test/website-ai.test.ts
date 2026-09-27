@@ -74,6 +74,10 @@ test('a prompt can create one private article draft without taking an existing r
       message: 'Draft', edits: [], styles: [], actions: [], pages: [{ ...page, path: badPath }],
     })))
   }
+  const colliding = websitePromptInput.parse({ ...pageInput, existingPaths: ['/guides/deploy-safely'] })
+  await assert.rejects(() => requestWebsiteProposal(colliding, 'test-key', async () => providerResponse({
+    message: 'Draft', edits: [], styles: [], actions: [], pages: [{ ...page, kind: 'page', path: '/guides-deploy-safely' }],
+  })))
 })
 
 test('unknown fields and unsafe style values never reach the draft', async () => {

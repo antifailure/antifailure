@@ -29,6 +29,9 @@
 .cms-prompt-change { display: grid; gap: 5px; padding: 11px 12px; border-bottom: 1px solid var(--color-rule); overflow-wrap: anywhere; }
 .cms-prompt-change small { color: var(--color-muted); font-size: 10px; }
 .cms-prompt-change span { color: var(--color-ink); font-size: 12px; line-height: 1.45; }
+.cms-prompt-full-body summary { min-height: 44px; display: flex; align-items: center; color: var(--color-ink); font-size: 12px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.cms-prompt-full-body summary:focus-visible { outline: 2px solid var(--color-ink); outline-offset: 2px; }
+.cms-prompt-full-body p { max-height: 280px; overflow: auto; white-space: pre-wrap; color: var(--color-ink); font-size: 12px; line-height: 1.6; }
 .cms-prompt-proposal-actions { display: flex; align-items: center; gap: 10px; padding: 11px; }
 .cms-prompt-proposal-actions button { min-height: 36px; padding: 0 10px; font-size: 11px; }
 .cms-prompt-proposal-actions button:first-child { background: var(--color-ink); color: var(--color-card); border-radius: 3px; }

@@ -47,6 +47,12 @@ test('new pages and posts have safe paths, page-specific fields, and publishable
   assert.deepEqual(emptyPageBody(), { type: 'doc', content: [{ type: 'paragraph' }] })
 })
 
+test('two distinct page URLs cannot share the same editable field namespace', () => {
+  const document = emptyWebsiteDocument()
+  document.pages = [{ path: '/guides/deploy-safely', kind: 'page' }, { path: '/guides-deploy-safely', kind: 'page' }]
+  assert.equal(validateWebsiteDocument(document).ok, false)
+})
+
 test('an existing article cannot publish an empty title or an impossible date', () => {
   const document = emptyWebsiteDocument()
   const title = pageContentKey('/blog/what-staging-misses-about-migrations', 'title')

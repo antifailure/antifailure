@@ -5,6 +5,7 @@ import type {
   WebsiteValidationResult,
 } from './types.ts'
 import { isAuthoredPagePath } from './authored-path.ts'
+import { sitePageSlug } from './page-slug.ts'
 
 export const WEBSITE_LIMITS = Object.freeze({
   bytes: 1_048_576,
@@ -425,8 +426,9 @@ function parsePages(value: unknown, path: string, errors: ValidationIssue[]): Au
     if ((raw.kind === 'post' && !/^\/blog\/[a-z0-9-]+$/u.test(raw.path)) || (raw.kind === 'page' && raw.path.startsWith('/blog/'))) {
       issue(errors, `${at}.path`, 'Articles live under /blog; other pages use their own path.'); continue
     }
-    if (seen.has(raw.path)) { issue(errors, `${at}.path`, 'This page path is already used.'); continue }
-    seen.add(raw.path)
+    const key = sitePageSlug(raw.path)
+    if (seen.has(key)) { issue(errors, `${at}.path`, 'This page path shares an editing key with another page.'); continue }
+    seen.add(key)
     result.push({ path: raw.path, kind: raw.kind })
   }
   return result

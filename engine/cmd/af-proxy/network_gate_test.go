@@ -38,8 +38,12 @@ func gateTCPServer(t *testing.T) (string, *atomic.Int32, func()) {
 func gateTestConfig(t *testing.T) networkGateConfig {
 	t.Helper()
 	control, _, _ := gateTCPServer(t)
-	closed, _, closeServer := gateTCPServer(t)
-	closeServer()
+	// Keep the port allocated on 127.0.0.1, but dial another loopback address.
+	// Closing an ephemeral listener and then creating a second positive
+	// control can let that control reuse the supposedly denied port.
+	_, port, err := net.SplitHostPort(control)
+	require.NoError(t, err)
+	closed := net.JoinHostPort("127.255.255.254", port)
 	return networkGateConfig{control: control, probeTimeout: 20 * time.Millisecond,
 		interval: 5 * time.Millisecond, consecutive: 3,
 		probes: []networkGateProbe{{"direct", "tcp4", closed}},

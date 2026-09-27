@@ -2,7 +2,7 @@ import Link from "next/link";
 import { pageContentKey } from "@antifailure/website";
 import { CmsText } from "@/components/cms/Editable";
 import { PageHero, PageSection, PageShell } from "@/components/pages/kit";
-import { POSTS_BY_DATE, formatDate } from "@/lib/blog";
+import { POSTS_BY_DATE, formatDate, getSourcePost } from "@/lib/blog";
 import { pageMetadata } from "@/lib/seo";
 
 export const metadata = pageMetadata("/blog");
@@ -33,10 +33,10 @@ export default function BlogIndexPage() {
                 </div>
                 <h2 className="mt-4 max-w-[900px] text-[36px] leading-dense tracking-tighter text-black max-lg:text-[28px] max-md:text-[24px]">
                   <Link prefetch={false} href={`/blog/${post.slug}`} className="hover:underline decoration-black/25 underline-offset-[6px]">
-                    <CmsText cmsKey={pageContentKey(`/blog/${post.slug}`, "title")} label={`${post.slug} title`} sectionId="page-blog" defaultValue={post.title} />
+                    <CmsText cmsKey={pageContentKey(`/blog/${post.slug}`, "title")} label={`${post.slug} title`} sectionId="page-blog" defaultValue={getSourcePost(post.slug)?.title ?? post.title} />
                   </Link>
                 </h2>
-                <CmsText cmsKey={pageContentKey(`/blog/${post.slug}`, "description")} label={`${post.slug} description`} sectionId="page-blog" defaultValue={post.dek} as="p" className="mt-4 max-w-[680px] text-[17px] leading-relaxed tracking-extra-tight text-gray-new-40 max-md:text-[15px]" />
+                <CmsText cmsKey={pageContentKey(`/blog/${post.slug}`, "description")} label={`${post.slug} description`} sectionId="page-blog" defaultValue={getSourcePost(post.slug)?.dek ?? post.dek} as="p" className="mt-4 max-w-[680px] text-[17px] leading-relaxed tracking-extra-tight text-gray-new-40 max-md:text-[15px]" />
                 <Link prefetch={false}
                   href={`/blog/${post.slug}`}
                   className="mt-5 inline-flex items-center gap-x-2 text-[15px] tracking-extra-tight text-black underline decoration-black/20 underline-offset-4 hover:decoration-black"

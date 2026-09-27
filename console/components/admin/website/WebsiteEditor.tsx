@@ -449,7 +449,7 @@ function EditorWorkspace({ initial }: { initial: WebsiteState }) {
     <fieldset disabled={disabled} className="cms-inspector-body">
       {manifest && (inspectorTab === "design" || panel === "styles") ? <DesignInspector document={document} target={target} device={device} manifest={manifest} onChange={(next) => edit(next, `style:${target}`)} disabled={disabled} fontAssets={fontAssets} /> : currentAuthoredPage && pageRootSelected ?
         <PageDetails document={document} page={currentAuthoredPage} disabled={disabled} onChange={edit} onRemove={() => setRemovePagePath(pagePath)} /> : <>
-        {pageRootSelected && pagePath.startsWith("/blog/") && <SourceArticleDetails document={document} path={pagePath} definitions={manifest?.fields ?? []} source={pageOptions.find((item) => item.path === pagePath)} disabled={disabled} onChange={edit} />}
+        {pageRootSelected && pagePath.startsWith("/blog/") && (manifest ? <SourceArticleDetails document={document} path={pagePath} definitions={manifest.fields} source={pageOptions.find((item) => item.path === pagePath)} disabled={disabled} onChange={edit} /> : <p className="cms-help" role="status">Loading article settings…</p>)}
         {selectedField && <button className="cms-text-button cms-back" onClick={() => choose({ sectionId: selectedField.sectionId })}>← All section content</button>}
         {!selection.key && (fields.length > 6 || collectionDefinitions.length > 0) && <input className={`${inputClass} cms-content-search`} type="search" aria-label="Find a setting" placeholder="Find a setting…" value={contentSearch} onChange={(event) => setContentSearch(event.target.value)} />}
         {!fields.length && <p className="cms-help">Click text, media or a section in the preview to start editing.</p>}

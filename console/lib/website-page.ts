@@ -1,4 +1,16 @@
-import { authoredPage, emptyPageBody, isAuthoredPagePath, pageBlockPrefix, pageContentKey, sitePageSlug, type AuthoredPage, type WebsiteDocument } from "@antifailure/website";
+import { authoredPage, emptyPageBody, isAuthoredPagePath, pageBlockPrefix, pageContentKey, sitePageSlug, type AuthoredPage, type FieldDefinition, type WebsiteDocument } from "@antifailure/website";
+
+export function sourceArticleDefault(path: string, field: string, definitions: readonly FieldDefinition[], source?: {
+  title?: string; description?: string; tags?: string[]; published?: string;
+}): string {
+  const found = definitions.find((definition) => definition.key === pageContentKey(path, field));
+  if (typeof found?.defaultValue === "string") return found.defaultValue;
+  if (field === "title") return source?.title ?? "";
+  if (field === "description" || field === "summary") return source?.description ?? "";
+  if (field === "tags") return source?.tags?.join(", ") ?? "";
+  if (field === "published") return source?.published ?? "";
+  return "";
+}
 
 function slug(value: string): string {
   return value.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/gu, "").replace(/[^a-z0-9]+/gu, "-").replace(/^-+|-+$/gu, "").slice(0, 70);
@@ -13,7 +25,10 @@ export function createAuthoredPage(document: WebsiteDocument, existingPaths: rea
   if (!isAuthoredPagePath(path) || (input.kind === "post" && !/^\/blog\/[a-z0-9-]+$/u.test(path)) || (input.kind === "page" && path.startsWith("/blog/"))) {
     throw new Error("Choose a lowercase path such as /guides/releases or /blog/safer-deploys.");
   }
-  if (existingPaths.includes(path) || authoredPage(document, path)) throw new Error("That path already belongs to a page. Open it from the list instead.");
+  if (existingPaths.some((existing) => sitePageSlug(existing) === sitePageSlug(path)) ||
+    document.pages?.some((existing) => sitePageSlug(existing.path) === sitePageSlug(path))) {
+    throw new Error("That path already belongs to a page or shares its editing key. Choose another path.");
+  }
   if (!title || !description || title.length > 180 || description.length > 300) throw new Error("Add a title and a short introduction first.");
   const key = (field: string) => pageContentKey(path, field);
   return { path, document: { ...document, pages: [...(document.pages ?? []), { path, kind: input.kind }], fields: {

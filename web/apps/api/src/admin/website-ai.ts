@@ -1,7 +1,7 @@
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 import {
-  emptyWebsiteDocument, isAuthoredPagePath, pageContentKey, safeHref, setFieldOverride, setStyleOverride, validateWebsiteDocument,
+  emptyWebsiteDocument, isAuthoredPagePath, pageContentKey, safeHref, setFieldOverride, setStyleOverride, sitePageSlug, validateWebsiteDocument,
   type FieldDefinition, type WebsiteDocument,
 } from '@antifailure/website'
 
@@ -93,7 +93,7 @@ function checkProposal(input: WebsitePromptInput, value: unknown): WebsitePropos
     if (action.operation === 'move-section' && (!action.after && input.page !== '/' || action.after && !input.targets.includes(action.after))) throw new Error('The assistant suggested a move outside this page.')
   }
   for (const page of proposal.pages) {
-    if (!isAuthoredPagePath(page.path) || input.existingPaths.includes(page.path) ||
+    if (!isAuthoredPagePath(page.path) || input.existingPaths.some((path) => sitePageSlug(path) === sitePageSlug(page.path)) ||
       (page.kind === 'post' ? !/^\/blog\/[a-z0-9-]+$/u.test(page.path) : page.path.startsWith('/blog/'))) {
       throw new Error('The assistant suggested an unavailable page path.')
     }
@@ -117,7 +117,7 @@ export function applyWebsiteProposal(document: WebsiteDocument, input: WebsitePr
     next = setStyleOverride(next, style.target, style.breakpoint, style.property as Parameters<typeof setStyleOverride>[3], style.value)
   }
   for (const page of proposal.pages) {
-    if (next.pages?.some((entry) => entry.path === page.path)) throw new Error('That page already exists.')
+    if (next.pages?.some((entry) => sitePageSlug(entry.path) === sitePageSlug(page.path))) throw new Error('That page already exists.')
     next = { ...next, pages: [...(next.pages ?? []), { path: page.path, kind: page.kind }] }
     for (const [field, value] of Object.entries({
       title: page.title, description: page.description, summary: page.summary,

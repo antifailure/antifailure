@@ -41,9 +41,10 @@ function previewConnection(): { origin: string; session: string } | null {
 
 export function CmsProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const pagePath = pathname.replace(/\/+$/u, "") || "/";
   const [framedPreview, setFramedPreview] = useState(false);
   const isPreview = pathname === "/cms-preview" || pathname === "/cms-preview/" || framedPreview;
-  const [publishedDocument, setPublishedDocument] = useState<WebsiteDocument>(() => projectWebsiteDocument(normalizeWebsiteDocument(snapshot.document).document, pathname));
+  const [publishedDocument, setPublishedDocument] = useState<WebsiteDocument>(() => projectWebsiteDocument(normalizeWebsiteDocument(snapshot.document).document, pagePath));
   const [previewDocument, setPreviewDocument] = useState<WebsiteDocument>(() => normalizeWebsiteDocument(snapshot.document).document);
   const [previewEditing, setEditing] = useState(false);
   const document = isPreview ? previewDocument : publishedDocument;
@@ -100,7 +101,7 @@ export function CmsProvider({ children }: { children: ReactNode }) {
     // A path change needs a fresh projection, but a response older than the
     // static HTML must never erase content that the build already published.
     revision.current = snapshot.revision;
-    setPublishedDocument(projectWebsiteDocument(normalizeWebsiteDocument(snapshot.document).document, pathname));
+    setPublishedDocument(projectWebsiteDocument(normalizeWebsiteDocument(snapshot.document).document, pagePath));
     const controller = new AbortController();
     let fetching = false;
     const refresh = async () => {
@@ -108,7 +109,7 @@ export function CmsProvider({ children }: { children: ReactNode }) {
       fetching = true;
       try {
         const url = new URL(controlPlaneUrl("website.published"));
-        url.searchParams.set("path", pathname);
+        url.searchParams.set("path", pagePath);
         const response = await fetch(url, { credentials: "omit", signal: controller.signal, cache: "no-cache" });
         if (!response.ok) return;
         const current: unknown = await response.json();
@@ -123,7 +124,7 @@ export function CmsProvider({ children }: { children: ReactNode }) {
     const timer = window.setInterval(() => { void refresh(); }, 60_000);
     window.addEventListener("focus", refresh);
     return () => { controller.abort(); window.clearInterval(timer); window.removeEventListener("focus", refresh); };
-  }, [isPreview, pathname]);
+  }, [isPreview, pagePath]);
 
   useEffect(() => {
     if (!isPreview) return;

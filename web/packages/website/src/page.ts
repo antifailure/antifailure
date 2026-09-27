@@ -1,19 +1,11 @@
 import type { AuthoredPage, WebsiteDocument } from './types.ts'
 import { resolveOrder } from './resolve.ts'
+import { sitePageSlug } from './page-slug.ts'
 export { isAuthoredPagePath } from './authored-path.ts'
+export { sitePageSlug } from './page-slug.ts'
 
 export function authoredPage(document: WebsiteDocument, path: string): AuthoredPage | undefined {
   return document.pages?.find((page) => page.path === path)
-}
-
-/** Trim path separators in one pass. A route can come from a request query,
- * so do not use an overlapping start/end regular expression here. */
-export function sitePageSlug(path: string): string {
-  let start = 0
-  let end = path.length
-  while (start < end && path.charCodeAt(start) === 47) start++
-  while (end > start && path.charCodeAt(end - 1) === 47) end--
-  return path.slice(start, end).replace(/[^a-zA-Z0-9_-]+/gu, '-') || 'home'
 }
 
 /** Stable, short namespace for blocks on a public page. The canonical path is

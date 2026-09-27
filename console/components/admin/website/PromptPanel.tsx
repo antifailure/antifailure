@@ -55,7 +55,8 @@ export function applyPromptChanges(document: WebsiteDocument, manifest: WebsiteM
     }
   }
   for (const proposed of proposal.pages) {
-    if (!isAuthoredPagePath(proposed.path) || existingPaths.includes(proposed.path) || next.pages?.some((entry) => entry.path === proposed.path) ||
+    if (!isAuthoredPagePath(proposed.path) || existingPaths.some((path) => sitePageSlug(path) === sitePageSlug(proposed.path)) ||
+      next.pages?.some((entry) => sitePageSlug(entry.path) === sitePageSlug(proposed.path)) ||
       (proposed.kind === "post" ? !/^\/blog\/[a-z0-9-]+$/u.test(proposed.path) : proposed.path.startsWith("/blog/"))) {
       throw new Error("That page path is unavailable. Choose another path.");
     }
@@ -169,7 +170,12 @@ export function PromptPanel({ document, manifest, page, sectionId, selectedKey, 
         {proposal.edits.map((edit) => <div className="cms-prompt-change" key={edit.key}><small>{manifest?.fields.find((field) => field.key === edit.key)?.label ?? edit.key}</small><span>{String(edit.value)}</span></div>)}
         {proposal.styles.map((style, index) => <div className="cms-prompt-change" key={`${style.target}-${style.property}-${index}`}><small>{style.target} · {style.breakpoint} · {style.property}</small><span>{style.value}</span></div>)}
         {proposal.actions.map((action, index) => <div className="cms-prompt-change" key={`action-${index}`}><small>{action.operation.replaceAll("-", " ")}</small><span>{action.operation === "add-section" ? `${action.kind} block${action.heading ? ` · ${action.heading}` : ""}` : action.sectionId}</span></div>)}
-        {proposal.pages.map((proposed) => <div className="cms-prompt-change" key={proposed.path}><small>New {proposed.kind === "post" ? "article" : "page"} · {proposed.path}</small><span>{proposed.title}<br />{proposed.description}<br />{proposed.body ? `${proposed.body.slice(0, 240)}${proposed.body.length > 240 ? "…" : ""}` : "Body needs your source material before publication."}</span></div>)}
+        {proposal.pages.map((proposed) => <div className="cms-prompt-change" key={proposed.path}>
+          <small>New {proposed.kind === "post" ? "article" : "page"} · {proposed.path}</small>
+          <span>{proposed.title}</span><span>{proposed.description}</span>
+          <details className="cms-prompt-full-body"><summary>Read the full draft body</summary><p>{proposed.body || "The body needs your source material before publication."}</p></details>
+          {proposed.tags && <small>Topics: {proposed.tags}</small>}
+        </div>)}
         <div className="cms-prompt-proposal-actions"><button type="button" disabled={disabled} onClick={apply}>Apply to draft</button><button type="button" onClick={() => setProposal(null)}>Discard</button></div>
       </div>}
       {notice && <p className="cms-prompt-notice" role="status">{notice}</p>}
