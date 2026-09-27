@@ -730,6 +730,163 @@ test('a program still writing when the budget runs out is blocked, not judged', 
     `the report blamed the expectation for a screen it never waited for: ${outcome.detail}`);
 });
 
+// THE FOUR ORDERINGS OF A SILENCE, and why a silence alone is not evidence. The
+// driver's wait ends when the program has said its last word, and it used to
+// accept a silence of EXIT_GRACE_MS as proof of that. The silence is measured on
+// DELIVERY, so its clock counts the gap since the DRIVER last read rather than the
+// gap since the PROGRAM last wrote, and a program merely DESCHEDULED is silent
+// without being finished. Accepting that reported `expectation-not-met`, which
+// tells the author their program did not print something, about output nobody had
+// waited for.
+//
+// It was not theoretical. `runner` is a required check and it failed once in 333
+// observations, on pull requests that had not touched the runner, always as this
+// file's late burst subtest with the screen cut mid line. Induced at one position
+// with only the length of the silence varying: 300 ms and 500 ms never failed,
+// 700 ms failed 2 runs in 3, 1000 ms failed 3 in 3. The transition sat exactly on
+// EXIT_GRACE_MS, which is why raising it would only have moved the flake.
+//
+// What replaces it is the rule the other surface already follows, at
+// workflow.ts's `meetsAll` and model.ts's `judgeAll`: stop the moment the
+// expectation is met and keep going otherwise. More output can only ever turn an
+// unmet expectation into a met one, because the transcript accumulates. So the
+// three tests below are the three ways a silence can arrive that any single break
+// can tell apart, and each one names the ordering it covers. They are called
+// `silence ordering` because verdict.test.ts and browser.test.ts already own the
+// bare `ordering` prefix for the retry orderings, and two unrelated series sharing
+// it makes a suite log hard to read. The next three cells are older tests, named
+// here so the table is complete rather than repeated: an unmet expectation
+// against a program that never exits and never writes again is "a program that will not exit and
+// shows the wrong thing fails rather than blocks", which now spends its declared
+// budget before it says so, output still arriving at the budget is the subtest
+// above, and keys still to send at the budget is "the budget stops a program with
+// keys still to send".
+//
+// ONE ORDERING HAS NO TEST OF ITS OWN, deliberately: a gap SHORTER than the grace,
+// with output either side of it. It is the same code path as silence ordering 1
+// and no single break reaches it first, because with the screen deciding, the only
+// way to cut a transcript early is to accept an unmet silence, which is what that
+// test catches. A test for it would look alive while measuring nothing.
+const silenceProgram = (before: string, silenceMs: number, after: string) => String.raw`
+const stall = (ms) => { const until = Date.now() + ms; while (Date.now() < until); };
+` + before + `\nstall(${silenceMs});\n` + after;
+
+test('silence ordering 1: a program silent past the grace and NOT finished is waited for, not judged', async () => {
+  // THE CELL THIS LANE WAS OPENED FOR: output, then a silence longer than the
+  // grace, then the output the expectation is about, then an exit. The silence is
+  // twice EXIT_GRACE_MS, so it cannot stop being a silence the driver would once
+  // have ended on however that constant moves, and the expectation appears ONLY
+  // after it, so a driver that accepts the silence must get this wrong.
+  //
+  // The burst before the silence is small on purpose. What made the failure
+  // reachable is the emulator catching up INSIDE the silence, which is what lets
+  // the driver's own drain reach its fixed point and return; fifty lines catch up
+  // in a millisecond, so this needs no load and no timing luck. Measured against
+  // the code this replaces, at a thousand lines and a 1000 ms silence: 3 failures
+  // in 3.
+  const silenceMs = EXIT_GRACE_MS * 2;
+  const program = silenceProgram(
+    'for (let i = 1; i <= 50; i++) process.stdout.write("line " + i + "\\n");',
+    silenceMs,
+    'process.stdout.write("the late word\\n"); process.exit(0);',
+  );
+  const results = await runTerminal({
+    workflows: [{
+      name: 'silent-then-more',
+      command: execPath,
+      args: ['-e', program],
+      screen: { rows: 10, cols: 40 },
+      expect: ['"the late word"'],
+      maxMs: 30_000,
+    }],
+  });
+  const outcome = results[0]!.outcome;
+  assert.equal(outcome.verdict, 'pass',
+    `a silence of ${silenceMs} ms was read as the end of a program that had not finished: ${outcome.detail}`);
+});
+
+test('silence ordering 2: a program that EXITS during the silence is judged at once, not at its budget', async () => {
+  // A silence with no resume, ended by the exit. The expectation is never met, so
+  // the wait cannot end on the screen, and the thing that must end it is the
+  // process being gone. The race is the assertion: the budget is 30 s and this
+  // has to come back in a fraction of it, which is what says the exit was read as
+  // the end rather than waited past. Without that, a driver that simply waited
+  // out every budget would pass this test while being unusable.
+  const program = silenceProgram(
+    'process.stdout.write("only this\\n");',
+    EXIT_GRACE_MS * 2,
+    'process.exit(0);',
+  );
+  // The work promise is kept and awaited in a `finally`, which is not tidiness.
+  // When the race wins, `withinReach` returns and the DRIVER CARRIES ON: it still
+  // holds the pseudo terminal, and this file already paid for learning what that
+  // costs, an abandoned driver keeping the event loop alive so the FILE never
+  // finishes and the summary reads `pass 0 fail 0 cancelled 2`, which a reader
+  // scanning counters sees as no failure at all. Awaiting the work releases the
+  // child, and it costs the rest of the budget only on a run that was failing
+  // anyway.
+  const work = runTerminal({
+    workflows: [{
+      name: 'quiet-then-exit',
+      command: execPath,
+      args: ['-e', program],
+      screen: { rows: 10, cols: 40 },
+      expect: ['"never printed"'],
+      maxMs: 30_000,
+    }],
+  });
+  let raced;
+  try {
+    raced = await withinReach(work, EXIT_GRACE_MS * 16);
+  } finally {
+    await work;
+  }
+  if (raced === NEVER_RETURNED) {
+    assert.fail(`${NEVER_RETURNED} within ${EXIT_GRACE_MS * 16} ms for a program that exited during the silence, so its exit was not what ended the wait`);
+  }
+  const outcome = raced[0]!.outcome;
+  // fail rather than blocked: the program finished and did not show the words, so
+  // this IS a claim about the program and the driver is entitled to make it.
+  assert.equal(outcome.verdict, 'fail', outcome.detail);
+  assert.equal(outcome.cause, 'expectation-not-met', outcome.detail);
+});
+
+test('silence ordering 3: a program whose screen already shows the words is not waited on to its budget', async () => {
+  // The latency cell, and the one that keeps the change honest. Waiting longer
+  // whenever the expectation is unmet is only defensible because a MET
+  // expectation still ends the wait at once: a full screen program that never
+  // exits is the common case, and if it paid its whole budget every time this
+  // would be a regression dressed as a fix. The race is the assertion again,
+  // against a 30 s budget, and a bound derived from the grace rather than chosen:
+  // the wait is one grace once the last byte has landed, so eight of them is
+  // generous and still an order of magnitude short of the budget.
+  const program = 'process.stdout.write("ready to go\\n"); setInterval(() => {}, 1000);';
+  // Kept and awaited for the reason given in the test above, and it matters more
+  // here: this program is a `setInterval` that can never exit on its own, so an
+  // abandoned driver would hold it until the 30 s budget with nothing waiting on
+  // either of them.
+  const work = runTerminal({
+    workflows: [{
+      name: 'tui-that-shows-it',
+      command: execPath,
+      args: ['-e', program],
+      screen: { rows: 10, cols: 40 },
+      expect: ['"ready to go"'],
+      maxMs: 30_000,
+    }],
+  });
+  let raced;
+  try {
+    raced = await withinReach(work, EXIT_GRACE_MS * 8);
+  } finally {
+    await work;
+  }
+  if (raced === NEVER_RETURNED) {
+    assert.fail(`${NEVER_RETURNED} within ${EXIT_GRACE_MS * 8} ms for a program already showing what was expected, so a met expectation is now paying the budget`);
+  }
+  assert.equal(raced[0]!.outcome.verdict, 'pass', raced[0]!.outcome.detail);
+});
+
 test('a queued parse respects the budget and preserves finished output', async (t) => {
   // Exercise the real pty and emulator, but make each parse take 50 ms while
   // the child emits a short line every millisecond. This creates the backlog
