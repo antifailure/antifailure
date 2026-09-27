@@ -15,6 +15,7 @@ import {
 } from "@/components/pages/kit";
 import { cn } from "@/lib/cn";
 import { CONDITIONAL_PROCESSORS } from "@/lib/legal-facts";
+import { BUSINESS_ADDRESS, CONTACT_EMAIL } from "@/lib/site";
 
 const NOT_CLAIMED = [
   "Zero rollback. No deployment can ever fail.",
@@ -125,7 +126,7 @@ export function PrivacyPage() {
               ],
               [
                 "This site",
-                "Nothing, until you use the contact form. That writes your name, work email, company, an optional seat count and your message into the control plane's own database, with the page it came from and the time. The role that serves public requests can insert into that table and cannot read it back, so no request to this site can ever return somebody else's contact details.",
+                "Contact and demo forms store the details you submit, the source page, and the submission time in the control plane database. Public requests cannot read stored leads. Website measurement is described separately below.",
               ],
             ]}
           />
@@ -153,57 +154,37 @@ export function PrivacyPage() {
         </div>
       </PageSection>
       <PageSection tone="panel">
-        <PageHeading title="<strong>No card ever reaches this product.</strong>" />
+        <PageHeading title="<strong>Payments are handled by Stripe.</strong>" />
         <Prose className="mt-10">
           <p>
-            That part is unconditional and it is architectural rather than a promise: checkout and
-            the billing portal are pages Stripe hosts, so a card is entered on Stripe&rsquo;s own
-            form and never passes through anything here. No card details or billing addresses exist
-            anywhere in this product and none can.
+            Checkout and the billing portal are hosted by Stripe. Card details
+            entered there are sent directly to Stripe.
           </p>
           <p>
-            What is conditional is everything else. The control plane contains a real Stripe
-            integration, and it is active only where{" "}
+            Stripe billing is enabled for a deployment when{" "}
             {switchedOnBy("Stripe").map((name, i, all) => (
               <span key={name}>
                 <code>{name}</code>
                 {i < all.length - 1 ? (i === all.length - 2 ? " and " : ", ") : ""}
               </span>
             ))}{" "}
-            are set. Where they are, Stripe holds the
-            customer, subscription and invoice records for that deployment and is a processor for
-            it. Where they are
-            not, the billing routes refuse and name the missing variables, and an organization
-            carries nothing but a plan name, which sets its rate limits and quotas. The control
-            plane says which of the two it is on the first line it logs when it starts.
-          </p>
-          <p>
-            This page previously said there was no billing at all. That was true when it was
-            written and stopped being true when the billing work landed, which is the reason the
-            numbers and capabilities on these pages are now checked against the code by a test
-            rather than kept in step by hand.
+            are configured. Stripe then processes payments and stores customer,
+            subscription, and invoice records for that deployment. Billing is
+            unavailable when Stripe is not configured.
           </p>
         </Prose>
       </PageSection>
       <PageSection tone="ruled">
         <PageHeading
           kicker="This site"
-          title="<strong>It counts page views itself,</strong> PostHog watches the rest, and both stop if you say so."
+          title="<strong>Website analytics and your privacy controls.</strong>"
         />
         <Prose className="mt-10">
           <p>
-            There are two measurements on this site and one of them has a vendor in it. The first
-            is a counter this repository wrote, sending to this project&rsquo;s own control plane.
-            The second is PostHog, for autocapture and session replay, and it is here because the
-            first one cannot answer where somebody gave up: it sends no address, no element and no
-            ordering, deliberately. There is no Google Analytics, no Datadog, no Sentry and no
-            crash reporter in anything this repository wrote. Two scripts are fetched while you
-            read, and both are worth naming. PostHog&rsquo;s session replay recorder, which comes
-            from the endpoint we run rather than from any vendor address. And the booking widget on
-            the contact page, which is cal.com&rsquo;s, and whose frame runs its own error
-            reporting to Sentry. That last one is their document doing their thing on their origin,
-            and it is named here because your browser makes the connection and a page listing what
-            it loads should not stop at the ones it likes.
+            Website measurement uses an internal page counter and PostHog for
+            interaction analytics and session replay. PostHog&rsquo;s recorder
+            loads through our endpoint. The contact page also loads a Cal.com
+            booking widget, which uses its own Sentry error reporting.
           </p>
           <p>
             Five things leave your browser for the counter: a page shape from a closed list, a
@@ -223,30 +204,20 @@ export function PrivacyPage() {
             string, which is stripped before anything is sent, and not your address.
           </p>
           <p>
-            <strong>Every value you type is masked before it leaves your browser.</strong> The
-            careers form and the contact form ask for a name, a work email, a company and a
-            paragraph in your own words, and a recording of either one shows the fields filling up
-            with asterisks and never what you wrote. It is not withheld on receipt and it is not
-            deleted afterwards: it is replaced in the page, so there is nothing in the recording
-            that could be unmasked later.
+            <strong>Typed form values are masked in session recordings before
+            those recordings leave your browser.</strong> A recording shows
+            masked fields rather than the values you entered. Submitting a form
+            separately sends the details needed to process that request.
           </p>
           <p>
-            Neither of them sets a cookie, and neither keeps an identifier that outlives this tab,
-            so nothing here can join two of your visits. PostHog would do both by default, for a
-            year; it is configured here not to, and that choice is what keeps the sentence before
-            this one true.
+            Neither analytics system sets cookies. Their identifiers are scoped
+            to the current browser tab.
           </p>
           <p>
-            <strong>PostHog, Inc. receives all of that, and we will not dress that up.</strong>{" "}
-            Your browser does not talk to a posthog.com host: it talks to an endpoint we run at{" "}
-            <code>app.antifailure.dev</code>, which forwards. That changes where the request goes
-            and not who reads it, so PostHog is a processor for this website and is named as one
-            here. The data is processed in the United States, on PostHog Cloud US. What the
-            arrangement genuinely buys you is two things.
-            A content blocker does not recognise the request, so the numbers are not quietly half
-            missing and nobody here is tempted to guess at the gap. And your IP address is not
-            forwarded, so PostHog never receives it, which costs us any real geography on those
-            dashboards and is worth it.
+            PostHog, Inc. receives and processes this website analytics data in the United
+            States through PostHog Cloud US. Requests go through our endpoint at{" "}
+            <code>app.antifailure.dev</code>, which forwards the analytics to
+            PostHog without forwarding your IP address.
           </p>
           <p>
             One claim is unaffected and it is a different claim: your production data never leaves
@@ -337,7 +308,7 @@ export function TermsPage() {
               ],
               [
                 "Paying",
-                "A paid plan is bought through Stripe's own hosted checkout and managed in Stripe's customer portal. No card ever reaches this product. These terms are not a paid-service agreement: the contracting entity, the governing law and the liability cap are all still blank below, and a contract with no party to it is not one. A purchase is governed by whatever is agreed in writing at the time.",
+                "Paid plans use Stripe-hosted checkout and its customer portal. Card details are entered directly with Stripe. Purchases are governed by the applicable written agreement; this draft page is not a paid-service agreement.",
               ],
               [
                 "The enterprise edition",
@@ -424,16 +395,17 @@ export function TermsPage() {
       <PageSection tone="panel">
         <PageHeading
           kicker="Liability"
-          title="<strong>The shape of the cap, with the numbers left out.</strong>"
+          title="<strong>Business details and applicable terms.</strong>"
         />
         <Prose className="mt-10">
           <p>
-            Four values decide this section and none of them exists yet, so they are left visibly
-            blank rather than filled with something that reads as settled: the contracting entity{" "}
-            <Blank>entity name</Blank>, its registered address <Blank>registered address</Blank>,
-            the governing law and venue <Blank>jurisdiction</Blank>, and the figure the cap is set
-            at <Blank>liability cap</Blank>. A cap written before a lawyer has chosen the
-            jurisdiction it will be read in is a number, not a protection.
+            Business address: {BUSINESS_ADDRESS}. Contact:{" "}
+            <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>.
+          </p>
+          <p>
+            The contracting entity is <Blank>entity name</Blank>. The proposed
+            governing law is Delaware. Venue and the liability cap remain subject
+            to the applicable written agreement and legal review.
           </p>
         </Prose>
         <div className="mt-14 max-md:mt-10">

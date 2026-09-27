@@ -72,15 +72,12 @@ export default function NotFound() {
           That page is not here.
         </h1>
         <p className="mt-5 max-w-[52ch] text-[15px] leading-[1.6] tracking-extra-tight text-gray-new-40">
-          Nothing is published at this address. If you followed a link out of an
-          Antifailure error message, that is a bug in the product rather than
-          something you did: every error code is supposed to name a page that
-          exists, and a build gate checks it. It is worth{" "}
+          Try one of the pages below. If a link brought you here, you can{" "}
           <a
             className="text-black underline decoration-black/25 underline-offset-4 hover:decoration-black"
             href="https://github.com/antifailure/antifailure/issues/new"
           >
-            reporting
+            report the broken link
           </a>
           .
         </p>

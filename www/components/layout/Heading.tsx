@@ -51,8 +51,8 @@ export function Heading({
       ) : null}
       <h2
         className={cn(
-          "indent-24 text-[48px] font-normal leading-dense tracking-tighter text-pretty [&>strong]:font-normal",
-          "max-xl:text-[40px] max-lg:indent-16 max-lg:text-[28px] max-lg:text-wrap max-md:indent-0 max-md:text-[26px]",
+          "text-[42px] font-normal leading-dense tracking-tighter text-pretty [&>strong]:font-normal",
+          "max-xl:text-[36px] max-lg:text-[30px] max-lg:text-wrap max-md:text-[27px]",
           theme === "light" && "text-gray-new-40 [&>strong]:text-black-pure",
           theme === "dark" && "text-gray-new-50 [&>strong]:text-black",
         )}

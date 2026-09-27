@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { controlPlaneUrl } from "@/lib/control-plane-routes";
 import { leadSubmitted } from "@/lib/analytics";
 
@@ -47,19 +47,27 @@ type State =
 // exact same vocabulary rather than a second copy that drifts. One source of
 // truth for what an input on this site looks like.
 export const FIELD =
-  "mt-1.5 h-11 w-full rounded-[8px] border border-black/15 bg-white px-3 text-[15px] text-black outline-none placeholder:text-gray-new-50 focus-visible:border-black/45 focus-visible:ring-2 focus-visible:ring-black/10 disabled:opacity-60";
+  "mt-1.5 h-11 w-full rounded-[8px] border border-black/15 bg-white px-3 text-base text-black outline-none placeholder:text-gray-new-50 focus-visible:border-black/45 focus-visible:ring-2 focus-visible:ring-black/10 disabled:opacity-60";
 export const LABEL = "block text-[13px] tracking-extra-tight text-gray-new-40";
 
 export function EnterpriseForm() {
   const [state, setState] = useState<State>({ kind: "idle" });
   const formRef = useRef<HTMLFormElement>(null);
+  const confirmationRef = useRef<HTMLDivElement>(null);
   const id = useId();
 
   const sending = state.kind === "sending";
 
+  useEffect(() => {
+    if (state.kind === "sent") {
+      confirmationRef.current?.scrollIntoView({ block: "center", behavior: "instant" });
+    }
+  }, [state.kind]);
+
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (sending) return;
+    if (!event.currentTarget.reportValidity()) return;
     const data = new FormData(event.currentTarget);
     setState({ kind: "sending" });
 
@@ -84,7 +92,7 @@ export function EnterpriseForm() {
       setState({
         kind: "failed",
         message:
-          "Could not reach the server. Check your connection and press it again; nothing you typed is lost.",
+          "We could not connect. Check your connection and try again. Your answers are saved on this page.",
       });
       // Deliberately not counted. `refused` means the endpoint answered and
       // would not take it, which is a fact about the submission; a request that
@@ -96,7 +104,7 @@ export function EnterpriseForm() {
     if (response.status === 429) {
       setState({
         kind: "failed",
-        message: "That was a lot of attempts at once. Wait a minute and press it again.",
+        message: "Please wait a minute before trying again.",
       });
       leadSubmitted("refused");
       return;
@@ -106,7 +114,7 @@ export function EnterpriseForm() {
       // The server's own sentence when it gave one. A generic failure message
       // on a form is how people conclude a product is broken, and the server's
       // refusals here name the field to fix.
-      let message = "Something went wrong on our side. Press it again in a moment.";
+      let message = "We could not send your request. Please try again in a moment.";
       try {
         const body = (await response.json()) as { error?: unknown };
         if (typeof body.error === "string" && body.error) message = body.error;
@@ -140,27 +148,27 @@ export function EnterpriseForm() {
   if (state.kind === "sent") {
     return (
       <div
+        ref={confirmationRef}
         role="status"
         className="rounded-[8px] bg-white p-7 ring-1 ring-black/10 max-md:p-6"
       >
         <h3 className="text-[20px] leading-snug tracking-tighter text-black">
-          It is written down.
+          Thanks. We have your request.
         </h3>
         <p className="mt-4 text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
           {state.notified
-            ? "Somebody has been told, and it is in the queue behind them, so it is not waiting on one person reading their mail."
-            : "It is in the queue a person reads, oldest first. Nothing here mails you on a schedule, so if you need an answer on a known day, book a call above: that is a real calendar with real openings."}
+            ? "We will review your requirements and get back to you."
+            : "We will review your requirements. You can also book a call above to discuss them at a time that suits you."}
         </p>
         <p className="mt-4 text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
-          Nothing is waiting on us for the parts that do not need us. The engine
-          is open source and runs on your own machine, and the{" "}
+          You can also try the open-source engine with the{" "}
           <a
             className="text-black underline decoration-black/20 underline-offset-4 hover:decoration-black"
             href="/docs/getting-started/quickstart"
           >
             quickstart
           </a>{" "}
-          needs no account at all.
+          . No account required.
         </p>
         <button
           type="button"
@@ -274,8 +282,7 @@ export function EnterpriseForm() {
           {sending ? "Sending" : "Send it"}
         </button>
         <p className="text-[13px] leading-5 tracking-extra-tight text-gray-new-40">
-          It is stored in the product database, read by a person, and never sold
-          or added to a newsletter.
+          We use these details to respond to your request.
         </p>
       </div>
     </form>

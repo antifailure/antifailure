@@ -695,7 +695,13 @@ if (has("contact.html")) {
   ]) {
     assert(contacts.has(url), `Organization JSON-LD publishes ${url}`);
   }
-  assert(!html.includes("mailto:"), "/contact does not advertise dead email channels");
+  const approvedEmail = readFileSync(new URL("../lib/site.ts", import.meta.url), "utf8")
+    .match(/export const CONTACT_EMAIL = "([^"]+)"/)?.[1];
+  const emailLinks = [...html.matchAll(/<a\b[^>]*href="(mailto:[^"]+)"/g)].map((match) => match[1]);
+  assert(
+    Boolean(approvedEmail) && emailLinks.length > 0 && emailLinks.every((href) => href === `mailto:${approvedEmail}`),
+    "/contact publishes only the owner-approved email address",
+  );
 }
 
 // Reachability, which is a different question from "does this link resolve".

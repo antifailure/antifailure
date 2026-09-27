@@ -36,35 +36,35 @@ const REASONS: Record<MeasurementOff, { state: string; detail: string }> = {
   reader: {
     state: "Not counting or recording this visit.",
     detail:
-      "You switched measurement off in this browser. What is kept is the flag that says so, and, if you switched off part way through a visit, a second one PostHog keeps for the same reason. Both stay on this device and neither is ever sent anywhere. On a visit that starts this way PostHog’s code is not fetched at all.",
+      "Measurement is off in this browser. Your preference stays on this device. On future visits with this setting, the PostHog recorder is not loaded.",
   },
   browser: {
     state: "Not counting or recording this visit.",
     detail:
-      "Your browser sends Global Privacy Control or Do Not Track, and this site honours it in both measurements. That decision is the browser’s, so the switch cannot turn counting back on while it stands, and PostHog’s code is never fetched, so nothing recorded this page before being told not to.",
+      "Your browser requests privacy through Global Privacy Control or Do Not Track. Both analytics systems remain off, and the PostHog recorder is not loaded.",
   },
   automated: {
     state: "Not counting or recording this visit.",
     detail:
-      "This browser reports itself as a crawler or an automated session. Those are left out of the numbers rather than counted as readers, which is why a bot cannot inflate them.",
+      "Automated browsers and crawlers are excluded from website measurement.",
   },
   build: {
     state: "Not counting or recording anybody.",
     detail:
-      "This build of the site has no measurement endpoint configured, so nothing here is counting or recording, for anyone, however this switch is set.",
+      "Measurement is not configured for this site build.",
   },
 };
 
 const ON = {
   state: "Counting and recording this visit.",
   detail:
-    "Two measurements. The counter sends a page shape and a channel, both from closed lists, and nothing else. PostHog sends the page addresses, what you clicked, and a session recording, with every value you type masked in the page before it is sent. Neither sets a cookie and neither keeps an identifier past this tab. Switching it off stops both immediately, ends the recording, and throws away anything captured and not yet sent.",
+    "This visit is included in page analytics and PostHog session replay. Typed values are masked before recording. Neither system sets cookies or keeps an identifier beyond this tab. Switching measurement off stops both and discards unsent recordings.",
 };
 
 const READING = {
   state: "Reading this browser.",
   detail:
-    "The answer depends on settings only your browser can be asked for, so it is read here rather than guessed on the server.",
+    "Checking this browser's privacy settings.",
 };
 
 export function MeasurementSwitch() {

@@ -693,7 +693,7 @@ export function IdePlay() {
                 >
                   <button
                     type="button"
-                    className={`flex items-center gap-1.5 px-2 py-2 ${on ? "text-black" : "text-gray-new-50 hover:text-black/70"}`}
+                    className={`flex items-center gap-1.5 px-2 py-2 max-lg:min-h-11 ${on ? "text-black" : "text-gray-new-50 hover:text-black/70"}`}
                     onClick={() => openFile(id)}
                   >
                     <FileGlyph name={id} />
@@ -702,7 +702,7 @@ export function IdePlay() {
                   {id !== HOME_FILE ? (
                     <button
                       type="button"
-                      className="pr-1.5 text-[11px] text-black/30 hover:text-black/70"
+                      className="pr-1.5 text-[11px] text-black/30 hover:text-black/70 max-lg:min-h-11 max-lg:min-w-11"
                       aria-label={`Close ${id}`}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -746,7 +746,7 @@ export function IdePlay() {
                 <button
                   key={tab.id}
                   type="button"
-                  className={`shrink-0 whitespace-nowrap border-b py-1.5 ${
+                  className={`shrink-0 whitespace-nowrap border-b py-1.5 max-lg:min-h-11 ${
                     bottomTab === tab.id
                       ? "border-black text-black"
                       : "border-transparent hover:text-black/70"

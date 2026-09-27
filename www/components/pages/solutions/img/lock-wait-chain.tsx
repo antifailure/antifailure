@@ -32,7 +32,7 @@ export function LockWaitChain() {
         <div className="bg-[#f7f7f5]">
           <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-4 py-2.5 sm:px-5">
             <div className="text-[13px] font-medium tracking-tight text-black">Lock wait graph</div>
-            <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#C43D3D]">
+            <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-danger-ink">
               ACCESS EXCLUSIVE
             </span>
           </div>

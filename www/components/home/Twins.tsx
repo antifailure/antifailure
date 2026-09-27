@@ -1,12 +1,11 @@
 import { Container } from "@/components/layout/Container";
 import { Heading } from "@/components/layout/Heading";
-import { Illustrative } from "@/components/layout/Illustrative";
-import { TwinIdeStage } from "./visuals/TwinIdeStage";
+import { ConsolePreview } from "./visuals/ConsolePreview";
 
 const FEATURES = [
   {
     title: "Isolated networking",
-    description: "Clone-local DNS, no default public egress, no route out of the network.",
+    description: "Each twin has its own network. Gateway policies control which external services it can reach.",
     icon: (
       <svg viewBox="0 0 20 20" className="size-[18px]" fill="none" aria-hidden>
         <circle cx="10" cy="10" r="6.5" stroke="currentColor" strokeWidth="1.4" />
@@ -17,7 +16,7 @@ const FEATURES = [
   },
   {
     title: "Safe credentials",
-    description: "Production secrets are replaced. The twin cannot reach live keys.",
+    description: "Use test credentials and route payments, messages, and other external calls through your test policies.",
     icon: (
       <svg viewBox="0 0 20 20" className="size-[18px]" fill="none" aria-hidden>
         <circle cx="7.2" cy="10" r="3.1" stroke="currentColor" strokeWidth="1.4" />
@@ -27,7 +26,7 @@ const FEATURES = [
   },
   {
     title: "Cleanup proof",
-    description: "Every resource is journaled, destroyed, and counted at teardown. Nothing outlives the run.",
+    description: "Review the teardown record to see which tracked resources were removed.",
     icon: (
       <svg viewBox="0 0 20 20" className="size-[18px]" fill="none" aria-hidden>
         {Array.from({ length: 9 }, (_, i) => (
@@ -58,19 +57,10 @@ export function Twins() {
           <Heading
             icon="twins"
             label="Isolated Twin"
-            title="<strong>A disposable production twin.</strong> Build the candidate, restore safe state, contain side effects, and destroy everything when the report is done."
+            title="<strong>Your stack. Your data shape. One isolated run.</strong> Give each change its own environment, then remove it when testing ends."
           />
           <div className="relative mt-14 min-w-0 max-xl:mt-12 max-lg:mt-10 max-md:mt-8 max-sm:mt-11">
-            <TwinIdeStage />
-            {/* "The four phases ... are real" asserted a named model. There
-                is none: no four-phase entity exists in the engine, and
-                /product/twins names four differently, Plan, Provision, Run and
-                Close. What is real is the order the work happens in and the
-                three seals, each of which a conformance behaviour proves. */}
-            <Illustrative className="mt-6">
-              The order is real, and so are the containment seals: build, restore safe state,
-              contain, destroy. The percentages are a shaped run.
-            </Illustrative>
+            <ConsolePreview />
           </div>
           <ul className="mt-10 grid grid-cols-3 gap-x-16 max-xl:mt-8 max-xl:grid-cols-1 max-xl:gap-y-7 max-lg:mt-10">
             {FEATURES.map((item) => (

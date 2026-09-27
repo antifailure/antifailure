@@ -16,7 +16,6 @@ import { useInViewPlay } from "@/lib/useInViewPlay";
 import { usePausedRaf } from "@/lib/usePausedRaf";
 import {
   CheckRow,
-  FILM_EASE,
   Hairline,
   MonoLabel,
   Panel,

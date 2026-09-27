@@ -180,7 +180,7 @@ export function LockHoldStrip() {
             <dt className="font-mono text-[9px] font-medium tracking-[0.1em] text-gray-new-40 uppercase">
               peak hold
             </dt>
-            <dd className="mt-1 font-mono text-[13px] font-medium text-[#C43D3D] tabular-nums md:text-[14px]">
+            <dd className="mt-1 font-mono text-[13px] font-medium text-danger-ink tabular-nums md:text-[14px]">
               27.4s
             </dd>
           </div>
@@ -188,7 +188,7 @@ export function LockHoldStrip() {
             <dt className="font-mono text-[9px] font-medium tracking-[0.1em] text-gray-new-40 uppercase">
               events p99
             </dt>
-            <dd className="mt-1 font-mono text-[11px] font-medium whitespace-nowrap text-[#8A6A12] tabular-nums sm:text-[12px] md:text-[14px]">
+            <dd className="mt-1 font-mono text-[11px] font-medium whitespace-nowrap text-ochre-ink tabular-nums sm:text-[12px] md:text-[14px]">
               820ms → 6.9s
             </dd>
           </div>

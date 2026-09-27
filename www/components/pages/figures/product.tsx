@@ -172,14 +172,6 @@ function WellFigure({
   );
 }
 
-function CodePane({ source }: { source: string }) {
-  return (
-    <pre className="overflow-x-auto rounded-[10px] bg-[#f7f7f5] px-3 py-3 font-mono text-[12px] leading-5 tracking-extra-tight text-black/70">
-      {source}
-    </pre>
-  );
-}
-
 function LockHoldViz({
   peak,
   peakLabel,

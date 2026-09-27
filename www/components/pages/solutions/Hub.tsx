@@ -3,34 +3,34 @@ import { SectionLabel } from "@/components/layout/SectionLabel";
 import { AFTER_HEADING, DirectoryList, Metrics, SectionHeading } from "./visuals";
 
 const ICP = [
-  { value: "20 to 300", label: "engineers, at fast-growing SaaS and internet companies rather than at regulated enterprises." },
-  { value: "Postgres", label: "backed applications with enough production data that toy fixtures are misleading." },
-  { value: "Daily / weekly", label: "production deploys, a real CI/CD process, and a platform engineer who owns reliability." },
+  { value: "Your stack", label: "Services, workers, and integrations tested together." },
+  { value: "Postgres", label: "Realistic row counts, relationships, and masked customer data." },
+  { value: "Your workflow", label: "Results in your pull request, before the deployment." },
 ] as const;
 
 const TEAMS = [
   {
     href: "/solutions/saas",
     title: "B2B SaaS",
-    body: "Daily deploys, expanding schemas, and staging that drifted years ago. Tenant-shaped state without production identities.",
+    body: "Test migrations, subscriptions, and account changes with masked tenant data.",
     metric: "Seats · billing · rare rows",
   },
   {
     href: "/solutions/fintech",
     title: "Fintech",
-    body: "Billing, ledgers, and side effects that must never hit live processors. A stateful Stripe pack, not the production API.",
+    body: "Rehearse payment flows and inspect ledger results with a local Stripe simulator.",
     metric: "Stripe offline · fail closed",
   },
   {
     href: "/solutions/marketplaces",
     title: "Marketplaces",
-    body: "Queues, workers, dual-writes, and matching logic staging never reproduces. Timing is the bug.",
+    body: "Test matching, notifications, and settlement with services and workers running together.",
     metric: "Workers · webhooks captured",
   },
   {
     href: "/solutions/devtools",
     title: "Developer tools",
-    body: "Schema changes on large tables. Users notice p99 immediately. Locks, rewrites and plan regressions show up here first.",
+    body: "Inspect locks, rewrites, and query plans before a schema change reaches users.",
     metric: "Locks · rewrites · plans",
   },
 ];
@@ -41,8 +41,8 @@ export function SolutionsHubPage() {
       <PageHero
         path="/solutions"
         eyebrow="Solutions"
-        title="The same question, for the teams who feel it first."
-        lead="Before a risky change meets production, prove it on a disposable twin. Built for teams who already feel migration anxiety, staging drift, and release incidents."
+        title="Test the changes your business depends on."
+        lead="From subscription upgrades to background workers, Antifailure gives each change an isolated environment and a result your team can inspect."
       />
 
       <PageSection>
@@ -51,12 +51,12 @@ export function SolutionsHubPage() {
           <Metrics items={[...ICP]} />
         </div>
         <p className={`${AFTER_HEADING} text-[14px] tracking-extra-tight text-black/60`}>
-          Cloud-native or containerized · customer-hosted agent · history of migration anxiety · production-shaped traffic
+          Run locally or in CI, with data and test environments in your infrastructure.
         </p>
       </PageSection>
 
       <PageSection tone="ruled">
-        <SectionHeading title="<strong>Teams.</strong> Postgres, frequent deploys, and a platform engineer who owns reliability." />
+        <SectionHeading title="<strong>Start with the workflows that matter to your team.</strong>" />
         <div className={AFTER_HEADING}>
           <DirectoryList items={TEAMS} />
         </div>

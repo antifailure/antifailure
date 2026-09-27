@@ -24,7 +24,7 @@ export const HEADER_MENUS: HeaderMenu[] = [
           {
             title: "Overview",
             href: "/product",
-            description: "Twin, state, containment, judgment",
+            description: "MCP tools for deployment testing",
           },
           {
             title: "Isolated Twin",
@@ -34,12 +34,12 @@ export const HEADER_MENUS: HeaderMenu[] = [
           {
             title: "Safe State",
             href: "/product/safe-state",
-            description: "Sanitized production-shaped Postgres",
+            description: "Masked data with relationships intact",
           },
           {
             title: "Side-Effect Firewall",
             href: "/product/firewall",
-            description: "Simulators instead of real-world side effects",
+            description: "Control external calls during tests",
           },
           {
             title: "Load",
@@ -78,12 +78,12 @@ export const HEADER_MENUS: HeaderMenu[] = [
           {
             title: "B2B SaaS",
             href: "/solutions/saas",
-            description: "Daily deploys, migration anxiety",
+            description: "Subscriptions, tenants, schema changes",
           },
           {
             title: "Fintech",
             href: "/solutions/fintech",
-            description: "Billing and ledger-safe twins",
+            description: "Payments and ledger checks",
           },
           {
             title: "Marketplaces",
@@ -100,8 +100,8 @@ export const HEADER_MENUS: HeaderMenu[] = [
     ],
     featured: [
       {
-        title: "Give us one nervous deploy",
-        description: "A real upcoming migration, not a generic demo.",
+        title: "Bring your next change",
+        description: "See Antifailure on a change relevant to your team.",
         href: "/request-demo",
         visual: "twin",
       },

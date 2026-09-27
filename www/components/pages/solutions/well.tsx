@@ -11,8 +11,8 @@ import { cn } from "@/lib/cn";
 // the well's own rounded-[32px] lands on the element beside it and the cascade,
 // not the caller, decides. Only one radius class is ever written from here.
 const wellRadius = {
-  32: "rounded-[32px]",
-  24: "rounded-[24px]",
+  32: "rounded-[12px]",
+  24: "rounded-[8px]",
 } as const;
 
 export function SageWell({
@@ -32,7 +32,7 @@ export function SageWell({
         "relative flex flex-col justify-center overflow-hidden bg-sage",
         wellRadius[radius],
         compact
-          ? "min-h-0 max-h-[380px] px-5 py-5 max-md:max-h-[300px] max-md:px-4 max-md:py-4 md:px-7 md:py-6"
+          ? "min-h-0 px-5 py-5 max-md:px-4 max-md:py-4 md:px-7 md:py-6"
           : "min-h-[520px] px-6 py-8 max-md:min-h-[360px] max-md:px-4 max-md:py-5 md:px-10 md:py-12",
         className,
       )}
@@ -48,8 +48,8 @@ export function SageWell({
 // spent three `!` utilities that were never emitted trying to win that race.
 // Only one of these two strings is ever written, so there is no race.
 const windowRadius = {
-  16: "rounded-[16px]",
-  13: "rounded-[13px]",
+  16: "rounded-[8px]",
+  13: "rounded-[6px]",
 } as const;
 
 export function FloatWindow({
@@ -67,7 +67,7 @@ export function FloatWindow({
     <div
       className={cn(
         chrome &&
-          cn(windowRadius[radius], "bg-white shadow-[0_24px_64px_rgba(0,0,0,0.10),0_2px_8px_rgba(0,0,0,0.04)]"),
+          cn(windowRadius[radius], "border border-stroke bg-white"),
         className,
       )}
     >
@@ -195,12 +195,8 @@ function HeroCopy({
           the open-source quickstart a visitor can run today, and a booked demo
           for the hosted plane. */}
       <div className="mt-8 flex flex-wrap gap-3 xl:mt-auto xl:pt-10 max-sm:flex-col max-sm:[&_a]:w-full">
-        <Button href="/docs/getting-started/quickstart" theme="filled">
-          Start the quickstart
-        </Button>
-        <Button href="/request-demo" theme="outlined">
-          Request a demo
-        </Button>
+        <Button href="/request-demo" theme="filled">Request a demo</Button>
+              <Button href="/docs/reference/mcp" theme="outlined">Connect your agent</Button>
       </div>
     </div>
   );
@@ -208,7 +204,7 @@ function HeroCopy({
 
 function HeroVisual({ children }: { children: ReactNode }) {
   return (
-    <div className="min-h-0 overflow-hidden rounded-[28px] [&>*]:!min-h-0 [&>*]:!max-h-none [&>*]:!rounded-[28px]">
+    <div className="min-h-0 overflow-hidden rounded-[12px] [&>*]:!min-h-0 [&>*]:!max-h-none [&>*]:!rounded-[12px]">
       {children}
     </div>
   );
@@ -242,10 +238,10 @@ export function SplitHero({
         </div>
 
         <div className="mt-12 grid grid-cols-12 items-stretch gap-x-16 gap-y-10 max-xl:mt-10 max-xl:grid-cols-1 max-md:mt-8">
-          <div className="col-span-5 min-w-0 max-xl:order-2 max-xl:col-span-1">
+          <div className="col-span-5 min-w-0 max-xl:col-span-1">
             <HeroCopy paragraphs={paragraphs} />
           </div>
-          <div className="col-span-7 min-w-0 max-xl:order-1 max-xl:col-span-1">
+          <div className="col-span-7 min-w-0 max-xl:col-span-1">
             <HeroVisual>{visual}</HeroVisual>
           </div>
         </div>

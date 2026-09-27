@@ -23,7 +23,7 @@ const AURORA_SIZES = "(max-width: 639px) 768px, 1920px";
 export function HeroFilm() {
   return (
     <>
-      <div className="relative -top-16 left-1/2 h-[832px] w-480 -translate-x-1/2 overflow-hidden max-xl:-top-12.5 max-xl:h-[700px] max-xl:w-326 max-lg:-top-2 max-lg:h-[560px] max-lg:w-254 max-sm:hidden">
+      <div className="relative top-[calc(-4rem_+_var(--hero-shift))] left-1/2 h-[832px] w-480 -translate-x-1/2 overflow-hidden max-xl:-top-12.5 max-xl:h-[700px] max-xl:w-326 max-lg:-top-2 max-lg:h-[560px] max-lg:w-254 max-sm:hidden">
         <Picture
           src="/home/hero-aurora.png"
           alt=""

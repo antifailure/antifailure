@@ -35,7 +35,7 @@ const PLANS: Plan[] = [
     name: "Community",
     price: "$0",
     period: "local engine, forever",
-    tagline: "The whole engine, on your machine and your cloud, with no account.",
+    tagline: "The open-source engine on your own infrastructure.",
     // The filled action on this page, because it is the only plan on it a
     // visitor can start without somebody else's permission. It used to be an
     // outlined "Inspect the surface" while the invitation wall carried the
@@ -54,7 +54,7 @@ const PLANS: Plan[] = [
     name: "Team",
     price: "$500",
     period: "per month · one organization",
-    tagline: "The hosted control plane. Book a demo and we set your organization up on it.",
+    tagline: "Shared reporting and coordination for your team.",
     featured: true,
     cta: { href: "/request-demo", label: "Request a demo", theme: "green" },
     includes: [
@@ -62,7 +62,7 @@ const PLANS: Plan[] = [
       `Up to ${members("team")} members, counting invitations not yet accepted`,
       "Included run credits for deployment twins",
       "Usage for environment minutes, data volume, and workload execution",
-      "Customer-cloud execution for margin and data exposure",
+      "Run test environments in your own cloud",
       "Pull-request checks and aggregated reports across repositories",
     ],
   },
@@ -114,17 +114,17 @@ const PLANS: Plan[] = [
       "Organization-wide release policy",
       "Residency, so environments run only in the regions you name",
       "Single sign-on and SCIM, in the enterprise edition you run",
-      "Support and service-level commitments, sold when references exist",
+      "Discuss support and service-level requirements",
     ],
   },
 ];
 
 const VALUE_METRICS: [string, string][] = [
-  ["Applications protected", "The systems the twin actually covers, not a count of personalities."],
+  ["Applications protected", "The services and databases included in each test environment."],
   ["Deployment runs", "Safety validations attached to a pull request or release."],
   ["Environment execution", "Minutes the twin is provisioned, exercised, and destroyed."],
   ["Data volume", "Sanitized, referential state restored inside your boundary."],
-  ["Peak workload", "Traffic shape and concurrency, not model fan-out."],
+  ["Peak workload", "Traffic volume and concurrency during a test."],
   ["Governance and support", "Policy scope, the regions environments may run in, and response level."],
 ];
 
@@ -137,7 +137,7 @@ function PlanCard({ plan }: { plan: Plan }) {
       )}
     >
       <div className="flex items-baseline justify-between gap-3">
-        <h3 className="text-[18px] tracking-extra-tight text-black">{plan.name}</h3>
+        <h2 className="text-[18px] tracking-extra-tight text-black">{plan.name}</h2>
         {plan.badge ? (
           <span className="text-[12px] tracking-extra-tight text-gray-new-40">{plan.badge}</span>
         ) : null}
@@ -218,7 +218,7 @@ const PRICING_FAQ: FaqItem[] = [
   {
     question: "Is the MCP server free?",
     answer:
-      "Yes, and it needs no account. The MCP server is part of the engine, which is MIT licensed, and your client starts it on your own machine with one command. It serves the rehearsal tools to a coding agent over standard input and output, so there is no hosted component behind it, no key, and no plan attached to it. The enterprise directory carries no MCP code at all.",
+      "Yes. The MCP server is included in the MIT-licensed engine. Your coding agent starts it locally with af mcp; no Antifailure account or subscription is required.",
   },
   {
     question: "Do I need an account to use Antifailure?",
@@ -253,7 +253,7 @@ const PRICING_FAQ: FaqItem[] = [
   {
     question: "What happens when a free limit is reached?",
     answer:
-      "The next environment is refused, with a message naming the limit, what the organization is currently holding, and who can change it. Nothing that already exists is torn down. Taking somebody's running environment away because a number moved is not a behaviour this product has.",
+      "You cannot create another environment until capacity is available or the limit is increased. Existing environments keep running.",
   },
   {
     question: "Can I run the control plane myself?",
@@ -263,7 +263,7 @@ const PRICING_FAQ: FaqItem[] = [
   {
     question: "What is an environment-hour?",
     answer:
-      "One environment, held for one hour. It is the unit the control plane can actually measure: every environment holds a database branch, a network and a container per service for as long as it exists, so the cost is close to linear in it. A cap in dollars would need a price list per runtime, per region and per service size, none of which a control plane has.",
+      "One environment running for one hour. Two environments running for thirty minutes each also use one environment-hour.",
   },
 ];
 
@@ -273,25 +273,9 @@ export function PricingPage() {
       <PageHero
         path="/pricing"
         eyebrow="Pricing"
-        title="Operational value, not AI personalities."
-        lead="Community is the local engine. It is free, it is MIT licensed, and it works today with no account. Team is a flat platform fee per organization plus run usage. Enterprise adds volume, policy, and governance, and its band is the illustrative one: Community and Team are the prices you pay."
-        actions={
-          <>
-            {/* The quickstart still leads, which is this page's own decision
-                and survives: the engine is MIT licensed, it installs with one
-                command, and it needs no account at all. What changes is the
-                label beside it. It went through "Request hosted access" and
-                "Create an account"; the hosted plane is sold by talking to
-                somebody now, so the button says so. That is a funnel decision
-                and not a claim that signing up is refused: see
-                components/pages/company/RequestDemo.tsx for where the flag's
-                real value lives. */}
-            <Button href="/docs/getting-started/quickstart">Start the quickstart</Button>
-            <Button href="/request-demo" theme="outlined">
-              Request a demo
-            </Button>
-          </>
-        }
+        title="Antifailure pricing."
+        lead="Run the open-source engine for free, or add hosted reporting and coordination for your team."
+        actions={null}
       />
       <PageSection className="pt-0">
         {/* This paragraph once said the hosted plane was invitation only, then
@@ -307,19 +291,6 @@ export function PricingPage() {
             than in a paragraph somebody retyped. The free plan still applies to
             an organization with no live subscription, whether that control
             plane is the hosted one or one you run yourself. */}
-        <p className="mb-14 max-w-[720px] border-l border-black/15 pl-6 text-[16px] leading-7 tracking-extra-tight text-gray-new-40 max-md:mb-10 max-md:pl-4">
-          Community needs nothing from us. The engine is MIT licensed, it installs with one
-          command, and the quickstart runs on your own compute without an account. The hosted
-          control plane is a managed service, and a booked demo is the way onto it: an
-          organization with no live subscription is held to the free plan, whose limits are the
-          ones below and are enforced from the first environment. Team is that hosted plane at
-          the price on its card, a flat platform fee per organization plus run usage, arranged
-          from the same demo. Enterprise is arranged with a person too, so its band is
-          illustrative and its button books a call. Residency on that plan is about where your
-          environments run, which a policy holds to the regions you name. The hosted control
-          plane itself runs in one Azure region, Central US, and it can also be run on your own
-          infrastructure in a region you choose.
-        </p>
         <ul className="grid grid-cols-3 items-stretch gap-x-12 max-xl:grid-cols-1 max-xl:gap-y-12">
           {PLANS.map((plan) => (
             <li key={plan.name} className="min-w-0">
@@ -327,23 +298,25 @@ export function PricingPage() {
             </li>
           ))}
         </ul>
+        <p className="mt-10 max-w-[720px] text-sm leading-6 text-gray-new-40">
+          Community runs on your own compute. Team is billed per organization
+          plus usage. Enterprise pricing is indicative; contact us for a quote.
+        </p>
       </PageSection>
       <PageSection tone="ruled">
         <PageHeading
           kicker="Free plan"
-          title="<strong>Three numbers decide what free gives you.</strong> These are the ones a control plane enforces, not a summary of them."
+          title="<strong>Included in the free hosted plan.</strong>"
         />
         <Prose className="mt-8">
           <p>
-            The engine itself has no quota. It is MIT licensed, it runs on your machine and in
-            your own continuous integration, and nothing in it counts environments or hours. The
-            three below are what a control plane enforces for an organization with no live
-            subscription, and they apply the same way whether that control plane is the hosted
-            one or one you run yourself.
+            The local engine has no environment or hour quota. The limits below
+            apply to free organizations using the control plane, including its
+            default self-hosted configuration.
           </p>
           <p className="mt-6">
-            Reaching any of them refuses the next environment and says so, naming the number and
-            what you are holding. Nothing that is already running is ever torn down.
+            At the limit, you cannot create a new environment until capacity is available.
+            Existing environments keep running.
           </p>
         </Prose>
         <FreePlanFacts />
@@ -351,7 +324,7 @@ export function PricingPage() {
       <PageSection tone="ruled">
         <PageHeading
           kicker="Value metrics"
-          title="<strong>We meter what the twin actually does.</strong> Not how many agents you named."
+          title="<strong>Usage follows your test environments.</strong>"
         />
         <div className="mt-14 max-w-[960px] pl-24 max-xl:pl-16 max-md:pl-0">
           {VALUE_METRICS.map(([title, body]) => (
@@ -373,7 +346,7 @@ export function PricingPage() {
       <PageSection tone="plain">
         <PageHeading
           kicker="Questions"
-          title="<strong>What free covers, in the words people ask it in.</strong> Including the one about MCP."
+          title="<strong>Pricing questions.</strong>"
         />
         <Faq path="/pricing" items={PRICING_FAQ} />
       </PageSection>

@@ -789,58 +789,135 @@ describe('the privacy page describes the code that exists', () => {
 
 })
 
-describe('the site does not publish a mailbox that cannot receive mail', () => {
-  // The instance: the legal pages said "Security reports go to
-  // security@antifailure.dev today" and "security@antifailure.dev reaches a
-  // person who can act on it", while the CONTACT PAGE OF THE SAME SITE carried
-  // a callout titled "Email is not a contact route" saying the domain has no
-  // mail exchanger and its SPF policy authorises no senders. Both were live on
-  // antifailure.dev at once, and the contact page is the one telling the truth:
-  //
-  //   $ dig +short MX antifailure.dev     (empty)
-  //   $ dig +short TXT antifailure.dev    "v=spf1 -all"
-  //
-  // The class: a published address is a promise that somebody is on the other
-  // end of it. Publishing one at a domain that cannot receive mail sends a
-  // security researcher, a person asking for their data to be deleted, and a
-  // customer with a problem all into the same silence, and none of them can
-  // tell. It is worse than saying nothing, because saying nothing at least
-  // makes them look for another route.
-  //
-  // This asserts the property rather than the two sentences that were wrong,
-  // because a list of known-bad sentences is what let the third one through
-  // further up this file.
+describe('the site publishes only its approved business contact', () => {
+  // The former domain-wide ban recorded the missing MX from September 2.
+  // The owner supplied a business contact on September 26, and the inventory
+  // records the new inbound MX evidence. SPF governs outbound mail, so it
+  // cannot establish whether this address receives. Keep CI independent of
+  // DNS: pin the owner-approved address, require its receives row, and trace
+  // both published links to the shared value. The rendered-site SEO gate
+  // separately checks the resulting mailto destinations.
+  const SITE = 'www/lib/site.ts'
+  const INVENTORY = 'tools/docs/contact-routes.tsv'
   const PAGES = [
     'www/components/pages/company/Legal.tsx',
     'www/components/pages/company/Contact.tsx',
   ]
+  const APPROVED = 'vir@antifailure.dev'
+  const CONTACT_LINK = /<a\b[^>]*\bhref=\{\s*`mailto:\$\{CONTACT_EMAIL\}`\s*\}[^>]*>\s*\{CONTACT_EMAIL\}\s*<\/a>/
+  type ContactSources = { sources: Record<string, string>; inventory: string }
+
+  const inputs: Promise<ContactSources> = Promise.all([siteSources(), read(INVENTORY)]).then(
+    ([sources, inventory]) => ({
+      sources: Object.fromEntries([
+        ...sources.map(({ file, text }) => [file, text]),
+        ['www/lib/legal-facts.ts', facts],
+      ]),
+      inventory,
+    }),
+  )
+
+  function verifyContacts({ sources, inventory }: ContactSources): void {
+    const site = withoutComments(sources[SITE] ?? '')
+    const declaration = site.match(/export\s+const\s+CONTACT_EMAIL\s*=\s*(["'])([^"']+)\1\s*;/)
+    assert.ok(declaration, `${SITE} must export a literal CONTACT_EMAIL; an empty parse is not approval`)
+    assert.equal(declaration[2], APPROVED, 'CONTACT_EMAIL changed without owner approval')
+
+    const entries = inventory.split(/\r?\n/)
+      .filter((line) => line.trim() && !line.trimStart().startsWith('#'))
+      .map((line) => line.split('\t'))
+      .filter(([file, address]) => file === SITE && address === APPROVED)
+    assert.equal(entries.length, 1, 'the approved business contact needs exactly one inventory row')
+    assert.equal(entries[0]![2], 'receives', 'the approved business contact inventory verdict must be receives')
+    assert.ok(entries[0]![3]?.trim(), 'the contact inventory must record the evidence for its receives verdict')
+
+    for (const [file, text] of Object.entries(sources)) {
+      const addresses = [...withoutComments(text).matchAll(/[A-Za-z0-9._%+-]+@antifailure\.dev\b/gi)]
+        .map((match) => match[0])
+      assert.deepEqual(
+        addresses,
+        file === SITE ? [APPROVED] : [],
+        `${file} publishes an undeclared contact address; use the approved shared CONTACT_EMAIL`,
+      )
+    }
+
+    for (const page of PAGES) {
+      const code = withoutComments(sources[page] ?? '')
+      assert.match(
+        code,
+        /import\s*\{[^}]*\bCONTACT_EMAIL\b[^}]*\}\s*from\s*["']@\/lib\/site["']/,
+        `${page} must import the approved contact from the shared site constants`,
+      )
+      assert.match(
+        code,
+        CONTACT_LINK,
+        `${page} must render a live mailto link whose destination and visible address use CONTACT_EMAIL`,
+      )
+    }
+  }
+
+  it('connects the owner-approved receives inventory entry to both published contact links', async () => {
+    verifyContacts(await inputs)
+  })
+
+  it('rejects an unknown shared address even when its name and all page references remain unchanged', async () => {
+    const baseline = await inputs
+    assert.throws(
+      () => verifyContacts({
+        ...baseline,
+        sources: { ...baseline.sources, [SITE]: baseline.sources[SITE]!.replace(APPROVED, 'unknown@antifailure.dev') },
+      }),
+      /CONTACT_EMAIL changed without owner approval/,
+    )
+  })
+
+  it('rejects a missing declaration instead of passing over an empty parse', async () => {
+    const baseline = await inputs
+    assert.throws(
+      () => verifyContacts({
+        ...baseline,
+        sources: { ...baseline.sources, [SITE]: baseline.sources[SITE]!.replace('export const CONTACT_EMAIL', 'export const REMOVED_CONTACT_EMAIL') },
+      }),
+      /must export a literal CONTACT_EMAIL/,
+    )
+  })
 
   for (const page of PAGES) {
-    it(`publishes no address at antifailure.dev in ${path.basename(page)}`, async () => {
-      const text = await read(page)
-      const found = [...text.matchAll(/[A-Za-z0-9._%+-]+@antifailure\.dev/g)].map((m) => m[0])
-      assert.deepEqual(
-        [...new Set(found)],
-        [],
-        `${page} publishes an address at a domain with no mail exchanger. Mail sent there is ` +
-          `delivered nowhere, and the site's own contact page says so. Name the route that ` +
-          `works, which today is GitHub private vulnerability reporting, or add an MX record ` +
-          `and a mailbox first.`,
+    it(`rejects a disconnected or commented-out contact link in ${path.basename(page)}`, async () => {
+      const baseline = await inputs
+      for (const replacement of ['<span>{CONTACT_EMAIL}</span>', '{/* $& */}']) {
+        const changed = baseline.sources[page]!.replace(CONTACT_LINK, replacement)
+        assert.notEqual(changed, baseline.sources[page], 'the mutation must change the actual published link')
+        assert.throws(
+          () => verifyContacts({ ...baseline, sources: { ...baseline.sources, [page]: changed } }),
+          /must render a live mailto link/,
+        )
+      }
+    })
+
+    it(`rejects a new literal address beside the approved link in ${path.basename(page)}`, async () => {
+      const baseline = await inputs
+      assert.throws(
+        () => verifyContacts({
+          ...baseline,
+          sources: {
+            ...baseline.sources,
+            [page]: baseline.sources[page]! + '\nconst unapprovedContact = "mailto:unknown@antifailure.dev";\n',
+          },
+        }),
+        /publishes an undeclared contact address/,
       )
     })
   }
 
-  it('is reading pages that mention the domain at all, so an empty result means something', async () => {
-    // The negative control on the parse. A renamed or moved file reads as an
-    // empty string here and every assertion above passes over nothing, which is
-    // exactly the failure mode this file warns about at the top.
-    for (const page of PAGES) {
-      const text = await read(page)
-      assert.match(
-        text,
-        /antifailure\.dev/,
-        `${page} no longer mentions the domain at all, so the check above is reasoning about ` +
-          `nothing. Either the file moved or the pattern stopped matching.`,
+  it('rejects an absent or downgraded receives inventory row', async () => {
+    const baseline = await inputs
+    const row = baseline.inventory.split('\n').find((line) => line.startsWith(`${SITE}\t${APPROVED}\t`))
+    assert.ok(row, 'the mutation must target the actual inventory row')
+    for (const replacement of ['', row.replace('\treceives\t', '\tnot-a-route\t')]) {
+      assert.throws(
+        () => verifyContacts({ ...baseline, inventory: baseline.inventory.replace(row, replacement) }),
+        /needs exactly one inventory row|inventory verdict must be receives/,
       )
     }
   })

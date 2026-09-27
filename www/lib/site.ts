@@ -48,6 +48,12 @@ export const CONTROL_PLANE_URL = (
 /** The product name, spelled and cased exactly one way, everywhere. */
 export const SITE_NAME = "Antifailure";
 
+/** Business contact details supplied by the owner on September 26, 2026.
+ * Inbound MX records point to Forward Email. Outbound SPF remains v=spf1 -all;
+ * receiving mail does not establish automated outbound delivery. */
+export const CONTACT_EMAIL = "vir@antifailure.dev";
+export const BUSINESS_ADDRESS = "2018 Suffolk Dr, Houston, TX";
+
 /**
  * What joins a page's own name to the site's name in a <title>.
  *
@@ -124,9 +130,7 @@ export const REPO_URL = "https://github.com/antifailure/antifailure";
 export const REPO_SLUG = "antifailure/antifailure";
 export const DOCS_URL = `${SITE_URL}/docs`;
 
-/** Public contact routes checked against the live repository and site. The
- * domain currently has no MX records, so no email address is presented as a
- * working channel. */
+/** Public support routes. Direct business contact uses CONTACT_EMAIL above. */
 export const CONTACT_POINTS = [
   {
     id: "security",

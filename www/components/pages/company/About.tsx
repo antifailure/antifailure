@@ -13,7 +13,6 @@ import {
 import {
   DOCS_URL,
   REPO_URL,
-  SITE_CATEGORY,
   SITE_DESCRIPTION_LONG,
 } from "@/lib/site";
 
@@ -42,8 +41,8 @@ export function AboutPage() {
       <PageHero
         path="/about"
         eyebrow="About"
-        title="A proving ground for changes that deserve more than staging."
-        lead="Antifailure is an open-core project for pre-production testing and release safety. It builds disposable, production-shaped environments so a team can inspect evidence before a risky change reaches production."
+        title="Confidence before the change reaches production."
+        lead="Antifailure gives developers a place to test the change they are about to ship, with realistic data, running services, and evidence they can inspect."
         actions={
           <>
             <Button href={DOCS_URL} theme="filled">
@@ -59,16 +58,15 @@ export function AboutPage() {
       <PageSection>
         <PageHeading
           kicker="The project"
-          title="<strong>Production shape, contained effects, and a result you can inspect.</strong> The evidence matters more than the claim."
+          title="<strong>Make production conditions part of the review.</strong>"
         />
         <div className="mt-14 grid grid-cols-[minmax(0,720px)_minmax(260px,420px)] gap-x-20 gap-y-10 max-lg:grid-cols-1">
           <Prose>
             <p>{SITE_DESCRIPTION_LONG}</p>
             <p className="mt-6">
-              The category is stated narrowly: <strong>{SITE_CATEGORY}</strong>. Antifailure is not a
-              replacement for every test suite, database tool, or preview platform. It combines
-              those concerns when a release needs a production-shaped rehearsal and an explicit
-              record of what the environment did and did not reproduce.
+              A pull request can pass its tests and still behave differently on a
+              large database or across several running services. Antifailure brings
+              those conditions into the review, while there is still time to change the code.
             </p>
             <p className="mt-6">
               The implementation, plans, and known limits are public in the{" "}
@@ -78,9 +76,8 @@ export function AboutPage() {
           </Prose>
           <div className="self-start">
             <Callout label="Current status" tone="warn">
-              The public status ledger separates work that is proven, written, or planned instead
-              of collapsing those states into one readiness claim. Release and hosted-service
-              availability are reported there rather than frozen into this page.
+              Check feature availability and the verification status of each
+              runtime and provider.
               {/* min-h-11 because this is a standalone control rather than a
                   link inside a sentence, and its twin on /contact is already
                   44px. Measured at 320, 390 and 1440 against the built export:
@@ -102,7 +99,7 @@ export function AboutPage() {
       <PageSection tone="panel">
         <PageHeading
           kicker="How it works"
-          title="<strong>One run, four accountable stages.</strong> Each stage leaves evidence for the next."
+          title="<strong>Build. Test. Review. Clean up.</strong>"
         />
         <Steps items={RUN_STEPS} />
       </PageSection>
@@ -125,13 +122,10 @@ export function AboutPage() {
             </Prose>
           </div>
           <div>
-            <PageHeading title="<strong>Evidence, not certainty.</strong>" />
+            <PageHeading title="<strong>Understand what each result covers.</strong>" />
             <Prose className="mt-8">
               <p>
-                A passing run describes behavior under the fidelity it reached. It does not promise
-                that no deployment can fail, that every cloud can be cloned perfectly, or that open
-                source replaces compliance. Those limits are part of the product definition, not
-                footnotes added after a result.
+                Review each result alongside the checks that ran and the environment they used. The report identifies missing coverage so your team can decide what to test next.
               </p>
               <p className="mt-5">
                 Read the <Link prefetch={false} href="/terms">terms and stated limits</Link> or the{" "}

@@ -3,16 +3,7 @@
 import { useEffect } from "react";
 import Link from "next/link";
 
-// The reason this file exists rather than being left to the framework: the
-// homepage renders a WebGL scene, and a browser that cannot give it a context
-// throws during render. Without a boundary here, the whole page becomes Next's
-// stock "Application error: a client-side exception has occurred", which is a
-// black screen with a sentence on it. That is what a visitor with hardware
-// acceleration turned off used to get.
-//
-// The scene itself now degrades instead of throwing, so this should be
-// unreachable. It is here because "should be unreachable" is exactly the
-// claim an error boundary exists to stop us relying on.
+// Keep a recoverable page if a client component fails to render.
 export default function Error({
   error,
   reset,
@@ -33,12 +24,10 @@ export default function Error({
           Something broke
         </p>
         <h1 className="mt-4 max-w-[20ch] text-[40px] font-medium leading-[1.05] tracking-tighter text-black max-lg:text-[32px] max-sm:text-[26px]">
-          This page failed to render.
+          We could not load this page.
         </h1>
         <p className="mt-5 max-w-[54ch] text-[15px] leading-[1.6] tracking-extra-tight text-gray-new-40">
-          That is our fault, not yours, and it is worth telling us about. The
-          rest of the site is unaffected, and the documentation is plain HTML
-          that does not depend on any of this.
+          Try again, or open the documentation. If the problem continues, send us a report.
         </p>
 
         {error.digest ? (

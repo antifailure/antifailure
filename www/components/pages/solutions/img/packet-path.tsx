@@ -105,7 +105,7 @@ export function PacketPath() {
                   </div>
                   <div className="self-center text-right">
                     {hop.tone === "block" ? (
-                      <span className="inline-flex rounded-full bg-white px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] text-[#C43D3D]">
+                      <span className="inline-flex rounded-full bg-white px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] text-danger-ink">
                         {hop.mode}
                       </span>
                     ) : (
@@ -127,7 +127,7 @@ export function PacketPath() {
         </FloatWindow>
 
         <div className="w-full shrink-0 rounded-[12px] bg-white p-3 shadow-[0_16px_48px_rgba(0,0,0,0.14)] md:w-[176px] md:p-4">
-          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#C43D3D]">fail closed</div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-danger-ink">fail closed</div>
           <div className="mt-1.5 text-[13px] font-semibold tracking-tight text-black">Live hop refused</div>
           <p className="mt-1.5 text-[12px] leading-4 text-gray-new-40 max-md:hidden">
             The charge is written to a clone-local ledger. api.stripe.com never resolves.

@@ -230,7 +230,7 @@ export const ROUTES: readonly Route[] = [
   {
     path: "/terms",
     title: pageTitle("Terms of Use"),
-    description: "A proving ground, not a guarantee. The promise is evidence, not zero failure.",
+    description: "Terms for using Antifailure, including responsibilities, warranties, and limitations.",
     summary: "The terms of use.",
     section: "legal",
     indexable: true,
@@ -242,7 +242,7 @@ export const ROUTES: readonly Route[] = [
     title: pageTitle("Acceptable Use"),
     description:
       "Where the product may and may not be pointed, and what we will not do to a customer.",
-    summary: "The acceptable use policy, and the enforcement that exists rather than the kind that does not.",
+    summary: "Acceptable use of Antifailure and its hosted services.",
     section: "legal",
     indexable: true,
     priority: 0.3,

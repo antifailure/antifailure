@@ -1,21 +1,22 @@
 // Command contactcheck refuses a contact route this project cannot answer.
 //
-// THE DEFECT THIS EXISTS FOR. CODE_OF_CONDUCT.md named conduct@antifailure.dev
+// THE DEFECT THIS EXISTS FOR. On 2026-09-02, CODE_OF_CONDUCT.md named conduct@antifailure.dev
 // as the place a person reporting harassment should go, and the legal pages
-// named security@antifailure.dev for a security researcher. Neither address
-// can receive mail. There is no mail exchanger on that domain, and the rest of
-// its records close the door behind that one:
+// named security@antifailure.dev for a security researcher. Those addresses
+// could not receive mail. The domain had no mail exchanger. The DNS snapshot
+// recorded during that investigation was:
 //
 //	$ dig +short MX antifailure.dev                        (empty)
 //	$ dig +short TXT antifailure.dev                        "v=spf1 -all"
 //	$ dig +short TXT _dmarc.antifailure.dev                 "v=DMARC1; p=reject; ..."
 //	$ dig +short TXT resend._domainkey.antifailure.dev      "v=DKIM1; p="
 //
-// No mail exchanger, so nothing can be delivered. An SPF policy authorising no
-// sender and a DMARC policy of reject, so nothing can be sent either. A DKIM
-// record with an empty p=, which is how RFC 6376 spells a REVOKED key. The
-// domain is configured to send nothing and receive nothing, and every address
-// on it is silence.
+// That is historical evidence, not the domain's current configuration. On
+// 2026-09-26, MX resolved to mx1.forwardemail.net and mx2.forwardemail.net, both
+// with priority 10, and the owner supplied the business contact recorded in
+// tools/docs/contact-routes.tsv. Outbound SPF is separate from inbound mail;
+// it does not establish whether an address can receive. The old domain-wide
+// refusal was removed, while every published address still needs its own row.
 //
 // WHY THAT IS WORSE THAN PUBLISHING NOTHING. A published address is a promise
 // that somebody is on the other end. A researcher sitting on a finding, a
@@ -63,7 +64,7 @@
 //	receives           a person reads mail sent here, and the reason says who.
 //	                   REFUSED outright when the domain is one of the dead
 //	                   domains below. This is the rule that cannot be argued
-//	                   with: no wording makes antifailure.dev receive mail.
+//	                   with: a reason cannot override a known delivery failure.
 //
 //	not-a-route        the string is a value the software writes, a git
 //	                   identity, or an illustration in a placeholder. Nobody is
@@ -157,13 +158,11 @@ const noReplySuffix = "users.noreply.github.com"
 //
 // This is a list of PROVEN failures rather than the gate's main mechanism. The
 // main mechanism is that an address with no row at all fails, which is what
-// covers a domain nobody has checked yet. This list exists so that the one
-// domain we have checked cannot be re-argued in a reason column.
-var deadDomains = map[string]string{
-	"antifailure.dev": "no MX record at all, SPF `v=spf1 -all`, DMARC `p=reject` with strict alignment, " +
-		"and a DKIM record at resend._domainkey whose empty p= revokes the key (RFC 6376). " +
-		"Resolved against three independent resolvers on 2026-09-02, which agreed",
-}
+// covers a domain nobody has checked yet. Remove an entry when new evidence
+// establishes a working route, and record that evidence in the inventory.
+// There are currently no known-dead domains; tests inject a dead-domain
+// fixture so both refusal paths remain exercised without relying on live DNS.
+var deadDomains = map[string]string{}
 
 // verdicts are the only words a row may carry. A closed set, because the
 // failure being guarded against is somebody writing a plausible sentence in a

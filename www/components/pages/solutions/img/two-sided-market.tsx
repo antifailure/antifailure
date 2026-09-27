@@ -68,7 +68,7 @@ function SideRow({
           <span
             className={cn(
               "shrink-0 font-mono text-[9px] uppercase tracking-[0.1em]",
-              miss ? "text-[#8A6A12]" : "text-[#285D49]",
+              miss ? "text-ochre-ink" : "text-[#285D49]",
             )}
           >
             {miss ? "miss" : "joined"}
@@ -77,7 +77,7 @@ function SideRow({
         <div
           className={cn(
             "mt-0.5 hidden truncate font-mono text-[10px] tracking-extra-tight md:block",
-            miss ? "text-[#8A6A12]" : "text-[#285D49]",
+            miss ? "text-ochre-ink" : "text-[#285D49]",
           )}
         >
           {miss ? "no match" : `↔ ${via}`}
@@ -101,7 +101,7 @@ export function TwoSidedMarket() {
           <div className="min-w-0 text-[13px] font-medium text-black">Referential subset</div>
           <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.12em] text-[#285D49]">
             2 joined
-            <span className="text-[#8A6A12]"> · 1 miss</span>
+            <span className="text-ochre-ink"> · 1 miss</span>
           </span>
         </div>
 
@@ -206,7 +206,7 @@ export function TwoSidedMarket() {
             >
               <span className="size-1.5 rounded-full bg-[#33bf00] md:size-2" />
             </span>
-            <span className="absolute top-[83%] left-[64%] z-10 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#f4edd6] px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-[0.1em] whitespace-nowrap text-[#8A6A12]">
+            <span className="absolute top-[83%] left-[64%] z-10 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#f4edd6] px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-[0.1em] whitespace-nowrap text-ochre-ink">
               miss
             </span>
           </div>
@@ -230,7 +230,7 @@ export function TwoSidedMarket() {
           <span className="min-w-0 truncate font-mono text-[11px] tracking-extra-tight text-[#285D49]">
             buyer_44a ↔ seller_helix
           </span>
-          <span className="shrink-0 font-mono text-[11px] tracking-extra-tight text-[#8A6A12]">1 miss</span>
+          <span className="shrink-0 font-mono text-[11px] tracking-extra-tight text-ochre-ink">1 miss</span>
         </div>
       </FloatWindow>
     </SageWell>

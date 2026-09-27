@@ -29,8 +29,8 @@ const BAR_H = 20;
 
 const TONE_INK = {
   pass: "text-[#285D49]",
-  warn: "text-[#8A6A12]",
-  block: "text-[#C43D3D]",
+  warn: "text-ochre-ink",
+  block: "text-danger-ink",
 } as const;
 
 const TONE_PIP = {

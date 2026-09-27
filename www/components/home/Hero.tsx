@@ -9,8 +9,8 @@ import { HeroServices } from "./HeroServices";
 export function Hero() {
   return (
     <section className="hero relative mt-16 safe-paddings max-xl:mt-14">
-      <Container className="relative z-30 pt-96 pb-10 max-xl:pt-54 max-lg:pt-52 max-md:pt-53 max-md:pb-8" size="1600">
-        <SectionLabel>Pre-production deployment safety</SectionLabel>
+      <Container className="relative z-30 pt-[var(--hero-top)] pb-10 max-xl:pt-54 max-lg:pt-52 max-md:pt-53 max-md:pb-8" size="1600">
+        <SectionLabel>Deployment testing for coding agents</SectionLabel>
         <h1 className="mt-5 max-w-[1240px] text-[68px] leading-dense tracking-tighter max-xl:max-w-[1100px] max-xl:text-[60px] max-lg:max-w-[920px] max-lg:text-[48px] max-md:mt-4 max-md:max-w-full max-md:text-[42px] max-sm:text-[32px]">
           <span className="whitespace-nowrap max-xl:whitespace-normal">
             Know what happens before you deploy,
@@ -18,55 +18,17 @@ export function Hero() {
           <br className="max-xl:hidden" />{" "}
           on a disposable production twin.
         </h1>
-        {/* The free path first, because it needs nothing from us at all. The
-            primary button used to be "Request access", which led to an
-            invitation wall, so the page pitched a product and then pointed at
-            a locked door. The engine is MIT licensed and the quickstart needs
-            no account, so that is the action, and the install line under it is
-            the first command of it rather than a third call to action.
-            The button beside it went through "Request hosted access" and then
-            "Create an account", and the second outlived its truth: self-serve
-            is off, so a stranger cannot create an organization on their own,
-            and the way into the hosted plane is a booked demo. So it says
-            "Request a demo" and leads to the page that books one. */}
-        {/* THREE CONTROLS ON ONE LINE. The install command sat on its own row
-            below the two buttons, square where they are round, which read as a
-            leftover rather than as the third thing you can do here. It is the
-            first command of the quickstart beside it, so it belongs beside it.
-            Below `md` all three stack full width, as the buttons already did. */}
         <div className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-3 max-lg:mt-7 max-lg:gap-x-4 max-md:flex-col max-md:items-stretch max-md:gap-y-3 max-md:[&_a]:w-full">
-          <Button href="/docs/getting-started/quickstart" theme="filled">
-            Start the quickstart
-          </Button>
-          <Button href="/request-demo" theme="outlined">
+          <Button href="/request-demo" theme="filled">
             Request a demo
           </Button>
-          {/* No fill and no border of its own: the variant now carries Button's
-              outlined theme, so this only has to stop being 34.2% of the row. */}
-          <CopyCodeButton variant="white" className="w-auto max-w-full max-xl:w-auto max-md:w-full" />
+          <CopyCodeButton variant="white" className="w-auto max-w-full max-xl:w-auto max-lg:w-auto max-md:w-full" />
         </div>
-        {/* The state of the product, worded to match the pricing page rather
-            than beside it: two descriptions of one product state is how the
-            first of them goes stale.
-
-            The two sentences are in the order a visitor needs them: what they
-            can have today with no account, then how the hosted plane is
-            reached, which is by talking to somebody as a matter of how it is
-            sold rather than because signing up is refused. See
-            components/pages/company/RequestDemo.tsx for where that value
-            actually lives. */}
-        <p className="mt-5 max-w-[760px] text-[15px] leading-6 tracking-extra-tight text-gray-new-40 max-lg:mt-4 max-lg:max-w-[520px] max-md:text-[14px]">
-          The engine is open source and runs in your own continuous integration
-          today, with no account.
-          {/* Broken at the sentence, the same way the h1 above is, rather than
-              left to text-balance, which put the first sentence's "The" alone
-              at the end of a line. */}
-          <br className="max-lg:hidden" />{" "}
-          The hosted control plane is a managed service: book a demo and we set your team up on it.
+        <p className="mt-5 max-w-[760px] text-base leading-6 tracking-extra-tight text-gray-new-20 max-lg:mt-4 max-lg:max-w-[520px]">
+          Give your coding agent a production twin through MCP. Test migrations,
+          user flows, and load on masked data, then use the findings to fix the
+          change before you ship.
         </p>
-        {/* mt-36 was 144 pixels of nothing between two short sentences and the
-            five things this product is. The gap is the section rhythm now, and
-            the same one the film below it uses. */}
         <div className="relative mt-20 max-lg:mt-16 max-md:mt-14 max-sm:mt-12">
           <HeroServices />
         </div>

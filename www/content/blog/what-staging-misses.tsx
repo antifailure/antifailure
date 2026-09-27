@@ -1,148 +1,42 @@
 import type { Post } from "@/lib/blog";
 
-/**
- * Every factual claim about Antifailure here is one this repository already
- * makes: the per-statement timing and strongest-lock-per-table rehearsal, the
- * pg_stat_statements diff, and the plan comparison are all in the README under
- * "Database review, automatically". The Postgres behaviour described is
- * standard and checkable against the Postgres documentation, which is linked
- * rather than paraphrased.
- */
 export const MIGRATION_LOCKS: Post = {
   slug: "what-staging-misses-about-migrations",
-  title: "Staging cannot tell you how long a lock is held",
-  dek: "A migration that runs instantly against a seeded table can hold an exclusive lock for minutes against a real one. The difference is row count, and staging does not have it.",
-  summary:
-    "Why migrations that pass on staging take production down: lock duration scales with data, and staging has no data.",
+  title: "Why migration timing changes with your data",
+  dek: "A migration can pass on staging and still hold a long lock in production. Rehearse it at realistic row counts before you deploy.",
+  summary: "How data volume, query plans, and lock duration affect a Postgres migration.",
   published: "2026-08-29",
+  updated: "2026-09-26",
   tags: ["Postgres", "Migrations", "Testing"],
   body: (
     <>
-      <p>
-        Almost every migration incident has the same shape. The change was
-        reviewed. It ran on staging in under a second. It ran in CI. Then it
-        reached production and something held a lock long enough that requests
-        queued behind it, connections filled, and the application stopped
-        answering.
-      </p>
-      <p>
-        Nothing about the review was careless. The problem is that the property
-        that matters is not visible in any environment that lacks production
-        data, and the artifact everyone inspects, the SQL, does not contain it.
-      </p>
+      <p>A schema change can be valid SQL, pass review, and work on staging while still holding a costly lock in production. The difference often lies in the data the statement has to read or rewrite.</p>
+      <p>A small test database helps check correctness. To understand migration cost, you also need realistic row counts, data distributions, and observations from the database while the statement runs.</p>
 
-      <h2>The property that does not fit in a diff</h2>
-      <p>
-        A lock has two independent characteristics. Which lock mode a statement
-        takes is a static fact about the statement, and a linter can tell you.
-        How long it is held is a function of how much data it has to touch, and
-        nothing static can tell you.
-      </p>
-      <p>
-        Those two are frequently confused because on a seeded table they look
-        identical. An <code>ACCESS EXCLUSIVE</code> lock held for four
-        milliseconds against ten thousand rows and the same lock held for
-        twenty-seven seconds against ninety million are the same line of SQL.
-        Only one of them is an outage.
-      </p>
-      <p>
-        This is why static migration linters, which are useful, are not
-        sufficient. They correctly tell you that a statement takes a strong
-        lock. They cannot tell you that it will hold it past your connection
-        pool&apos;s patience, because that answer depends on the table.
-      </p>
+      <h2>Lock mode and lock duration answer different questions</h2>
+      <p>A migration linter can identify statements that request strong locks. The time those locks remain held depends on the work Postgres performs, the available resources, and other activity in the database.</p>
+      <p>That distinction matters for a type change that rewrites a table. The SQL may be a single line, but Postgres has to process the existing rows while holding the required lock.</p>
 
-      <h2>Why the staging copy does not stand in</h2>
-      <p>Four things are usually different, and each one hides a distinct failure.</p>
+      <h2>What to carry into a rehearsal</h2>
       <ul>
-        <li>
-          <strong>Row count.</strong> Rewrite and scan times scale with it.
-          Staging is typically several orders of magnitude smaller, so every
-          duration measured there is meaningless.
-        </li>
-        <li>
-          <strong>Distribution.</strong> Planner choices depend on statistics.
-          Uniform seeded data produces different plans from real data with its
-          skew, its nulls and its handful of enormous accounts.
-        </li>
-        <li>
-          <strong>Concurrency.</strong> A lock is only a problem when something
-          else wants the table. A quiet staging box has no queue to form behind
-          it, so the same lock is invisible.
-        </li>
-        <li>
-          <strong>Index and bloat state.</strong> A table that has been written
-          to for two years does not behave like one created by a fixture script
-          this morning.
-        </li>
-      </ul>
-      <p>
-        The uncomfortable consequence is that a green staging run on a schema
-        change is close to no evidence at all. It proves the SQL parses and the
-        application still boots. It does not address the question anybody
-        actually has, which is whether this is safe to run at 2pm on a Tuesday.
-      </p>
-
-      <h2>What has to be measured instead</h2>
-      <p>
-        The question is not &ldquo;is this migration valid&rdquo; but
-        &ldquo;what does this migration do to a database shaped like ours,
-        while it is being used.&rdquo; That requires executing it against
-        production-shaped data and watching, which is what Antifailure rehearses
-        on a fresh branch. Four measurements come out of it:
-      </p>
-      <ul>
-        <li>
-          <strong>Per-statement timing.</strong> Not the total, which averages
-          away the one statement that matters, but each statement separately.
-        </li>
-        <li>
-          <strong>The strongest lock held per table.</strong> Per table, because
-          a migration touching six tables has six different blast radii and
-          reporting the maximum tells you nothing about which one to fix.
-        </li>
-        <li>
-          <strong>Query plan comparison.</strong> Plans before and after,
-          compared, which is how you catch the index you stopped using rather
-          than the one you forgot to add.
-        </li>
-        <li>
-          <strong>A <code>pg_stat_statements</code> diff</strong> between main
-          and the branch, which is how an N+1 introduced by an ORM change shows
-          up as a number instead of as a support ticket next week.
-        </li>
+        <li><strong>Row counts.</strong> A rewrite on a large table can take much longer than the same change on a fixture database.</li>
+        <li><strong>Data distribution.</strong> Skew, nulls, and large accounts affect planner choices. Uniform seed data may produce different query plans.</li>
+        <li><strong>Concurrent activity.</strong> Other sessions can wait for a migration or delay its lock acquisition. A quiet branch alone does not reproduce production contention.</li>
+        <li><strong>Environment differences.</strong> Hardware, indexes, and storage conditions affect timing. Treat rehearsal measurements as observations of that environment.</li>
       </ul>
 
-      <h2>Rollback is a separate question, and it expires</h2>
-      <p>
-        &ldquo;We can roll back&rdquo; is usually said about the deployment
-        rather than the schema, and the two come apart quickly. Once a column is
-        dropped the data is gone. Once a backfill has run, reverting the code
-        leaves rows the old version never expected. Once a type has changed in
-        place, going back is another rewrite holding another lock.
-      </p>
-      <p>
-        So rollback feasibility is a property to check while rehearsing, not a
-        reassurance to offer during an incident. It is frequently true at the
-        moment of deploy and false twenty minutes later, and knowing which of
-        those you are in changes what you do next.
-      </p>
+      <h2>What Antifailure measures</h2>
+      <p>Antifailure applies pending migrations to a disposable branch of a masked database. It records statement durations, samples locks from another connection, observes table rewrites, and compares query plans.</p>
+      <p>Lock sampling records the strongest mode held per table, a lower bound on its duration, and whether another session was observed waiting. The report also includes migration lint findings and suggested changes.</p>
+      <p>In a recorded orders-app demo, changing <code>total_cents</code> to <code>bigint</code> rewrote the orders table. The report recorded an <code>AccessExclusiveLock</code> on that table for at least 10.5 seconds. That is a measurement from the demo branch, not a forecast for another database.</p>
 
-      <h2>What this looks like in practice</h2>
-      <p>
-        The output that is worth having is not a pass or a fail. It is a
-        statement specific enough to argue with:{" "}
-        <em>
-          this statement holds ACCESS EXCLUSIVE on <code>orders</code> for
-          twenty-seven seconds at your row count, eighty-four statements queue
-          behind it, and the table is rewritten in full.
-        </em>
-      </p>
-      <p>
-        That is a decision somebody can make. &ldquo;It passed on staging&rdquo;
-        is not, and it never was. It only looked like one because the thing it
-        failed to measure is invisible until the day it is not.
-      </p>
+      <h2>Plan the path back</h2>
+      <p>Reverting application code does not undo every schema or data change. Dropping a column removes data; a backfill may create values an older release does not expect.</p>
+      <p>For a column type change, consider an expand-and-contract sequence: add a new column, backfill in batches, move reads and writes, and remove the old column in a later migration. Rehearse the sequence and check compatibility with the previous release.</p>
+
+      <h2>Put the findings in the review</h2>
+      <p>A useful report names the statement, the affected table, the observed lock, and the conditions of the test. Your team can then decide whether to change the migration, adjust its timeout, or gather more evidence before deployment.</p>
+      <p><a href="/docs/concepts/insights">Read the migration rehearsal guide</a> to set up the checks for your repository.</p>
     </>
   ),
 };

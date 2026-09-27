@@ -49,12 +49,12 @@ const STAGING_ROWS: { miss: string; have: string }[] = [
 ];
 
 const VERDICTS: { tone: "PASS" | "FAIL" | "UNVERIFIED"; title: string; body: string }[] = [
-  { tone: "PASS", title: "Ship", body: "Every workflow reached the outcome it declared, and every invariant held." },
-  { tone: "FAIL", title: "Do not merge", body: "A workflow failed or an invariant broke. The only verdict that exits non-zero." },
+  { tone: "PASS", title: "Ship", body: "The configured checks passed. Review their scope and supporting evidence." },
+  { tone: "FAIL", title: "Do not merge", body: "A check found a failure. Review the evidence and reproduction steps." },
   {
     tone: "UNVERIFIED",
     title: "We could not tell",
-    body: "Flaky, blocked or unverified. Something is wrong with the run, and it does not count against you.",
+    body: "The run could not establish an outcome. Review the reason and rerun the affected checks.",
   },
 ];
 
@@ -74,22 +74,22 @@ const PRODUCT_FAQ: FaqItem[] = [
   {
     question: "How do I know the masking actually worked?",
     answer:
-      "A scanner reads back every column of every table, sampling rows rather than reading all of them, looking for anything that still parses as an email, a card number, a phone number, or a key, then signs an attestation that records the sample size. An unverified golden cannot be branched, and that is enforced in code rather than in a checklist.",
+      "After masking, a scanner samples rows across every table and column for emails, card numbers, phone numbers, and keys. A signed attestation records coverage and findings. Only verified snapshots can be branched.",
   },
   {
     question: "What stops a test run from emailing real customers or charging a real card?",
     answer:
-      "Every environment gets a sidecar that owns its network namespace, and nothing leaves except through it. Each host gets one of seven modes: BLOCK, ALLOW, SANDBOX with test credentials and a tripwire if a live key appears, CAPTURE into a searchable inbox, MOCK from a stateful offline pack, EMULATE from an emulator inside the environment reached with no endpoint override, or SYNTH, which asks a model to invent a response and marks the result unverified. An unlisted host fails closed.",
+      "Outbound traffic goes through a gateway with a policy for each host. Use sandboxes, offline mocks, local emulators, or captured messages for integrations. Unlisted destinations are blocked.",
   },
   {
     question: "Can a run complete with no network access at all?",
     answer:
-      "Yes, for the covered surface. The Stripe pack is complete enough to run checkout, subscribe, renew, and cancel with signed webhooks and no network.",
+      "Yes. Supported offline mocks include Stripe checkout, subscriptions, renewals, cancellations, and signed webhooks.",
   },
   {
     question: "What happens when a check fails because the tooling broke, not my code?",
     answer:
-      "It is classified as such. A run returns pass, fail, flaky, blocked, or unverified, and a failure caused by the runner is never counted against your application.",
+      "The result distinguishes application failures from blocked, flaky, and unverified checks, with a reason to help you decide what to rerun.",
   },
   {
     question: "Which databases and platforms does it support?",
@@ -104,7 +104,7 @@ const PRODUCT_FAQ: FaqItem[] = [
   {
     question: "Is it production ready?",
     answer:
-      "Version 1.0 commits to the manifest schema, the command line, the documented JSON fields, the provider interfaces and the error codes, and breaking any of those costs a major version. It is a promise about interfaces, not a claim that every component is finished: docs/plan/STATUS.md still gives the honest answer per component, marking each one proven, written, or planned.",
+      "The version 1 contract covers the manifest, CLI, documented JSON fields, provider interfaces, and error codes. The stability guide and component status document describe support and verification for each feature.",
   },
 ];
 
@@ -114,14 +114,14 @@ export function OverviewPage() {
       <PageHero
         path="/product"
         eyebrow="Product"
-        title="A disposable production twin that proves whether a deployment is safe."
-        lead="Connect a repository and a cloud environment. For every risky change, Antifailure builds an isolated production twin, fills it with safe production-shaped state, and exercises it."
+        title="See how your change behaves before you deploy."
+        lead="Connect your coding agent through MCP. Give it an isolated copy of your stack to rehearse migrations, test user journeys, and return evidence before you merge."
         framed={false}
         visual={<POV01 />}
       />
 
       <PageSection>
-        <PageHeading title="<strong>Seven pieces, one decision.</strong> None of these is the product on its own." />
+        <PageHeading title="<strong>A full test environment for each pull request.</strong>" />
 
         <div className="relative mt-14 max-md:mt-10">
           <ul className="grid grid-cols-4 gap-x-16 gap-y-12 max-xl:grid-cols-2 max-xl:gap-x-10 max-md:grid-cols-1 max-md:gap-y-8">
@@ -148,28 +148,23 @@ export function OverviewPage() {
 
       <PageSection tone="panel">
         <Split visual={<POV02 rows={STAGING_ROWS} />}>
-          <PageHeading title="<strong>The question staging cannot answer.</strong> What happens when this change meets real data, concurrency, workers, and the deploy process." />
+          <PageHeading title="<strong>Test against the conditions your change will meet.</strong>" />
           <p className="mt-8 max-w-[520px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-            Preview tools, test-data platforms, E2E suites, load tests, packet mirrors, and observability
-            each cover one fragment.
+            Bring services, data, and test traffic together in an environment dedicated to your change.
           </p>
         </Split>
       </PageSection>
 
       <PageSection>
         <Split visual={<POV03 />}>
-          <PageHeading kicker="Scope" title="<strong>Postgres migrations first.</strong> Not universal multicloud cloning." />
+          <PageHeading kicker="Scope" title="<strong>Rehearse migrations at realistic database sizes.</strong>" />
           <p className="mt-6 max-w-[560px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-            Exclusive locks, table rewrites, query-plan regressions, and old binaries
-            that cannot read candidate writes. Conventional tests miss all of them.
+            Inspect lock durations, table rewrites, query plan changes, and compatibility with the previous release.
           </p>
         </Split>
         <Illustrative label="Example finding">
-          One migration rehearsed, with the numbers chosen. The measurements are the ones{" "}
-          <code className="font-mono text-[15px] text-black">af insights</code> takes: the strongest
-          lock mode and its hold time, whether another session was left waiting on it, rewrites, and
-          plans before and after.
-        </Illustrative>
+            Example migration report with sample values.
+          </Illustrative>
 
         <div className="mt-8 grid grid-cols-2 items-start gap-x-16 gap-y-12 max-xl:grid-cols-1">
           <POV04 />
@@ -201,7 +196,7 @@ export function OverviewPage() {
       </PageSection>
 
       <PageSection tone="ruled">
-        <PageHeading title="<strong>The output is a decision.</strong> Not a dataset. Not a preview URL alone." />
+        <PageHeading title="<strong>Know what passed and what needs attention.</strong>" />
         {/* The two column rules are siblings of the list, not children of it.
             They were spans inside the ul, and a ul may only directly contain
             li, so axe's list rule reported the element and a screen reader
@@ -223,14 +218,6 @@ export function OverviewPage() {
           <span className="pointer-events-none absolute inset-y-0 left-[calc(33.333%-32px)] w-px bg-black/12 max-xl:hidden" />
           <span className="pointer-events-none absolute inset-y-0 right-[calc(33.333%-32px)] w-px bg-black/12 max-xl:hidden" />
         </div>
-        <div className="mt-16 max-w-[640px] border-t border-black/10 pt-8">
-          <MonoLabel tone="reader">What we will not claim</MonoLabel>
-          <p className="mt-3 text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
-            Zero rollback. No deployment can ever fail. Thousands of AI agents behave exactly like
-            humans. One click perfectly clones every cloud. Where a run could not measure something,
-            it says so rather than scoring it.
-          </p>
-        </div>
       </PageSection>
 
       {/* Phrased the way the questions are actually asked, not the way a
@@ -241,7 +228,7 @@ export function OverviewPage() {
       <PageSection>
         <PageHeading
           kicker="Questions"
-          title="<strong>What people ask first.</strong> Answered here rather than in a sales call."
+          title="<strong>Common questions.</strong>"
         />
         <Faq path="/product" items={PRODUCT_FAQ} />
       </PageSection>

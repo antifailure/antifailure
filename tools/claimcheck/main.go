@@ -867,7 +867,7 @@ var siteClaims = []siteClaim{
 		name: "mail this domain cannot send",
 		// Carried forward from the change that corrected the waitlist copy,
 		// because the fact it rests on is unchanged and the temptation is
-		// permanent. antifailure.dev publishes no MX record, an SPF policy of
+		// permanent. Inbound forwarding now works, but the domain retains an SPF policy of
 		// `v=spf1 -all`, a DMARC policy of reject with strict alignment, and a
 		// wildcard DKIM record whose public key is empty, which per RFC 6376 is
 		// a revoked key. Measured with dig rather than taken from a page.
@@ -886,7 +886,7 @@ var siteClaims = []siteClaim{
 		// The site's own record of the DNS fact. The day antifailure.dev gains a
 		// sending identity that sentence has to go, this rule lapses loudly, and
 		// whoever removed it is told to revisit what the page may promise.
-		premise: [2]string{"www/components/pages/company/Contact.tsx", "no mail exchanger"},
+		premise: [2]string{"www/lib/site.ts", "v=spf1 -all"},
 		reason: "the domain authorizes no outbound sender, so a page may say what " +
 			"happens to what somebody typed and who reads it, and may not say that " +
 			"something will reach them, because nothing can. The contact form's own " +
@@ -929,27 +929,6 @@ var siteClaims = []siteClaim{
 			"review will find every gap on the list, so a reviewer checking the address " +
 			"our own README gives them disproved it in thirty seconds and then had cause " +
 			"to doubt every other line on a page whose only asset is that it can be checked",
-	},
-	{
-		name:      "an address on a domain that receives no mail",
-		forbidden: regexp.MustCompile(`[A-Za-z0-9._%+-]+@antifailure\.dev`),
-		premise:   [2]string{"www/components/pages/company/Contact.tsx", "has no mail exchanger"},
-		reason: "antifailure.dev publishes no MX record and its SPF policy is `v=spf1 -all`, so " +
-			"every address on it is a promise nobody can keep. Eight of them shipped, and the " +
-			"expensive ones were not on the website: AF-EE-004 told a customer who had just hit " +
-			"their seat limit to email licensing@, the enterprise licence text gave the same " +
-			"address for any question, and SECURITY.md gave security@ to a researcher holding a " +
-			"finding. Every one of those is read at the moment somebody is trying to pay, or is " +
-			"blocked, or is doing us a favour, which is the moment a dead route costs the most. " +
-			"THIS COULD NOT HAVE BEEN A RULE BEFORE, and the premise beside it is why: whether a " +
-			"domain accepts mail is settled by DNS, a build gate that queried DNS would not be " +
-			"hermetic and would fail offline, and until the contact page was written nothing in " +
-			"the tree recorded the answer. Contact.tsx now states it, which is what makes it " +
-			"checkable here. If a mailbox is ever set up, that callout goes, this premise lapses, " +
-			"and this gate fails rather than going on refusing an address that has become real. " +
-			"Name the route the contact page names instead: GitHub private vulnerability " +
-			"reporting for a security finding, Discussions for a question, and " +
-			"https://antifailure.dev/contact for anything commercial",
 	},
 	{
 		name:      "a documentation page count nothing counted",

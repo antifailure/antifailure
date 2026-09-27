@@ -57,21 +57,17 @@ function PagesClose() {
           <div className="min-w-0">
             <SectionLabel>Next</SectionLabel>
             <h2 className="mt-5 text-[48px] font-normal leading-dense tracking-tighter text-pretty text-gray-new-40 max-xl:text-[40px] max-lg:text-[28px] max-md:text-[24px]">
-              <span className="text-black">Know what happens</span> before you deploy.
+              <span className="text-black">Bring your next pull request.</span>
             </h2>
             <p className="mt-6 max-w-[520px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-              Create a disposable production twin for every risky change. Catch migration failures
-              before they reach customers.
+              See how Antifailure would test your stack, what it would check,
+              and the evidence your team would review before merging.
             </p>
           </div>
           <div className="flex min-w-0 flex-col items-start gap-4 max-lg:w-full">
             <div className="flex gap-x-5 max-sm:w-full max-sm:flex-col max-sm:gap-y-3 max-sm:[&_a]:w-full max-sm:[&_button]:w-full">
-              <Button href="/docs/getting-started/quickstart" theme="filled">
-                Start the quickstart
-              </Button>
-              <Button href="/request-demo" theme="outlined">
-                Request a demo
-              </Button>
+              <Button href="/request-demo" theme="filled">Request a demo</Button>
+              <Button href="/docs/reference/mcp" theme="outlined">Connect your agent</Button>
             </div>
             {/* The border, the fill and the hover come from the `white`
                 variant now. They were restated here as `border-black/12
@@ -145,12 +141,8 @@ export function PageHero({
         <div className="mt-8 flex gap-x-5 max-lg:mt-7 max-sm:flex-col max-sm:gap-y-3 max-sm:[&_a]:w-full max-sm:[&_button]:w-full">
           {actions ?? (
             <>
-              <Button href="/docs/getting-started/quickstart" theme="filled">
-                Start the quickstart
-              </Button>
-              <Button href="/request-demo" theme="outlined">
-                Request a demo
-              </Button>
+              <Button href="/request-demo" theme="filled">Request a demo</Button>
+              <Button href="/docs/reference/mcp" theme="outlined">Connect your agent</Button>
             </>
           )}
         </div>
@@ -236,7 +228,7 @@ export function PageHeading({
     <div className={cn("max-w-[960px]", wide && "max-w-none")}>
       {kicker ? <SectionLabel className="mb-8 max-lg:mb-6">{kicker}</SectionLabel> : null}
       <h2
-        className="indent-24 text-[48px] font-normal leading-dense tracking-tighter text-pretty text-gray-new-40 max-xl:text-[40px] max-lg:indent-16 max-lg:text-[28px] max-md:indent-0 max-md:text-[24px] [&>strong]:font-normal [&>strong]:text-black"
+        className="max-w-[24ch] text-[40px] font-normal leading-dense tracking-tighter text-pretty text-gray-new-40 max-xl:text-[36px] max-lg:text-[30px] max-md:text-[27px] [&>strong]:font-normal [&>strong]:text-gray-new-10"
         dangerouslySetInnerHTML={{ __html: title }}
       />
     </div>
@@ -253,11 +245,8 @@ export function FeatureGrid({
       <ul className="grid grid-cols-3 gap-x-16 gap-y-14 max-xl:grid-cols-2 max-xl:gap-x-10 max-md:grid-cols-1 max-md:gap-y-8">
         {items.map((item) => (
           <li key={item.title} className="min-w-0">
-            <svg viewBox="0 0 16 16" className="mb-4 size-4 text-black" fill="none" aria-hidden>
-              <rect x="1.5" y="1.5" width="13" height="13" stroke="currentColor" strokeWidth="1.2" />
-            </svg>
             <h3 className="text-[18px] leading-snug tracking-extra-tight text-black">{item.title}</h3>
-            <p className="mt-2 max-w-[320px] text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
+            <p className="mt-3 max-w-[36ch] text-base leading-7 tracking-extra-tight text-gray-new-40">
               {item.body}
             </p>
           </li>
@@ -391,7 +380,7 @@ export function Steps({ items }: { items: { title: string; body: string }[] }) {
         <li key={item.title} className="min-w-0">
           <div className="mb-4 size-2 rounded-full bg-black" />
           <h3 className="text-[18px] leading-snug tracking-extra-tight text-black">{item.title}</h3>
-          <p className="mt-2 text-[14px] leading-6 tracking-extra-tight text-gray-new-40">{item.body}</p>
+          <p className="mt-2 text-base leading-7 tracking-extra-tight text-gray-new-40">{item.body}</p>
         </li>
       ))}
     </ol>
@@ -413,7 +402,7 @@ export function RelatedGrid({
           <li key={item.href}>
             <Link prefetch={false} href={item.href} className="group block min-w-0">
               <span className="block text-[18px] tracking-extra-tight text-black">{item.title}</span>
-              <span className="mt-2 block text-[14px] leading-6 tracking-extra-tight text-gray-new-40">
+              <span className="mt-2 block text-base leading-7 tracking-extra-tight text-gray-new-40">
                 {item.description}
               </span>
               <span className="mt-4 inline-block text-[13px] tracking-extra-tight text-gray-new-50 transition-colors group-hover:text-black">

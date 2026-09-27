@@ -17,28 +17,28 @@ const MANIFEST = `load:
 
 const PROPERTIES = [
   {
-    title: "The mix, not one endpoint",
-    body: "Routes are weighted by the share of requests production actually served them. A flat mix proves the endpoint you already trusted is fast.",
+    title: "Production route mix",
+    body: "Weight each route by its share of production requests.",
   },
   {
     title: "Poisson arrivals",
-    body: "Requests arrive in clumps, the way real ones do. Evenly spaced arrivals hide the queueing that the change is about to make worse.",
+    body: "Vary request arrival times to exercise queues under uneven load.",
   },
   {
     title: "Deterministic per seed",
-    body: "The same seed sends the same requests in the same order, so two runs are comparable and a difference belongs to the change.",
+    body: "Reuse a seed to send the same request sequence across runs.",
   },
   {
-    title: "The achieved rate, reported",
-    body: "The report carries the rate the generator managed, not the rate it was asked for. Reporting the target is how a load test says everything was fine while the queue grew.",
+    title: "Actual throughput",
+    body: "See the request rate achieved during the run alongside latency and errors.",
   },
   {
-    title: "Unsafe until named",
-    body: "No route is sent until the manifest names it safe. With no allowlist the default is read-only GETs under the root.",
+    title: "Choose which routes to test",
+    body: "Configure a route allowlist. The default permits read-only GET requests.",
   },
   {
-    title: "Compared, not scored",
-    body: "Each route is measured against the p95 production serves it in. The answer is a delta, never an absolute capacity claim.",
+    title: "Latency comparison",
+    body: "Compare each eligible route with its production p95 from the trace export.",
   },
 ];
 
@@ -48,17 +48,15 @@ export function LoadPage() {
       <PageHero
         path="/product/load"
         eyebrow="Load"
-        title="Traffic shaped like production's, sent at the twin."
-        lead="The engine reads your own production traffic, keeps the mix of routes it actually served, and sends that mix at the twin. Every route is unsafe until the manifest names it, and a trace export arrives carrying production's own p95 per route, so the answer is a comparison rather than a score."
+        title="Test your new build with your real traffic mix."
+        lead="Import an access log or OpenTelemetry trace export. Antifailure sends the recorded route mix to your twin and measures latency and errors. Trace exports also provide a production baseline for comparison."
         framed={false}
         visual={
           <div>
             <PLD01 />
             <Illustrative>
-              A shaped run, to show the format. The routes, latencies and shares are written. The
-              columns, the sort order and the thresholds are the ones{" "}
-              <code className="font-mono text-[12px] text-black/70">af load</code> produces.
-            </Illustrative>
+            Example load report with sample routes and measurements.
+          </Illustrative>
           </div>
         }
       />
@@ -66,31 +64,22 @@ export function LoadPage() {
       <PageSection>
         <PageHeading
           kicker="Why the shape"
-          title="<strong>The mix is the point.</strong> A load test that hammers one endpoint proves the endpoint is fast, which nobody doubted."
+          title="<strong>Exercise the routes together, as your users do.</strong>"
         />
         <p className="mt-8 max-w-[560px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-          What breaks under real traffic is the mix: the page nobody thinks about that is nine
-          percent of requests, and the endpoint that is fine alone and holds a lock the hot path
-          wants.
+          Routes share database connections, locks, and workers. Testing the production mix helps reveal slowdowns that isolated endpoint tests can miss.
         </p>
         <FeatureGrid items={PROPERTIES} />
       </PageSection>
 
       <PageSection tone="ruled">
         <Split visual={<PLD02 source={MANIFEST} />}>
-          <PageHeading title="<strong>Two sources, and only one of them carries a baseline.</strong> A trace export carries a latency. A log line does not." />
+          <PageHeading title="<strong>Start with access logs or traces.</strong>" />
           <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-            <code className="font-mono text-[15px] text-black/70">otel</code> reads an OpenTelemetry
-            trace export in OTLP/JSON, the file a collector&apos;s file exporter writes.{" "}
-            <code className="font-mono text-[15px] text-black/70">access_log</code> reads a combined
-            format log. Both are read out of the repository, so no credential and no outbound call
-            decides what traffic gets sent. A span has a start and an end, so a shape read from
-            traces arrives with production&apos;s p95 for each route in it, which is what{" "}
-            <code className="font-mono text-[15px] text-black/70">p95_increase</code> compares
-            against. A combined format line carries no duration, so an access log gives the mix, the
-            weights and the arrival rate, and no baseline to measure a regression against. Setting{" "}
-            <code className="font-mono text-[15px] text-black/70">p95_increase</code> under the log
-            is refused when the manifest is read, rather than accepted and quietly skipped.
+            Access logs provide route weights and arrival rates. OpenTelemetry traces
+            also include request durations, so Antifailure can compare the new build
+            with production latency. Point the manifest at your export and choose
+            which routes to exercise.
           </p>
           {/*
             Both refusals under one label because both really are AF-MAN-002:
@@ -99,17 +88,10 @@ export function LoadPage() {
             as a second error code to anybody who had just read the first.
           */}
           <div className="mt-8">
-            <Callout label="AF-MAN-002">
-              <p>
-                load.source: There is no load source called &quot;datadog&quot;. The sources that
-                read traffic are otel, an OpenTelemetry trace export, and access_log, a combined
-                format log. Both take source_config.path.
-              </p>
-              <p className="mt-4">
-                load.thresholds.p95_increase: The load source is access_log and p95_increase is
-                set. A combined format log line carries no duration, so every route read from one
-                arrives with no baseline and this threshold can never fire.
-              </p>
+            <Callout label="Configure your first load test">
+              <a href="/docs/concepts/load" className="underline decoration-black/25 underline-offset-4">
+                Read the guide to sources, route policies, and thresholds.
+              </a>
             </Callout>
           </div>
         </Split>
@@ -118,20 +100,14 @@ export function LoadPage() {
       <PageSection tone="panel">
         <Split
           visual={
-            <Callout label="What load does not do">
-              It does not run traffic against a migration while the migration applies, and it does not
-              deploy a second version of the application to compare against. The baseline is
-              production&rsquo;s own p95, read out of the trace export you point it at.
+            <Callout label="Baseline requirements">
+              Use an OpenTelemetry trace export for p95 comparisons. Access logs provide the route mix and arrival rate.
             </Callout>
           }
         >
-          <PageHeading title="<strong>A route with no baseline is never a breach.</strong> Comparing against nothing and calling the answer a regression is how a check becomes noise." />
+          <PageHeading title="<strong>Set thresholds against your production baseline.</strong>" />
           <p className="mt-8 max-w-[560px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-            Thresholds are deltas against what production serves, never absolute numbers: an absolute
-            limit fails on a slow runner and says nothing about the change. A route the export saw
-            fewer than twenty times is listed with its latency and no verdict, because a percentile
-            made of three numbers is noise. When no route in a run has a baseline, the threshold
-            measured nothing and the run says so instead of reporting a clean p95.
+            Set an acceptable p95 increase and error rate in the manifest. Routes with fewer than twenty baseline samples show their measured latency without a regression verdict. The report identifies checks that lacked enough data.
           </p>
         </Split>
       </PageSection>

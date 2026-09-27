@@ -4,8 +4,8 @@ import { PMG01, PMG02, PMG03, PMG04 } from "@/components/pages/figures/product-m
 import { cn } from "@/lib/cn";
 
 const CAPTIONS = [
-  "An exclusive lock on subscriptions holds for 27 seconds. The rehearsal reports it before it ships.",
-  "Expand-and-contract holds the same lock for 0.4s, and no other session is left waiting on it.",
+  "Example: a direct type change holds an exclusive lock for 27.4 seconds.",
+  "Example: expand-and-contract holds the lock for 0.4 seconds with no waiting sessions.",
 ] as const;
 
 /**
@@ -46,8 +46,8 @@ export function MigrationsPage() {
       <PageHero
         path="/product/migrations"
         eyebrow="Migration Safety Engine"
-        title="Catch exclusive locks before they take checkout down."
-        lead="A fresh branch carrying production's shape applies the pending migrations while a second connection samples what is locked, then reports the strongest mode held per table, how long it was held, whether another session was left waiting on it, which tables were rewritten, and how the query plans moved."
+        title="See what your migration will do."
+        lead="Rehearse pending migrations on a copy of your production database. See lock durations, blocked sessions, table rewrites, and query plan changes before you deploy."
         framed={false}
         visual={<PMG01 captions={CAPTIONS} />}
       />
@@ -56,7 +56,7 @@ export function MigrationsPage() {
         <Split visual={<PMG02 />}>
           <PageHeading
             kicker="The finding"
-            title="<strong>A 27-second lock is a finding.</strong> Not a line in a log nobody reads."
+            title="<strong>Find the change that holds up your database.</strong>"
           />
           <ul className="mt-8 divide-y divide-black/[0.08] border-y border-black/[0.08] max-md:mt-6">
             {FINDINGS.map((item) => (
@@ -82,19 +82,15 @@ export function MigrationsPage() {
           </ul>
         </Split>
         <Illustrative label="Example finding">
-          A rehearsal of one migration, with the numbers chosen. The measurements are the ones{" "}
-          <code className="font-mono text-[12px] text-black/70">af insights</code> takes.
-        </Illustrative>
+            Example report with sample timings.
+          </Illustrative>
       </PageSection>
 
       <PageSection tone="ruled">
         <Split visual={<PMG03 source={INSIGHTS} />}>
-          <PageHeading title="<strong>Measured, not inferred.</strong> The lock comes from pg_locks and the rewrite from Postgres itself." />
+          <PageHeading title="<strong>See what Postgres does while your migration runs.</strong>" />
           <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
-            Staging with a handful of rows will not show an exclusive lock or a table rewrite. A
-            sampler on its own connection watches pg_locks and pg_stat_activity while the migration
-            runs, because the session running it cannot see its own lock until the statement returns,
-            which is exactly when the interesting part is over.
+            Table size changes the cost of a migration. Antifailure samples locks from a separate connection while each statement runs and records table rewrites directly from Postgres.
           </p>
         </Split>
       </PageSection>
@@ -109,7 +105,7 @@ export function MigrationsPage() {
             { title: "Statements", body: "Per-statement duration, so the slow one in a batch is named." },
             {
               title: "Lint",
-              body: "Missing lock timeouts, constraints added without NOT VALID, index builds that are not concurrent, backfills sharing a transaction with the schema change, and the rewrites and offline table operations. Each finding reaches the pull request under its own rule name with the fix attached, because a finding called migration_lint tells nobody what to change.",
+              body: "Catch missing lock timeouts, blocking index builds, costly constraints, and backfills mixed with schema changes. Each finding includes the rule and a suggested fix.",
             },
             { title: "Comparison", body: "A saved report from an earlier run, compared against this one." },
           ]}
@@ -118,7 +114,7 @@ export function MigrationsPage() {
 
       <PageSection>
         <Split visual={<PMG04 />}>
-          <PageHeading title="<strong>Safer pattern: expand-and-contract.</strong> The lint rule carries the fix, not only the complaint." />
+          <PageHeading title="<strong>Fix the migration with a safer sequence.</strong>" />
           <p className="mt-6 max-w-[480px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
             Switch the film to expand-and-contract. The strongest lock drops to 0.4s, nothing is
             left waiting on it, and the table is not rewritten.
@@ -140,7 +136,7 @@ export function MigrationsPage() {
               },
               {
                 title: "Backfill",
-                body: "Copy values across in batches so checkout never waits on ACCESS EXCLUSIVE.",
+                body: "Copy values in small batches to limit the time each update holds a lock.",
               },
               {
                 title: "Dual-read",
@@ -158,9 +154,9 @@ export function MigrationsPage() {
 
       <RelatedGrid
         items={[
-          { href: "/solutions", title: "Solutions", description: "The teams who feel this first." },
-          { href: "/product/load", title: "Load", description: "Traffic sent at the same production-shaped branch." },
-          { href: "/docs/guides/invariants", title: "Invariants docs", description: "The subscriptions demo in full." },
+          { href: "/solutions", title: "Solutions", description: "Migration testing for growing SaaS databases." },
+          { href: "/product/load", title: "Load", description: "Test your production traffic mix." },
+          { href: "/docs/guides/invariants", title: "Invariants docs", description: "Set up your first migration rehearsal." },
         ]}
       />
     </PageShell>

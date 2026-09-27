@@ -25,11 +25,21 @@ func problems(t *testing.T, rel, body string, rows []*row) []finding {
 	return Check(rel, body, rows)
 }
 
+// The historical domain can become a working route. Refusal tests inject
+// their own evidence instead of freezing production DNS in a test assertion.
+// These tests must stay serial because the checker reads the shared registry.
+func withDeadDomain(t *testing.T) {
+	t.Helper()
+	previous := deadDomains
+	deadDomains = map[string]string{"dead-mail.fixture": "test fixture: delivery is known to fail"}
+	t.Cleanup(func() { deadDomains = previous })
+}
+
 // The defect this whole tool exists for, in the words it was written in.
 func TestTheSentenceThatStartedThisIsRefused(t *testing.T) {
 	body := "## Enforcement\n\nInstances of abusive behavior may be\n" +
 		"reported to the community leaders responsible for enforcement at\n" +
-		"conduct@antifailure.dev. All complaints will be reviewed.\n"
+		"conduct@dead-mail.fixture. All complaints will be reviewed.\n"
 
 	got := problems(t, "CODE_OF_CONDUCT.md", body, nil)
 	if len(got) != 1 {
@@ -48,8 +58,9 @@ func TestTheSentenceThatStartedThisIsRefused(t *testing.T) {
 // next. A rule scoped to a single line would have passed the original defect,
 // which is the reason the window spans line breaks.
 func TestTheInvitationIsFoundAcrossALineBreak(t *testing.T) {
-	body := "reported to the community leaders responsible for enforcement at\nconduct@antifailure.dev.\n"
-	rows := rowsFor(t, &row{path: "CODE_OF_CONDUCT.md", address: "conduct@antifailure.dev", verdict: verdictNotRoute})
+	withDeadDomain(t)
+	body := "reported to the community leaders responsible for enforcement at\nconduct@dead-mail.fixture.\n"
+	rows := rowsFor(t, &row{path: "CODE_OF_CONDUCT.md", address: "conduct@dead-mail.fixture", verdict: verdictNotRoute})
 
 	got := problems(t, "CODE_OF_CONDUCT.md", body, rows)
 	if len(got) != 1 {
@@ -63,11 +74,12 @@ func TestTheInvitationIsFoundAcrossALineBreak(t *testing.T) {
 // The laundering path, and the reason the verdicts are a closed set. A row
 // cannot argue a domain with no mail exchanger into receiving mail.
 func TestAReceivesRowCannotRescueADeadDomain(t *testing.T) {
+	withDeadDomain(t)
 	rows := rowsFor(t, &row{
-		path: "SECURITY.md", address: "security@antifailure.dev", verdict: verdictReceives,
+		path: "SECURITY.md", address: "security@dead-mail.fixture", verdict: verdictReceives,
 		why: "the maintainers read this",
 	})
-	got := problems(t, "SECURITY.md", "Send findings here: security@antifailure.dev\n", rows)
+	got := problems(t, "SECURITY.md", "Send findings here: security@dead-mail.fixture\n", rows)
 	if len(got) != 1 {
 		t.Fatalf("want one finding, got %d: %+v", len(got), got)
 	}
@@ -78,8 +90,9 @@ func TestAReceivesRowCannotRescueADeadDomain(t *testing.T) {
 
 // The other laundering path: relabel the instruction as furniture.
 func TestFurnitureCannotBeAnInstruction(t *testing.T) {
-	rows := rowsFor(t, &row{path: "SECURITY.md", address: "security@antifailure.dev", verdict: verdictNotRoute})
-	if got := problems(t, "SECURITY.md", "Please write to security@antifailure.dev.\n", rows); len(got) != 1 {
+	withDeadDomain(t)
+	rows := rowsFor(t, &row{path: "SECURITY.md", address: "security@dead-mail.fixture", verdict: verdictNotRoute})
+	if got := problems(t, "SECURITY.md", "Please write to security@dead-mail.fixture.\n", rows); len(got) != 1 {
 		t.Fatalf("want one finding, got %d: %+v", len(got), got)
 	}
 }
@@ -88,10 +101,11 @@ func TestFurnitureCannotBeAnInstruction(t *testing.T) {
 // address once must not thereby license an instruction further down. This is
 // why the invitation rule sits above the verdicts rather than inside one.
 func TestOneQuotationDoesNotLicenseAnInstructionLater(t *testing.T) {
-	body := "The address named here, conduct@antifailure.dev, cannot receive mail.\n\n" +
+	withDeadDomain(t)
+	body := "The address named here, conduct@dead-mail.fixture, cannot receive mail.\n\n" +
 		strings.Repeat("Filler that is not about mail at all.\n", 6) +
-		"Report abuse to conduct@antifailure.dev.\n"
-	rows := rowsFor(t, &row{path: "CODE_OF_CONDUCT.md", address: "conduct@antifailure.dev", verdict: verdictDefect})
+		"Report abuse to conduct@dead-mail.fixture.\n"
+	rows := rowsFor(t, &row{path: "CODE_OF_CONDUCT.md", address: "conduct@dead-mail.fixture", verdict: verdictDefect})
 
 	got := problems(t, "CODE_OF_CONDUCT.md", body, rows)
 	if len(got) != 1 {
@@ -105,12 +119,12 @@ func TestOneQuotationDoesNotLicenseAnInstructionLater(t *testing.T) {
 // A quotation of a defect has to be accompanied by the correction, or the
 // reader takes the address away and nothing else.
 func TestQuotingADefectNeedsTheFileToSayItIsOne(t *testing.T) {
-	rows := rowsFor(t, &row{path: "notes.md", address: "conduct@antifailure.dev", verdict: verdictDefect})
+	rows := rowsFor(t, &row{path: "notes.md", address: "conduct@dead-mail.fixture", verdict: verdictDefect})
 
-	if got := problems(t, "notes.md", "The old address was conduct@antifailure.dev.\n", rows); len(got) != 1 {
+	if got := problems(t, "notes.md", "The old address was conduct@dead-mail.fixture.\n", rows); len(got) != 1 {
 		t.Fatalf("a bare quotation should be refused, got %d: %+v", len(got), got)
 	}
-	with := "The old address was conduct@antifailure.dev, at a domain with no mail exchanger, " +
+	with := "The old address was conduct@dead-mail.fixture, at a domain with no mail exchanger, " +
 		"so it could not receive anything.\n"
 	if got := problems(t, "notes.md", with, rows); len(got) != 0 {
 		t.Errorf("a quotation beside the correction is fine, got %+v", got)
@@ -122,9 +136,10 @@ func TestQuotingADefectNeedsTheFileToSayItIsOne(t *testing.T) {
 // invitation, and a rule matching the bare word `email` anywhere in the window
 // convicted it. That is why `email` is anchored to the end of the window.
 func TestASentenceAboutAMailboxIsNotAnInvitationToUseIt(t *testing.T) {
+	withDeadDomain(t)
 	body := "The legal pages no longer publish an email address that cannot receive mail.\n\n" +
-		"The addendum and the retention page both named\n`security@antifailure.dev` as the destination.\n"
-	rows := rowsFor(t, &row{path: "f.md", address: "security@antifailure.dev", verdict: verdictDefect})
+		"The addendum and the retention page both named\n`security@dead-mail.fixture` as the destination.\n"
+	rows := rowsFor(t, &row{path: "f.md", address: "security@dead-mail.fixture", verdict: verdictDefect})
 
 	if got := problems(t, "f.md", body, rows); len(got) != 0 {
 		t.Errorf("want clean, got %+v", got)
@@ -134,11 +149,12 @@ func TestASentenceAboutAMailboxIsNotAnInvitationToUseIt(t *testing.T) {
 // `email` immediately in front of the address is the shape that does mean an
 // invitation, in each of the ways people write it.
 func TestEmailInFrontOfTheAddressIsAnInvitation(t *testing.T) {
-	rows := rowsFor(t, &row{path: "f.md", address: "security@antifailure.dev", verdict: verdictNotRoute})
+	withDeadDomain(t)
+	rows := rowsFor(t, &row{path: "f.md", address: "security@dead-mail.fixture", verdict: verdictNotRoute})
 	for _, body := range []string{
-		"Just email security@antifailure.dev.\n",
-		"Email: security@antifailure.dev\n",
-		"You can email us at security@antifailure.dev.\n",
+		"Just email security@dead-mail.fixture.\n",
+		"Email: security@dead-mail.fixture\n",
+		"You can email us at security@dead-mail.fixture.\n",
 	} {
 		if got := problems(t, "f.md", body, rows); len(got) != 1 {
 			t.Errorf("%q should be refused, got %+v", body, got)
@@ -173,8 +189,9 @@ func TestAPlaceholderAtALiveDomainIsNotConvictedByItsLabel(t *testing.T) {
 // posted to an API rather than offered to a reader, and the paragraph that
 // documents it ends by saying not to email it.
 func TestASyntheticValueAtTheDeadDomainIsAllowed(t *testing.T) {
-	rows := rowsFor(t, &row{path: "api/README.md", address: "waitlist-probe@antifailure.dev", verdict: verdictNotRoute})
-	body := "One row in that table is not a person. `waitlist-probe@antifailure.dev` is\n" +
+	withDeadDomain(t)
+	rows := rowsFor(t, &row{path: "api/README.md", address: "waitlist-probe@dead-mail.fixture", verdict: verdictNotRoute})
+	body := "One row in that table is not a person. `waitlist-probe@dead-mail.fixture` is\n" +
 		"written by the workflow every morning. Do not count it, and do not email it.\n"
 	if got := problems(t, "api/README.md", body, rows); len(got) != 0 {
 		t.Errorf("want clean, got %+v", got)
@@ -199,7 +216,7 @@ func TestExemptKnowsTheReservedNames(t *testing.T) {
 }
 
 func TestDomainOfIgnoresATrailingFullStop(t *testing.T) {
-	if got := domainOf("conduct@antifailure.dev."); got != "antifailure.dev" {
+	if got := domainOf("conduct@dead-mail.fixture."); got != "dead-mail.fixture" {
 		t.Errorf("domainOf = %q", got)
 	}
 }
@@ -280,13 +297,29 @@ func TestAReceivesRowAtAnUncheckedDomainPasses(t *testing.T) {
 	}
 }
 
+// Restoring inbound routing does not exempt every address at that domain.
+// Only the particular owner-approved contact has a receives row.
+func TestRestoredDomainStillRequiresAnAccountedContact(t *testing.T) {
+	rows := rowsFor(t, &row{
+		path: "contact.md", address: "vir@antifailure.dev", verdict: verdictReceives,
+		why: "owner-supplied contact; inbound MX checked on 2026-09-26",
+	})
+	if got := problems(t, "contact.md", "Email vir@antifailure.dev.\n", rows); len(got) != 0 {
+		t.Errorf("the approved contact should pass after routing was restored, got %+v", got)
+	}
+	got := problems(t, "contact.md", "Email unconfirmed@antifailure.dev.\n", rows)
+	if len(got) != 1 || !strings.Contains(got[0].problem, "no row") {
+		t.Errorf("an unaccounted contact must still fail, got %+v", got)
+	}
+}
+
 // Prose wraps, and a phrase splits across the break with the comment marker of
 // the next line in the middle of it. `no mail exchanger` is three words, and
 // in ci.yml it sat as "no mail" then a newline then "# exchanger", which is
 // the exact sentence the evidence rule looks for and could not see.
 func TestEvidenceIsFoundAcrossAWrappedLine(t *testing.T) {
-	rows := rowsFor(t, &row{path: ".github/workflows/ci.yml", address: "conduct@antifailure.dev", verdict: verdictDefect})
-	body := "        # The file named conduct@antifailure.dev. The domain has no mail\n" +
+	rows := rowsFor(t, &row{path: ".github/workflows/ci.yml", address: "conduct@dead-mail.fixture", verdict: verdictDefect})
+	body := "        # The file named conduct@dead-mail.fixture. The domain has no mail\n" +
 		"        # exchanger, so nothing sent there was delivered.\n"
 	if got := problems(t, ".github/workflows/ci.yml", body, rows); len(got) != 0 {
 		t.Errorf("want clean, got %+v", got)
@@ -300,10 +333,10 @@ func TestEvidenceIsFoundAcrossAWrappedLine(t *testing.T) {
 // instruction forty lines down, in the file a person opens after being
 // harassed. File membership is not proximity.
 func TestEvidenceFarFromTheAddressDoesNotCountAsBesideIt(t *testing.T) {
-	rows := rowsFor(t, &row{path: "CODE_OF_CONDUCT.md", address: "conduct@antifailure.dev", verdict: verdictDefect})
+	rows := rowsFor(t, &row{path: "CODE_OF_CONDUCT.md", address: "conduct@dead-mail.fixture", verdict: verdictDefect})
 	body := "The old address cannot receive mail, and here is why.\n" +
 		strings.Repeat("A paragraph about something else entirely.\n", 40) +
-		"The address is conduct@antifailure.dev.\n"
+		"The address is conduct@dead-mail.fixture.\n"
 
 	got := problems(t, "CODE_OF_CONDUCT.md", body, rows)
 	if len(got) != 1 {
@@ -317,9 +350,9 @@ func TestEvidenceFarFromTheAddressDoesNotCountAsBesideIt(t *testing.T) {
 // The same quotation with the correction in its own paragraph is fine, which
 // is what every real one in this repository looks like.
 func TestEvidenceBesideTheAddressCounts(t *testing.T) {
-	rows := rowsFor(t, &row{path: "CODE_OF_CONDUCT.md", address: "conduct@antifailure.dev", verdict: verdictDefect})
+	rows := rowsFor(t, &row{path: "CODE_OF_CONDUCT.md", address: "conduct@dead-mail.fixture", verdict: verdictDefect})
 	body := strings.Repeat("A paragraph about something else entirely.\n", 40) +
-		"It named conduct@antifailure.dev, and that address\ncannot receive mail.\n"
+		"It named conduct@dead-mail.fixture, and that address\ncannot receive mail.\n"
 	if got := problems(t, "CODE_OF_CONDUCT.md", body, rows); len(got) != 0 {
 		t.Errorf("want clean, got %+v", got)
 	}

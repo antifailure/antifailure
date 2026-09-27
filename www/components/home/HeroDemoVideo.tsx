@@ -123,7 +123,7 @@ function FilmControl({
   return (
     <button
       type="button"
-      className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-x-2 border border-black/40 bg-black/[0.02] px-4 font-mono text-[12px] font-medium tracking-extra-tight whitespace-nowrap text-black transition-colors duration-200 hover:border-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-neon max-sm:min-h-10 max-sm:gap-x-1.5 max-sm:px-3 max-sm:text-[11px]"
+      className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-x-2 border border-black/40 bg-black/[0.02] px-4 font-mono text-[12px] font-medium tracking-extra-tight whitespace-nowrap text-black transition-colors duration-200 hover:border-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-neon max-sm:gap-x-1.5 max-sm:px-3 max-sm:text-[11px]"
       onClick={onClick}
     >
       {children}
@@ -259,13 +259,11 @@ export function HeroDemoVideo() {
               over gray-new-40 continuation is how every other section head on
               this page reads. */}
           <h2 className="text-[34px] font-normal leading-dense tracking-tighter text-gray-new-40 max-lg:text-[28px] max-md:text-[26px]">
-            <strong className="font-normal text-black-pure">A risky pull request, stopped before it merges.</strong>{" "}
-            Eighty five seconds.
+            <strong className="font-normal text-black-pure">See Antifailure catch a costly migration.</strong>
           </h2>
           <p className="mt-6 text-base tracking-extra-tight text-gray-new-40 max-md:mt-5">
-            Antifailure makes a copy of production, the same size and the same
-            shape and the same load, with every real name replaced. Your change
-            runs there whether a person wrote it or an agent did.
+            Follow a schema change from pull request to rehearsal. See the lock
+            it holds, the finding it produces, and the environment being removed.
           </p>
         </div>
         {/* The site's own list mark, which is SectionLabel's arrow in the neon
@@ -332,12 +330,12 @@ export function HeroDemoVideo() {
           <video
             ref={videoRef}
             className={cn("relative block w-full bg-white object-contain", fullscreen ? "h-screen" : "aspect-video")}
-            src="/home/launch-film.mp4"
-            poster="/home/launch-film.jpg"
+            src="/home/antifailure-demo-20260926.mp4"
+            poster="/home/antifailure-demo.jpg"
             muted={muted}
             playsInline
             preload="none"
-            aria-label="The Antifailure launch film. A copy of production is built, the change runs against it on a pull request, a migration is caught holding an exclusive lock on 48 million rows, and the copy is destroyed."
+            aria-label="Antifailure demo: rehearsing a database migration on a production twin."
           />
 
           {/* The one control that has to sit on the picture, because it is the
@@ -353,7 +351,7 @@ export function HeroDemoVideo() {
               aria-label="Play the film"
               onClick={togglePlay}
             >
-              <span className="inline-flex min-h-11 items-center gap-x-3 border border-black/40 bg-white px-5 font-mono text-[13px] font-medium tracking-extra-tight whitespace-nowrap text-black transition-colors duration-200 group-hover:border-black group-hover:bg-[#F6FDFA] group-focus-visible:outline group-focus-visible:outline-2 group-focus-visible:outline-neon max-sm:min-h-10 max-sm:px-4 max-sm:text-[11px]">
+              <span className="inline-flex min-h-11 items-center gap-x-3 border border-black/40 bg-white px-5 font-mono text-[13px] font-medium tracking-extra-tight whitespace-nowrap text-black transition-colors duration-200 group-hover:border-black group-hover:bg-[#F6FDFA] group-focus-visible:outline group-focus-visible:outline-2 group-focus-visible:outline-neon max-sm:px-4 max-sm:text-[11px]">
                 <PlayIcon />
                 PLAY THE FILM
               </span>

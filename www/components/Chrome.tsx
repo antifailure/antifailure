@@ -70,7 +70,7 @@ export function ChromeProvider({ children }: { children: ReactNode }) {
       {children}
       <ContentSheet
         open={overlay?.kind === "sheet"}
-        id={overlay?.kind === "sheet" ? overlay.id : "brief"}
+        id={overlay?.kind === "sheet" ? overlay.id : "privacy"}
         onClose={close}
       />
     </ChromeContext.Provider>

@@ -25,7 +25,7 @@ function ledgerClip(teeth: number) {
 const LEDGER_CLIP = ledgerClip(26);
 
 function toneInk(tone: "pass" | "warn" | "block") {
-  return tone === "pass" ? "text-[#285D49]" : tone === "warn" ? "text-[#8A6A12]" : "text-[#C43D3D]";
+  return tone === "pass" ? "text-[#285D49]" : tone === "warn" ? "text-ochre-ink" : "text-danger-ink";
 }
 
 function toneRail(tone: "pass" | "warn" | "block") {

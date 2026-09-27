@@ -9,11 +9,11 @@ export function MarketplacesPage() {
         stack
         path="/solutions/marketplaces"
         eyebrow="Solutions · Marketplaces"
-        title="Queues, workers, dual-writes, matching logic staging never reproduces."
+        title="Test the whole order flow, including the workers."
         paragraphs={[
-          "The twin includes workers and queues. Production webhooks are blocked.",
-          "Impatient retries and multi-tab checkout become deterministic scenarios.",
-          "Matching logic that depends on queue order will not show up if staging skips workers.",
+          "Run services, workers, and queues together in an isolated environment.",
+          "Exercise retries and repeat submissions with workflows your team defines.",
+          "Check matching, notifications, and settlement before releasing a change.",
         ]}
         visual={<SequenceDiagram />}
       />
@@ -21,7 +21,7 @@ export function MarketplacesPage() {
       <FeatureRow
         reverse
         kicker="Timing is the bug"
-        title="Services, queues, and workers are a dimension staging drops."
+        title="Give background jobs a place in your pre-deploy checks."
         items={[
           { title: "Queues in the twin", body: "The broker runs in the twin, with its topics and consumer groups created in its own image and no production messages copied." },
           { title: "Webhook containment", body: "Production partner webhooks are blocked and written to the attempted-effect ledger." },
@@ -45,10 +45,10 @@ export function MarketplacesPage() {
       <FeatureRow
         reverse
         kicker="Compare"
-        title="Duplicate events, missed matches, and irreversible writes in the oracle."
+        title="Catch missed matches and inconsistent order state."
         items={[
-          { title: "Rolling deploys", body: "Old and new schema coexistence is exactly what a disposable twin is for." },
-          { title: "Duplicate events", body: "Visible when workers actually run." },
+          { title: "Rolling deploys", body: "Test the previous release against the updated schema." },
+          { title: "Duplicate events", body: "Check outcomes after background jobs finish." },
           { title: "Compare", body: "The oracle diffs the twin's writes against the baseline run." },
         ]}
         visual={<DualWriteBoard />}

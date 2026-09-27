@@ -58,15 +58,22 @@ type State =
   | { kind: "sent"; reference: string };
 
 const FIELD =
-  "mt-1.5 h-11 w-full rounded-[8px] border border-black/15 bg-white px-3 text-[15px] text-black outline-none placeholder:text-gray-new-50 focus-visible:border-black/45 focus-visible:ring-2 focus-visible:ring-black/10 disabled:opacity-60";
+  "mt-1.5 h-11 w-full rounded-[8px] border border-black/15 bg-white px-3 text-base text-black outline-none placeholder:text-gray-new-50 focus-visible:border-black/45 focus-visible:ring-2 focus-visible:ring-black/10 disabled:opacity-60";
 const LABEL = "block text-[13px] tracking-extra-tight text-gray-new-40";
 
 export function ApplicationForm() {
   const [state, setState] = useState<State>({ kind: "idle" });
   const [role, setRole] = useState<Role | "">("");
+  const confirmationRef = useRef<HTMLDivElement>(null);
   const id = useId();
 
   const sending = state.kind === "sending";
+
+  useEffect(() => {
+    if (state.kind === "sent") {
+      confirmationRef.current?.scrollIntoView({ block: "center", behavior: "instant" });
+    }
+  }, [state.kind]);
 
   // The role a card above linked at. Read on mount and again on every
   // fragment change, because a reader who is already on this page and presses
@@ -137,7 +144,7 @@ export function ApplicationForm() {
       setState({
         kind: "failed",
         message:
-          "Could not reach the server. Nothing you typed is lost, and pressing it again with the same answers cannot create a duplicate.",
+          "We could not connect. Check your connection and try again. Your answers are saved on this page.",
       });
       return;
     }
@@ -145,7 +152,7 @@ export function ApplicationForm() {
     if (response.status === 429) {
       setState({
         kind: "failed",
-        message: "That was a lot of attempts at once. Wait a minute and press it again.",
+        message: "Please wait a minute before trying again.",
       });
       return;
     }
@@ -153,7 +160,7 @@ export function ApplicationForm() {
     if (!response.ok) {
       // The server's own sentence when it gave one: its refusals name the
       // field to fix, and a generic message here would hide that.
-      let message = "Something went wrong on our side. Press it again in a moment.";
+      let message = "We could not submit your application. Please try again in a moment.";
       try {
         const body = (await response.json()) as { error?: unknown };
         if (typeof body.error === "string" && body.error) message = body.error;
@@ -181,7 +188,7 @@ export function ApplicationForm() {
       setState({
         kind: "failed",
         message:
-          "We could not confirm your application was recorded, so we will not tell you it was. Nothing you typed is lost. Press it again; the same answers cannot create a duplicate.",
+          "We could not confirm your application. Please try again. Your answers are saved, and retrying will not create a duplicate.",
       });
       return;
     }
@@ -190,15 +197,12 @@ export function ApplicationForm() {
 
   if (state.kind === "sent") {
     return (
-      <div role="status" className="rounded-[8px] bg-white p-7 ring-1 ring-black/10 max-md:p-6">
+      <div ref={confirmationRef} role="status" className="rounded-[8px] bg-white p-7 ring-1 ring-black/10 max-md:p-6">
         <h2 className="text-[22px] leading-snug tracking-tighter text-black">
-          It is written down.
+          Application received.
         </h2>
         <p className="mt-4 text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
-          Your application is in the private queue a person reads, oldest first.
-          This confirms that the row exists. It is not an offer, and it is not a
-          promise of a reply on a known day: nothing here mails you on a
-          schedule, so no automatic message has been sent.
+          Thank you for applying. We will review your work privately. Keep the reference below if you want to contact us about your application.
         </p>
         <p className="mt-4 text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
           Keep this reference if you need to ask us to remove it.
@@ -382,9 +386,7 @@ export function ApplicationForm() {
 
       <noscript>
         <p className="mt-4 text-[14px] leading-6 tracking-extra-tight text-[#b32d18]">
-          This form needs JavaScript to send an application. With it turned off,
-          nothing here can reach us, so please use a browser that allows it
-          rather than pressing the button.
+          Enable JavaScript in your browser to submit this form.
         </p>
       </noscript>
     </form>

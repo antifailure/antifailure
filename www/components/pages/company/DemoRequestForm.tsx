@@ -97,7 +97,7 @@ export function DemoRequestForm() {
       setState({
         kind: "failed",
         message:
-          "Could not reach the server. Check your connection and press it again; nothing you typed is lost.",
+          "We could not connect. Check your connection and try again. Your answers are saved on this page.",
       });
       return;
     }
@@ -105,14 +105,14 @@ export function DemoRequestForm() {
     if (response.status === 429) {
       setState({
         kind: "failed",
-        message: "That was a lot of attempts at once. Wait a minute and press it again.",
+        message: "Please wait a minute before trying again.",
       });
       leadSubmitted("refused");
       return;
     }
 
     if (!response.ok) {
-      let message = "Something went wrong on our side. Press it again in a moment.";
+      let message = "We could not send your request. Please try again in a moment.";
       try {
         const body = (await response.json()) as { error?: unknown };
         if (typeof body.error === "string" && body.error) message = body.error;
@@ -140,23 +140,22 @@ export function DemoRequestForm() {
     return (
       <div role="status" className="rounded-[8px] bg-white p-5 ring-1 ring-black/10 sm:p-6">
         <h2 className="text-[20px] leading-snug tracking-tighter text-black">
-          It is in the queue.
+          Thanks. We have your demo request.
         </h2>
         <p className="mt-4 text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
           {state.notified
-            ? "Somebody has been told, and it is written down behind them, so it is not waiting on one person reading their mail. Expect a reply to set up a time."
-            : "It is written into the product database, read by a person oldest first, and never sold or added to a newsletter. Expect a reply to set up a time."}
+            ? "We will get in touch to arrange a walkthrough for your team."
+            : "We will review your request and get in touch to arrange a walkthrough."}
         </p>
         <p className="mt-4 text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
-          Nothing waits on us for the parts that do not need us. The engine is
-          open source and runs on your own machine, and the{" "}
+          Want to try it while you wait? Follow the{" "}
           <a
             className="text-black underline decoration-black/20 underline-offset-4 hover:decoration-black"
             href="/docs/getting-started/quickstart"
           >
             quickstart
           </a>{" "}
-          needs no account at all.
+          to run Antifailure locally. No account required.
         </p>
       </div>
     );
@@ -319,16 +318,15 @@ export function DemoRequestForm() {
         />
       </div>
 
-      <label className="mt-4 flex items-start gap-3">
+      <label className="mt-4 flex min-h-11 cursor-pointer items-center gap-3">
         <input
           type="checkbox"
           name="marketingOptIn"
           disabled={sending}
-          className="mt-0.5 size-4 shrink-0 rounded-[4px] border-black/25 text-black accent-black focus-visible:ring-2 focus-visible:ring-black/10"
+          className="size-4 shrink-0 rounded-[4px] border-black/25 text-black accent-black focus-visible:ring-2 focus-visible:ring-black/10"
         />
         <span className="text-[13px] leading-5 tracking-extra-tight text-gray-new-40">
-          Send me the occasional product update. Unchecked by default, no
-          newsletter.
+          Send me occasional product updates.
         </span>
       </label>
 
@@ -352,7 +350,7 @@ export function DemoRequestForm() {
           {sending ? "Requesting" : "Request a demo"}
         </button>
         <p className="text-[13px] leading-5 tracking-extra-tight text-gray-new-40">
-          Stored in the product database, read by a person, never sold.
+          We use these details to respond to your request.
         </p>
       </div>
     </form>

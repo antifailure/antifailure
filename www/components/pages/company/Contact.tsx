@@ -9,7 +9,7 @@ import {
   Prose,
   RelatedGrid,
 } from "@/components/pages/kit";
-import { CONTACT_POINTS, REPO_URL } from "@/lib/site";
+import { BUSINESS_ADDRESS, CONTACT_EMAIL, CONTACT_POINTS, REPO_URL } from "@/lib/site";
 import { CalBooking } from "./CalBooking";
 import { EnterpriseForm } from "./EnterpriseForm";
 
@@ -33,9 +33,9 @@ const CONTACT_DETAILS = {
     action: "Start a discussion",
   },
   signup: {
-    body: "The hosted control plane is a managed service, and a booked demo is the way onto it. Bring a deployment your team is nervous about and we show what a production twin catches before it ships. The engine itself is open source and needs no account at all.",
+    body: "See Antifailure on a deployment relevant to your team. We will walk through setup, test coverage, and results.",
     href: "/pricing",
-    link: "What the free plan holds",
+    link: "Compare plans",
     action: "Request a demo",
   },
 } as const;
@@ -79,8 +79,8 @@ export function ContactPage() {
       <PageHero
         path="/contact"
         eyebrow="Contact"
-        title="Use the route that matches the question."
-        lead="Antifailure uses GitHub for private vulnerability reports, public product work, and community discussion. A call can be booked on this page and it is the only route that reaches a person on a known day. Buying for a team is the form below, which writes a row a person reads. Creating an account needs none of this."
+        title="Talk through your next deployment."
+        lead="Book a call about your stack, ask about a team rollout, or find help with a technical question."
         actions={
           <>
             <Button href="#book" theme="filled">
@@ -89,6 +89,9 @@ export function ContactPage() {
             <Button href={`${REPO_URL}/issues`} theme="outlined">
               Search product issues
             </Button>
+            <a href={`mailto:${CONTACT_EMAIL}`} className="inline-flex min-h-11 items-center text-base text-gray-new-10 underline decoration-black/25 underline-offset-4">
+              {CONTACT_EMAIL}
+            </a>
           </>
         }
       />
@@ -101,24 +104,23 @@ export function ContactPage() {
         <div id="book" className="scroll-mt-24">
           <PageHeading
             kicker="Book a call"
-            title="<strong>Thirty minutes with the person building it.</strong> The times below are real openings, not a form."
+            title="<strong>Thirty minutes with the founder.</strong>"
           />
           <Prose className="mt-8">
             <p>
-              Use this for a hosted evaluation, a design partnership, or
-              anything commercial that does not belong in a public issue. A
-              security report should still go through{" "}
+              Discuss your stack, an evaluation, or a team rollout. For a
+              security issue, use{" "}
               <a href={`${REPO_URL}/security/advisories/new`}>
                 GitHub private vulnerability reporting
               </a>
-              , which is confidential, tracked, and read by the maintainers
-              rather than by one calendar.
+              .
             </p>
           </Prose>
           <div className="mt-12 max-w-[1040px] max-xl:mt-10">
             <CalBooking />
           </div>
         </div>
+        <p className="mt-8 text-sm text-gray-new-40">Business address: {BUSINESS_ADDRESS}</p>
       </PageSection>
 
       {/* Second, after the calendar and before the four written routes. It is
@@ -140,18 +142,13 @@ export function ContactPage() {
         <div id="enterprise" className="scroll-mt-24">
           <PageHeading
             kicker="Buying for a team"
-            title="<strong>Seats, single sign-on, a security review, a contract.</strong> Tell us which of those you need."
+            title="<strong>Tell us what your team needs.</strong>"
           />
           <Prose className="mt-8">
             <p>
-              Use this if you need seats and roles for people who are not in one
-              GitHub organization, single sign-on, an agreement to sign, or an
-              answer about where data is processed. It writes a row in the
-              product database that a person reads, oldest first, rather than an
-              address on a list. You do not need it to start: the engine is open
-              source and the <a href="/docs/getting-started/quickstart">quickstart</a>{" "}
-              needs no account, and the hosted plane is a{" "}
-              <a href="/request-demo">booked demo</a>.
+              Tell us about your team size, single sign-on, security review,
+              or data residency requirements. For a product walkthrough,
+              <a href="/request-demo"> request a demo</a>.
             </p>
           </Prose>
           <div className="mt-10 max-w-[720px]">
@@ -163,7 +160,7 @@ export function ContactPage() {
       <PageSection>
         <PageHeading
           kicker="Contact routes"
-          title="<strong>Four routes that resolve today.</strong> Choose based on privacy and purpose."
+          title="<strong>Find the right place for your question.</strong>"
         />
         <ul className="mt-14 grid grid-cols-2 gap-5 max-md:grid-cols-1">
           {CONTACT_POINTS.map((point) => {
@@ -206,7 +203,7 @@ export function ContactPage() {
           <div>
             <PageHeading
               kicker="Product and documentation"
-              title="<strong>Search the public record first.</strong> Then add a reproducible report."
+              title="<strong>Get technical help.</strong>"
             />
             <Prose className="mt-8">
               <p>
@@ -225,12 +222,8 @@ export function ContactPage() {
             </Prose>
           </div>
           <div className="self-start">
-            <Callout label="Email is not a contact route" tone="warn">
-              The antifailure.dev domain has no mail exchanger, and its SPF policy authorizes no
-              outbound senders. Addresses that still appear in repository documents are therefore
-              not presented here as working channels. Use GitHub private vulnerability reporting
-              for security details, and keep secrets and private reports out of Issues and
-              Discussions.
+            <Callout label="Security reports" tone="warn">
+              Send sensitive findings through GitHub private vulnerability reporting. Keep credentials and private reports out of public issues and discussions.
             </Callout>
           </div>
         </div>
@@ -238,9 +231,9 @@ export function ContactPage() {
 
       <RelatedGrid
         items={[
-          { href: "/about", title: "About", description: "Project identity, current status, and stated limits." },
+          { href: "/about", title: "About", description: "Why we are building Antifailure." },
           { href: "/privacy", title: "Privacy", description: "Data boundaries, subprocessors, retention, and controls." },
-          { href: "/terms", title: "Terms", description: "The product's stated limits and current commitments." },
+          { href: "/terms", title: "Terms", description: "Terms for using Antifailure." },
         ]}
       />
     </PageShell>

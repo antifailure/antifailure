@@ -1,389 +1,113 @@
-import { cn } from "@/lib/cn";
-
-const COLUMNS = [
-  {
-    title: "Simulated",
-    icon: "todo" as const,
-    cards: [
-      {
-        id: "CHG-184",
-        title: "POST /v1/charges $49.00",
-        tags: [{ label: "Stripe", color: "#B0B3B8" }],
-        who: { initial: "L", bg: "#E4E5E7" },
-      },
-      {
-        id: "CHG-185",
-        title: "Retry charge on checkout",
-        tags: [
-          { label: "Stripe", color: "#B0B3B8" },
-          { label: "Clone-local", color: "#B0B3B8" },
-        ],
-        who: { initial: "D", bg: "#E4E5E7" },
-      },
-      {
-        id: "CHG-190",
-        title: "Duplicate charge attempt",
-        tags: [{ label: "Stripe", color: "#B0B3B8" }],
-        who: { initial: "A", bg: "#E4E5E7" },
-      },
-      {
-        id: "INV-044",
-        title: "Refund path on cancel",
-        tags: [{ label: "Stripe", color: "#B0B3B8" }],
-        who: { initial: "L", bg: "#E4E5E7" },
-      },
-    ],
-  },
-  {
-    title: "Captured",
-    icon: "progress" as const,
-    cards: [
-      {
-        id: "MAIL-91",
-        title: "Order #4182 receipt",
-        tags: [{ label: "Email", color: "#B0B3B8" }],
-        who: { initial: "D", bg: "#E4E5E7" },
-      },
-      {
-        id: "WH-220",
-        title: "slack.hooks · store only",
-        tags: [
-          { label: "Webhook", color: "#B0B3B8" },
-          { label: "Preview", color: "#B0B3B8" },
-        ],
-        who: { initial: "A", bg: "#E4E5E7" },
-      },
-      {
-        id: "MAIL-92",
-        title: "Password reset never sent",
-        tags: [{ label: "Email", color: "#B0B3B8" }],
-        who: { initial: "L", bg: "#E4E5E7" },
-      },
-    ],
-  },
-  {
-    title: "Blocked",
-    icon: "done" as const,
-    cards: [
-      {
-        id: "DNS-018",
-        title: "api.prod.internal",
-        tags: [{ label: "Production", color: "#285D49" }],
-        who: { initial: "A", bg: "#E4E5E7" },
-      },
-      {
-        id: "TCP-443",
-        title: "18.4.2.9 · ip-bypass",
-        tags: [{ label: "Unknown", color: "#285D49" }],
-        who: { initial: "L", bg: "#E4E5E7" },
-      },
-      {
-        id: "WH-441",
-        title: "hooks.prod.internal",
-        tags: [{ label: "Webhook", color: "#285D49" }],
-        who: { initial: "D", bg: "#E4E5E7" },
-      },
-    ],
-  },
-] as const;
-
-const MESSAGES = [
-  {
-    name: "lena",
-    initial: "L",
-    bg: "#E4E5E7",
-    time: "8:55 PM",
-    body: "Twin posted POST /v1/charges $49.00. Simulated against clone-local Stripe. Not live.",
-  },
-  {
-    name: "didier",
-    initial: "D",
-    bg: "#E4E5E7",
-    time: "8:55 PM",
-    body: "Yes, SendGrid /v3/mail/send is captured. MIME stored. Never delivered.",
-  },
-  {
-    name: "andreas",
-    initial: "A",
-    bg: "#E4E5E7",
-    time: "8:56 PM",
-    body: "hooks.prod.internal is unresolved. Unknown destination, denied. Fail closed.",
-  },
-] as const;
-
-function ColIcon({ kind }: { kind: "todo" | "progress" | "done" }) {
-  if (kind === "todo") {
-    return (
-      <svg viewBox="0 0 14 14" className="size-3.5" fill="none" aria-hidden>
-        <circle cx="7" cy="7" r="5.15" stroke="#9B9EA5" strokeWidth="1.4" />
-      </svg>
-    );
-  }
-  if (kind === "progress") {
-    return (
-      <svg viewBox="0 0 14 14" className="size-3.5" aria-hidden>
-        <circle cx="7" cy="7" r="5.15" fill="none" stroke="#F2C94C" strokeWidth="1.4" />
-        <path d="M7 1.85 A5.15 5.15 0 0 1 12.15 7 H7 Z" fill="#F2C94C" />
-      </svg>
-    );
-  }
+function Application({ x, y, small = false }: { x: number; y: number; small?: boolean }) {
   return (
-    <svg viewBox="0 0 14 14" className="size-3.5" fill="none" aria-hidden>
-      <circle cx="7" cy="7" r="5.15" fill="#4CB782" />
-      <path d="M4.6 7.1 6.3 8.8 9.5 5.4" stroke="#fff" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    <g transform={`translate(${x} ${y}) scale(${small ? 0.72 : 1})`}>
+      <path d="M12 0H176V132H12Z" fill="var(--color-sage-2)" stroke="var(--color-forest-line)" strokeOpacity=".35" />
+      <path d="M0 12H164V144H0Z" fill="var(--color-sage)" stroke="var(--color-forest)" strokeWidth="1.5" />
+      <path d="M20 38H76M20 61H123M34 84H137M34 107H91" stroke="var(--color-forest-line)" strokeWidth="3" />
+      <path d="M20 84H26M20 107H26M20 126H76" stroke="var(--color-positive-ink)" strokeWidth="3" />
+    </g>
+  );
+}
+
+function Payment({ x, y }: { x: number; y: number }) {
+  return (
+    <g transform={`translate(${x} ${y})`} fill="var(--color-sage)">
+      <path d="M8 0H90V53H8Z" fill="var(--color-sage-2)" stroke="var(--color-forest-line)" strokeOpacity=".4" />
+      <path d="M0 9H82V62H0Z" stroke="var(--color-forest)" strokeWidth="1.5" />
+      <path d="M0 25H82" stroke="var(--color-forest)" strokeWidth="7" />
+      <path d="M12 47H34M57 47H68" stroke="var(--color-forest-line)" strokeWidth="2" />
+      <circle cx="82" cy="60" r="13" fill="var(--color-forest)" />
+      <path d="M76 60L80 64L87 56" stroke="var(--color-sage)" strokeWidth="1.8" />
+    </g>
+  );
+}
+
+function Inbox({ x, y }: { x: number; y: number }) {
+  return (
+    <g transform={`translate(${x} ${y})`} fill="var(--color-sage)">
+      <path d="M11 0H78V47H11Z" fill="var(--color-sage-2)" stroke="var(--color-forest-line)" strokeOpacity=".4" />
+      <path d="M5 8H72V55H5Z" stroke="var(--color-forest)" strokeWidth="1.5" />
+      <path d="M5 8L38.5 33L72 8" stroke="var(--color-forest)" strokeWidth="1.5" />
+      <path d="M0 40H20L26 49H51L57 40H82V66H0Z" fill="var(--color-sage-2)" stroke="var(--color-forest)" strokeWidth="1.5" />
+      <path d="M28 57H54" stroke="var(--color-forest-line)" strokeWidth="1.5" />
+    </g>
+  );
+}
+
+function DesktopDiagram() {
+  return (
+    <svg viewBox="0 0 1040 430" fill="none" className="hidden w-full @min-[720px]:block" aria-hidden="true">
+      <path d="M36 65H1004V386H36Z" stroke="var(--color-forest-line)" strokeOpacity=".35" />
+      <text x="36" y="38" className="fill-forest font-mono text-[18px]">Your production twin</text>
+      <text x="90" y="126" className="fill-forest text-[23px]">Your app</text>
+      <Application x={90} y={162} />
+      <g stroke="var(--color-forest-line)" strokeWidth="1.5">
+        <path d="M266 234H293V147H440M293 234H440M293 234V321H440" />
+        <path d="M432 141L440 147L432 153M432 228L440 234L432 240M432 315L440 321L432 327" />
+      </g>
+      <text x="312" y="126" className="fill-forest text-[18px]">Payment</text>
+      <text x="312" y="213" className="fill-forest text-[18px]">Email</text>
+      <text x="312" y="300" className="fill-forest text-[18px]">Unknown host</text>
+      <path d="M455 112V348" stroke="var(--color-forest)" strokeWidth="12" />
+      <text x="455" y="97" textAnchor="middle" className="fill-forest font-mono text-[18px]">Antifailure</text>
+      <g stroke="var(--color-positive-ink)" strokeWidth="1.8">
+        <path d="M467 147H566M558 141L566 147L558 153M467 234H566M558 228L566 234L558 240" />
+      </g>
+      <Payment x={591} y={110} />
+      <Inbox x={591} y={202} />
+      <text x="722" y="141" className="fill-forest text-[25px]">Payment simulated</text>
+      <text x="722" y="168" className="fill-positive-ink text-[18px]">No real charge</text>
+      <text x="722" y="231" className="fill-forest text-[25px]">Email captured</text>
+      <text x="722" y="258" className="fill-positive-ink text-[18px]">Ready in your test inbox</text>
+      <circle cx="455" cy="321" r="12" fill="var(--color-sage)" stroke="var(--color-danger-ink)" strokeWidth="1.5" />
+      <path d="M450 316L460 326M460 316L450 326" stroke="var(--color-danger-ink)" strokeWidth="1.8" />
+      <text x="495" y="328" className="fill-danger-ink text-[20px]">Blocked</text>
     </svg>
   );
 }
 
-function ChannelHash() {
+function MobileDiagram() {
   return (
-    <svg viewBox="0 0 16 16" className="size-[15px]" fill="none" aria-hidden>
-      <path
-        d="M6.2 2.2 4.9 13.8M11.1 2.2 9.8 13.8M2.6 5.9h11M2.2 10.1h11"
-        stroke="#8A8F98"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-      />
+    <svg viewBox="0 0 360 560" fill="none" className="mx-auto block w-full max-w-[440px] @min-[720px]:hidden" aria-hidden="true">
+      <text x="24" y="37" className="fill-forest font-mono text-[21px]">Your production twin</text>
+      <path d="M24 61H336V536H24Z" stroke="var(--color-forest-line)" strokeOpacity=".35" />
+      <text x="180" y="93" textAnchor="middle" className="fill-forest text-[21px]">Your app</text>
+      <Application x={117} y={109} small />
+      <path d="M180 213V244M174 236L180 244L186 236" stroke="var(--color-forest-line)" strokeWidth="1.5" />
+      <path d="M65 253H295" stroke="var(--color-forest)" strokeWidth="9" />
+      <text x="180" y="283" textAnchor="middle" className="fill-forest font-mono text-[21px]">Antifailure</text>
+      <g stroke="var(--color-positive-ink)" strokeWidth="1.7">
+        <path d="M97 262V300M91 292L97 300L103 292M260 262V300M254 292L260 300L266 292" />
+      </g>
+      <Payment x={53} y={314} />
+      <Inbox x={219} y={310} />
+      <text x="98" y="412" textAnchor="middle" className="fill-forest text-[21px]">Payment</text>
+      <text x="98" y="439" textAnchor="middle" className="fill-forest text-[21px]">simulated</text>
+      <text x="260" y="412" textAnchor="middle" className="fill-forest text-[21px]">Email</text>
+      <text x="260" y="439" textAnchor="middle" className="fill-forest text-[21px]">captured</text>
+      <path d="M66 469H294" stroke="var(--color-forest-line)" strokeOpacity=".25" />
+      <circle cx="70" cy="498" r="10" stroke="var(--color-danger-ink)" strokeWidth="1.5" />
+      <path d="M66 494L74 502M74 494L66 502" stroke="var(--color-danger-ink)" strokeWidth="1.5" />
+      <text x="91" y="505" className="fill-danger-ink text-[21px]">Unknown hosts blocked</text>
     </svg>
   );
 }
 
-
-
-
-
-
-
-
-
-
-
-function SignalIcon() {
-  return (
-    <svg viewBox="0 0 12 12" className="size-3" fill="currentColor" aria-hidden>
-      <rect x="1" y="7.4" width="2" height="3.1" rx="0.4" />
-      <rect x="5" y="4.8" width="2" height="5.7" rx="0.4" opacity="0.55" />
-      <rect x="9" y="2.4" width="2" height="8.1" rx="0.4" opacity="0.28" />
-    </svg>
-  );
-}
-
-function Tag({ color, label }: { color: string; label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-[5px] bg-[#F4F4F6] px-1.5 py-[3px] text-[11px] leading-none text-[#6B6F76]">
-      <span className="size-[6px] rounded-full" style={{ background: color }} />
-      {label}
-    </span>
-  );
-}
-
-/**
- * The phone reading of the same truth.
- *
- * A three-column board with a chat window floating over it is a shape that only
- * works at desk width. Squeezed onto a phone the columns disappeared behind the
- * card and the section lost its evidence. The board's rows are the evidence, so
- * on a phone they become what they are: a ledger of attempted effects, each one
- * with what the firewall did about it.
- */
-const LEDGER = COLUMNS.flatMap((col) =>
-  col.cards.slice(0, col.title === "Blocked" ? 3 : 2).map((card) => ({
-    id: card.id,
-    title: card.title,
-    tag: card.tags[0],
-    disposition: col.title.toLowerCase(),
-    icon: col.icon,
-  })),
-);
-
-function EgressLedger() {
-  return (
-    <div className="overflow-hidden rounded-[12px] border border-black/[0.08] bg-white">
-      <div className="flex items-center justify-between border-b border-black/[0.06] px-3.5 py-2.5">
-        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-gray-new-50">
-          Egress ledger
-        </span>
-        <span className="text-[12px] tabular-nums tracking-tight text-gray-new-50">
-          {COLUMNS.reduce((n, col) => n + col.cards.length, 0)} attempts
-        </span>
-      </div>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-black/[0.06] bg-[#FAFAFB] px-3.5 py-2">
-        {COLUMNS.map((col) => (
-          <span key={col.title} className="flex items-center gap-1.5 text-[12px] tracking-tight text-[#6B6F76]">
-            <ColIcon kind={col.icon} />
-            {col.title}
-            <span className="tabular-nums text-gray-new-50">{col.cards.length}</span>
-          </span>
-        ))}
-      </div>
-      <ul>
-        {LEDGER.map((row) => (
-          <li
-            key={row.id}
-            className="flex items-start justify-between gap-3 border-b border-black/[0.05] px-3.5 py-2.5 last:border-b-0"
-          >
-            <span className="min-w-0">
-              <span className="block text-[13px] leading-snug tracking-tight text-[#1A1A1A]">{row.title}</span>
-              <span className="mt-1 flex items-center gap-1.5">
-                <span className="font-mono text-[10px] tabular-nums tracking-tight text-gray-new-50">{row.id}</span>
-                <Tag color={row.tag.color} label={row.tag.label} />
-              </span>
-            </span>
-            <span
-              className={cn(
-                "mt-0.5 shrink-0 font-mono text-[10px] uppercase tracking-[0.1em]",
-                row.disposition === "blocked" ? "text-[#285D49]" : "text-gray-new-50",
-              )}
-            >
-              {row.disposition}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
+/** A routing diagram, not a screenshot of the product. */
 export function FailClosedScene() {
   return (
-    <div data-scene="fail-closed" className="pointer-events-none relative w-full select-none" aria-hidden>
-      <div className="hidden max-xl:mt-1 max-xl:flex max-xl:flex-col max-xl:gap-4">
-        <EgressLedger />
-        <SlackThread mobile />
+    <figure>
+      <div
+        className="@container overflow-hidden bg-sage"
+        role="img"
+        aria-label="Antifailure keeps test payments and emails inside the production twin. Payment calls receive a simulated response, emails arrive in a test inbox, and unknown destinations are blocked. Real customers receive no charges or messages in this example."
+      >
+        <DesktopDiagram />
+        <MobileDiagram />
       </div>
-      <div className="relative aspect-[1024/477] w-full overflow-hidden max-xl:hidden">
-        <div className="absolute inset-0 bg-[#EFEFF1]">
-          {/* THE THIRD COLUMN NEVER FIT, AT ANY WIDTH. Three columns pinned
-              to 248 pixels with a 12 pixel gap need 768, and this area is 536
-              at 1280, 635 at 1440 and 734 even at 1920, so "Blocked" hung 232,
-              133 and 34 pixels past the stage and was clipped mid word. The
-              one disposition the heading of this section actually promises was
-              the one nobody could read, on every screen there is. The columns
-              share the row now instead of demanding a width it never has. */}
-          <div className="absolute inset-y-0 left-[36%] right-0 flex gap-3 pt-[11%] pr-5 pb-[8%] opacity-[0.82]">
-            {COLUMNS.map((col) => (
-              <div key={col.title} className="flex min-w-0 flex-1 flex-col">
-                <div className="mb-2.5 flex h-7 items-center gap-1.5 px-0.5">
-                  <ColIcon kind={col.icon} />
-                  <span className="text-[13px] font-medium tracking-tight text-[#24262B]">{col.title}</span>
-                  <span className="text-[13px] tabular-nums text-gray-new-50">{col.cards.length}</span>
-                </div>
-                <div className="flex flex-col gap-2">
-                  {col.cards.map((card) => (
-                    <div
-                      key={card.id}
-                      className="rounded-[10px] border border-black/[0.06] bg-white px-3 py-2.5 shadow-[0_1px_0_rgba(0,0,0,0.03)]"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[12px] tabular-nums tracking-tight text-gray-new-50">{card.id}</span>
-                        <span
-                          className="inline-flex size-[18px] shrink-0 items-center justify-center rounded-full text-[8px] font-medium text-[#6B6F76]"
-                          style={{ background: card.who.bg }}
-                        >
-                          {card.who.initial}
-                        </span>
-                      </div>
-                      <div className="mt-1 text-[13px] leading-snug tracking-tight text-[#1A1A1A]">{card.title}</div>
-                      <div className="mt-2 flex items-center gap-1.5">
-                        <span className="text-[#C0C3C8]">
-                          <SignalIcon />
-                        </span>
-                        {card.tags.map((tag) => (
-                          <Tag key={tag.label} color={tag.color} label={tag.label} />
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div
-          className="pointer-events-none absolute inset-0 max-xl:hidden"
-          style={{
-            background: [
-              // The stop at 78 percent sat on top of the third column, so the
-              // one disposition the heading actually promises, Blocked, was
-              // the one the reader could not make out. It fades past the
-              // content now rather than over it.
-              "linear-gradient(to right, #f7f7f5 0%, #f7f7f5 3%, transparent 9%, transparent 92%, rgba(247,247,245,0.55) 97%, #f7f7f5 100%)",
-              "linear-gradient(to bottom, #f7f7f5 0%, rgba(247,247,245,0.92) 8%, transparent 18%, transparent 72%, rgba(247,247,245,0.7) 88%, #f7f7f5 100%)",
-            ].join(", "),
-          }}
-        />
-
-        <SlackThread />
-      </div>
-    </div>
-  );
-}
-
-/**
- * The thread that reads the ledger back in human words.
- *
- * On a wide screen it floats over the board. On a phone it sits under the
- * ledger as its own block, at content height, because a card pinned to 78% of
- * a fixed-height stage cut its own last message in half.
- */
-function SlackThread({ mobile }: { mobile?: boolean }) {
-  return (
-    <div
-      className={cn(
-        "flex flex-col overflow-hidden rounded-[12px] border border-black/[0.08] bg-white",
-        mobile
-          ? "w-full"
-          : "absolute top-[11.1%] bottom-[7.5%] left-[4.9%] z-10 w-[32.5%] min-w-[280px] max-w-[340px] shadow-[0_16px_48px_rgba(0,0,0,0.10)]",
-      )}
-    >
-          <div className="flex h-11 shrink-0 items-center justify-between border-b border-black/[0.06] px-3.5">
-            <div className="flex items-center gap-2">
-              <ChannelHash />
-              <span className="text-[13px] font-semibold tracking-tight text-[#1A1A1A]">Checkout</span>
-              <span className="text-[13px] tracking-tight text-gray-new-50">#egress</span>
-            </div>
-          </div>
-
-          <div className="relative min-h-0 flex-1 overflow-hidden">
-            <div className="space-y-5 px-3.5 py-4 max-md:space-y-3.5 max-md:py-3">
-              {MESSAGES.map((msg) => (
-                <div key={msg.name} className="flex gap-2.5">
-                  <span
-                    className="mt-0.5 inline-flex size-7 shrink-0 items-center justify-center rounded-[5px] text-[11px] font-medium text-[#6B6F76]"
-                    style={{ background: msg.bg }}
-                  >
-                    {msg.initial}
-                  </span>
-                  <div className="min-w-0">
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-[13px] font-semibold tracking-tight text-[#1A1A1A]">{msg.name}</span>
-                      <span className="text-[12px] text-gray-new-50">{msg.time}</span>
-                    </div>
-                    <p className="mt-0.5 text-[13px] leading-[1.45] tracking-tight text-[#3C3F44]">{msg.body}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-white to-transparent max-xl:hidden" />
-          </div>
-
-          <div className="px-3 pb-3">
-            <div className="rounded-[10px] border border-black/[0.08] bg-[#FAFAFB] px-3 pt-3.5 pb-2">
-              <div className="flex flex-wrap items-center gap-1.5 text-[13px] leading-5 text-[#3C3F44]">
-                <span className="rounded-[5px] bg-[#33bf00]/[0.14] px-1.5 py-px font-medium text-[#285D49]">@firewall</span>
-                <span>deny unknown destinations</span>
-              </div>
-              {/* NO COMPOSER TOOLBAR. It carried a plus, a type control,
-                  an emoji, an at sign, a camera, a microphone and a slash
-                  command, then a send button with its own dropdown chevron.
-                  Nine controls, none of which do anything, in a chat client
-                  this company does not make. The one line above is the whole
-                  point of the panel: somebody names the rule, and the ledger
-                  behind it obeys. Everything else was set dressing that made
-                  the figure read as a screenshot of another product. */}
-            </div>
-          </div>
-    </div>
+      <figcaption className="mt-4 text-sm leading-6 text-gray-new-40 max-md:text-base">
+        Example policy: payments simulated, emails captured, unknown hosts blocked.
+      </figcaption>
+    </figure>
   );
 }

@@ -22,11 +22,12 @@
 #                     that did not work. Refused unless the same file also
 #                     tells the reader it cannot receive.
 #
-# There is no `receives` row in this file today, and that is the honest state
-# of the project rather than an oversight. antifailure.dev has no mail
-# exchanger, publishes an SPF policy authorising no sender, a DMARC policy of
-# reject, and a revoked DKIM key. Every route this project offers a reader goes
-# through GitHub or through the booking calendar on the contact page.
+# The owner supplied the business contact below on 2026-09-26. A DNS check on
+# that date returned `10 mx1.forwardemail.net.` and `10 mx2.forwardemail.net.`
+# for antifailure.dev. This confirms inbound mail routing, not mailbox delivery
+# or readership; the owner supplies that contact assurance. Outbound SPF does
+# not determine whether inbound mail can be received. Historical defect rows
+# below describe the configuration observed when those defects were recorded.
 
 .changes/legal-pages-named-a-mailbox-that-could-not-receive.md	security@antifailure.dev	records-a-defect	the fragment recording that the legal pages stopped naming this mailbox. It quotes the sentence that was wrong and then says the domain publishes no mail exchanger.
 .githooks/pre-commit	potatogreenbean204@gmail.com	not-a-route	the wrong git identity this hook exists to refuse. It is compared against, never offered to anybody, and a commit carrying it is rejected before it is written.
@@ -53,7 +54,7 @@ justfile	potatogreenbean204@gmail.com	not-a-route	the same wrong git identity, c
 schemas/policy-vectors.json	pv3pass@registry.example.com	not-a-route	not an address. It is the part after the user information in an egress rule host, deploy:pv3pass@registry.example.com, one of the refusal cases both policy engines are required to refuse; engine/internal/policy/vectors_test.go writes it and web/packages/policy/test/vectors.test.ts asserts it. Nobody is invited to write to it.
 schemas/policy-vectors.json	deploy@registry.example.com	not-a-route	not an address. It is the part after the user information in an egress rule host, deploy@registry.example.com, one of the refusal cases both policy engines are required to refuse; engine/internal/policy/vectors_test.go writes it and web/packages/policy/test/vectors.test.ts asserts it. Nobody is invited to write to it.
 schemas/policy-vectors.json	pv4tok@registry.example.com	not-a-route	not an address. It is the part after the user information in an egress rule host, pv4tok@registry.example.com:443, one of the refusal cases both policy engines are required to refuse; engine/internal/policy/vectors_test.go writes it and web/packages/policy/test/vectors.test.ts asserts it. Nobody is invited to write to it.
-tools/contactcheck/main.go	conduct@antifailure.dev	records-a-defect	named in this gate's own explanation of the defect it was written for, beside the dig output showing the domain has no mail exchanger.
+tools/contactcheck/main.go	conduct@antifailure.dev	records-a-defect	named in this gate's explanation of the defect recorded on 2026-09-02, beside the historical DNS snapshot and the subsequent routing correction.
 tools/contactcheck/main.go	security@antifailure.dev	records-a-defect	the other half of the same explanation.
 tools/preview/README.md	operator@preview.local	not-a-route	the operator the preview seeds, named in the section explaining that its password is generated fresh on every run and written outside the working tree. The preview database is thrown away, and .local is reserved by RFC 6762, so the address resolves nowhere.
 tools/preview/common.sh	operator@preview.local	not-a-route	the same seeded operator, as the shell variable the preview scripts sign in with.
@@ -70,7 +71,7 @@ tools/preview/seed.ts	lena.fischer@preview.local	not-a-route	the same seeded set
 www/components/home/visuals/TwinLifecycleScene.tsx	ada@corp.io	not-a-route	a row of invented customer data in the animated lifecycle film, shown being masked. The film is captioned as a shaped example.
 www/components/home/visuals/TwinLifecycleScene.tsx	user_00418@mask.local	not-a-route	what the same film shows that row becoming after masking. A generated value at a domain that does not resolve, which is the output the masker actually produces.
 www/components/home/visuals/headerMinis.tsx	ada@corp.io	not-a-route	the same invented row, in the small header animation that reuses the film's data.
-www/components/home/visuals/hero/StateFilm.tsx	ajay@acme.com	not-a-route	a row of invented customer data in the hero film, shown being masked.
+www/lib/site.ts	vir@antifailure.dev	receives	Vir Sanghavi supplied this as the business contact on 2026-09-26. MX checked the same day returned `10 mx1.forwardemail.net.` and `10 mx2.forwardemail.net.`; no test message was sent. The owner confirmation establishes the intended recipient, while DNS establishes inbound routing.
 .changes/a-code-of-conduct-that-routed-complaints-into-silence.md	conduct@antifailure.dev	records-a-defect	the fragment recording that the code of conduct stopped naming it, beside the DNS reason nothing sent there was delivered.
 .changes/a-code-of-conduct-that-routed-complaints-into-silence.md	status@antifailure.dev	records-a-defect	the same fragment, recording that the status workflow stopped committing under it.
 .github/workflows/ci.yml	conduct@antifailure.dev	records-a-defect	named in the comment above the contactcheck step as the defect the step exists for, with the DNS reason beside it.

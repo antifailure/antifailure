@@ -39,10 +39,10 @@ function FigureShell({
               </span>
             </div>
             <div className="mb-2 flex shrink-0 items-baseline gap-2">
-              <span className="border-b-2 border-[#33bf00] pb-0.5 font-mono text-[9px] font-medium uppercase tracking-[0.14em] text-black sm:text-[10px]">
+              <span className="border-b-2 border-[#33bf00] pb-0.5 font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-black sm:text-[12px]">
                 {rail}
               </span>
-              <span className="hidden font-mono text-[9px] uppercase tracking-[0.14em] text-gray-new-50 sm:inline">
+              <span className="hidden font-mono text-[11px] uppercase tracking-[0.14em] text-gray-new-50 sm:inline">
                 FIG. {id}
               </span>
             </div>
@@ -69,12 +69,12 @@ function Metric({
 }) {
   return (
     <div className="min-w-0 border-l border-black/[0.10] pl-2.5 first:border-l-0 first:pl-0 sm:pl-3">
-      <div className="font-mono text-[8px] font-medium uppercase tracking-[0.12em] text-gray-new-50 sm:text-[9px]">
+      <div className="font-mono text-[11px] font-medium uppercase tracking-[0.12em] text-gray-new-50 sm:text-[11px]">
         {label}
       </div>
       <div
         className={cn(
-          "mt-1 truncate font-mono text-[10px] font-medium tabular-nums sm:text-[11px]",
+          "mt-1 truncate font-mono text-[12px] font-medium tabular-nums sm:text-[11px]",
           tone === "neutral" && "text-black/75",
           tone === "fail" && "text-red-700",
           tone === "pass" && "text-[#285D49]",
@@ -91,7 +91,7 @@ function BooleanMark({ value }: { value: boolean }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full px-2 py-1 font-mono text-[9px] font-medium uppercase tracking-[0.08em]",
+        "inline-flex items-center rounded-full px-2 py-1 font-mono text-[11px] font-medium uppercase tracking-[0.08em]",
         value ? "bg-red-50 text-red-700 ring-1 ring-red-700/15" : "bg-[#E4F1EB] text-[#285D49] ring-1 ring-[#33bf00]/25",
       )}
     >
@@ -118,7 +118,7 @@ function LockComparison({ safe }: { safe: boolean }) {
           <div className="text-[13px] font-medium tracking-tight text-black">
             ALTER · subscriptions.plan_id
           </div>
-          <p className="mt-1 font-mono text-[10px] text-gray-new-50">
+          <p className="mt-1 font-mono text-[12px] text-gray-new-50">
             rehearsal branch · observer connection at 250ms
           </p>
         </div>
@@ -126,17 +126,17 @@ function LockComparison({ safe }: { safe: boolean }) {
       </div>
 
       <div className="mt-4 overflow-hidden rounded-[12px] border border-black/[0.09] bg-white">
-        <div className="grid grid-cols-[minmax(0,1fr)_minmax(92px,0.72fr)] border-b border-black/[0.08] bg-[#f4f4f1] px-3 py-2 font-mono text-[8px] font-medium uppercase tracking-[0.12em] text-gray-new-50 sm:grid-cols-[minmax(0,1fr)_minmax(144px,0.7fr)] sm:px-4 sm:text-[9px]">
+        <div className="grid grid-cols-[minmax(0,1fr)_minmax(92px,0.72fr)] border-b border-black/[0.08] bg-[#f4f4f1] px-3 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.12em] text-gray-new-50 sm:grid-cols-[minmax(0,1fr)_minmax(144px,0.7fr)] sm:px-4 sm:text-[11px]">
           <span>Finding</span>
           <span>{safe ? "Remedy" : "Observed"}</span>
         </div>
         <div className="divide-y divide-black/[0.07]">
           {rows.map((row) => (
             <div key={row.label} className="grid grid-cols-[minmax(0,1fr)_minmax(92px,0.72fr)] items-center gap-2 px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_minmax(144px,0.7fr)] sm:px-4">
-              <span className="min-w-0 font-mono text-[9px] text-black/55 sm:text-[10px]">{row.label}</span>
+              <span className="min-w-0 font-mono text-[11px] text-black/55 sm:text-[12px]">{row.label}</span>
               <span
                 className={cn(
-                  "min-w-0 break-words text-right font-mono text-[9px] font-medium sm:text-[10px]",
+                  "min-w-0 break-words text-right font-mono text-[11px] font-medium sm:text-[12px]",
                   safe ? "text-[#285D49]" : "text-red-700",
                 )}
               >
@@ -166,7 +166,7 @@ export function PMG01({ captions }: { captions: readonly [string, string] }) {
         title="migration rehearsal · lock exposure"
         rail="COMPARE"
         toolbar={
-          <div className="flex w-full rounded-[10px] bg-[#f4f4f1] p-1" aria-label="Migration strategy comparison">
+          <div className="flex w-full rounded-[10px] bg-[#f4f4f1] p-1" role="group" aria-label="Migration strategy comparison">
             {(["Direct type change", "Expand-and-contract"] as const).map((label, index) => {
               const active = mode === index;
               return (
@@ -176,7 +176,7 @@ export function PMG01({ captions }: { captions: readonly [string, string] }) {
                   aria-pressed={active}
                   onClick={() => setMode(index as 0 | 1)}
                   className={cn(
-                    "min-w-0 flex-1 rounded-[7px] px-2 py-2 text-[10px] font-medium sm:text-[11px]",
+                    "min-w-0 flex-1 rounded-[7px] px-2 py-2 text-[12px] font-medium sm:text-[11px]",
                     active ? "bg-white text-black shadow-sm ring-1 ring-black/[0.06]" : "text-gray-new-50 hover:text-black/70",
                   )}
                 >
@@ -208,21 +208,21 @@ export function PMG02() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-[13px] font-medium tracking-tight text-black">subscriptions migration</div>
-          <p className="mt-1 font-mono text-[10px] text-gray-new-50">three connections · one measured lock window</p>
+          <p className="mt-1 font-mono text-[12px] text-gray-new-50">three connections · one measured lock window</p>
         </div>
         <StatusPill tone="FAIL">FAIL</StatusPill>
       </div>
 
       <div className="mt-4 overflow-hidden rounded-[12px] border border-black/[0.09] bg-white">
-        <div className="grid grid-cols-[104px_minmax(0,1fr)] border-b border-black/[0.08] bg-[#f4f4f1] px-3 py-2 font-mono text-[8px] font-medium uppercase tracking-[0.12em] text-gray-new-50 sm:grid-cols-[132px_minmax(0,1fr)] sm:px-4 sm:text-[9px]">
+        <div className="grid grid-cols-[104px_minmax(0,1fr)] border-b border-black/[0.08] bg-[#f4f4f1] px-3 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.12em] text-gray-new-50 sm:grid-cols-[132px_minmax(0,1fr)] sm:px-4 sm:text-[11px]">
           <span>Observed via</span>
           <span>Result</span>
         </div>
         <div className="divide-y divide-black/[0.07]">
           {observations.map((item) => (
             <div key={item.label} className="grid grid-cols-[104px_minmax(0,1fr)] items-center gap-2 px-3 py-3 sm:grid-cols-[132px_minmax(0,1fr)] sm:px-4">
-              <span className="font-mono text-[9px] font-medium text-black/65 sm:text-[10px]">{item.label}</span>
-              <span className="min-w-0 break-words font-mono text-[9px] text-black/70 sm:text-[10px]">{item.detail}</span>
+              <span className="font-mono text-[11px] font-medium text-black/65 sm:text-[12px]">{item.label}</span>
+              <span className="min-w-0 break-words font-mono text-[11px] text-black/70 sm:text-[12px]">{item.detail}</span>
             </div>
           ))}
         </div>
@@ -231,7 +231,7 @@ export function PMG02() {
       <div className="mt-3 rounded-[10px] border border-red-700/20 bg-red-50 px-3 py-3">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <div className="font-mono text-[8px] font-medium uppercase tracking-[0.12em] text-red-700/65">Lock finding</div>
+            <div className="font-mono text-[11px] font-medium uppercase tracking-[0.12em] text-red-700">Lock finding</div>
             <div className="mt-1 text-[11px] font-medium tracking-tight text-red-800">second session waited on the relation lock</div>
           </div>
           <BooleanMark value />
@@ -255,38 +255,38 @@ export function PMG03({ source }: { source: string }) {
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-[13px] font-medium tracking-tight text-black">one report, three observed sources</div>
-          <p className="mt-1 font-mono text-[10px] text-gray-new-50">no timing inferred from SQL text</p>
+          <p className="mt-1 font-mono text-[12px] text-gray-new-50">no timing inferred from SQL text</p>
         </div>
         <StatusPill tone="FAIL">FAIL</StatusPill>
       </div>
 
-      <div className="mt-4 grid gap-2 sm:grid-cols-3" aria-label="Evidence sources">
+      <div className="mt-4 grid gap-2 sm:grid-cols-3" role="group" aria-label="Evidence sources">
         {EVIDENCE.map((item, index) => (
           <div key={item.source} className="min-w-0 border border-black/[0.08] bg-[#fbfbfa] px-2.5 py-2.5">
             <div className="flex items-center gap-2">
-              <span className="font-mono text-[9px] font-medium text-gray-new-50">
+              <span className="font-mono text-[11px] font-medium text-gray-new-50">
                 {index + 1}
               </span>
-              <span className="truncate font-mono text-[9px] font-medium text-black/75">{item.source}</span>
+              <span className="truncate font-mono text-[11px] font-medium text-black/75">{item.source}</span>
             </div>
-            <div className="mt-2 font-mono text-[8px] uppercase tracking-[0.1em] text-gray-new-50">{item.measure}</div>
-            <div className="mt-1 text-[9px] leading-3.5 text-black/65">{item.result}</div>
+            <div className="mt-2 font-mono text-[11px] uppercase tracking-[0.1em] text-gray-new-50">{item.measure}</div>
+            <div className="mt-1 text-[11px] leading-3.5 text-black/65">{item.result}</div>
           </div>
         ))}
       </div>
 
       <div className="mt-3 overflow-hidden rounded-[12px] border border-black/[0.09] bg-white">
         <div className="flex items-center justify-between gap-3 border-b border-black/[0.08] bg-[#f4f4f1] px-3 py-2">
-          <span className="font-mono text-[9px] font-medium text-black/65">internal/insights</span>
-          <span className="font-mono text-[8px] uppercase tracking-[0.12em] text-red-700">lint finding</span>
+          <span className="font-mono text-[11px] font-medium text-black/65">internal/insights</span>
+          <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-red-700">lint finding</span>
         </div>
         <div className="flex min-w-0">
-          <div className="select-none border-r border-black/[0.07] bg-[#fafaf8] px-2 py-2.5 text-right font-mono text-[9px] leading-[17px] text-gray-new-50" aria-hidden>
+          <div className="select-none border-r border-black/[0.07] bg-[#fafaf8] px-2 py-2.5 text-right font-mono text-[11px] leading-[17px] text-gray-new-50" aria-hidden>
             {lines.map((_, index) => (
               <div key={index}>{index + 1}</div>
             ))}
           </div>
-          <pre className="min-w-0 flex-1 whitespace-pre-wrap break-words px-2.5 py-2.5 font-mono text-[9px] leading-[17px] tracking-extra-tight text-black/70 sm:text-[10px]">
+          <pre className="min-w-0 flex-1 whitespace-pre-wrap break-words px-2.5 py-2.5 font-mono text-[11px] leading-[17px] tracking-extra-tight text-black/70 sm:text-[12px]">
             {source}
           </pre>
         </div>
@@ -294,11 +294,11 @@ export function PMG03({ source }: { source: string }) {
 
       <div className="mt-3 grid gap-2 sm:grid-cols-[0.9fr_1.1fr]">
         <div className="rounded-[10px] border border-red-700/20 bg-red-50 px-3 py-2.5">
-          <div className="font-mono text-[8px] font-medium uppercase tracking-[0.12em] text-red-700/65">Migration lint</div>
+          <div className="font-mono text-[11px] font-medium uppercase tracking-[0.12em] text-red-700">Migration lint</div>
           <div className="mt-1 text-[11px] font-medium tracking-tight text-red-800">direct type change rewrites subscriptions</div>
         </div>
         <div className="rounded-[10px] border border-[#33bf00]/25 bg-[#E4F1EB]/70 px-3 py-2.5">
-          <div className="font-mono text-[8px] font-medium uppercase tracking-[0.12em] text-[#285D49]">Remedy</div>
+          <div className="font-mono text-[11px] font-medium uppercase tracking-[0.12em] text-[#285D49]">Remedy</div>
           <div className="mt-1 text-[11px] font-medium tracking-tight text-[#285D49]">expand, backfill in batches, dual-read, contract later</div>
         </div>
       </div>
@@ -319,7 +319,7 @@ export function PMG04() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-[13px] font-medium tracking-tight text-black">expand-and-contract sequence</div>
-          <p className="mt-1 font-mono text-[10px] text-gray-new-50">schema stays readable across deploys</p>
+          <p className="mt-1 font-mono text-[12px] text-gray-new-50">schema stays readable across deploys</p>
         </div>
         <StatusPill tone="PASS">PASS</StatusPill>
       </div>
@@ -327,13 +327,13 @@ export function PMG04() {
       <ol className="mt-4 grid gap-2 sm:grid-cols-4" aria-label="Expand-and-contract migration stages">
         {SAFE_STEPS.map((step, index) => (
           <li key={step.title} className="grid min-w-0 grid-cols-[34px_minmax(0,1fr)] gap-2 border border-black/[0.08] bg-white p-2.5 sm:block sm:min-h-[118px]">
-            <div className="font-mono text-[9px] font-medium text-[#285D49]">
+            <div className="font-mono text-[11px] font-medium text-[#285D49]">
               {step.number}
             </div>
             <div className="min-w-0 sm:mt-3">
               <div className="text-[11px] font-medium tracking-tight text-black">{step.title}</div>
-              <div className="mt-1 text-[9px] leading-3.5 text-black/55">{step.detail}</div>
-              <div className={cn("mt-1.5 font-mono text-[8px] text-[#285D49] sm:mt-2", index === 0 && "font-medium")}>
+              <div className="mt-1 text-[11px] leading-3.5 text-black/55">{step.detail}</div>
+              <div className={cn("mt-1.5 font-mono text-[11px] text-[#285D49] sm:mt-2", index === 0 && "font-medium")}>
                 {step.tag}
               </div>
             </div>
@@ -342,17 +342,17 @@ export function PMG04() {
       </ol>
 
       <div className="mt-3 overflow-hidden rounded-[12px] border border-black/[0.09] bg-[#fbfbfa]">
-        <div className="grid grid-cols-[84px_1fr_1fr] border-b border-black/[0.07] bg-[#f4f4f1] px-2.5 py-2 font-mono text-[8px] font-medium uppercase tracking-[0.1em] text-gray-new-50 sm:grid-cols-[112px_1fr_1fr] sm:px-3 sm:text-[9px]">
+        <div className="grid grid-cols-[84px_1fr_1fr] border-b border-black/[0.07] bg-[#f4f4f1] px-2.5 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.1em] text-gray-new-50 sm:grid-cols-[112px_1fr_1fr] sm:px-3 sm:text-[11px]">
           <span>Window</span>
           <span>Old binary</span>
           <span>New binary</span>
         </div>
-        <div className="grid grid-cols-[84px_1fr_1fr] items-center border-b border-black/[0.07] px-2.5 py-2.5 font-mono text-[8px] sm:grid-cols-[112px_1fr_1fr] sm:px-3 sm:text-[9px]">
+        <div className="grid grid-cols-[84px_1fr_1fr] items-center border-b border-black/[0.07] px-2.5 py-2.5 font-mono text-[11px] sm:grid-cols-[112px_1fr_1fr] sm:px-3 sm:text-[11px]">
           <span className="text-black/55">Both columns</span>
           <span className="text-black/70">reads plan_id</span>
           <span className="text-[#285D49]">reads both</span>
         </div>
-        <div className="grid grid-cols-[84px_1fr_1fr] items-center px-2.5 py-2.5 font-mono text-[8px] sm:grid-cols-[112px_1fr_1fr] sm:px-3 sm:text-[9px]">
+        <div className="grid grid-cols-[84px_1fr_1fr] items-center px-2.5 py-2.5 font-mono text-[11px] sm:grid-cols-[112px_1fr_1fr] sm:px-3 sm:text-[11px]">
           <span className="text-black/55">After contract</span>
           <span className="text-gray-new-50">retired</span>
           <span className="text-[#285D49]">reads plan_id_v2</span>

@@ -24,10 +24,10 @@ function FigureChrome({ id, tab, rail }: { id: string; tab: string; rail: string
         <span className="block truncate">{tab}</span>
       </div>
       <div className="mb-1.5 flex shrink-0 items-baseline gap-2.5">
-        <span className="border-b-2 border-[#33bf00] pb-0.5 font-mono text-[9px] font-medium uppercase tracking-[0.14em] text-black sm:text-[10px]">
+        <span className="border-b-2 border-[#33bf00] pb-0.5 font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-black sm:text-[12px]">
           {rail}
         </span>
-        <span className="hidden font-mono text-[9px] uppercase tracking-[0.12em] text-gray-new-50 sm:inline">
+        <span className="hidden font-mono text-[11px] uppercase tracking-[0.12em] text-gray-new-50 sm:inline">
           FIG. {id}
         </span>
       </div>
@@ -78,7 +78,7 @@ function MicroLabel({ children, tone = "muted" }: { children: ReactNode; tone?: 
   return (
     <span
       className={cn(
-        "font-mono text-[9px] font-medium uppercase tracking-[0.12em]",
+        "font-mono text-[11px] font-medium uppercase tracking-[0.12em]",
         tone === "muted" && "text-gray-new-50",
         tone === "sage" && "text-[#285D49]",
         tone === "danger" && "text-[#A73737]",
@@ -93,7 +93,7 @@ function StateChip({ children, tone = "plain" }: { children: ReactNode; tone?: T
   return (
     <span
       className={cn(
-        "inline-flex items-center whitespace-nowrap rounded-full border px-2.5 py-1 font-mono text-[9px] font-medium uppercase tracking-[0.1em]",
+        "inline-flex items-center whitespace-nowrap rounded-full border px-2.5 py-1 font-mono text-[11px] font-medium uppercase tracking-[0.1em]",
         toneClasses[tone],
       )}
     >
@@ -168,7 +168,7 @@ function Seal({ label, detail, tone = "sage" }: { label: string; detail: string;
         </span>
         <span className="min-w-0 text-[12px] font-medium leading-4 text-black">{label}</span>
       </div>
-      <span className={cn("mt-1 block font-mono text-[9px] leading-4", tone === "sage" ? "text-[#285D49]" : "text-[#A73737]")}>
+      <span className={cn("mt-1 block font-mono text-[11px] leading-4", tone === "sage" ? "text-[#285D49]" : "text-[#A73737]")}>
         {detail}
       </span>
     </div>
@@ -177,9 +177,9 @@ function Seal({ label, detail, tone = "sage" }: { label: string; detail: string;
 
 function SummaryMetric({ label, value, tone = "plain" }: { label: string; value: string; tone?: Tone }) {
   return (
-    <div className={cn("min-w-0 rounded-[10px] border px-3 py-2.5 text-center", toneClasses[tone])}>
+    <div className={cn("min-w-0 rounded-[10px] border px-1 py-2.5 text-center sm:px-3", toneClasses[tone])}>
       <div className="font-mono text-[18px] leading-none text-black">{value}</div>
-      <div className="mt-1 font-mono text-[9px] uppercase tracking-[0.1em] text-gray-new-50">{label}</div>
+      <div className="mt-1 font-mono text-[11px] uppercase tracking-normal text-gray-new-50 sm:tracking-[0.1em]">{label}</div>
     </div>
   );
 }
@@ -201,7 +201,7 @@ export function PFW01() {
           </span>
           <div className="min-w-0">
             <div className="truncate text-[14px] font-medium tracking-tight text-black">Fail-closed egress boundary</div>
-            <div className="font-mono text-[10px] text-gray-new-50">network namespace sealed; run 08f2</div>
+            <div className="font-mono text-[12px] text-gray-new-50">network namespace sealed; run 08f2</div>
           </div>
         </div>
         <StateChip tone="success">0 escaped</StateChip>
@@ -215,7 +215,7 @@ export function PFW01() {
               hostnames ran 68px past the card and crossed into the arrow
               gutter, which only happened on desktop and so survived every
               mobile check. */}
-          <div className="mt-4 space-y-2 break-words font-mono text-[10px] leading-4 text-black/70">
+          <div className="mt-4 space-y-2 break-words font-mono text-[12px] leading-4 text-black/70">
             <div>POST api.stripe.com/v1/charges</div>
             <div>POST api.sendgrid.com/v3/mail/send</div>
             <div className="text-[#A73737]">TCP 18.4.2.9:443</div>
@@ -226,7 +226,7 @@ export function PFW01() {
 
         <section className="min-w-0 rounded-[12px] border border-[#83B39F]/35 bg-[#E4F1EB] p-4" aria-label="Mandatory egress gateway policy checks">
           <SectionTitle eyebrow="mandatory gateway" title="Resolve, inspect, then apply the first explicit rule" tone="sage" />
-          <div className="mt-4 rounded-[9px] bg-white/75 px-3 py-2.5 font-mono text-[10px] leading-5 text-[#285D49]">
+          <div className="mt-4 rounded-[9px] bg-white/75 px-3 py-2.5 font-mono text-[12px] leading-5 text-[#285D49]">
             Default posture: BLOCK. Unknown or ambiguous traffic fails closed.
           </div>
         </section>
@@ -244,9 +244,9 @@ export function PFW01() {
       </div>
 
       <div className="mt-3 grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-[10px] bg-black px-3 py-2.5 text-white">
-        <MicroLabel tone="sage">attempted-effect ledger</MicroLabel>
+        <span className="font-mono text-[11px] text-white">Gateway request log</span>
         <div className="h-px min-w-0 bg-white/15" aria-hidden />
-        <span className="font-mono text-[10px] text-white/70">every gateway decision is append-only</span>
+        <span className="font-mono text-[12px] text-white/70">every gateway decision is append-only</span>
       </div>
     </FirewallFigure>
   );
@@ -270,7 +270,7 @@ export function PFW02() {
         <section className="min-w-0 rounded-[10px] bg-[#f7f7f5] p-3" aria-label="Charge request">
           <MicroLabel>request</MicroLabel>
           <div className="mt-2 font-mono text-[11px] leading-5 text-black">POST /v1/charges</div>
-          <div className="mt-2 font-mono text-[10px] leading-5 text-black/55">amount 4900; usd; cus_sim_11</div>
+          <div className="mt-2 font-mono text-[12px] leading-5 text-black/55">amount 4900; usd; cus_sim_11</div>
         </section>
 
         <div className="flex items-center justify-center" aria-hidden>
@@ -280,7 +280,7 @@ export function PFW02() {
         <section className="min-w-0 rounded-[10px] border border-[#83B39F]/35 bg-[#E4F1EB] p-3" aria-label="Simulated Stripe response">
           <MicroLabel tone="sage">mock response</MicroLabel>
           <div className="mt-2 font-mono text-[11px] leading-5 text-[#285D49]">200 OK; ch_sim_08f2</div>
-          <div className="mt-2 font-mono text-[10px] leading-5 text-black/60">status succeeded; livemode false</div>
+          <div className="mt-2 font-mono text-[12px] leading-5 text-black/60">status succeeded; livemode false</div>
         </section>
       </div>
 
@@ -290,7 +290,7 @@ export function PFW02() {
         </span>
         <div className="min-w-0">
           <div className="truncate text-[12px] font-medium text-black">Clone-local state transition persisted</div>
-          <div className="truncate font-mono text-[10px] text-gray-new-50">cus_sim_11; charge.created; api.stripe.com never resolved</div>
+          <div className="truncate font-mono text-[12px] text-gray-new-50">cus_sim_11; charge.created; api.stripe.com never resolved</div>
         </div>
       </div>
     </FirewallFigure>
@@ -322,13 +322,13 @@ export function PFW03() {
             </span>
             <div className="min-w-0">
               <div className="truncate text-[12px] font-medium text-black">Order #4182</div>
-              <div className="truncate font-mono text-[10px] text-gray-new-50">msg_sim_2a91; multipart/alternative</div>
+              <div className="truncate font-mono text-[12px] text-gray-new-50">msg_sim_2a91; multipart/alternative</div>
             </div>
           </div>
           <StateChip tone="danger">not sent</StateChip>
         </header>
 
-        <dl className="grid grid-cols-[3.25rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 border-b border-black/[0.06] px-3 py-2.5 font-mono text-[10px] leading-4">
+        <dl className="grid grid-cols-[3.25rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 border-b border-black/[0.06] px-3 py-2.5 font-mono text-[12px] leading-4">
           <dt className="text-gray-new-50">from</dt>
           <dd className="min-w-0 truncate text-black/70">checkout@twin.local</dd>
           <dt className="text-gray-new-50">to</dt>
@@ -344,15 +344,15 @@ export function PFW03() {
             <div className="mt-2 h-2 w-[56%] rounded-full bg-black/[0.07]" />
           </div>
           <div className="grid content-start gap-1" aria-label="Captured MIME parts">
-            <span className="rounded-[6px] bg-[#f7f7f5] px-2 py-1 font-mono text-[9px] text-gray-new-50">plain</span>
-            <span className="rounded-[6px] bg-[#E4F1EB] px-2 py-1 font-mono text-[9px] text-[#285D49]">html</span>
+            <span className="rounded-[6px] bg-[#f7f7f5] px-2 py-1 font-mono text-[11px] text-gray-new-50">plain</span>
+            <span className="rounded-[6px] bg-[#E4F1EB] px-2 py-1 font-mono text-[11px] text-[#285D49]">html</span>
           </div>
         </div>
       </article>
 
       <div className="mt-2.5 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-[9px] bg-black px-3 py-2.5 text-white">
         <span className="size-1.5 rounded-full bg-[#33bf00]" aria-hidden />
-        <span className="truncate font-mono text-[10px] text-white/70">POST /v3/mail/send returns provider-shaped 202; no delivery attempted.</span>
+        <span className="truncate font-mono text-[12px] text-white/70">POST /v3/mail/send returns provider-shaped 202; no delivery attempted.</span>
       </div>
     </FirewallFigure>
   );
@@ -389,7 +389,7 @@ export function PFW04() {
           >
             <span
               className={cn(
-                "grid size-6 place-items-center rounded-full font-mono text-[9px]",
+                "grid size-6 place-items-center rounded-full font-mono text-[11px]",
                 check.tone === "danger" ? "bg-[#f4d9d9] text-[#A73737]" : check.tone === "sage" ? "bg-[#CAE6D9] text-[#285D49]" : "bg-[#f0f0ee] text-gray-new-50",
               )}
             >
@@ -398,7 +398,7 @@ export function PFW04() {
             <span className="min-w-0 truncate text-[11px] font-medium text-black/75">{check.label}</span>
             <span
               className={cn(
-                "shrink-0 font-mono text-[10px] font-medium",
+                "shrink-0 font-mono text-[12px] font-medium",
                 check.tone === "danger" ? "text-[#A73737]" : check.tone === "sage" ? "text-[#285D49]" : "text-gray-new-50",
               )}
             >
@@ -408,7 +408,7 @@ export function PFW04() {
         ))}
       </ol>
 
-      <div className="mt-3 rounded-[10px] bg-black px-3 py-2.5 font-mono text-[10px] leading-4 text-white/70">
+      <div className="mt-3 rounded-[10px] bg-black px-3 py-2.5 font-mono text-[12px] leading-4 text-white/70">
         Socket not opened; 0 bytes out; denial receipt deny_02 recorded.
       </div>
     </FirewallFigure>
@@ -443,10 +443,10 @@ export function PFW05() {
       </div>
 
       <div className="mt-3 overflow-hidden rounded-[10px] border border-black/[0.08]">
-        <div className="grid grid-cols-[minmax(0,1fr)_5.5rem_5.5rem] gap-3 bg-black px-3 py-2 font-mono text-[9px] font-medium uppercase tracking-[0.1em] text-white/60">
-          <span>attempted effect</span>
+        <div className="grid grid-cols-2 gap-x-3 gap-y-2 bg-black px-3 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.1em] text-white/60 sm:grid-cols-[minmax(0,1fr)_5.5rem_5.5rem]">
+          <span className="col-span-2 sm:col-span-1">attempted effect</span>
           <span>mode</span>
-          <span>receipt</span>
+          <span className="text-right sm:text-left">receipt</span>
         </div>
         {LEDGER_ROWS.map((row, index) => {
           const blocked = row.result === "blocked";
@@ -454,23 +454,23 @@ export function PFW05() {
             <div
               key={row.receipt}
               className={cn(
-                "grid grid-cols-[minmax(0,1fr)_5.5rem_5.5rem] items-center gap-3 border-t border-black/[0.06] px-3 py-2.5 font-mono text-[10px]",
+                "grid grid-cols-2 items-center gap-x-3 gap-y-2 border-t border-black/[0.06] px-3 py-3 font-mono text-[12px] sm:grid-cols-[minmax(0,1fr)_5.5rem_5.5rem] sm:py-2.5",
                 blocked ? "bg-[#fbefef]" : index % 2 === 0 ? "bg-white" : "bg-[#f7f7f5]",
               )}
             >
-              <span className="flex min-w-0 items-center gap-2 text-black/75" title={row.target}>
+              <span className="col-span-2 flex min-w-0 items-start gap-2 text-black/75 sm:col-span-1 sm:items-center" title={row.target}>
                 <OutcomeDot blocked={blocked} />
                 <span className="shrink-0 text-gray-new-50">{row.method}</span>
-                <span className="min-w-0 truncate">{row.target}</span>
+                <span className="min-w-0 break-words sm:truncate">{row.target}</span>
               </span>
               <span className={blocked ? "text-[#A73737]" : "text-[#285D49]"}>{row.mode}</span>
-              <span className="text-gray-new-50">{row.receipt}</span>
+              <span className="text-right text-gray-new-50 sm:text-left">{row.receipt}</span>
             </div>
           );
         })}
       </div>
 
-      <div className="mt-3 rounded-[10px] bg-[#eff8f3] px-3 py-2.5 font-mono text-[10px] leading-4 text-[#285D49]">
+      <div className="mt-3 rounded-[10px] bg-[#eff8f3] px-3 py-2.5 font-mono text-[12px] leading-4 text-[#285D49]">
         {MODES.join(" / ")} are the only visible outcomes here. Every row represents an attempted effect; none escaped.
       </div>
     </FirewallFigure>
@@ -490,10 +490,10 @@ function RouteNode({
 }) {
   return (
     <div className={cn("grid min-w-0 grid-cols-[28px_minmax(0,1fr)] items-center gap-3 rounded-[9px] border px-3 py-2.5", toneClasses[tone])}>
-      <span className="grid size-7 place-items-center rounded-full border border-current/15 bg-white font-mono text-[9px]">{number}</span>
+      <span className="grid size-7 place-items-center rounded-full border border-current/15 bg-white font-mono text-[11px]">{number}</span>
       <span className="min-w-0">
         <span className="block truncate text-[12px] font-medium text-black">{title}</span>
-        <span className="block truncate font-mono text-[10px] text-gray-new-50">{detail}</span>
+        <span className="block truncate font-mono text-[12px] text-gray-new-50">{detail}</span>
       </span>
     </div>
   );
@@ -520,7 +520,7 @@ export function PFW06() {
             <RouteNode number="02" title="Clone-local DNS" detail="stripe.pack.local" tone="sage" />
             <RouteNode number="03" title="Mandatory gateway" detail="MOCK; decision logged" tone="success" />
           </div>
-          <div className="mt-3 flex items-center justify-between gap-2 rounded-[9px] bg-white px-3 py-2.5 font-mono text-[10px]">
+          <div className="mt-3 flex items-center justify-between gap-2 rounded-[9px] bg-white px-3 py-2.5 font-mono text-[12px]">
             <span className="text-gray-new-50">network result</span>
             <span className="text-[#285D49]">contained response</span>
           </div>
@@ -539,18 +539,18 @@ export function PFW06() {
               </span>
               <span className="min-w-0">
                 <span className="block truncate text-[12px] font-medium text-black">Public network unreachable</span>
-                <span className="block truncate font-mono text-[10px] text-[#A73737]">ENETUNREACH; 0 bytes out</span>
+                <span className="block truncate font-mono text-[12px] text-[#A73737]">ENETUNREACH; 0 bytes out</span>
               </span>
             </div>
           </div>
           <div className="mt-3 grid grid-cols-2 divide-x divide-black/[0.07] rounded-[9px] bg-white py-2.5 text-center">
             <div>
               <MicroLabel>gateway</MicroLabel>
-              <div className="mt-1 font-mono text-[10px] text-black/55">not reached</div>
+              <div className="mt-1 font-mono text-[12px] text-black/55">not reached</div>
             </div>
             <div>
               <MicroLabel>ledger row</MicroLabel>
-              <div className="mt-1 font-mono text-[10px] text-black/55">none</div>
+              <div className="mt-1 font-mono text-[12px] text-black/55">none</div>
             </div>
           </div>
         </section>
@@ -562,7 +562,7 @@ export function PFW06() {
         </span>
         <div className="min-w-0">
           <div className="text-[12px] font-medium">Containment is structural</div>
-          <div className="truncate font-mono text-[10px] text-white/55">no DNS dependency; no editable bypass; no public route</div>
+          <div className="truncate font-mono text-[12px] text-white/55">no DNS dependency; no editable bypass; no public route</div>
         </div>
       </div>
     </FirewallFigure>

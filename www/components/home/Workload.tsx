@@ -17,13 +17,12 @@ export function Workload() {
           <Heading
             icon="workload"
             label="Load"
-            title="<strong>Traffic shaped like production's.</strong> The route mix out of your own access log, sent at the twin. Not production traffic diverted."
+            title="<strong>Test the routes your users rely on.</strong> Replay your production traffic mix against the new build."
           />
           <div className="relative mt-14 min-w-0 max-xl:mt-12 max-lg:mt-10 max-md:mt-8 max-sm:mt-11">
             <WorkloadIdeStage />
             <Illustrative className="mt-6">
-              An editor with the real files in it. af init, af up and af ci exist and do what the
-              terminal shows; the repository and its contents are made up.
+              Example project using the Antifailure CLI.
             </Illustrative>
           </div>
         </div>
