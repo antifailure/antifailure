@@ -1,4 +1,4 @@
-# improved
+# changed
 
 The website now leads with the MCP workflow and explains each capability in
 shorter, more direct language. Product, solutions, pricing, forms, and articles

@@ -68,7 +68,7 @@ function LoadFigure({
         <figcaption id={captionId} className="sr-only">
           {label}
         </figcaption>
-        <FloatWindow className="w-full overflow-hidden border border-black/[0.06]">
+        <FloatWindow className="w-full overflow-hidden">
           <FigureChrome id={id} tab={tab} rail={rail} />
           <div className={cn("p-3.5 sm:p-4", compact && "sm:p-3.5")}>{children}</div>
         </FloatWindow>
