@@ -196,6 +196,26 @@ func TestABranchWithItsOwnFilesystemKeepsItsDataAcrossAStopAndStart(t *testing.T
 // The probe is also a QUERY rather than `pg_isready`, because a query is what
 // every caller does next, and a gate should prove the capability the caller
 // needs rather than a nearby one.
+//
+// AND IT NEEDS NO PASSWORD, WHICH IS A PROPERTY WORTH STATING RATHER THAN
+// RELYING ON. A review read this as a defect, on the reasonable ground that the
+// product's own TCP connection string carries the managed password and this
+// probe carries none. The difference is WHERE it connects FROM. `initdb` in the
+// stock image writes these host lines, read out of a running container rather
+// than assumed:
+//
+//	host  all  all  127.0.0.1/32  trust
+//	host  all  all  ::1/128       trust
+//	host  all  all  all           scram-sha-256
+//
+// This probe runs INSIDE the branch through `docker exec`, so it arrives from
+// 127.0.0.1 and matches the trust line. The product connects from outside the
+// container, matches the last line, and needs the password. So the two are not
+// the same connection and only one of them is passwordless.
+//
+// If the provider ever sets `POSTGRES_HOST_AUTH_METHOD`, those trust lines go
+// and this probe stops working. That is the one change that would break it, and
+// it is named here so the next person does not have to rediscover it.
 func requireBranchReady(t *testing.T, ctx context.Context, envID string) {
 	t.Helper()
 	require.NoError(t, branchReady(t, ctx, envID, 2*time.Minute),
@@ -410,7 +430,14 @@ func TestBranchReadinessRefusesTheSocketOnlyServerTheEntrypointPassesThrough(t *
 	t.Cleanup(func() {
 		clean, cancelClean := context.WithTimeout(context.Background(), time.Minute)
 		defer cancelClean()
-		_ = dockerutil.RemoveContainer(clean, cli, created.ID)
+		// Reported rather than discarded. This container's kind is `db-test`,
+		// which the provider's own candidate cleanup does not sweep, so a
+		// removal that failed silently would leave a Postgres running and the
+		// test would pass over the top of it. A leak nobody is told about is
+		// found days later by whoever runs out of memory.
+		if err := dockerutil.RemoveContainer(clean, cli, created.ID); err != nil {
+			t.Errorf("the planted socket only server was left behind: %v", err)
+		}
 	})
 	_, err = cli.ContainerStart(ctx, created.ID, client.ContainerStartOptions{})
 	require.NoError(t, err)
