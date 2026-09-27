@@ -30,3 +30,10 @@ when the container stops rather than after the readiness wait, so the most
 useful verdict in the feature does not arrive as a timeout. A major version
 mismatch between the two images is refused before either environment is built,
 by the provider's own comparison against the server rather than against a tag.
+
+A guide walks the whole flow end to end, because the pieces existed on four
+separate pages and nothing joined them: declare the build, run one workload
+against both builds on one golden, read the throughput and the latency
+distribution, then crash the database and read what the recovery kept. Every
+output block on it is from a run, and the page says which command produced each
+one.

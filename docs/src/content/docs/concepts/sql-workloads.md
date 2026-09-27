@@ -388,11 +388,22 @@ This is a finding rather than a failure, and for somebody hardening a storage
 engine it is often the most useful thing the tool will say.
 
 ```
-  AF-DB-044  The build ptlive:candidate could not open the data directory of
-  golden gv_20260924103012_a1b2, and the server said: FATAL:  database files
-  are incompatible with server / DETAIL:  The database cluster was initialized
-  with BLCKSZ 8192, but the server was compiled with BLCKSZ 16384.
+AF-DB-044: The build postgres:16-alpine could not open the data directory of
+golden gv_20260927070738148927_rebase20, and the server said: 2026-09-27
+07:08:10.280 UTC [1] FATAL:  database files are incompatible with server /
+2026-09-27 07:08:10.280 UTC [1] DETAIL:  The data directory was initialized by
+PostgreSQL version 17, which is not compatible with this version 16.15.
 ```
+
+That is real output, from
+`TestABuildThatCannotOpenTheOtherBuildsDataDirectoryIsAFinding` in
+`engine/internal/db/docker/rebase_live_test.go`, which provokes the refusal at the
+provider rather than through the command. Two different majors are the cheapest
+way to produce a data directory a server will not open, and `af load compare`
+refuses two majors before it builds anything, so the command can never show you
+this particular sentence. The shape is what matters: a build of your own engine
+with a catalog version, a block size or a page layout the other build does not
+accept produces the same finding with its own detail line.
 
 The server's own words are carried into the message, because the verdict line
 is the same sentence for a catalog version, a block size, a write ahead log

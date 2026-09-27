@@ -408,7 +408,7 @@ other build's data directory is reported as `AF-DB-044` with the server's own
 words, rather than as an environment that would not start.
 
 The full account is under
-[SQL workloads](/concepts/sql-workloads/#comparing-two-database-builds), because
+[SQL workloads](/docs/concepts/sql-workloads#comparing-two-database-builds), because
 the person who needs it is usually measuring the database directly.
 
 ### What the comparison cannot control
