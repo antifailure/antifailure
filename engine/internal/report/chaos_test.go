@@ -232,3 +232,96 @@ func TestUnreachableSays_AnUnprobedNumberIsLabelledAsOne(t *testing.T) {
 	rec := &report.ChaosRecovery{DowntimeMs: 3100}
 	require.Equal(t, "3.1s, timed from the fault to the first query after the settle, not probed", rec.UnreachableSays())
 }
+
+// withInvariants is the held run with the manifest's own invariants declared,
+// in the shapes a reader has to be able to tell apart.
+func withInvariants(invs ...report.ChaosInvariant) string {
+	c := heldChaos()
+	c.Faults[0].Invariants = invs
+	return report.Run{Chaos: c}.Markdown()
+}
+
+// TestChaosSection_CarriesBothSidesOfEveryInvariant is what makes a violation
+// readable.
+//
+// The after column alone cannot be acted on: a rule that is broken after a
+// crash and was broken before it is not something the crash did, and a section
+// showing only the second would put a project's own pre-existing defect on the
+// fault. Both sides are on the page for exactly that reason.
+func TestChaosSection_CarriesBothSidesOfEveryInvariant(t *testing.T) {
+	out := withInvariants(
+		report.ChaosInvariant{Name: "every-account-exists", BeforeHeld: true, AfterHeld: true},
+		report.ChaosInvariant{Name: "no-negative-balance", Rows: [][]string{{"2"}}},
+		report.ChaosInvariant{Name: "orders-have-a-customer", BeforeHeld: true,
+			Rows: [][]string{{"7"}, {"9"}}},
+		report.ChaosInvariant{Name: "asks-a-missing-table",
+			BeforeError: "relation does not exist", AfterError: "relation does not exist"},
+	)
+	require.Contains(t, out, "| The project's own rules about its own data | Before the fault | After the recovery |")
+	require.Contains(t, out, "| `every-account-exists` | held | held |")
+	require.Contains(t, out, "| `no-negative-balance` | violated | violated, 1 row |")
+	// The one the fault is answerable for is the one that is bold, the way a
+	// damaged relation is.
+	require.Contains(t, out, "| **`orders-have-a-customer`** | held | violated, 2 rows |")
+	require.Contains(t, out, "| `asks-a-missing-table` | not asked: relation does not exist | not asked: relation does not exist |")
+}
+
+// TestChaosSection_AnInvariantNobodyAskedIsNotRenderedAsHeld is the pass that
+// would be silent. "Not asked" and "held" are the two answers this arm exists
+// to keep apart, and a reader who cannot see the difference has been told the
+// run checked something it never did.
+func TestChaosSection_AnInvariantNobodyAskedIsNotRenderedAsHeld(t *testing.T) {
+	out := withInvariants(report.ChaosInvariant{
+		Name: "no-negative-balance", BeforeHeld: true,
+		AfterError: "the database did not answer a query after the fault",
+	})
+	require.Contains(t, out, "| `no-negative-balance` | held | not asked: the database did not answer a query after the fault |")
+	require.NotContains(t, out, "| `no-negative-balance` | held | held |")
+}
+
+// TestChaosSection_SurvivesAFaultThatEndedInAnError is the ordering the arm
+// exists for: the database did not come back, so there is no recovery table,
+// and the one thing worth saying is that the project's rules were never asked.
+func TestChaosSection_SurvivesAFaultThatEndedInAnError(t *testing.T) {
+	out := report.Run{Chaos: &report.Chaos{Faults: []report.ChaosFault{{
+		Name: "freeze", Kind: "container_pause", Target: "database",
+		Injected: true, Undone: true,
+		Error: "AF-CHS-006: the database did not answer a query within 5s",
+		Invariants: []report.ChaosInvariant{{
+			Name: "no-negative-balance", BeforeHeld: true,
+			AfterError: "the database did not answer a query after the fault",
+		}},
+	}}}}.Markdown()
+	require.Contains(t, out, "| `no-negative-balance` | held | not asked: the database did not answer a query after the fault |")
+
+	// And the fault is not described as one that could not be injected, and
+	// the section does not claim nothing after it was measured while printing
+	// the table of what was. It went in, it was undone, and the run around it
+	// did not finish.
+	require.NotContains(t, out, "could not be injected",
+		"a fault that went in was reported as one that could not be injected")
+	require.NotContains(t, out, "Nothing after it was measured",
+		"the section said nothing was measured and then printed what was")
+	require.Contains(t, out, "went into database and the run around it did not finish")
+}
+
+// TestChaosSection_AFaultThatNeverWentInStillSaysNothingWasMeasured is the
+// other side of that branch, so the fix above cannot have turned every failure
+// into a fault that landed.
+func TestChaosSection_AFaultThatNeverWentInStillSaysNothingWasMeasured(t *testing.T) {
+	out := report.Run{Chaos: &report.Chaos{Faults: []report.ChaosFault{{
+		Name: "postgres-crash", Kind: "process_kill", Target: "database",
+		Error: "AF-CHS-004: no process in the container matches",
+	}}}}.Markdown()
+	require.Contains(t, out, "could not be injected")
+	require.Contains(t, out, "Nothing after it was measured.")
+	require.NotContains(t, out, "the run around it did not finish")
+}
+
+// TestChaosSection_AddsNothingWhenNoInvariantIsDeclared is the liveness arm
+// for every assertion above, and the requirement that a project which declares
+// none sees no change whatsoever.
+func TestChaosSection_AddsNothingWhenNoInvariantIsDeclared(t *testing.T) {
+	require.NotContains(t, report.Run{Chaos: heldChaos()}.Markdown(),
+		"The project's own rules about its own data")
+}
