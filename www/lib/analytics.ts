@@ -12,7 +12,7 @@
 
 import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
-import { pageViewed, routeIdFor } from "./beacon";
+import { isWebsitePreview, pageViewed, routeIdFor } from "./beacon";
 
 export {
   SESSION_IDLE_TIMEOUT_MS,
@@ -52,7 +52,7 @@ export function usePageViews(): void {
   const last = useRef<string | null>(null);
 
   useEffect(() => {
-    if (pathname === "/cms-preview") return;
+    if (isWebsitePreview(pathname)) return;
     if (last.current === pathname) return;
     last.current = pathname;
     pageViewed(routeIdFor(pathname));

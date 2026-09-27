@@ -115,6 +115,36 @@ export const productRouter = router({
 - A new permission goes in `src/admin/permissions.ts` under **your lane's
   prefix**, with a description and at least one role that holds it.
 
+## Website editor
+
+Owners open **Administration → Website**. Use the Page field to choose from the
+built page catalog or enter a public path. The canvas shows that route at
+desktop, tablet, or phone width. Select text, an image, a diagram detail, or a
+section to edit it. The homepage and inner marketing pages support custom
+sections; documentation pages support the same blocks, including HTML, CSS,
+and JavaScript inside an isolated iframe. Shared header and footer fields also
+apply to documentation. The current source copy remains the default for any
+field that has not been changed, and the editor lists saved fields that no
+longer match the current page source so an owner can reset them.
+
+**Ask AI** sits beside the manual inspector. Choose an element, section, or
+page; describe a copy, design, or block change; inspect the proposed edits;
+then apply them to the draft. Applying a proposal does not publish it. Drafts
+autosave, and Publish updates the public document and queues a static site
+refresh. The per-page public read projects only the selected route plus shared
+chrome, keeping other pages' edits out of a visitor's response.
+
+The API route `admin.administration.website.propose` is owner-only. It reads
+`AF_CMS_ANTHROPIC_API_KEY` only on the server. Hosted staging and production
+address the externally managed `cms-anthropic-api-key` Azure Key Vault secret;
+Terraform never reads its value. Self-hosted installs leave the variable empty
+to disable suggestions while preserving manual editing. A request sends at
+most about 11,000 characters of selected-page field context to Claude Haiku, caps output at
+1,800 tokens, and uses an atomic per-owner daily allowance of 40 requests and
+180,000 tokens. Neither a prompt nor the API key is written to website drafts
+or audits. A model response is schema-checked and previewed before the owner
+can apply it.
+
 ## Before you say it is done
 
 ```

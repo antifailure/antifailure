@@ -15,6 +15,13 @@
       "headers": { "cache-control": "no-store" }
     },
     {
+      "route": "/cms-pages.json",
+      "headers": {
+        "cache-control": "public, max-age=60",
+        "access-control-allow-origin": "https://app.antifailure.dev"
+      }
+    },
+    {
       "route": "/product/crowdi",
       "redirect": "/product/load",
       "statusCode": 301
@@ -147,6 +154,7 @@
     }
   },
   "globalHeaders": {
+    "content-security-policy": "frame-ancestors https://app.antifailure.dev",
     "strict-transport-security": "max-age=63072000; includeSubDomains; preload",
     "x-content-type-options": "nosniff",
     "referrer-policy": "strict-origin-when-cross-origin",

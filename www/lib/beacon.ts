@@ -51,6 +51,7 @@
  */
 
 import { controlPlaneUrl } from "./control-plane-routes";
+import { parsePreviewConnection } from "./cms/preview-origin";
 import { looksAutomated } from "./bots";
 
 /**
@@ -550,7 +551,9 @@ let measuring: boolean | null = null;
 export function isWebsitePreview(pathname?: string): boolean {
   const path = pathname ?? (typeof location === "undefined" ? "" : location.pathname);
   const normalized = path.replace(/\/+$/, "").replace(/\.html$/, "");
-  return normalized === "/cms-preview" || normalized.startsWith("/cms-preview/");
+  if (normalized === "/cms-preview" || normalized.startsWith("/cms-preview/")) return true;
+  if (typeof window === "undefined" || window.parent === window) return false;
+  return parsePreviewConnection(window.location.search, new URL(controlPlaneUrl("website.published")).origin, process.env.NODE_ENV !== "production") !== null;
 }
 
 let previewSuppressed = false;

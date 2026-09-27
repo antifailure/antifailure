@@ -681,4 +681,6 @@ do
 done
 test -d site/docs || { echo "no /docs in the assembled site"; exit 1; }
 
+python3 tools/site/page_catalog.py site
+
 echo "assembled $(find site -type f | wc -l | tr -d ' ') files"

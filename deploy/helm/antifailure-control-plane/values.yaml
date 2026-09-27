@@ -229,6 +229,12 @@ providerKeys:
     secret: AF_PROVIDER_KEY_SECRET
     secrets: AF_PROVIDER_KEY_SECRETS
 
+# Optional owner-only website assistant. Create this Kubernetes Secret through
+# your secret manager; the chart never writes an API key into a rendered Secret.
+websiteAI:
+  existingSecret: ""
+  secretKey: AF_CMS_ANTHROPIC_API_KEY
+
 # The enterprise edition, for an installation running
 # ghcr.io/antifailure/control-plane-enterprise as image.repository.
 #

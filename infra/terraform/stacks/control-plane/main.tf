@@ -125,6 +125,7 @@ module "control_plane" {
   provider_key_secret_enabled = var.provider_key_secret_enabled
   provider_key_secrets_name   = var.provider_key_secrets_name
   provider_key_version        = var.provider_key_version
+  cms_anthropic_secret_name   = var.cms_anthropic_secret_name
   github_app_id               = var.github_app_id
 
   enterprise_edition      = var.enterprise_edition

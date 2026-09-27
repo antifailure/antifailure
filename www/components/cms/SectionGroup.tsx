@@ -12,7 +12,7 @@ export function useOrderedSections(group: "page" | "hero", source: readonly Sour
   const definitions = source.map(({ content: _content, ...definition }) => definition);
   const signature = JSON.stringify(definitions);
   useEffect(() => { cms.register([], definitions); }, [cms.register, signature]); // eslint-disable-line react-hooks/exhaustive-deps
-  const custom = cms.document.sections.custom.filter((section) => section.group === group);
+  const custom = cms.document.sections.custom.filter((section) => section.group === group && (group !== "page" || !section.id.startsWith("custom-p")));
   const moves = [...custom.map(({ id, after }) => ({ id, after })), ...cms.document.sections.moves.filter((move) => !move.group || move.group === group)];
   const order = resolveOrder(source.map((section) => section.id), moves, custom.map((section) => section.id), cms.document.sections.hidden);
   const entries = new Map(source.map((section) => [section.id, section]));

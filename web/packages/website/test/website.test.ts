@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import {
   assertWebsiteDocument, emptyWebsiteDocument, normalizeWebsiteDocument, referencedAssets,
   resetStyleOverride, resolveCollection, resolveField, resolveOrder, resolveStyle, safeBuiltinSource,
-  safeHref, setFieldOverride, setStyleOverride, stableStringify, validateWebsiteDocument,
+  safeHref, setFieldOverride, setStyleOverride, stableStringify, validateWebsiteDocument, orderedPageBlockIds, pageBlockPrefix, projectWebsiteDocument, sitePageSlug,
   CUSTOM_SHAPES, DIVIDER_VARIANTS, isCustomShape, isDividerVariant, resolveCustomShape, resolveDividerVariant,
 } from '../src/index.ts'
 import type { FieldValue, RichTextDocument } from '../src/index.ts'
@@ -11,6 +11,56 @@ import type { FieldValue, RichTextDocument } from '../src/index.ts'
 const asset = '7e6d1890-144a-4acf-9a12-579a96ab91ac'
 const font = 'bbed3f78-ec9a-4b63-931b-278eed66be15'
 const customId = `custom-${asset}`
+
+test('scoped blocks stay valid and isolated to their public route', () => {
+  const twin = `${pageBlockPrefix('/product/twins')}${asset}`
+  const load = `${pageBlockPrefix('/product/load')}${font}`
+  assert.notEqual(twin, load)
+  const document = emptyWebsiteDocument()
+  document.sections.custom = [{ id: twin, kind: 'text', group: 'page', after: 'page-product-twins' }, { id: load, kind: 'embed', group: 'page', after: 'page-product-load' }]
+  assert.equal(validateWebsiteDocument(document).ok, true)
+  document.sections.custom[1]!.id = 'custom-pmissing-not-a-uuid'
+  assert.equal(validateWebsiteDocument(document).ok, false)
+})
+
+test('a route slug is stable even with long runs of separators', () => {
+  assert.equal(sitePageSlug('/product/twins/'), 'product-twins')
+  assert.equal(sitePageSlug('/'.repeat(20_000) + 'docs/reference/mcp' + '/'.repeat(20_000)), 'docs-reference-mcp')
+})
+
+test('public page projection keeps shared chrome and only that page content', () => {
+  const document = emptyWebsiteDocument()
+  const twin = `${pageBlockPrefix('/product/twins')}${asset}`
+  const load = `${pageBlockPrefix('/product/load')}${font}`
+  document.fields = { 'header.github.text': 'GitHub', 'page.product-twins.text.h1': 'Twin', 'page.product-load.text.h1': 'Load', [`${twin}.heading`]: 'Twin block', [`${load}.heading`]: 'Load block' }
+  document.styles = { global: { desktop: { color: '#18191b' } }, 'page.product-twins.text.h1': { mobile: { fontSize: 30 } }, 'page.product-load.text.h1': { mobile: { fontSize: 40 } } }
+  document.sections.custom = [{ id: twin, group: 'page', kind: 'text', after: 'page-product-twins' }, { id: load, group: 'page', kind: 'text', after: 'page-product-load' }]
+  const projected = projectWebsiteDocument(document, '/product/twins')
+  assert.deepEqual(Object.keys(projected.fields).sort(), [`${twin}.heading`, 'header.github.text', 'page.product-twins.text.h1'].sort())
+  assert.equal(projected.sections.custom.length, 1)
+  assert.equal(projected.sections.custom[0]!.id, twin)
+  assert.ok(projected.styles.global)
+  assert.equal(projected.styles['page.product-load.text.h1'], undefined)
+  const home = projectWebsiteDocument(document, '/')
+  assert.deepEqual(home.fields, { 'header.github.text': 'GitHub' })
+  assert.deepEqual(home.sections.custom, [])
+  assert.ok(home.styles.global)
+})
+
+test('route blocks honor their saved after anchors and later explicit moves', () => {
+  const path = '/product/twins'
+  const first = `${pageBlockPrefix(path)}${asset}`
+  const second = `${pageBlockPrefix(path)}${font}`
+  const document = emptyWebsiteDocument()
+  document.sections.custom = [
+    { id: second, group: 'page', kind: 'text', after: first },
+    { id: first, group: 'page', kind: 'text', after: 'page-product-twins' },
+  ]
+  assert.deepEqual(orderedPageBlockIds(document, path), [first, second])
+  document.sections.custom[0]!.after = 'page-product-twins'
+  document.sections.moves = [{ id: first, after: second, group: 'page' }]
+  assert.deepEqual(orderedPageBlockIds(document, path), [second, first])
+})
 const richText: RichTextDocument = {
   type: 'doc', content: [
     { type: 'paragraph', content: [

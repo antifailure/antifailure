@@ -44,7 +44,7 @@ describe('the website draft and publication boundary', { skip: hasDb ? false : '
   beforeEach(async () => {
     // This suite runs only in its dedicated CMS database. Reset global content
     // through the test superuser; neither serving role holds these powers.
-    await h.admin`TRUNCATE website_refresh_jobs, website_mutations, website_history, website_assets CASCADE`
+    await h.admin`TRUNCATE website_refresh_jobs, website_mutations, website_history, website_assets, website_ai_usage CASCADE`
     const empty = emptyWebsiteDocument()
     await h.admin`UPDATE website_draft SET revision = 0, document = ${h.admin.json(JSON.parse(JSON.stringify(empty)))}, updated_by = NULL`
     await h.admin`UPDATE website_published SET revision = 0, document = ${h.admin.json(JSON.parse(JSON.stringify(empty)))}, content_hash = ${websiteDigest(empty)}`
@@ -157,8 +157,8 @@ describe('the website draft and publication boundary', { skip: hasDb ? false : '
     assert.equal(second.nextCursor, null)
   })
 
-  test('the serving role cannot read drafts, history, secrets, receipts or write published content', async () => {
-    for (const table of ['website_draft', 'website_history', 'website_secrets', 'website_mutations', 'website_refresh_jobs']) {
+  test('the serving role cannot read operator-only website data or write published content', async () => {
+    for (const table of ['website_draft', 'website_history', 'website_secrets', 'website_mutations', 'website_refresh_jobs', 'website_ai_usage']) {
       await assert.rejects(() => h.pool.withoutTenant((db) => db.execute(sql.raw(`SELECT * FROM ${table}`))), denied)
     }
     await assert.rejects(() => h.pool.withoutTenant((db) => db.execute(sql`UPDATE website_published SET revision = 99`)), denied)
@@ -279,6 +279,11 @@ describe('the website draft and publication boundary', { skip: hasDb ? false : '
     assert.notEqual(published.headers.get('etag'), etag)
     const body = await published.json() as { document: unknown }
     assert.deepEqual(body.document, changed('private'))
+    const page = await h.fetch('/v1/website/published?path=%2Fproduct%2Ftwins')
+    assert.equal(page.status, 200)
+    assert.deepEqual((await page.json() as { document: unknown }).document, emptyWebsiteDocument())
+    const invalid = await h.fetch('/v1/website/published?path=https%3A%2F%2Fevil.test')
+    assert.equal(invalid.status, 400)
     const evil = await h.fetch('/v1/website/published', { headers: { origin: 'https://evil-site.test' } })
     assert.equal(evil.headers.get('access-control-allow-origin'), null)
     const preflight = await h.fetch('/v1/website/published', { method: 'OPTIONS', headers: { origin: 'https://evil-site.test' } })
@@ -286,6 +291,48 @@ describe('the website draft and publication boundary', { skip: hasDb ? false : '
     const head = await h.fetch('/v1/website/published', { method: 'HEAD' })
     assert.equal(head.status, 200)
     assert.equal(await head.text(), '')
+  })
+
+  test('the homepage response does not include edits for an unrelated page', async () => {
+    const document = emptyWebsiteDocument()
+    document.fields = { 'hero.heading': 'Homepage', 'page.product-twins.text.h1': 'Twins only' }
+    await owner.caller.saveDraft({ document, expectedRevision: 0, requestId: randomUUID() })
+    await owner.caller.publish({ expectedRevision: 1, requestId: randomUUID() })
+    const home = await (await h.fetch('/v1/website/published?path=%2F')).json() as { document: { fields: Record<string, unknown> } }
+    const twin = await (await h.fetch('/v1/website/published?path=%2Fproduct%2Ftwins')).json() as { document: { fields: Record<string, unknown> } }
+    assert.deepEqual(home.document.fields, { 'hero.heading': 'Homepage' })
+    assert.deepEqual(twin.document.fields, { 'page.product-twins.text.h1': 'Twins only' })
+  })
+
+  test('AI proposals are owner-only, budgeted, and cannot write or publish a draft', async () => {
+    const previousKey = process.env.AF_CMS_ANTHROPIC_API_KEY
+    const previousFetch = globalThis.fetch
+    process.env.AF_CMS_ANTHROPIC_API_KEY = 'test-key'
+    globalThis.fetch = async () => new Response(JSON.stringify({
+      content: [{ type: 'text', text: JSON.stringify({ message: 'Suggested a clearer headline.', edits: [{ key: 'hero.title', value: 'Test before you ship.' }], styles: [], actions: [] }) }],
+      usage: { input_tokens: 100, output_tokens: 20 }, stop_reason: 'end_turn',
+    }), { status: 200 })
+    const input = { page: '/', prompt: 'Make the headline clearer', fields: [{ key: 'hero.title', label: 'Headline', kind: 'text' as const, value: 'Know what happens.' }], targets: ['hero'] }
+    try {
+      const support = await operator('support')
+      await assert.rejects(() => support.caller.propose(input), { code: 'FORBIDDEN' })
+      const wide = { ...input, fields: [1, 2, 3].map((n) => ({ key: `hero.text${n}`, label: `Text ${n}`, kind: 'text' as const, value: '界'.repeat(3000) })) }
+      await assert.rejects(() => owner.caller.propose(wide), { code: 'BAD_REQUEST' })
+      const before = await owner.caller.get()
+      for (let i = 0; i < 40; i++) {
+        const proposal = await owner.caller.propose(input)
+        assert.deepEqual(proposal.edits, [{ key: 'hero.title', value: 'Test before you ship.' }])
+      }
+      await assert.rejects(() => owner.caller.propose(input), { code: 'TOO_MANY_REQUESTS' })
+      const afterState = await owner.caller.get()
+      assert.deepEqual(afterState.document, before.document)
+      assert.equal(afterState.draftRevision, before.draftRevision)
+      assert.equal(afterState.publishedRevision, before.publishedRevision)
+    } finally {
+      globalThis.fetch = previousFetch
+      if (previousKey === undefined) delete process.env.AF_CMS_ANTHROPIC_API_KEY
+      else process.env.AF_CMS_ANTHROPIC_API_KEY = previousKey
+    }
   })
 
   test('referenced images and fonts become public atomically; private deletes and archival preserve references', async () => {

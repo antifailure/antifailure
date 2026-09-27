@@ -180,8 +180,9 @@ response_time_threshold_ms = 4000
 # The organization the hosted licence is issued to. It is compared against the
 # licence and against nothing else: every customer organization on this plane
 # is gated by its own plan, and this names the installation.
-enterprise_edition = true
-license_org        = "antifailure"
+enterprise_edition        = true
+license_org               = "antifailure"
+cms_anthropic_secret_name = "cms-anthropic-api-key"
 
 # The public half of license-signing-key-hosted-2026-09, which sits in
 # afcp-kv-centralus. Derived from the vault's copy by re-deriving the key from

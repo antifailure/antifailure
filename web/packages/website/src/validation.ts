@@ -350,7 +350,10 @@ function parseCustomSections(value: unknown, path: string, errors: ValidationIss
     const raw = object(entry, at, errors)
     if (!raw) continue
     onlyKeys(raw, ['id', 'kind', 'group', 'after'], at, errors)
-    if (typeof raw.id !== 'string' || !raw.id.startsWith('custom-') || !isAssetId(raw.id.slice(7))) { issue(errors, `${at}.id`, 'Custom sections require a custom-UUID identifier.'); continue }
+    const scoped = typeof raw.id === 'string' ? /^custom-p[a-z0-9]{1,7}-(.+)$/u.exec(raw.id) : null
+    if (typeof raw.id !== 'string' || !(raw.id.startsWith('custom-') && isAssetId(raw.id.slice(7))) && !(scoped && isAssetId(scoped[1]))) {
+      issue(errors, `${at}.id`, 'Custom sections require a scoped or unscoped custom UUID identifier.'); continue
+    }
     const id = raw.id.toLowerCase()
     if (seen.has(id)) { issue(errors, `${at}.id`, 'Duplicate custom section.'); continue }
     if (typeof raw.kind !== 'string' || !SECTION_KINDS.has(raw.kind)) { issue(errors, `${at}.kind`, 'Unknown custom section kind.'); continue }

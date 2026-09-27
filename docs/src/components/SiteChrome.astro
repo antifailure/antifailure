@@ -71,21 +71,22 @@ const docsHome = base || "/docs";
 // "true" is the value for "this is the relevant one" when it is not the page.
 const here = Astro.url.pathname.replace(/\/$/, "") || "/";
 const nav = [
-  { text: "Product", href: "/product" },
-  { text: "Solutions", href: "/solutions" },
+  { id: "product", text: "Product", href: "/product" },
+  { id: "solutions", text: "Solutions", href: "/solutions" },
   // Two fixes on one line. `base`, not `${base}/`: the host sets
   // "trailingSlash": "never", so the slashed form 301s, and this is the Docs
   // link in the header of all 82 documentation pages, which made it the
   // most-served redirect on the site. And `current` is computed rather than
   // hardcoded true, so the one page that IS the Docs home says "page" and the
   // other 81, for which Docs is the section and not the page, say "true".
-  { text: "Docs", href: docsHome, current: here === docsHome ? "page" : "true" },
-  { text: "Writing", href: "/blog" },
-  { text: "Pricing", href: "/pricing" },
+  { id: "docs", text: "Docs", href: docsHome, current: here === docsHome ? "page" : "true" },
+  { id: "writing", text: "Writing", href: "/blog" },
+  { id: "pricing", text: "Pricing", href: "/pricing" },
 ];
 ---
 
 <header
+  data-cms-section="header"
   class="af-header relative z-50 flex h-16 w-full items-center bg-white after:absolute after:right-0 after:bottom-0 after:left-0 after:h-px after:bg-gray-new-90 max-xl:h-14"
 >
   <div
@@ -94,6 +95,7 @@ const nav = [
     <div class="flex items-center gap-x-6 xl:gap-x-10">
       <a
         href="/"
+        data-cms-href="header.logo.href"
         class="af-wordmark flex h-8 shrink-0 items-center gap-2.5"
         aria-label="Antifailure"
       >
@@ -104,7 +106,7 @@ const nav = [
             stroke-width="2.1"
             stroke-linecap="square"></path>
         </svg>
-        <span class="text-[16px] leading-none font-medium tracking-extra-tight text-black">
+        <span data-cms-key="header.logo.wordmark" class="text-[16px] leading-none font-medium tracking-extra-tight text-black">
           Antifailure
         </span>
       </a>
@@ -116,6 +118,8 @@ const nav = [
               <li class="flex h-16 items-center max-xl:h-14">
                 <a
                   href={item.href}
+                  data-cms-key={`header.menus.${item.id}.text`}
+                  data-cms-href={`header.menus.${item.id}.href`}
                   aria-current={item.current}
                   class:list={[
                     "relative flex h-16 items-center gap-x-1 rounded-sm px-2.5 text-[15px] leading-normal font-normal tracking-snug whitespace-pre transition-colors duration-200 hover:text-black max-xl:h-14",
@@ -136,6 +140,7 @@ const nav = [
       <div class="flex items-center gap-x-6 max-lg:hidden">
         <a
           href="https://github.com/antifailure/antifailure"
+          data-cms-href="header.github.href"
           target="_blank"
           rel="noopener noreferrer"
           class="group flex items-center gap-1.5 rounded-sm py-1.5 text-black transition-colors duration-200 hover:text-gray-new-40"
@@ -150,19 +155,23 @@ const nav = [
               d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.26.8-.58v-2.02c-3.34.72-4.04-1.61-4.04-1.61c-.55-1.39-1.34-1.76-1.34-1.76c-1.09-.75.08-.73.08-.73c1.2.08 1.84 1.24 1.84 1.24c1.07 1.83 2.81 1.3 3.5 1c.1-.78.42-1.3.76-1.6c-2.67-.3-5.47-1.33-5.47-5.93c0-1.31.47-2.38 1.24-3.22c-.13-.3-.54-1.52.12-3.18c0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.29-1.55 3.3-1.23 3.3-1.23c.66 1.66.25 2.88.12 3.18c.77.84 1.24 1.91 1.24 3.22c0 4.61-2.81 5.63-5.48 5.92c.43.37.81 1.1.81 2.22v3.29c0 .32.22.69.82.58A12 12 0 0 0 12 .3z"
             ></path>
           </svg>
-          <span class="text-sm leading-none tracking-extra-tight">GitHub</span>
+          <span data-cms-key="header.github.text" class="text-sm leading-none tracking-extra-tight">GitHub</span>
         </a>
       </div>
       <div class="flex gap-x-3.5">
         <a
           href="/signin"
+          data-cms-key="header.actions.signin.text"
+          data-cms-href="header.actions.signin.href"
           class="inline-flex h-9 cursor-pointer items-center justify-center rounded-full border border-black/40 bg-black/[0.02] px-[18px] text-sm font-medium tracking-extra-tight text-black transition-colors duration-200 hover:border-black"
           >Sign in</a
         >
         <a
-          href="/signup"
+          href="/request-demo"
+          data-cms-key="header.actions.demo.text"
+          data-cms-href="header.actions.demo.href"
           class="inline-flex h-9 cursor-pointer items-center justify-center rounded-full bg-black px-[18px] text-sm font-medium tracking-extra-tight text-white transition-colors duration-200 hover:bg-[#292929]"
-          >Start free</a
+          >Request a demo</a
         >
       </div>
     </div>

@@ -215,6 +215,11 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
         'installation-wide dispatch and reconciliation state. Only the operator role has a grant ' +
           'and the public response never returns its lease token.',
       ],
+      [
+        'website_ai_usage',
+        'the installation-wide owner allowance for optional AI suggestions, keyed by operator ' +
+          'rather than tenant. The serving role has no grant and the table is forced under RLS.',
+      ],
       // The analytics tables carry a keyed hash of the organization rather than
       // its id, and that is the whole point of them: see migrations/0032. An
       // org_id here would make the stream joinable back to a customer, so the

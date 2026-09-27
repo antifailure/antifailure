@@ -496,8 +496,9 @@ stripe_price_team = "price_1UBSGCIfNGpUWtp7OVO2YbsY"
 # production guide, under Turning on the enterprise edition, has both steps in
 # order, and cd.yml refuses the deploy with production untouched if either is
 # missing.
-enterprise_edition = true
-license_org        = "antifailure"
+enterprise_edition        = true
+license_org               = "antifailure"
+cms_anthropic_secret_name = "cms-anthropic-api-key"
 
 # The same signing key as staging: one key, hosted-2026-09, issues both
 # installations' licences. A public key, not a secret.
