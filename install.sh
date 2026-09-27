@@ -322,7 +322,18 @@ say "Downloading $name"
 # The third answer this script used to collapse into one: a release that exists
 # and has no build for this platform is not the same as a network that dropped
 # the download, and "could not download" was said to both.
-fetch "$base/$name.tar.gz" "$tmp/$name.tar.gz" \
+#
+# 2>/dev/null, and it is the whole point of the line rather than tidiness. curl
+# is invoked with -sS, which is silent but SHOWS errors, so a refused archive
+# printed `curl: (56) The requested URL returned error: 404` at the reader
+# immediately BEFORE the sentence below, which was written to replace exactly
+# that kind of noise. The number in it is curl's own error code and not the
+# status: the same 404 came out as 22 through one path and 56 through another,
+# so a reader who takes it for an HTTP status is reading a different number
+# every time. why_not re-asks the URL and reports the status itself, so nothing
+# is lost by silencing the tool, and the two other fetch call sites in this
+# script already silence it. This one was the odd one out.
+fetch "$base/$name.tar.gz" "$tmp/$name.tar.gz" 2>/dev/null \
   || die "$(why_not "$base/$name.tar.gz" "the build for $os $arch" "nothing was installed")"
 
 # The checksum is checked rather than assumed, and there is no path through
@@ -422,7 +433,20 @@ done
 unpinned=0
 [ -e "$tmp/$name/runner/package-lock.json" ] || unpinned=1
 
-mkdir -p "$BIN_DIR" "$PREFIX"
+# Guarded, and each directory on its own, because one unguarded mkdir was the
+# last raw tool error left in this script. `mkdir -p "$BIN_DIR" "$PREFIX"` under
+# set -e printed `mkdir: /some/path: Permission denied` at the reader and exited,
+# with none of this script's own words, straight after "Checksum verified". The
+# die below cannot cover it: that one fires when the FILE cannot be written into
+# a directory that already exists, and says nothing about a directory that could
+# not be created. Two arguments to one mkdir also printed the SAME line twice
+# whenever BIN_DIR sits under PREFIX, which is the default, and BSD mkdir creates
+# the second argument before set -e stops the script, so an unwritable BIN_DIR
+# left an empty PREFIX behind as well as an unexplained failure.
+mkdir -p "$BIN_DIR" 2>/dev/null \
+  || die "$BIN_DIR could not be created, so nothing was installed; check that you can write to it, or set AF_PREFIX or AF_BIN_DIR to somewhere you can"
+mkdir -p "$PREFIX" 2>/dev/null \
+  || die "$PREFIX could not be created, so nothing was installed; check that you can write to it, or set AF_PREFIX to somewhere you can"
 if ! install -m 0755 "$tmp/$name/af" "$BIN_DIR/af" 2>/dev/null; then
   cp "$tmp/$name/af" "$BIN_DIR/af" 2>/dev/null \
     && chmod 0755 "$BIN_DIR/af" 2>/dev/null \
