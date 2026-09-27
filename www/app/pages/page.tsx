@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { builtAuthoredPage, builtAuthoredPages } from "@/lib/authored-pages";
 import { PageHero, PageSection, PageShell } from "@/components/pages/kit";
 import { pageMetadata } from "@/lib/seo";
+import { pageTitle } from "@/lib/site";
 
 const authored = builtAuthoredPages().filter((page) => page.kind === "page").flatMap((page) => {
   const entry = builtAuthoredPage(page.path);
@@ -10,7 +11,7 @@ const authored = builtAuthoredPages().filter((page) => page.kind === "page").fla
 });
 
 export const metadata: Metadata = authored.length ? pageMetadata("/pages") : {
-  title: "Pages | Antifailure", robots: { index: false, follow: false },
+  title: { absolute: pageTitle("Pages") }, robots: { index: false, follow: false },
 };
 
 export default function PagesIndex() {
