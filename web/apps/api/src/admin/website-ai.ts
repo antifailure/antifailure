@@ -130,7 +130,9 @@ export async function requestWebsiteProposal(
       key: field.key, label: field.label, kind: field.kind, sectionId: 'ai-context', defaultValue: field.value,
       ...(field.options ? { options: field.options } : {}),
     })))
-    return { ...checked, usage: { inputTokens: Math.max(0, body.usage?.input_tokens ?? 0), outputTokens: Math.max(0, body.usage?.output_tokens ?? 0) } }
+    const inputTokens = Number.isSafeInteger(body.usage?.input_tokens) && body.usage!.input_tokens! >= 0 ? body.usage!.input_tokens! : 24_000
+    const outputTokens = Number.isSafeInteger(body.usage?.output_tokens) && body.usage!.output_tokens! >= 0 ? body.usage!.output_tokens! : MAX_OUTPUT_TOKENS
+    return { ...checked, usage: { inputTokens, outputTokens } }
   } catch (error) {
     if (error instanceof TRPCError) throw error
     throw new TRPCError({ code: 'BAD_GATEWAY', message: 'The assistant could not prepare a valid edit. Your draft is unchanged.' })

@@ -13,6 +13,10 @@ import { requestWebsiteProposal, websitePromptInput } from './website-ai.ts'
 const revision = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
 const mutation = z.object({ expectedRevision: revision, requestId: z.string().uuid() })
 const timestamp = (value: Date | string) => new Date(value).toISOString()
+// A 24 KB dynamic request, fixed instructions/schema, and 1,800 output tokens
+// fit inside this conservative reservation even for one-byte tokens. Reserve
+// before the network call so concurrent prompts cannot overrun the daily cap.
+const AI_RESERVATION = 40_000
 
 /** Database diagnostics never become operator copy. Expected conflicts retain
  * their helpful message; failures leave the entire audited transaction rolled back. */
@@ -31,16 +35,17 @@ export const websiteRouter = router({
       const key = process.env.AF_CMS_ANTHROPIC_API_KEY
       if (!key) throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'The website assistant is not configured yet. The manual editor remains available.' })
       if (JSON.stringify(input.fields).length > 14_000) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Select a smaller part of the page before prompting the assistant.' })
+      if (Buffer.byteLength(JSON.stringify(input), 'utf8') > 24_000) throw new TRPCError({ code: 'BAD_REQUEST', message: 'This request is too long. Select a smaller part of the page or shorten the instruction.' })
       const day = c.clock.now().toISOString().slice(0, 10)
       const reserved = await c.adminDb(async (db) => {
         const rows = await db.execute(sql`
         INSERT INTO website_ai_usage(actor_id, usage_day, requests, reserved_tokens)
-        VALUES (${c.admin.adminUserId}::uuid, ${day}::date, 1, 9000)
+        VALUES (${c.admin.adminUserId}::uuid, ${day}::date, 1, ${AI_RESERVATION})
         ON CONFLICT (actor_id, usage_day) DO UPDATE SET
           requests = website_ai_usage.requests + 1,
-          reserved_tokens = website_ai_usage.reserved_tokens + 9000
+          reserved_tokens = website_ai_usage.reserved_tokens + ${AI_RESERVATION}
         WHERE website_ai_usage.requests < 40
-          AND website_ai_usage.input_tokens + website_ai_usage.output_tokens + website_ai_usage.reserved_tokens + 9000 <= 180000
+          AND website_ai_usage.input_tokens + website_ai_usage.output_tokens + website_ai_usage.reserved_tokens + ${AI_RESERVATION} <= 180000
         RETURNING requests`)
         if (rows.length) await adminAudit(db, c, { action: 'website.ai.requested', targetType: 'website', targetId: 'homepage',
           severity: 'notice', detail: { page: input.page, fieldCount: input.fields.length }, tenantCopy: false })
@@ -56,7 +61,7 @@ export const websiteRouter = router({
         return proposal
       } finally {
         await c.adminDb((db) => db.execute(sql`
-          UPDATE website_ai_usage SET reserved_tokens = GREATEST(0, reserved_tokens - 9000),
+          UPDATE website_ai_usage SET reserved_tokens = GREATEST(0, reserved_tokens - ${AI_RESERVATION}),
             input_tokens = input_tokens + ${inputTokens}, output_tokens = output_tokens + ${outputTokens}
           WHERE actor_id = ${c.admin.adminUserId}::uuid AND usage_day = ${day}::date`))
       }

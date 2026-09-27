@@ -157,8 +157,8 @@ describe('the website draft and publication boundary', { skip: hasDb ? false : '
     assert.equal(second.nextCursor, null)
   })
 
-  test('the serving role cannot read drafts, history, secrets, receipts or write published content', async () => {
-    for (const table of ['website_draft', 'website_history', 'website_secrets', 'website_mutations', 'website_refresh_jobs']) {
+  test('the serving role cannot read operator-only website data or write published content', async () => {
+    for (const table of ['website_draft', 'website_history', 'website_secrets', 'website_mutations', 'website_refresh_jobs', 'website_ai_usage']) {
       await assert.rejects(() => h.pool.withoutTenant((db) => db.execute(sql.raw(`SELECT * FROM ${table}`))), denied)
     }
     await assert.rejects(() => h.pool.withoutTenant((db) => db.execute(sql`UPDATE website_published SET revision = 99`)), denied)
@@ -293,6 +293,17 @@ describe('the website draft and publication boundary', { skip: hasDb ? false : '
     assert.equal(await head.text(), '')
   })
 
+  test('the homepage response does not include edits for an unrelated page', async () => {
+    const document = emptyWebsiteDocument()
+    document.fields = { 'hero.heading': 'Homepage', 'page.product-twins.text.h1': 'Twins only' }
+    await owner.caller.saveDraft({ document, expectedRevision: 0, requestId: randomUUID() })
+    await owner.caller.publish({ expectedRevision: 1, requestId: randomUUID() })
+    const home = await (await h.fetch('/v1/website/published?path=%2F')).json() as { document: { fields: Record<string, unknown> } }
+    const twin = await (await h.fetch('/v1/website/published?path=%2Fproduct%2Ftwins')).json() as { document: { fields: Record<string, unknown> } }
+    assert.deepEqual(home.document.fields, { 'hero.heading': 'Homepage' })
+    assert.deepEqual(twin.document.fields, { 'page.product-twins.text.h1': 'Twins only' })
+  })
+
   test('AI proposals are owner-only, budgeted, and cannot write or publish a draft', async () => {
     const previousKey = process.env.AF_CMS_ANTHROPIC_API_KEY
     const previousFetch = globalThis.fetch
@@ -305,6 +316,8 @@ describe('the website draft and publication boundary', { skip: hasDb ? false : '
     try {
       const support = await operator('support')
       await assert.rejects(() => support.caller.propose(input), { code: 'FORBIDDEN' })
+      const wide = { ...input, fields: [1, 2, 3].map((n) => ({ key: `hero.text${n}`, label: `Text ${n}`, kind: 'text' as const, value: '界'.repeat(3000) })) }
+      await assert.rejects(() => owner.caller.propose(wide), { code: 'BAD_REQUEST' })
       const before = await owner.caller.get()
       for (let i = 0; i < 40; i++) {
         const proposal = await owner.caller.propose(input)

@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { pageBlockPrefix, setFieldOverride, setStyleOverride, sitePageSlug, validateWebsiteDocument, type CustomSectionKind, type WebsiteDocument, type WebsiteManifest } from "@antifailure/website";
 import { adminMutate } from "@/lib/admin";
 import { addSection, moveSection, pageSections } from "@/lib/website-client";
+import { WebsitePromptRunGuard } from "@/lib/website-prompt-run";
 
 type Proposal = {
   message: string;
@@ -64,14 +65,20 @@ export function PromptPanel({ document, manifest, page, sectionId, selectedKey, 
   const [prompt, setPrompt] = useState("");
   const [scope, setScope] = useState<"selection" | "section" | "page">("section");
   const [messages, setMessages] = useState<Message[]>([]);
-  const [proposal, setProposal] = useState<Proposal | null>(null);
+  const [pendingProposal, setProposal] = useState<{ page: string; value: Proposal } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const scopeId = useId();
   const inputId = useId();
   const thread = useRef<HTMLDivElement>(null);
-  useEffect(() => { setMessages([]); setProposal(null); setError(null); setNotice(null); }, [page]);
+  const run = useRef(new WebsitePromptRunGuard(page));
+  run.current.pageChanged(page);
+  const proposal = pendingProposal?.page === page ? pendingProposal.value : null;
+  useEffect(() => {
+    setMessages([]); setProposal(null); setBusy(false); setError(null); setNotice(null); setPrompt("");
+    return () => { run.current.invalidate(); };
+  }, [page]);
   useEffect(() => { thread.current?.scrollTo({ top: thread.current.scrollHeight, behavior: "instant" }); }, [messages, proposal, busy, error]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -95,6 +102,7 @@ export function PromptPanel({ document, manifest, page, sectionId, selectedKey, 
     }
     if (!fields.length) { setError("Choose an editable text, number, or section first."); return; }
     const request = prompt.trim();
+    const requestedRun = run.current.begin(page);
     setBusy(true); setError(null); setNotice(null); setProposal(null);
     try {
       const result = await adminMutate<Proposal>("admin.administration.website.propose", {
@@ -103,12 +111,13 @@ export function PromptPanel({ document, manifest, page, sectionId, selectedKey, 
         fontKeys: manifest.fonts.map((font) => font.key),
         conversation: messages.slice(-6),
       });
+      if (!run.current.isCurrent(requestedRun)) return;
       setMessages((held) => [...held.slice(-8), { role: "user", text: request }, { role: "assistant", text: result.message }]);
-      setProposal(result.edits.length || result.styles.length || result.actions.length ? result : null);
+      setProposal(result.edits.length || result.styles.length || result.actions.length ? { page: requestedRun.page, value: result } : null);
       setPrompt("");
       if (!result.edits.length && !result.styles.length && !result.actions.length) setNotice("No changes were suggested. You can ask a more specific question.");
-    } catch (cause) { setError(errorMessage(cause)); }
-    finally { setBusy(false); }
+    } catch (cause) { if (run.current.isCurrent(requestedRun)) setError(errorMessage(cause)); }
+    finally { if (run.current.isCurrent(requestedRun)) setBusy(false); }
   }
 
   function apply() {

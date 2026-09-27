@@ -1888,3 +1888,11 @@ export const websiteRefreshJobs = pgTable('website_refresh_jobs', {
   lastError: text('last_error'),
   deployedAt: timestamp('deployed_at', { withTimezone: true }),
 }, (t) => [uniqueIndex('website_refresh_due_idx').on(t.status, t.nextAttemptAt, t.revision)])
+export const websiteAiUsage = pgTable('website_ai_usage', {
+  actorId: uuid('actor_id').notNull(),
+  usageDay: date('usage_day').notNull(),
+  requests: integer('requests').notNull().default(0),
+  reservedTokens: integer('reserved_tokens').notNull().default(0),
+  inputTokens: integer('input_tokens').notNull().default(0),
+  outputTokens: integer('output_tokens').notNull().default(0),
+}, (t) => [primaryKey({ columns: [t.actorId, t.usageDay] })])

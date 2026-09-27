@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { pageBlockPrefix, resolveOrder, sitePageSlug, type CustomSection as Section } from "@antifailure/website";
+import { orderedPageBlockIds, pageBlockPrefix, sitePageSlug, type CustomSection as Section } from "@antifailure/website";
 import { useCms } from "./CmsProvider";
 import { CustomSection } from "./CustomSection";
 
@@ -14,9 +14,7 @@ export function SitewideSections({ children }: { children: React.ReactNode }) {
   const prefix = pageBlockPrefix(pathname);
   const pageId = `page-${sitePageSlug(pathname)}`;
   const sections = cms.document.sections.custom.filter((section) => section.group === "page" && section.id.startsWith(prefix));
-  const ids = sections.map((section) => section.id);
-  const moves = cms.document.sections.moves.filter((move) => ids.includes(move.id)).map((move) => move.after === pageId ? { ...move, after: null } : move);
-  const order = resolveOrder(ids, moves, [], cms.document.sections.hidden);
+  const order = orderedPageBlockIds(cms.document, pathname);
   const byId = new Map<string, Section>(sections.map((section) => [section.id, section]));
   const hidden = cms.document.sections.hidden.includes(pageId);
   return <>

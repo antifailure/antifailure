@@ -71,7 +71,7 @@
       }
     }
     for (const element of root.querySelectorAll('img')) {
-      if (element.closest('[data-cms-key],[aria-hidden="true"]')) continue;
+      if (element.closest('[data-cms-key]:not([data-cms-sitewide-key]),[aria-hidden="true"]')) continue;
       const src = element.getAttribute('src') || '';
       if (!/^\/(?!\/)/.test(src)) continue;
       const key = `page.${page}.image.h${hash(pathOf(element, root))}`;
@@ -211,15 +211,48 @@
     const sections = Array.isArray(currentDocument.sections?.custom) ? currentDocument.sections.custom : [];
     const hidden = new Set(Array.isArray(currentDocument.sections?.hidden) ? currentDocument.sections.hidden : []);
     const scoped = sections.filter((item) => item && item.group === 'page' && typeof item.id === 'string' && item.id.startsWith(pagePrefix()));
-    const ordered = scoped.slice();
-    for (const move of Array.isArray(currentDocument.sections?.moves) ? currentDocument.sections.moves : []) {
-      if (!move || typeof move.id !== 'string') continue;
-      const index = ordered.findIndex((item) => item.id === move.id);
-      if (index < 0) continue;
-      const [item] = ordered.splice(index, 1);
-      const anchor = ordered.findIndex((entry) => entry.id === move.after);
-      ordered.splice(move.after === null || move.after === sectionId ? 0 : anchor < 0 ? ordered.length : anchor + 1, 0, item);
+    // Match the website document's relative order resolver: saved block
+    // anchors first, explicit moves last, with cycles ignored as a unit.
+    const base = [sectionId, ...scoped.map((item) => item.id)];
+    const exists = new Set(base);
+    const moves = [
+      ...scoped.map((item) => ({ id: item.id, after: item.after })),
+      ...(Array.isArray(currentDocument.sections?.moves) ? currentDocument.sections.moves : []),
+    ];
+    const anchors = new Map();
+    const priority = new Map();
+    for (const [index, move] of moves.entries()) {
+      if (!move || !exists.has(move.id) || move.after === move.id || move.after !== null && !exists.has(move.after)) continue;
+      anchors.set(move.id, move.after); priority.set(move.id, index);
     }
+    const finished = new Set();
+    for (const id of base) {
+      const path = []; const positions = new Map(); let current = id;
+      while (current != null && anchors.has(current) && !finished.has(current)) {
+        if (positions.has(current)) { for (const cyclic of path.slice(positions.get(current))) anchors.delete(cyclic); break; }
+        positions.set(current, path.length); path.push(current); current = anchors.get(current);
+      }
+      for (const visited of path) finished.add(visited);
+    }
+    const children = new Map();
+    for (const id of base) {
+      if (!anchors.has(id)) continue;
+      const parent = anchors.get(id);
+      const siblings = children.get(parent) || [];
+      siblings.push(id); children.set(parent, siblings);
+    }
+    for (const siblings of children.values()) siblings.sort((a, b) => priority.get(a) - priority.get(b));
+    const orderedIds = []; const emitted = new Set();
+    function emit(id) {
+      if (emitted.has(id)) return;
+      emitted.add(id); orderedIds.push(id);
+      for (const child of children.get(id) || []) emit(child);
+    }
+    for (const id of children.get(null) || []) emit(id);
+    for (const id of base) if (!anchors.has(id)) emit(id);
+    for (const id of base) emit(id);
+    const byId = new Map(scoped.map((item) => [item.id, item]));
+    const ordered = orderedIds.filter((id) => id !== sectionId).map((id) => byId.get(id)).filter(Boolean);
     const root = document.querySelector('main');
     const titlePanel = root?.querySelector(':scope > .content-panel');
     if (titlePanel) titlePanel.hidden = hidden.has(sectionId);
