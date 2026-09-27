@@ -1,12 +1,12 @@
 {
   "counted_through": {
-    "console": "2026-09-27T11:57:51Z",
-    "control-plane-api": "2026-09-27T11:57:51Z",
-    "docs": "2026-09-27T11:57:52Z",
-    "installer": "2026-09-27T11:57:52Z",
-    "site-api": "2026-09-27T11:57:54Z",
-    "staging": "2026-09-27T11:57:54Z",
-    "website": "2026-09-27T11:57:51Z"
+    "console": "2026-09-27T11:59:22Z",
+    "control-plane-api": "2026-09-27T11:59:21Z",
+    "docs": "2026-09-27T11:59:22Z",
+    "installer": "2026-09-27T11:59:22Z",
+    "site-api": "2026-09-27T11:59:23Z",
+    "staging": "2026-09-27T11:59:23Z",
+    "website": "2026-09-27T11:59:22Z"
   },
   "days": [
     {
@@ -162,8 +162,8 @@
     {
       "id": "console",
       "day": "2026-09-27",
-      "checks": 15,
-      "ok": 15
+      "checks": 16,
+      "ok": 16
     },
     {
       "id": "control-plane-api",
@@ -318,8 +318,8 @@
     {
       "id": "control-plane-api",
       "day": "2026-09-27",
-      "checks": 15,
-      "ok": 15
+      "checks": 16,
+      "ok": 16
     },
     {
       "id": "docs",
@@ -474,8 +474,8 @@
     {
       "id": "docs",
       "day": "2026-09-27",
-      "checks": 15,
-      "ok": 15
+      "checks": 16,
+      "ok": 16
     },
     {
       "id": "installer",
@@ -630,8 +630,8 @@
     {
       "id": "installer",
       "day": "2026-09-27",
-      "checks": 15,
-      "ok": 15
+      "checks": 16,
+      "ok": 16
     },
     {
       "id": "site-api",
@@ -786,8 +786,8 @@
     {
       "id": "site-api",
       "day": "2026-09-27",
-      "checks": 15,
-      "ok": 15
+      "checks": 16,
+      "ok": 16
     },
     {
       "id": "staging",
@@ -954,8 +954,8 @@
     {
       "id": "staging",
       "day": "2026-09-27",
-      "checks": 15,
-      "ok": 15
+      "checks": 16,
+      "ok": 16
     },
     {
       "id": "website",
@@ -1110,8 +1110,8 @@
     {
       "id": "website",
       "day": "2026-09-27",
-      "checks": 15,
-      "ok": 15
+      "checks": 16,
+      "ok": 16
     }
   ]
 }
