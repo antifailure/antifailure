@@ -159,6 +159,8 @@ helm	value	stripe.webhookSecret	string	optional
 helm	value	terminationGracePeriodSeconds	number	optional
 helm	value	tolerations	list	optional
 helm	value	topologySpreadConstraints	list	optional
+helm	value	websiteAI.existingSecret	string	optional
+helm	value	websiteAI.secretKey	string	optional
 terraform:modules/alerting	output	action_group_id	-	-
 terraform:modules/alerting	output	alert_names	-	-
 terraform:modules/alerting	variable	alert_emails	list(string)	optional
@@ -206,6 +208,7 @@ terraform:modules/control-plane	variable	app_cpu	number	optional
 terraform:modules/control-plane	variable	app_memory	string	optional
 terraform:modules/control-plane	variable	assign_deployer_secret_officer	bool	optional
 terraform:modules/control-plane	variable	backup_retention_days	number	optional
+terraform:modules/control-plane	variable	cms_anthropic_secret_name	string	optional
 terraform:modules/control-plane	variable	concurrent_requests	number	optional
 terraform:modules/control-plane	variable	custom_domain	string	optional
 terraform:modules/control-plane	variable	database_admin_user	string	optional
@@ -315,6 +318,7 @@ terraform:stacks/control-plane	variable	backup_retention_days	number	optional
 terraform:stacks/control-plane	variable	budget_contact_emails	list(string)	optional
 terraform:stacks/control-plane	variable	cd_principal_id	string	optional
 terraform:stacks/control-plane	variable	ci_principal_id	string	optional
+terraform:stacks/control-plane	variable	cms_anthropic_secret_name	string	optional
 terraform:stacks/control-plane	variable	concurrent_requests	number	optional
 terraform:stacks/control-plane	variable	custom_domain	string	optional
 terraform:stacks/control-plane	variable	database_extensions	list(string)	optional
