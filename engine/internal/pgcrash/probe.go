@@ -33,6 +33,9 @@ type Availability struct {
 	Recovered bool `json:"recovered"`
 	// Interval is the probe's resolution.
 	Interval time.Duration `json:"interval"`
+	// Samples says how many attempts were actually observed. A zero cannot be
+	// mistaken for a database that answered every query.
+	Samples int `json:"samples"`
 }
 
 // probeInterval is how often an attempt starts.
@@ -169,7 +172,7 @@ func (p *probe) read() Availability {
 // whole timeout reports after attempts that started later.
 func availabilityOf(samples []probeSample, interval time.Duration) Availability {
 	sort.Slice(samples, func(i, j int) bool { return samples[i].at.Before(samples[j].at) })
-	a := Availability{Interval: interval}
+	a := Availability{Interval: interval, Samples: len(samples)}
 	first := -1
 	for i, s := range samples {
 		if !s.ok {

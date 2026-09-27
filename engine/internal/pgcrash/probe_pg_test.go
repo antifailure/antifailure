@@ -79,9 +79,12 @@ func TestVerify_TheProbeReportsWhatItObservedNotTheSettle(t *testing.T) {
 	t.Logf("the database said it was down for %s, the probe measured %s (every %s)", said, a.For, a.Interval)
 
 	require.Equal(t, 100*time.Millisecond, a.Interval)
+	require.GreaterOrEqual(t, a.Samples, 2, "the probe must have asked the database more than once")
 	// Postgres logged a 70 ms recovery on one runner and both probes answered.
 	// Never turn an unobserved refusal into an invented outage.
 	if !a.Unreachable {
+		require.Less(t, said, a.Interval,
+			"a restart lasting longer than the probe interval cannot pass as unseen")
 		require.Zero(t, a.For)
 		require.False(t, a.Recovered)
 		require.Zero(t, res.Downtime)
@@ -89,6 +92,8 @@ func TestVerify_TheProbeReportsWhatItObservedNotTheSettle(t *testing.T) {
 	}
 	require.True(t, a.Recovered)
 	require.Equal(t, a.For, res.Downtime, "the report must use what the probe observed")
+	require.LessOrEqual(t, res.Downtime, said+a.Interval+500*time.Millisecond,
+		"query unavailability should not exceed process recovery by more than sampling and startup overhead")
 	// A quick restart must not be reported as the whole settle. When recovery
 	// takes longer, the probe is still the source for query availability, not
 	// the process-recovery timestamps from Postgres's log.
