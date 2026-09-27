@@ -93,8 +93,9 @@ func TestEveryQuotedRosterSizeMatchesTheRoster(t *testing.T) {
 // Several engine tests already read the repository this way, because the thing
 // they are asserting about lives outside their own module and asserting about
 // a copy would be asserting about nothing.
+// The product page describes isolation without quoting a roster size now, so
+// only the documents that still publish that numeric claim belong here.
 var rosterSizeDocuments = []string{
-	"../../www/components/pages/product/Twins.tsx",
 	"../../docs/plan/STATUS.md",
 	"../../docs/plan/notes/claims.md",
 }
