@@ -9865,7 +9865,7 @@ load:
 Then name the other build on the base side:
 
 ` + "`" + "`" + "`" + `
-af load compare --sql --baseline HEAD --baseline-image pgvector/pgvector:pg17
+af load compare --sql --baseline HEAD --baseline-image your-registry/postgres:baseline
 ` + "`" + "`" + "`" + `
 
 ` + "`" + `--image` + "`" + ` and ` + "`" + `--baseline-image` + "`" + ` each default to ` + "`" + `database.image` + "`" + `, so naming one
@@ -9874,13 +9874,31 @@ to this one is normally refused, because two identical builds of one application
 are nothing to compare. With two database images it is the point, and the report
 says so.
 
+### Which build writes the pages is a choice, and it is probably the one you care about
+
+There is one golden and one build made it: the build ` + "`" + `database.image` + "`" + ` names. The
+side that names a different image OPENS a data directory it did not write. So the
+two arrangements answer two different questions, and the flags let you pick.
+
+- Declare your candidate and name the old build with ` + "`" + `--baseline-image` + "`" + `, as above,
+  and your candidate laid the pages out while the old build reads them.
+- Declare the old build and name your candidate with ` + "`" + `--image` + "`" + `, and your candidate
+  is the one opening a data directory the trusted build wrote.
+
+The second is usually the question a storage engine team is really asking, because
+it is what an upgrade does to data that already exists. The report names the
+writer on every run, so you never have to remember which way round you ran it.
+
 ## Step 3: read the throughput and the distribution
 
 The run this section shows came from the command above, against
 ` + "`" + `examples/go-api` + "`" + ` in the Antifailure repository, with ` + "`" + `--rounds 8 --duration 10s
---warmup 3s` + "`" + `. The candidate side ran the stock image for Postgres 17 and the base
-side ran ` + "`" + `pgvector/pgvector:pg17` + "`" + `, which is the same major built against glibc
-instead of musl, standing in for two builds of one engine.
+--warmup 3s` + "`" + `, and with two published images rather than the placeholders above,
+because a run has to name images that exist. The candidate side ran the stock image
+for Postgres 17 and the base side ran ` + "`" + `pgvector/pgvector:pg17` + "`" + `, which is the same
+major built against glibc instead of musl, so nothing about the two is the same but
+the on disk format. That is what makes them a usable stand in for two builds of one
+engine.
 
 That example ships with the ` + "`" + `load.sql` + "`" + ` block and without the ` + "`" + `load.comparison` + "`" + `
 and ` + "`" + `chaos` + "`" + ` blocks above, so the two were added to its manifest for these runs and
