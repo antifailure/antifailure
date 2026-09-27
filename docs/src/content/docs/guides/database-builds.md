@@ -39,8 +39,11 @@ database:
 
 The image has to be a Postgres the manifest can use, and that is checked against
 the server rather than against the tag, because a tag is a string somebody chose.
-A build whose `server_version_num` disagrees with `version`, or that is missing
-an extension the manifest declares, is refused before anything is built.
+A build whose `server_version_num` disagrees with `version`, or that is missing an
+extension the manifest declares, is refused before either environment is built. The
+check does start one throwaway container on that image, because asking the server
+is the only way to answer a question about the server, and it removes it whatever
+happens.
 
 ## Step 2: run one workload against both builds
 
@@ -160,13 +163,6 @@ Then the same numbers per transaction, and per statement inside it:
     CAN SEE     115%
 ```
 
-Read that run the way it asks to be read. The run wide `p95_ms` moved 47.9
-percent and every unit says `too close to say`, because eight rounds of ten
-seconds on a developer laptop can see a change of 115 percent at best. Nothing
-there is a finding about either build. It is a demonstration that the pipe is
-connected and an illustration of the column that stops you believing the
-headline.
-
 Throughput is committed transactions a second, judged against
 `load.comparison.thresholds.throughput_drop`. The distribution is reported per
 transaction and per statement inside it, as p50, p95 and p99 on both sides.
@@ -177,6 +173,13 @@ disagreed with each other, and a change inside it is reported as `too close to
 say` rather than as a result. A quiet machine, more rounds, or a longer duration
 narrows it. A number that a noisy host could have produced by itself is not a
 finding, and this is the column that tells you which you have.
+
+Read that run the way it asks to be read. The run wide `p95_ms` moved 47.9
+percent and every unit says `too close to say`, because eight rounds of ten
+seconds on a developer laptop can see a change of 115 percent at best. Nothing
+there is a finding about either build. It is a demonstration that the pipe is
+connected and an illustration of the column that stops you believing the
+headline.
 
 The report then states which axis differed and which build wrote the pages:
 
