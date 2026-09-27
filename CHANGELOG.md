@@ -14,6 +14,80 @@ and the per change entries are what make it a wall. `just relnotes` refuses an
 unbalanced marker, a second region in one section, an empty region, and a
 section that omits all of itself.
 
+## v1.8.1
+
+The Website editor now reaches the public site beyond the homepage. Open a
+product, solution, company, writing, legal, or documentation page from the
+page picker; edit its visible text, media, SEO title and description, or add a
+page-specific section. Shared header and footer changes reach documentation
+too. The five homepage diagrams expose their labels and marker shapes, and the
+numbered trust list can be edited without replacing the whole illustration.
+
+**Ask AI** proposes copy, style and section changes in the right inspector.
+An owner sees each proposed change before applying it to the draft, and
+publication remains a separate action. The model key is server-only, request
+context is bounded to the selected page, and each owner has a daily request
+and token allowance. Custom HTML, CSS and JavaScript remain isolated in
+sandboxed frames. Public reads send a visitor only that route's edits and
+shared chrome; unchanged content still follows the source defaults.
+
+### For operators, before you upgrade
+
+Migration `0051` adds `website_ai_usage`, an operator-only daily allowance
+table. It stores request and token counts, not prompts or completions. The
+assistant is optional: set `AF_CMS_ANTHROPIC_API_KEY` on the control-plane
+server, or leave it unset and use the manual editor. Hosted installations use
+an existing Key Vault secret by reference; self-hosted Helm installations can
+name an existing Kubernetes Secret with `websiteAI.existingSecret`.
+
+Publishing a page edit updates the browser-visible page before the static
+refresh completes. Edited SEO metadata is written into the refreshed static
+build. Inner-page body edits still require JavaScript to appear; the
+repository-authored Markdown files remain the source for raw documentation
+`.md` links. Review changes in both the editor preview and the live site.
+
+The v1.8.0 tag deployed the CMS control plane, but its downloadable GitHub
+release did not publish because that tag lacked a changelog section. v1.8.1
+supersedes it as the downloadable release of this feature set. No tag has been
+rewritten.
+
+### Added
+
+- The Website editor opens every indexed route from a generated catalog and
+  accepts a direct path for other public pages. It supports route-scoped blocks
+  on marketing and documentation pages, shared header and footer controls, and
+  an unmatched-setting list when a source element moves (#593).
+- The owner-only AI panel sends bounded selected-page context to Anthropic,
+  validates the response, and lets an owner apply it to an autosaved draft.
+  The key never enters the website bundle or an audit record (#593).
+- `af load compare` can hold the application and golden constant while varying
+  the candidate and baseline PostgreSQL images. It names which axis changed
+  and refuses an incompatible or already-running database build (#590, #595).
+- Chaos runs evaluate declared data invariants before the fault and after
+  recovery, distinguishing a rule the fault broke from one already violated
+  or unable to run (#577).
+
+### Fixed
+
+- Migration lock findings and SQL workload contention now scope their
+  PostgreSQL observations to the database and backends being measured, instead
+  of attributing a neighboring branch's locks or sessions to this run (#586).
+- The installer prints its own actionable error without a raw `curl` message
+  obscuring it (#583). A thaw waits for the daemon to apply an accepted request
+  before calling the environment stuck (#587).
+- Fresh Helm installs from this tag default to the v1.8.1 control-plane image.
+  Terraform's live `image_tag` default remains v1.7.0 in this tag: set it to
+  v1.8.1 explicitly for a fresh install after the image publishes. PR #592
+  restored the v1.7.0 default after it had stayed at v1.5.5; Terraform pins
+  advance only after their target tag exists.
+
+## v1.8.0
+
+The v1.8.0 tag passed CI and deployed the sitewide Website editor to the hosted
+control plane. Its GitHub artifact release did not publish because the tag
+did not include a matching changelog section. Use v1.8.1 for signed downloads
+and release notes; the v1.8.0 tag remains unchanged.
+
 ## v1.7.0
 
 The homepage can now be edited from **Administration → Website**. Select text
