@@ -9,6 +9,7 @@ import Underline from "@tiptap/extension-underline";
 import {
   safeHref,
   type RichTextDocument,
+  type RichTextHeading,
   type RichTextInline,
   type RichTextList,
   type RichTextListItem,
@@ -21,6 +22,7 @@ export interface RichTextInputProps {
   onChange: (value: RichTextDocument) => void;
   disabled?: boolean;
   label: string;
+  article?: boolean;
 }
 
 const Emphasis = Mark.create({
@@ -40,6 +42,12 @@ const extensions = [
     isAllowedUri: (url) => safeHref(url),
     HTMLAttributes: { target: null, rel: "noopener noreferrer" },
   }),
+  Underline,
+  Emphasis,
+];
+const articleExtensions = [
+  StarterKit.configure({ heading: { levels: [2, 3] }, blockquote: false, codeBlock: false, horizontalRule: false, strike: false, link: false, underline: false, trailingNode: false }),
+  Link.configure({ openOnClick: false, enableClickSelection: true, autolink: false, linkOnPaste: false, defaultProtocol: "https", isAllowedUri: (url) => safeHref(url), HTMLAttributes: { target: null, rel: "noopener noreferrer" } }),
   Underline,
   Emphasis,
 ];
@@ -64,14 +72,15 @@ function toRichText(source: JSONContent | string): RichTextDocument {
     const content = (node.content ?? []).map(inline).filter((part): part is RichTextInline => !!part);
     return { type: "paragraph", ...(content.length ? { content } : {}) };
   };
-  const blocks = (nodes: JSONContent[], depth = 0): Array<RichTextParagraph | RichTextList> => {
-    const result: Array<RichTextParagraph | RichTextList> = [];
+  const blocks = (nodes: JSONContent[], depth = 0): Array<RichTextParagraph | RichTextHeading | RichTextList> => {
+    const result: Array<RichTextParagraph | RichTextHeading | RichTextList> = [];
     if (depth > 8) return result;
     for (const node of nodes) {
       if (node.type === "paragraph") result.push(paragraph(node));
+      else if (node.type === "heading" && (node.attrs?.level === 2 || node.attrs?.level === 3)) result.push({ type: "heading", attrs: { level: node.attrs.level }, content: paragraph(node).content });
       else if (node.type === "bulletList" || node.type === "orderedList") {
         const content: RichTextListItem[] = (node.content ?? []).filter((child) => child.type === "listItem").map((child) => {
-          const children = blocks(child.content ?? [], depth + 2);
+          const children = blocks(child.content ?? [], depth + 2).filter((part): part is RichTextParagraph | RichTextList => part.type !== "heading");
           return { type: "listItem", content: children.length ? children : [{ type: "paragraph" }] };
         });
         if (content.length) result.push({ type: node.type, content });
@@ -91,7 +100,7 @@ function Tool({ title, active, disabled, onClick, children }: { title: string; a
   );
 }
 
-export function RichTextInput({ value, onChange, disabled = false, label }: RichTextInputProps) {
+export function RichTextInput({ value, onChange, disabled = false, label, article = false }: RichTextInputProps) {
   const id = useId();
   const [linkOpen, setLinkOpen] = useState(false);
   const [href, setHref] = useState("");
@@ -102,7 +111,7 @@ export function RichTextInput({ value, onChange, disabled = false, label }: Rich
   useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
 
   const editor = useEditor({
-    extensions,
+    extensions: article ? articleExtensions : extensions,
     content: toRichText(value),
     immediatelyRender: false,
     editable: !disabled,
@@ -111,7 +120,7 @@ export function RichTextInput({ value, onChange, disabled = false, label }: Rich
         role: "textbox",
         "aria-multiline": "true",
         "aria-label": label,
-        class: "min-h-36 max-h-96 overflow-y-auto px-3 py-3 text-base leading-relaxed text-ink outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ink sm:text-[14px] [&_p+p]:mt-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1 [&_a]:underline [&_a]:underline-offset-2 [&_code]:rounded-sm [&_code]:bg-paper [&_code]:px-1 [&_code]:font-mono [&_code]:text-[0.9em]",
+        class: "min-h-36 max-h-96 overflow-y-auto px-3 py-3 text-base leading-relaxed text-ink outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ink sm:text-[14px] [&_p+p]:mt-3 [&_h2]:mt-6 [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:mt-5 [&_h3]:text-lg [&_h3]:font-semibold [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1 [&_a]:underline [&_a]:underline-offset-2 [&_code]:rounded-sm [&_code]:bg-paper [&_code]:px-1 [&_code]:font-mono [&_code]:text-[0.9em]",
       },
     },
     onUpdate: ({ editor: current }) => onChangeRef.current(toRichText(current.getJSON())),
@@ -127,6 +136,8 @@ export function RichTextInput({ value, onChange, disabled = false, label }: Rich
       link: current?.isActive("link") ?? false,
       bulletList: current?.isActive("bulletList") ?? false,
       orderedList: current?.isActive("orderedList") ?? false,
+      heading2: current?.isActive("heading", { level: 2 }) ?? false,
+      heading3: current?.isActive("heading", { level: 3 }) ?? false,
     }),
   });
 
@@ -179,6 +190,7 @@ export function RichTextInput({ value, onChange, disabled = false, label }: Rich
           <Tool title="Link" active={active?.link || linkOpen} disabled={unavailable} onClick={openLink}><svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="m8 12 4-4m-5 6-1 1a3.54 3.54 0 0 1-5-5l3-3a3.54 3.54 0 0 1 5 0m2 6a3.54 3.54 0 0 0 5 0l3-3a3.54 3.54 0 0 0-5-5l-1 1" transform="translate(1 -1) scale(.9)" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg></Tool>
           <Tool title="Bullet list" active={active?.bulletList} disabled={unavailable} onClick={() => editor?.chain().focus().toggleBulletList().run()}><svg width="17" height="17" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M7 5h10M7 10h10M7 15h10" stroke="currentColor" strokeWidth="1.4" /><circle cx="3" cy="5" r="1" fill="currentColor" /><circle cx="3" cy="10" r="1" fill="currentColor" /><circle cx="3" cy="15" r="1" fill="currentColor" /></svg></Tool>
           <Tool title="Numbered list" active={active?.orderedList} disabled={unavailable} onClick={() => editor?.chain().focus().toggleOrderedList().run()}><span className="font-mono">1.</span></Tool>
+          {article && <><Tool title="Section heading" active={active?.heading2} disabled={unavailable} onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}>H2</Tool><Tool title="Subheading" active={active?.heading3} disabled={unavailable} onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()}>H3</Tool></>}
         </div>
         {linkOpen ? (
           <div className="border-b border-rule bg-paper p-3">

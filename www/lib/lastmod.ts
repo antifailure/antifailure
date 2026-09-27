@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { getPost, postModified } from "./blog";
+import { builtAuthoredPage } from "./authored-pages";
 import { changelogModified } from "./changelog";
 
 /**
@@ -173,6 +174,8 @@ function unavailable(routePath: string, why: string): Date {
 }
 
 export function contentLastModified(routePath: string): Date {
+  const authored = builtAuthoredPage(routePath);
+  if (authored) return new Date(authored.content.updated || authored.content.published);
   // A post carries its own date, so this answers without git at all and runs
   // ahead of the shallow check. Asking git when content/blog/<file>.tsx last
   // changed would answer a different question, and the file name is not the

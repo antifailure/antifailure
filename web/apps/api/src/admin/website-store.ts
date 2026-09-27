@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { sql, type Db } from '@antifailure/db'
 import { TRPCError } from '@trpc/server'
 import {
-  assertWebsiteDocument, normalizeWebsiteDocument, referencedAssets, stableStringify, type ValidationIssue, type WebsiteDocument,
+  assertWebsiteDocument, normalizeWebsiteDocument, referencedAssets, stableStringify, unpublishablePages, type ValidationIssue, type WebsiteDocument,
 } from '@antifailure/website'
 import { adminAudit, type AdminContext } from './trpc.ts'
 
@@ -153,6 +153,8 @@ export async function publishWebsite(ctx: AdminContext, input: { expectedRevisio
         updated_by = ${ctx.admin.email} WHERE id = 'homepage'`)
     }
     document = validatedWebsiteDocument(document)
+    const incompletePages = unpublishablePages(document)
+    if (incompletePages.length) throw new TRPCError({ code: 'BAD_REQUEST', message: incompletePages[0] })
     await assertWebsiteAssetsExist(db, document)
     const revision = state.publishedRevision + 1
     const contentHash = websiteDigest(document)

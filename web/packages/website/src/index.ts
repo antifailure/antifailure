@@ -1,5 +1,6 @@
 export type * from './types.ts'
-export { orderedPageBlockIds, pageBlockPrefix, projectWebsiteDocument, sitePageSlug } from './page.ts'
+export { authoredPage, isAuthoredPagePath, orderedPageBlockIds, pageBlockPrefix, projectWebsiteDocument, sitePageSlug } from './page.ts'
+export { authoredPageContent, emptyPageBody, pageContentKey, richTextLength, unpublishablePages } from './authored.ts'
 export {
   WEBSITE_LIMITS, STYLE_NUMBER_BOUNDS, emptyWebsiteDocument, validateWebsiteDocument,
   assertWebsiteDocument, normalizeWebsiteDocument, safeHref, safeBuiltinSource,

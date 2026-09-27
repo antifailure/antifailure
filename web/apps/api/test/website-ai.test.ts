@@ -31,6 +31,51 @@ test('bounded model response becomes a reviewable valid draft edit', async () =>
   assert.equal(document.styles.hero?.mobile?.fontSize, 48)
 })
 
+test('a whole-page Twins icon alignment request produces a scoped label override', async () => {
+  const requestInput = websitePromptInput.parse({
+    page: '/product/twins', scope: 'page',
+    prompt: 'Make this whole page cleaner and make the bottom of every icon align with the bottom of the text next to it',
+    targets: ['page-product-twins'], fontKeys: [],
+    fields: [{ key: 'page.product-twins.text.heading', label: 'h1 · An isolated environment', kind: 'text', value: 'An isolated environment for every change.' }],
+  })
+  let body: Record<string, unknown> = {}
+  const proposal = await requestWebsiteProposal(requestInput, 'test-key', async (_url, init) => {
+    body = JSON.parse(String(init?.body)) as Record<string, unknown>
+    return providerResponse({ message: 'The label icons now share the text baseline.', edits: [],
+      styles: [{ target: 'page-product-twins', breakpoint: 'desktop', property: 'iconAlign', value: 'end' }], actions: [] })
+  })
+  assert.equal(body.model, 'claude-sonnet-4-6')
+  assert.equal(body.max_tokens, 4000)
+  const messages = body.messages as Array<{ content: string }>
+  assert.equal((JSON.parse(messages.at(-1)!.content) as { scope: string }).scope, 'page')
+  const document = applyWebsiteProposal(emptyWebsiteDocument(), requestInput, proposal, [{
+    key: 'page.product-twins.text.heading', label: 'h1', kind: 'text', sectionId: 'page-product-twins',
+    defaultValue: 'An isolated environment for every change.',
+  }])
+  assert.equal(document.styles['page-product-twins']?.desktop?.iconAlign, 'end')
+})
+
+test('a prompt can create one private article draft without taking an existing route', async () => {
+  const pageInput = websitePromptInput.parse({ ...input, prompt: 'Create a new article about safe releases',
+    existingPaths: ['/blog', '/blog/what-staging-misses-about-migrations'] })
+  const page = { kind: 'post', path: '/blog/release-rehearsals', title: 'What a release rehearsal checks',
+    description: 'A practical guide to checking changes before deployment.',
+    summary: 'How Antifailure checks a change in an isolated production twin.',
+    body: 'A release rehearsal runs the proposed change in an isolated environment.\n\nReview the findings before deploying.',
+    tags: 'Engineering, Releases' }
+  const proposal = await requestWebsiteProposal(pageInput, 'test-key', async () =>
+    providerResponse({ message: 'Review this new article draft.', edits: [], styles: [], actions: [], pages: [page] }))
+  const document = applyWebsiteProposal(emptyWebsiteDocument(), pageInput, proposal, [])
+  assert.deepEqual(document.pages, [{ path: page.path, kind: 'post' }])
+  assert.equal(document.fields['page.blog-release-rehearsals.title'], page.title)
+  assert.equal((document.fields['page.blog-release-rehearsals.body'] as { content: unknown[] }).content.length, 2)
+  for (const badPath of ['/blog/what-staging-misses-about-migrations', '/admin/new', '/product']) {
+    await assert.rejects(() => requestWebsiteProposal(pageInput, 'test-key', async () => providerResponse({
+      message: 'Draft', edits: [], styles: [], actions: [], pages: [{ ...page, path: badPath }],
+    })))
+  }
+})
+
 test('unknown fields and unsafe style values never reach the draft', async () => {
   for (const value of [
     { message: 'Done', edits: [{ key: 'header.logo', value: 'Changed' }], styles: [], actions: [] },

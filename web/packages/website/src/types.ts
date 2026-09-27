@@ -11,6 +11,13 @@ export interface WebsiteDocument {
     custom: CustomSection[]
   }
   collections: Record<string, CollectionPatch>
+  /** Site-owned routes. Unedited source routes stay in their source files. */
+  pages?: AuthoredPage[]
+}
+
+export interface AuthoredPage {
+  path: string
+  kind: 'page' | 'post'
 }
 
 export type FieldValue = string | number | boolean | null | RichTextDocument | MediaReference
@@ -28,6 +35,12 @@ export interface RichTextParagraph {
   content?: RichTextInline[]
 }
 
+export interface RichTextHeading {
+  type: 'heading'
+  attrs: { level: 2 | 3 }
+  content?: RichTextInline[]
+}
+
 export interface RichTextListItem {
   type: 'listItem'
   content: Array<RichTextParagraph | RichTextList>
@@ -38,11 +51,11 @@ export interface RichTextList {
   content: RichTextListItem[]
 }
 
-export type RichTextNode = RichTextParagraph | RichTextList | RichTextListItem | RichTextInline
+export type RichTextNode = RichTextParagraph | RichTextHeading | RichTextList | RichTextListItem | RichTextInline
 
 export interface RichTextDocument {
   type: 'doc'
-  content: Array<RichTextParagraph | RichTextList>
+  content: Array<RichTextParagraph | RichTextHeading | RichTextList>
 }
 
 export type MediaReference = {
@@ -92,6 +105,7 @@ export interface StyleValues {
   lineHeight?: number
   letterSpacing?: number
   textAlign?: 'left' | 'center' | 'right' | 'justify'
+  iconAlign?: 'center' | 'end'
   color?: string
   backgroundColor?: string
   paddingTop?: number

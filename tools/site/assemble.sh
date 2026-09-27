@@ -105,6 +105,13 @@ class Head(HTMLParser):
 
 problems = []
 canonicals = set()
+# Authored /docs pages are built by the website exporter and listed in its
+# sitemap. Starlight pages remain in the documentation sitemap and must carry
+# TechArticle identity. Keep the two inventories separate without exempting a
+# custom page from its own canonical and OpenGraph checks.
+website_sitemap = ET.parse("site/sitemap.xml")
+website_urls = {node.text for node in website_sitemap.iter() if node.tag.endswith("loc")}
+authored_docs = {url for url in website_urls if url and url.startswith("https://antifailure.dev/docs/")}
 for filename in glob.glob("site/docs/**/*.html", recursive=True):
     if filename.endswith("/404.html"):
         continue
@@ -113,6 +120,13 @@ for filename in glob.glob("site/docs/**/*.html", recursive=True):
         parser.feed(f.read())
     if not parser.canonical:
         problems.append(f"{filename}: no canonical")
+        continue
+    if parser.canonical in authored_docs:
+        expected = "https://antifailure.dev/" + filename.removeprefix("site/").removesuffix(".html")
+        if parser.canonical != expected:
+            problems.append(f"{filename}: authored canonical {parser.canonical!r} != {expected!r}")
+        if parser.og_url != parser.canonical:
+            problems.append(f"{filename}: og:url {parser.og_url!r} != canonical {parser.canonical!r}")
         continue
     canonicals.add(parser.canonical)
     if parser.canonical.endswith("/"):
@@ -138,6 +152,8 @@ for filename in glob.glob("site/docs/**/*.html", recursive=True):
 
 sitemap = ET.parse("site/docs/sitemap-0.xml")
 published = {node.text for node in sitemap.iter() if node.tag.endswith("loc")}
+if authored_docs & published:
+    problems.append(f"authored documentation shadows Starlight: {sorted(authored_docs & published)}")
 if canonicals != published:
     problems.append(
         "documentation sitemap and page canonicals differ: "

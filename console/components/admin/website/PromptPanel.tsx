@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
-import { pageBlockPrefix, setFieldOverride, setStyleOverride, sitePageSlug, validateWebsiteDocument, type CustomSectionKind, type WebsiteDocument, type WebsiteManifest } from "@antifailure/website";
+import { isAuthoredPagePath, pageBlockPrefix, pageContentKey, setFieldOverride, setStyleOverride, sitePageSlug, validateWebsiteDocument, type CustomSectionKind, type WebsiteDocument, type WebsiteManifest } from "@antifailure/website";
 import { adminMutate } from "@/lib/admin";
 import { addSection, moveSection, pageSections } from "@/lib/website-client";
 import { WebsitePromptRunGuard } from "@/lib/website-prompt-run";
@@ -11,12 +11,13 @@ type Proposal = {
   edits: Array<{ key: string; value: string | number | boolean }>;
   styles: Array<{ target: string; breakpoint: "desktop" | "tablet" | "mobile"; property: string; value: string | number }>;
   actions: Array<{ operation: "add-section" | "hide-section" | "show-section" | "move-section"; sectionId: string; after: string; kind: string; heading: string; body: string }>;
+  pages: Array<{ kind: "page" | "post"; path: string; title: string; description: string; summary: string; body: string; tags: string }>;
   usage: { inputTokens: number; outputTokens: number };
 };
 type Message = { role: "user" | "assistant"; text: string };
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : "The assistant could not respond. Try again.";
 
-export function applyPromptChanges(document: WebsiteDocument, manifest: WebsiteManifest, proposal: Proposal, page: string): WebsiteDocument {
+export function applyPromptChanges(document: WebsiteDocument, manifest: WebsiteManifest, proposal: Proposal, page: string, existingPaths: readonly string[]): WebsiteDocument {
   let next = document;
   const fields = new Map(manifest.fields.map((field) => [field.key, field]));
   const targets = new Set(["global", ...manifest.sections.map((section) => section.id), ...manifest.fields.map((field) => field.key)]);
@@ -53,17 +54,31 @@ export function applyPromptChanges(document: WebsiteDocument, manifest: WebsiteM
       next = moveSection(next, "page", current, action.sectionId, destination);
     }
   }
+  for (const proposed of proposal.pages) {
+    if (!isAuthoredPagePath(proposed.path) || existingPaths.includes(proposed.path) || next.pages?.some((entry) => entry.path === proposed.path) ||
+      (proposed.kind === "post" ? !/^\/blog\/[a-z0-9-]+$/u.test(proposed.path) : proposed.path.startsWith("/blog/"))) {
+      throw new Error("That page path is unavailable. Choose another path.");
+    }
+    next = { ...next, pages: [...(next.pages ?? []), { path: proposed.path, kind: proposed.kind }] };
+    for (const [field, value] of Object.entries({
+      title: proposed.title, description: proposed.description, summary: proposed.summary,
+      tags: proposed.tags, published: new Date().toISOString().slice(0, 10),
+    })) next = setFieldOverride(next, pageContentKey(proposed.path, field), value);
+    const paragraphs = proposed.body.split(/\n\s*\n/u).map((part) => part.trim()).filter(Boolean);
+    next = setFieldOverride(next, pageContentKey(proposed.path, "body"), { type: "doc", content: paragraphs.length ?
+      paragraphs.map((part) => ({ type: "paragraph", content: [{ type: "text", text: part }] })) : [{ type: "paragraph" }] });
+  }
   const checked = validateWebsiteDocument(next);
   if (!checked.ok) throw new Error("The assistant suggestion does not pass website validation.");
   return checked.document;
 }
 
-export function PromptPanel({ document, manifest, page, sectionId, selectedKey, disabled, onApply }: {
+export function PromptPanel({ document, manifest, page, sectionId, selectedKey, existingPaths, catalogReady, disabled, onApply }: {
   document: WebsiteDocument; manifest: WebsiteManifest | null; page: string; sectionId?: string; selectedKey?: string;
-  disabled: boolean; onApply: (next: WebsiteDocument) => void;
+  existingPaths: readonly string[]; catalogReady: boolean; disabled: boolean; onApply: (next: WebsiteDocument, newPath?: string) => void;
 }) {
   const [prompt, setPrompt] = useState("");
-  const [scope, setScope] = useState<"selection" | "section" | "page">("section");
+  const [scope, setScope] = useState<"selection" | "section" | "page">("page");
   const [messages, setMessages] = useState<Message[]>([]);
   const [pendingProposal, setProposal] = useState<{ page: string; value: Proposal } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -76,7 +91,7 @@ export function PromptPanel({ document, manifest, page, sectionId, selectedKey, 
   run.current.pageChanged(page);
   const proposal = pendingProposal?.page === page ? pendingProposal.value : null;
   useEffect(() => {
-    setMessages([]); setProposal(null); setBusy(false); setError(null); setNotice(null); setPrompt("");
+    setMessages([]); setProposal(null); setBusy(false); setError(null); setNotice(null); setPrompt(""); setScope("page");
     return () => { run.current.invalidate(); };
   }, [page]);
   useEffect(() => { thread.current?.scrollTo({ top: thread.current.scrollHeight, behavior: "instant" }); }, [messages, proposal, busy, error]);
@@ -84,6 +99,9 @@ export function PromptPanel({ document, manifest, page, sectionId, selectedKey, 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!manifest || !prompt.trim() || busy || disabled) return;
+    if (!catalogReady && /\b(?:create|add|new)\b.{0,60}\b(?:page|article|blog post)\b/iu.test(prompt)) {
+      setError("The page list has not loaded yet. Reload the editor before creating a new URL."); return;
+    }
     const eligible = manifest.fields.filter((field) => ["text", "url", "number", "boolean", "select"].includes(field.kind));
     const scoped = scope === "selection" && selectedKey ? eligible.filter((field) => field.key === selectedKey)
       : scope === "section" && sectionId ? eligible.filter((field) => field.sectionId === sectionId) : eligible;
@@ -92,11 +110,20 @@ export function PromptPanel({ document, manifest, page, sectionId, selectedKey, 
       value: Object.hasOwn(document.fields, field.key) ? document.fields[field.key] : field.defaultValue,
       ...(field.options ? { options: field.options } : {}),
     })).filter((field) => ["string", "number", "boolean"].includes(typeof field.value) && String(field.value).length <= 3000);
+    // An inner page can expose hundreds of text nodes. A page-wide request
+    // needs its headings and a spread of later content, not the first seventy
+    // labels encountered at the top of the DOM.
+    const pageWide = scope === "page" && candidates.length > 70;
+    const headings = pageWide ? candidates.filter((field) => /^(?:h[1-3]|title|headline|lead|heading)\b/iu.test(field.label)).slice(0, 28) : [];
+    const picked = new Set(headings.map((field) => field.key));
+    if (pageWide) for (let index = 0; index < 70; index += 1) picked.add(candidates[Math.floor(index * (candidates.length - 1) / 69)]!.key);
+    const ordered = pageWide ? candidates.filter((field) => picked.has(field.key)) : candidates;
     const fields: typeof candidates = [];
     let contextBytes = 0;
-    for (const field of candidates) {
+    for (const field of ordered) {
       const size = JSON.stringify(field).length;
-      if (fields.length >= 70 || contextBytes + size > 11_000) break;
+      if (fields.length >= 70) break;
+      if (contextBytes + size > 11_000) continue;
       fields.push(field);
       contextBytes += size;
     }
@@ -106,16 +133,16 @@ export function PromptPanel({ document, manifest, page, sectionId, selectedKey, 
     setBusy(true); setError(null); setNotice(null); setProposal(null);
     try {
       const result = await adminMutate<Proposal>("admin.administration.website.propose", {
-        prompt: request, page, selection: selectedKey ?? sectionId,
+        prompt: request, page, scope, selection: scope === "selection" ? selectedKey : scope === "section" ? sectionId : undefined,
         fields, targets: manifest.sections.map((section) => section.id),
-        fontKeys: manifest.fonts.map((font) => font.key),
+        fontKeys: manifest.fonts.map((font) => font.key), existingPaths,
         conversation: messages.slice(-6),
       });
       if (!run.current.isCurrent(requestedRun)) return;
       setMessages((held) => [...held.slice(-8), { role: "user", text: request }, { role: "assistant", text: result.message }]);
-      setProposal(result.edits.length || result.styles.length || result.actions.length ? { page: requestedRun.page, value: result } : null);
+      setProposal(result.edits.length || result.styles.length || result.actions.length || result.pages.length ? { page: requestedRun.page, value: result } : null);
       setPrompt("");
-      if (!result.edits.length && !result.styles.length && !result.actions.length) setNotice("No changes were suggested. You can ask a more specific question.");
+      if (!result.edits.length && !result.styles.length && !result.actions.length && !result.pages.length) setNotice("No changes were suggested. You can ask a more specific question.");
     } catch (cause) { if (run.current.isCurrent(requestedRun)) setError(errorMessage(cause)); }
     finally { if (run.current.isCurrent(requestedRun)) setBusy(false); }
   }
@@ -123,7 +150,8 @@ export function PromptPanel({ document, manifest, page, sectionId, selectedKey, 
   function apply() {
     if (!manifest || !proposal) return;
     try {
-      onApply(applyPromptChanges(document, manifest, proposal, page));
+      if (proposal.pages.length && !catalogReady) throw new Error("Reload the page list before creating a new URL.");
+      onApply(applyPromptChanges(document, manifest, proposal, page, existingPaths), proposal.pages[0]?.path);
       setProposal(null); setNotice("Added to your draft. Check the preview, then publish when ready."); setError(null);
     } catch (cause) { setError(errorMessage(cause)); }
   }
@@ -137,10 +165,11 @@ export function PromptPanel({ document, manifest, page, sectionId, selectedKey, 
       {!messages.length && <div className="cms-prompt-example"><span>Try</span><button type="button" onClick={() => setPrompt("Make this section clearer and more direct for a technical buyer. Keep every claim accurate.")}>Make this section clearer for a technical buyer ↗</button><button type="button" onClick={() => setPrompt("Tighten the hierarchy and spacing in this section without changing the brand palette.")}>Tighten the hierarchy and spacing ↗</button></div>}
       {messages.map((message, index) => <div key={index} className={`cms-prompt-message is-${message.role}`}><span>{message.role === "user" ? "You" : "Antifailure"}</span><p>{message.text}</p></div>)}
       {busy && <div className="cms-prompt-thinking" role="status">Preparing a small, reviewable edit…</div>}
-      {proposal && <div className="cms-prompt-proposal"><div className="cms-prompt-proposal-head"><strong>Proposed changes</strong><span>{proposal.edits.length + proposal.styles.length + proposal.actions.length}</span></div>
+      {proposal && <div className="cms-prompt-proposal"><div className="cms-prompt-proposal-head"><strong>Proposed changes</strong><span>{proposal.edits.length + proposal.styles.length + proposal.actions.length + proposal.pages.length}</span></div>
         {proposal.edits.map((edit) => <div className="cms-prompt-change" key={edit.key}><small>{manifest?.fields.find((field) => field.key === edit.key)?.label ?? edit.key}</small><span>{String(edit.value)}</span></div>)}
         {proposal.styles.map((style, index) => <div className="cms-prompt-change" key={`${style.target}-${style.property}-${index}`}><small>{style.target} · {style.breakpoint} · {style.property}</small><span>{style.value}</span></div>)}
         {proposal.actions.map((action, index) => <div className="cms-prompt-change" key={`action-${index}`}><small>{action.operation.replaceAll("-", " ")}</small><span>{action.operation === "add-section" ? `${action.kind} block${action.heading ? ` · ${action.heading}` : ""}` : action.sectionId}</span></div>)}
+        {proposal.pages.map((proposed) => <div className="cms-prompt-change" key={proposed.path}><small>New {proposed.kind === "post" ? "article" : "page"} · {proposed.path}</small><span>{proposed.title}<br />{proposed.description}<br />{proposed.body ? `${proposed.body.slice(0, 240)}${proposed.body.length > 240 ? "…" : ""}` : "Body needs your source material before publication."}</span></div>)}
         <div className="cms-prompt-proposal-actions"><button type="button" disabled={disabled} onClick={apply}>Apply to draft</button><button type="button" onClick={() => setProposal(null)}>Discard</button></div>
       </div>}
       {notice && <p className="cms-prompt-notice" role="status">{notice}</p>}

@@ -1,5 +1,10 @@
-import type { WebsiteDocument } from './types.ts'
+import type { AuthoredPage, WebsiteDocument } from './types.ts'
 import { resolveOrder } from './resolve.ts'
+export { isAuthoredPagePath } from './authored-path.ts'
+
+export function authoredPage(document: WebsiteDocument, path: string): AuthoredPage | undefined {
+  return document.pages?.find((page) => page.path === path)
+}
 
 /** Trim path separators in one pass. A route can come from a request query,
  * so do not use an overlapping start/end regular expression here. */
@@ -34,11 +39,13 @@ export function orderedPageBlockIds(document: WebsiteDocument, path: string): st
 export function projectWebsiteDocument(document: WebsiteDocument, path: string): WebsiteDocument {
   const page = sitePageSlug(path)
   const block = pageBlockPrefix(path)
+  const blogIndex = path === '/blog'
   const related = path === '/' ? (key: string) =>
     !key.startsWith('page.') && !key.startsWith('page-') && !key.startsWith('custom-p') &&
     (!key.startsWith('seo.') || key.startsWith('seo.home.')) :
     (key: string) => key === 'global' || key === 'header' || key === 'footer' || key === `page-${page}` ||
       key.startsWith('header.') || key.startsWith('footer.') || key.startsWith(`page.${page}.`) || key.startsWith(`seo.${page}.`) || key.startsWith(block)
+      || (blogIndex && key.startsWith('page.blog-'))
   const retain = <T>(items: Record<string, T>): Record<string, T> => Object.fromEntries(Object.entries(items).filter(([key]) => related(key)))
   return {
     ...document,
@@ -50,5 +57,6 @@ export function projectWebsiteDocument(document: WebsiteDocument, path: string):
       moves: document.sections.moves.filter((move) => related(move.id)),
       custom: document.sections.custom.filter((section) => path === '/' ? !section.id.startsWith('custom-p') : section.id.startsWith(block)),
     },
+    ...(document.pages ? { pages: blogIndex ? document.pages.filter((page) => page.kind === 'post') : document.pages.filter((page) => page.path === path) } : {}),
   }
 }

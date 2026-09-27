@@ -34,6 +34,15 @@ test("device style scopes do not overlap and media framing reaches actual images
   assert.ok(css.includes(`object-position:${focus?.focalX}% ${focus?.focalY}%`));
   assert.match(css, /height:240px/);
 });
+test("page-wide icon alignment reaches label icons without stretching the layout or changing mobile", () => {
+  const document = emptyWebsiteDocument();
+  document.styles["page-product-twins"] = { desktop: { iconAlign: "end" } };
+  const css = cmsStyles(document, () => "");
+  assert.match(css, /@media \(min-width:1024px\)\{\[data-cms-section="page-product-twins"\] \[data-cms-icon-row\]\{align-items:end!important/);
+  assert.match(css, /\[data-cms-icon-row\]>svg\{transform:translateY\(24%\)!important/);
+  assert.doesNotMatch(css, /\[data-cms-layout="split"\]\{align-items:stretch/);
+  assert.doesNotMatch(css, /@media \(max-width:767px\)[^\n]*align-items:end/);
+});
 test("font overrides use authored font names and reject arbitrary CSS selectors or colors", () => {
   const document = emptyWebsiteDocument();
   document.styles.global = { desktop: { fontFamily: "geist", color: "#193e30" } };

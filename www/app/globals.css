@@ -312,6 +312,8 @@ main:focus {
   text-wrap: balance;
 }
 
+.prose-post > :first-child { margin-top: 0; }
+
 .prose-post h3 {
   margin-top: 2em;
   font-size: 20px;

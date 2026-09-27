@@ -109,19 +109,15 @@ export function TwinsPage() {
             kicker="Lifecycle"
             title="<strong>From repository to test result.</strong>"
           />
+          <ul className="mt-10 grid grid-cols-2 gap-x-7 gap-y-7 max-md:grid-cols-1">
+            {PHASES.map((phase) => (
+              <li key={phase.name} className="min-w-0 border-t border-black/12 pt-3">
+                <MonoLabel tone="reader" className="uppercase tracking-[0.14em]">{phase.name}</MonoLabel>
+                <p className="mt-2 max-w-[280px] text-[13px] leading-5 tracking-extra-tight text-gray-new-40">{phase.note}</p>
+              </li>
+            ))}
+          </ul>
         </Split>
-        <ul className="mt-10 grid grid-cols-4 gap-x-16 gap-y-8 max-xl:grid-cols-2 max-md:grid-cols-1">
-          {PHASES.map((phase) => (
-            <li key={phase.name} className="min-w-0">
-              <MonoLabel tone="reader" className="uppercase tracking-[0.14em]">
-                {phase.name}
-              </MonoLabel>
-              <p className="mt-3 max-w-[280px] text-[13px] leading-5 tracking-extra-tight text-gray-new-40">
-                {phase.note}
-              </p>
-            </li>
-          ))}
-        </ul>
         <Illustrative>
             Example lifecycle log.
           </Illustrative>

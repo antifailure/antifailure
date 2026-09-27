@@ -97,7 +97,9 @@ export function CmsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (isPreview) return;
-    revision.current = -1;
+    // A path change needs a fresh projection, but a response older than the
+    // static HTML must never erase content that the build already published.
+    revision.current = snapshot.revision;
     setPublishedDocument(projectWebsiteDocument(normalizeWebsiteDocument(snapshot.document).document, pathname));
     const controller = new AbortController();
     let fetching = false;

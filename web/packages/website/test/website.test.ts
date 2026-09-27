@@ -5,6 +5,7 @@ import {
   resetStyleOverride, resolveCollection, resolveField, resolveOrder, resolveStyle, safeBuiltinSource,
   safeHref, setFieldOverride, setStyleOverride, stableStringify, validateWebsiteDocument, orderedPageBlockIds, pageBlockPrefix, projectWebsiteDocument, sitePageSlug,
   CUSTOM_SHAPES, DIVIDER_VARIANTS, isCustomShape, isDividerVariant, resolveCustomShape, resolveDividerVariant,
+  authoredPageContent, emptyPageBody, isAuthoredPagePath, pageContentKey, unpublishablePages,
 } from '../src/index.ts'
 import type { FieldValue, RichTextDocument } from '../src/index.ts'
 
@@ -21,6 +22,41 @@ test('scoped blocks stay valid and isolated to their public route', () => {
   assert.equal(validateWebsiteDocument(document).ok, true)
   document.sections.custom[1]!.id = 'custom-pmissing-not-a-uuid'
   assert.equal(validateWebsiteDocument(document).ok, false)
+})
+
+test('new pages and posts have safe paths, page-specific fields, and publishable content', () => {
+  const document = emptyWebsiteDocument()
+  document.pages = [{ path: '/guides/deploy-safely', kind: 'page' }, { path: '/blog/a-real-change', kind: 'post' }]
+  assert.equal(validateWebsiteDocument(document).ok, true)
+  for (const path of ['/admin/secret', '/api/action', '/blog/post.html', '/../../bad', '//evil.example']) assert.equal(isAuthoredPagePath(path), false)
+  assert.equal(validateWebsiteDocument({ ...document, pages: [...document.pages, document.pages[0]] }).ok, false)
+  assert.equal(unpublishablePages(document).length > 0, true)
+  for (const page of document.pages) {
+    document.fields[pageContentKey(page.path, 'title')] = page.kind === 'post' ? 'A real change' : 'Deploy safely'
+    document.fields[pageContentKey(page.path, 'description')] = 'A concrete explanation of what changes before a deploy.'
+    document.fields[pageContentKey(page.path, 'summary')] = 'How the change is checked.'
+    document.fields[pageContentKey(page.path, 'published')] = '2026-09-27'
+    document.fields[pageContentKey(page.path, 'body')] = { type: 'doc', content: [{ type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'The check' }] }, { type: 'paragraph', content: [{ type: 'text', text: 'Rehearse it before release.' }] }] }
+  }
+  document.fields[pageContentKey('/blog/a-real-change', 'tags')] = 'Engineering, Deploys'
+  assert.deepEqual(unpublishablePages(document), [])
+  assert.equal(authoredPageContent(document, document.pages[1]!).title, 'A real change')
+  assert.equal(projectWebsiteDocument(document, '/blog').pages?.length, 1)
+  assert.equal(projectWebsiteDocument(document, '/blog/a-real-change').pages?.length, 1)
+  assert.equal(projectWebsiteDocument(document, '/guides/deploy-safely').pages?.length, 1)
+  assert.deepEqual(emptyPageBody(), { type: 'doc', content: [{ type: 'paragraph' }] })
+})
+
+test('an existing article cannot publish an empty title or an impossible date', () => {
+  const document = emptyWebsiteDocument()
+  const title = pageContentKey('/blog/what-staging-misses-about-migrations', 'title')
+  const published = pageContentKey('/blog/what-staging-misses-about-migrations', 'published')
+  document.fields[title] = ''
+  document.fields[published] = '2026-02-31'
+  assert.equal(unpublishablePages(document).length, 2)
+  document.fields[title] = 'Why migration timing changes with your data'
+  document.fields[published] = '2026-08-29'
+  assert.deepEqual(unpublishablePages(document), [])
 })
 
 test('a route slug is stable even with long runs of separators', () => {
@@ -144,6 +180,12 @@ test('shape and divider sections persist named choices and safe existing style c
   const reset = setFieldOverride(doc, `${customId}.shape`, undefined)
   assert.equal(resolveCustomShape(reset.fields[`${customId}.shape`]), 'circle')
   assert.equal(validateWebsiteDocument({ ...doc, sections: { ...doc.sections, custom: [{ id: customId, kind: 'svg', group: 'hero', after: null }] } }).ok, false)
+})
+
+test('label icon alignment is a bounded design choice', () => {
+  const doc = setStyleOverride(emptyWebsiteDocument(), 'page-product-twins', 'desktop', 'iconAlign', 'end')
+  assert.equal(doc.styles['page-product-twins']?.desktop?.iconAlign, 'end')
+  assert.equal(validateWebsiteDocument({ ...doc, styles: { 'page-product-twins': { desktop: { iconAlign: 'expression(alert(1))' } } } }).ok, false)
 })
 
 test('shape and divider render choices reject markup, CSS, unsupported names, and non-text values', () => {

@@ -1,4 +1,5 @@
 import { POSTS_BY_DATE } from "./blog";
+import { builtAuthoredPage, builtAuthoredPages } from "./authored-pages";
 import { SITE_TITLE, pageTitle, titleName } from "./site";
 
 /**
@@ -366,7 +367,19 @@ const POST_ROUTES: Route[] = POSTS_BY_DATE.map((post) => ({
   parent: "/blog",
 }));
 
-const ALL_ROUTES: readonly Route[] = [...ROUTES, ...POST_ROUTES];
+const AUTHORED_ROUTES: Route[] = builtAuthoredPages().filter((page) => page.kind === "page").flatMap((page) => {
+  const entry = builtAuthoredPage(page.path);
+  if (!entry) return [];
+  return [{ path: page.path, title: pageTitle(entry.content.title), description: entry.content.description,
+    summary: entry.content.summary, section: "company" as const, indexable: true, priority: 0.6,
+    parent: "/" }];
+});
+
+const PAGE_DIRECTORY: Route[] = AUTHORED_ROUTES.length ? [{ path: "/pages", title: pageTitle("Pages"),
+  description: "Pages published by the Antifailure team.", summary: "Index of the team's authored pages.",
+  section: "company", indexable: true, priority: 0.4, parent: "/" }] : [];
+const ALL_ROUTES: readonly Route[] = [...ROUTES, ...POST_ROUTES, ...PAGE_DIRECTORY, ...AUTHORED_ROUTES];
+if (new Set(ALL_ROUTES.map((route) => route.path)).size !== ALL_ROUTES.length) throw new Error("A CMS page path conflicts with an existing site route.");
 
 /** Routes that belong in the sitemap and may be indexed. */
 export const INDEXABLE_ROUTES = ALL_ROUTES.filter((r) => r.indexable);

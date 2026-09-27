@@ -572,6 +572,15 @@ and requests a static refresh. Unchanged text, images and design settings use
 the version in the site's source. HTML, CSS and JavaScript blocks run in an
 isolated iframe rather than in the surrounding page.
 
+The **Pages** view lists built routes and individual Writing articles. Owners
+can create a page at a new path or an article under `/blog`, then edit its
+title, introduction, summary, rich body, date and topics. A draft URL is
+previewable before it exists publicly. Publishing rebuilds its HTML, Markdown
+version and sitemap entry; new articles also enter the Writing index and RSS
+feed. The editor links newly authored pages from the site's Pages index so
+visitors and crawlers can reach them. Existing pages retain source defaults
+until an owner changes a field.
+
 The **Ask AI** panel is optional. `AF_CMS_ANTHROPIC_API_KEY` is the Anthropic
 API key used only by the control-plane process for owner-requested edit
 suggestions. Leave it unset to use the manual editor without AI. The key is

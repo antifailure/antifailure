@@ -151,8 +151,9 @@ function DesignControls({ document, target, device, manifest, onChange, disabled
         <p className="text-[12px] leading-5 text-muted">Padding adds room inside. Margins add room above and below.</p>
         <div className="grid grid-cols-2 gap-x-3">{number("paddingTop", "Top padding")}{number("paddingBottom", "Bottom padding")}{number("paddingLeft", "Left padding")}{number("paddingRight", "Right padding")}{number("marginTop", "Top margin")}{number("marginBottom", "Bottom margin")}{number("gap", "Item gap")}</div>
       </Group>
-      <Group title="Layout & size" count={count("layout", "position", "zIndex", "maxWidth", "width", "minHeight", "borderRadius", "opacity")}>
+      <Group title="Layout & size" count={count("layout", "iconAlign", "position", "zIndex", "maxWidth", "width", "minHeight", "borderRadius", "opacity")}>
         {select("layout", "Arrangement", [{ value: "default", label: "Original arrangement" }, { value: "stack", label: "Stack vertically" }, { value: "media-left", label: "Media on the left" }, { value: "media-right", label: "Media on the right" }, { value: "center", label: "Centered" }])}
+        {select("iconAlign", "Label icon alignment", [{ value: "center", label: "Centered" }, { value: "end", label: "Text baseline" }])}
         {select("position", "Position", [{ value: "relative", label: "In page" }, { value: "absolute", label: "Overlay" }, { value: "fixed", label: "Fixed on screen" }])}
         <div className="grid grid-cols-2 gap-x-3">{number("zIndex", "Layer", 1, "")}{number("maxWidth", "Maximum width")}{number("width", "Width")}{number("minHeight", "Minimum height")}{number("borderRadius", "Corner radius")}{number("opacity", "Opacity", 0.05, "")}</div>
       </Group>
