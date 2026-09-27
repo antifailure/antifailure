@@ -76,7 +76,18 @@ type Options struct {
 	WarmFloor time.Duration
 	// Settle is how long to leave the fault in place before recovering.
 	Settle time.Duration
-	// ReadyTimeout is how long the database has to come back.
+	// ReadyTimeout is how long the database has to come back, and it is
+	// consulted BETWEEN attempts rather than during one: waitReady connects
+	// once before it looks at its deadline, and the wait starts after the
+	// writers have stopped rather than at the fault. So the window a database
+	// really gets is this, plus the stop grace, plus one connection attempt.
+	// For a value a manifest would state that slack is immaterial, and for a
+	// tiny one it is the whole of it.
+	//
+	// Which is why a test that needs a database that did NOT come back has to
+	// arrange one rather than set this short. The live tests in
+	// engine/internal/env were written on the other premise, with 1ms, and one
+	// of them failed on a fast runner while its sibling passed in the same run.
 	ReadyTimeout time.Duration
 	// Inject applies the fault and returns what it did. It is required: a
 	// verification with nothing to inject is the liveness arm, and that is

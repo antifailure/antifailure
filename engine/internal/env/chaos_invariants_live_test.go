@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
+	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/fault"
 	"github.com/antifailure/antifailure/engine/internal/redact"
 	"github.com/antifailure/antifailure/engine/internal/report"
@@ -73,6 +74,43 @@ func chaosInvDocker(t *testing.T) *client.Client {
 	return cli
 }
 
+// chaosInvOnce makes a Postgres container serve exactly ONCE, which is what
+// turns "the database did not come back" from something these tests WAIT for
+// into something they MAKE happen.
+//
+// What it replaces was a recovery timeout of 1ms, on the premise that no
+// container restart can beat it, so the proof would always end in "the
+// database did not answer". That premise is false, and CI proved it: in engine
+// job 107949572824 the first of the two live tests below failed with "the
+// database answered within 1ms" while the second one, the same fault against
+// the same image in the same run on the same machine, passed. Two verdicts for
+// one mechanism is a race, and the 1ms was never the window. waitReady in
+// engine/internal/pgcrash makes one connection attempt and consults its
+// deadline only AFTER that attempt, so the timeout bounds the RETRIES rather
+// than the first try; and Verify stops its writers between the undo and
+// waitReady, which is a grace of up to 2s that the deadline never sees at all.
+// A Postgres that shut down cleanly is back inside that window on a fast
+// runner and is not on a loaded one, so the test's verdict was a property of
+// the machine rather than of the code.
+//
+// So the container refuses to serve a second time instead. The first start is
+// an ordinary Postgres, with the user's own table and the row that already
+// breaks the invariant. The fault stops it, the undo starts it again, the
+// marker is there, and it exits at once: there is no database to answer, on
+// any machine, at any speed. The assertion that the proof ended in an error
+// can still say no, and now it says no about the fixture rather than about the
+// runner's clock.
+//
+// The marker sits at the filesystem root because that is the container's own
+// writable layer, which a restart keeps and which no volume this image
+// declares can shadow.
+const chaosInvOnce = `if [ -e /af-chaosinv-served ]; then
+	echo 'af-chaosinv: this database served once and does not come back' >&2
+	exit 70
+fi
+touch /af-chaosinv-served
+exec docker-entrypoint.sh postgres`
+
 // chaosInvDatabase starts one labelled Postgres this test owns, and returns the
 // environment id the injector is built on and the URL to reach it.
 //
@@ -108,6 +146,12 @@ func chaosInvDatabase(t *testing.T, cli *client.Client, envID string) string {
 				"PGDATA=" + chaosInvData,
 			},
 			ExposedPorts: network.PortSet{hostPort: struct{}{}},
+			// Served once, for the reason chaosInvOnce gives at length: what
+			// these tests are about is a database that does not come back, and
+			// a database that does not come back has to be built rather than
+			// hoped for.
+			Entrypoint: []string{"/bin/sh", "-c"},
+			Cmd:        []string{chaosInvOnce},
 		},
 		HostConfig: &container.HostConfig{
 			PortBindings: network.PortMap{hostPort: []network.PortBinding{{
@@ -176,9 +220,10 @@ func chaosInvOrchestrator(t *testing.T, invs []schema.Invariant) *Orchestrator {
 // wiring, end to end, against a Postgres that really stops.
 //
 // It is the one ordering where every link in the chain has to hold at once and
-// the run still ends in an error: the database is stopped and started again
-// and it is given no time at all to come back, so the proof fails, and the
-// arm has to survive that. What it proves, in order:
+// the run still ends in an error: the database is stopped, the undo starts it
+// again, and it does not come back, so the proof fails and the arm has to
+// survive that. That it does not come back is made to happen rather than
+// waited for, which is what chaosInvOnce is and why. What it proves, in order:
 //
 //   - the manifest's invariants reach the proof, because the before side was
 //     asked and answered against the user's own table
@@ -207,22 +252,28 @@ func TestCrashProofLive_TheManifestsInvariantsReachTheProofAndComeBack(t *testin
 		Name: "stop-the-database", Kind: schema.FaultKind(fault.KindContainerStop),
 		Target: schema.FaultTargetDatabase, Hold: "1s",
 	}
-	// The shortest recovery timeout there is. A container that has just been
-	// started cannot answer a query within it, so "the database did not come
-	// back" is decided by the manifest rather than by a race with a Postgres
-	// start up, and the test says the same thing on a fast machine and a
-	// loaded one.
+	// A recovery window a real database would be given, and it still runs out,
+	// because chaosInvOnce means there is nothing left to answer. It used to be
+	// 1ms and the 1ms used to be the whole mechanism, which made the verdict a
+	// property of how fast the runner restarts a container.
 	cr := &schema.CrashRecovery{
 		Enabled: boolPtr(true), Writers: 2, CommitsBeforeFault: 10,
-		RecoveryTimeout: "1ms",
+		RecoveryTimeout: "2s",
 	}
 
 	entry, proof := o.crashProof(t.Context(), inj, url, declared, cr,
 		report.ChaosFault{Name: declared.Name}, time.Now())
 
-	// The fault went in and the database was not given time to come back.
+	// The fault went in and the database never came back.
 	require.True(t, entry.Injected, "the fault never went in, so this test measured nothing")
-	require.NotEmpty(t, entry.Error, "the database answered within 1ms, which this test cannot be about")
+	require.NotEmpty(t, entry.Error,
+		"the proof succeeded, so the database came back and this test is not about the run it was written for: chaosInvOnce did not stop it serving a second time")
+	// The recovery timeout is what ran out, named by its own code rather than
+	// by its sentence. Without this the assertion above is satisfied by any
+	// error at all, including an undo that failed before the proof ever
+	// reached the question this test is about.
+	require.Contains(t, entry.Error, string(aferrors.AFCHS006),
+		"the run failed for some other reason than the database not coming back")
 
 	// The manifest's invariants reached the proof and were asked BEFORE it.
 	require.Len(t, entry.Invariants, 1, "the arm never reached the report entry")
@@ -235,6 +286,11 @@ func TestCrashProofLive_TheManifestsInvariantsReachTheProofAndComeBack(t *testin
 	// And it could not be asked after, which is the honest answer and not a
 	// pass.
 	require.NotEmpty(t, got.AfterError, "an invariant nobody could ask was reported as a verdict")
+	// And for the reason this test is about. An invariant whose statement was
+	// refused by a database that is answering fine would also leave this side
+	// with an error, and that is a different run with a different meaning.
+	require.Contains(t, got.AfterError, "the database did not answer a query after the fault",
+		"the invariant was not asked for some other reason than the database being gone")
 	require.False(t, got.AfterHeld)
 
 	// The proof is handed back on the error path, which is the only route the
@@ -267,13 +323,14 @@ func TestCrashProofLive_AManifestWithNoInvariantsIsUnchanged(t *testing.T) {
 	}
 	cr := &schema.CrashRecovery{
 		Enabled: boolPtr(true), Writers: 2, CommitsBeforeFault: 10,
-		RecoveryTimeout: "1ms",
+		RecoveryTimeout: "2s",
 	}
 
 	entry, proof := o.crashProof(t.Context(), inj, url, declared, cr,
 		report.ChaosFault{Name: declared.Name}, time.Now())
 
-	require.NotEmpty(t, entry.Error, "the database answered within 1ms, which this test cannot be about")
+	require.NotEmpty(t, entry.Error,
+		"the proof succeeded, so the database came back and this test is not about the run it was written for: chaosInvOnce did not stop it serving a second time")
 	require.Empty(t, entry.Invariants, "an arm appeared for a manifest that declares no invariants")
 	require.Nil(t, proof, "the error path stopped dropping the proof for a project that asked for nothing")
 	require.Empty(t, ChaosFindings(entry, proof, report.Configure(nil))[1:],
