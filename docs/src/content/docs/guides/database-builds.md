@@ -92,6 +92,24 @@ The second is usually the question a storage engine team is really asking, becau
 it is what an upgrade does to data that already exists. The report names the
 writer on every run, so you never have to remember which way round you ran it.
 
+### Tear the environment down before you change the build
+
+If an environment is already up for this project, its database branch is running
+whichever build it was started with, and the comparison refuses rather than
+measuring it:
+
+```
+AF-DB-045: The environment orders-api-w-database-image-90c66a is already running
+a database branch on the build the golden was made on and this run asked for
+pgvector/pgvector:pg17.
+```
+
+`af down` and run it again. The branch is not replaced for you, because a branch
+is copy on write and replacing one destroys everything written since it was made,
+to answer a question about measurement. It is not adopted either, which is the
+point: a run that asked for one build and quietly measured another would report a
+difference and name the wrong reason for it.
+
 ## Step 3: read the throughput and the distribution
 
 The run this section shows came from the command above, against

@@ -432,6 +432,27 @@ func (p *Provider) findBranch(ctx context.Context, envID string) (provider.Branc
 			}
 			return provider.Branch{}, false, nil
 		}
+		if got := c.Labels[LabelBranchImage]; got != p.branchImage {
+			// NEITHER ADOPTED NOR REMOVED, and this is the only case here that
+			// is neither.
+			//
+			// Adopting it is the defect this check exists for: the caller asked
+			// for one database build, the running container is another, the
+			// rebase never happens, and the comparison reports an axis and an
+			// image that nothing measured. That is the confounded reading the
+			// whole feature exists to prevent, arriving silently.
+			//
+			// Removing it is what the stopped case above does, and it is wrong
+			// here. That one is unusable by definition and nothing can be
+			// holding it. This one is running, somebody may be working against
+			// it, and a branch is copy on write: replacing it destroys every
+			// write made since it was branched, to answer a question about
+			// measurement. So the run refuses and says what to do, which is the
+			// same choice AF-DB-005 makes about an image under a running
+			// container.
+			return provider.Branch{}, false, aferrors.Coded(aferrors.AFDB045,
+				"env", envID, "running", namedImage(got), "asked", namedImage(p.branchImage))
+		}
 		created, _ := time.Parse(time.RFC3339, c.Labels[LabelCreated])
 		return provider.Branch{
 			EnvID: envID, From: c.Labels[LabelGolden],
@@ -439,6 +460,18 @@ func (p *Provider) findBranch(ctx context.Context, envID string) (provider.Branc
 		}, true, nil
 	}
 	return provider.Branch{}, false, nil
+}
+
+// namedImage is how a branch's database build is spelled to a person.
+//
+// The empty string is the build the golden was made on, which is a real answer
+// and not a blank, and a message that printed nothing there would read as a
+// message with a missing field.
+func namedImage(image string) string {
+	if image == "" {
+		return "the build the golden was made on"
+	}
+	return image
 }
 
 // connString builds the connection string for a published port.

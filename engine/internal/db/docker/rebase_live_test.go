@@ -219,3 +219,94 @@ func TestDestroyingAGoldenRemovesTheCopiesOfItOntoOtherBuilds(t *testing.T) {
 			"%s survived the golden it was made from", r.ID)
 	}
 }
+
+// THE REVIEW FINDING THAT WOULD HAVE MADE EVERY REPORT A LIE ON THE COMMON PATH.
+//
+// A comparison that varies the database build keeps the environment identifier
+// deliberately, because it addresses the environment the caller already has
+// rather than creating a second one beside it. Branch is idempotent by finding a
+// running branch for that identifier and adopting it. Put those two together and
+// a branch already up on one build is handed to a run that asked for another: the
+// copy never happens, the container keeps serving the build it was started with,
+// and the report names the build that was asked for. Every number in it is then
+// attributed to a build that did not run, which is the confounded reading this
+// whole feature exists to prevent, arriving silently and on the path a person is
+// most likely to be on, because the command leaves the environment up.
+//
+// It refuses rather than replacing the branch. A branch is copy on write, so
+// replacing one destroys every write made since it was made, to answer a question
+// about measurement.
+func TestABranchAlreadyUpOnAnotherBuildIsRefusedRatherThanMeasured(t *testing.T) {
+	requireImage(t, writerImage)
+	requireImage(t, readerImage)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	defer cancel()
+
+	writer := newExtensionProvider(t, dockerdb.Options{
+		Version: 17, PortFrom: 49700, Image: writerImage,
+		SeedSQL: `CREATE TABLE ledger (id int primary key); INSERT INTO ledger VALUES (1);`,
+	})
+	gv := writer.refresh(ctx, provider.GoldenSpec{
+		Version: 17, RulesHash: "rebase4", Provenance: "rebase-adopt",
+	})
+
+	// The environment comes up the way every environment comes up, on the
+	// golden's own build, with no image named anywhere.
+	const envID = "env_rebase_adopt01"
+	plain := newExtensionProvider(t, dockerdb.Options{
+		Version: 17, PortFrom: 49800, Image: writerImage,
+	})
+	b := plain.branch(ctx, gv.ID, envID)
+	require.NotEmpty(t, b.ProviderRef)
+
+	// And now the comparison asks for the other build, against the SAME
+	// environment identifier, which is what withBranchImage does on purpose.
+	asking := newExtensionProvider(t, dockerdb.Options{
+		Version: 17, PortFrom: 49900, Image: writerImage, BranchImage: readerImage,
+	})
+	_, err := asking.p.Branch(ctx, gv.ID, envID)
+	require.Error(t, err,
+		"a branch running another build must not be adopted for a run that asked for this one")
+	t.Logf("the refusal, as somebody running the comparison sees it:\n%v", err)
+
+	var coded *aferrors.Error
+	require.ErrorAs(t, err, &coded)
+	require.Equal(t, aferrors.AFDB045, coded.Code(),
+		"this is its own refusal rather than a branch that would not start")
+	require.Contains(t, err.Error(), readerImage, "the message names the build that was asked for")
+	require.Contains(t, err.Error(), "the build the golden was made on",
+		"and the one that is running, which is the golden's own and is an answer rather than a blank")
+
+	// AND THE RUNNING BRANCH IS STILL THERE, which is the half that makes the
+	// refusal the right answer rather than merely a different one. A replacement
+	// would have destroyed it.
+	after, err := plain.p.Branch(ctx, gv.ID, envID)
+	require.NoError(t, err, "the branch that was already up must survive the refusal")
+	require.Equal(t, b.ProviderRef, after.ProviderRef,
+		"the refusal must not have replaced the container it refused to adopt")
+
+	// THE OTHER DIRECTION, and a mutation is what asked for it. Everything above
+	// holds if the label is never written at all, because an unwritten label reads
+	// as the empty string and the empty string is not the image being asked for,
+	// so the refusal still arrives. Refusing is only correct if a run asking for
+	// the build that IS running adopts it: without the label being stamped, a
+	// second `af up` on the same image refuses its own branch and the feature
+	// cannot be used twice. So the label has to be written as well as read, and
+	// this is the assertion that says so.
+	const sameID = "env_rebase_adopt02"
+	made := newExtensionProvider(t, dockerdb.Options{
+		Version: 17, PortFrom: 49920, Image: writerImage, BranchImage: readerImage,
+	})
+	mine := made.branch(ctx, gv.ID, sameID)
+
+	again := newExtensionProvider(t, dockerdb.Options{
+		Version: 17, PortFrom: 49940, Image: writerImage, BranchImage: readerImage,
+	})
+	adopted, err := again.p.Branch(ctx, gv.ID, sameID)
+	require.NoError(t, err,
+		"a run asking for the build that is already running must adopt it, or the second "+
+			"run of any comparison refuses its own branch")
+	require.Equal(t, mine.ProviderRef, adopted.ProviderRef,
+		"and adopt the container that exists rather than build a second copy")
+}

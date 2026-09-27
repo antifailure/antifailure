@@ -90,6 +90,19 @@ const (
 	// service whose URL it prints, so the inference was one race away from an
 	// environment that is running and reports no address.
 	LabelServiceKind = "dev.antifailure.service-kind"
+	// LabelBranchImage is the database build a caller asked this branch's
+	// server to come out of, and the empty string for the golden's own.
+	//
+	// Recorded so that finding an existing branch can ask whether it is the
+	// branch that was asked for, which is not the same question as whether one
+	// exists. A comparison that varies the database build keeps the
+	// environment identifier deliberately, so without this label a branch
+	// already running on one build is adopted for a run that asked for
+	// another: the rebase never happens, and the report names a build that
+	// nothing measured. An absent label reads as the empty string, which is
+	// what every branch created before this existed actually ran, so nothing
+	// already up is disturbed by the comparison being added.
+	LabelBranchImage = "dev.antifailure.branch-image"
 	// LabelCreated is RFC 3339, used to age out orphans whose creating
 	// process died before it could clean up.
 	LabelCreated = "dev.antifailure.created"

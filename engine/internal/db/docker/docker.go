@@ -51,6 +51,11 @@ const (
 	LabelEnv     = dockerutil.LabelEnv
 	LabelGolden  = dockerutil.LabelGolden
 	LabelCreated = dockerutil.LabelCreated
+	// LabelBranchImage is which database build a branch was asked to run, and
+	// the empty string for the golden's own. Read by findBranch, which is what
+	// stops a branch already up on one build being adopted for a run that
+	// asked for another.
+	LabelBranchImage = dockerutil.LabelBranchImage
 )
 
 // ImageRepo is where golden versions are committed. Using one repository with
@@ -522,7 +527,21 @@ func (p *Provider) DestroyGolden(ctx context.Context, version string) error {
 	// destroyed golden leaves a full sized image per build that ever opened it,
 	// labelled managed, which is a leak the detector would report against this
 	// provider and nothing would ever collect.
-	for _, r := range p.rebased(ctx, version) {
+	//
+	// THE LISTING'S OWN FAILURE IS RAISED HERE, and treating it as "no copies"
+	// was the defect. This is the only moment anything can find them: the copies
+	// are labelled with the golden version, and the version is about to stop
+	// existing, so a daemon that would not list for one second turns a transient
+	// failure into a permanent leak of a full sized image per build that ever
+	// opened this golden. The inventory caller below wants the opposite and still
+	// gets it.
+	copies, err := p.rebasedOrError(ctx, version)
+	if err != nil {
+		return fmt.Errorf("db.docker: the copies of golden %s onto other builds could not be "+
+			"listed, so the golden is not removed: removing it now would leave them with "+
+			"nothing left to find them by: %w", version, err)
+	}
+	for _, r := range copies {
 		if _, rerr := p.cli.ImageRemove(ctx, r.ref, client.ImageRemoveOptions{}); rerr != nil &&
 			!cerrdefs.IsNotFound(rerr) {
 			return fmt.Errorf("db.docker: remove the copy %s of golden %s: %w", r.ref, version, rerr)
@@ -543,14 +562,27 @@ type rebasedImage struct {
 }
 
 // rebased names the copies of goldens onto other builds, all of them when
-// version is empty and one golden's when it is not.
+// version is empty and one golden's when it is not, and never fails.
 //
-// Best effort and never an error, because both callers already have a job: the
-// destroy above is removing a version and must not fail on a listing, and the
-// inventory is describing what exists. An empty answer from a daemon that would
-// not list is the same as no copies, which is the honest reading of "could not
-// look" for a caller that is only ever adding to a list.
+// THE TWO CALLERS WANT OPPOSITE THINGS FROM "I COULD NOT LOOK", and the first
+// version of this gave them the same thing. For the INVENTORY, which is only
+// ever adding to a list of what exists, an empty answer from a daemon that would
+// not list is the honest reading: it describes what it could see and no decision
+// turns on it. For DESTROY it is the opposite, because destroy ACTS on the
+// answer: it is the last moment anything can find these copies, since they are
+// labelled with a golden version that is about to stop existing, so reading a
+// failed listing as "there are none" leaks them forever. So the inventory keeps
+// this, and destroy uses rebasedOrError.
 func (p *Provider) rebased(ctx context.Context, version string) []rebasedImage {
+	out, err := p.rebasedOrError(ctx, version)
+	if err != nil {
+		return nil
+	}
+	return out
+}
+
+// rebasedOrError is the same listing for the caller that acts on it.
+func (p *Provider) rebasedOrError(ctx context.Context, version string) ([]rebasedImage, error) {
 	filters := []string{LabelKind, rebaseKind}
 	if version != "" {
 		filters = append(filters, LabelGolden, version)
@@ -559,7 +591,7 @@ func (p *Provider) rebased(ctx context.Context, version string) []rebasedImage {
 		Filters: dockerutil.Filter(filters...),
 	})
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("list the copies of goldens onto other builds: %w", err)
 	}
 	var out []rebasedImage
 	for _, img := range images.Items {
@@ -573,7 +605,7 @@ func (p *Provider) rebased(ctx context.Context, version string) []rebasedImage {
 			})
 		}
 	}
-	return out
+	return out, nil
 }
 
 // Branch creates a database for an environment from a golden version.
@@ -662,6 +694,12 @@ func (p *Provider) Branch(ctx context.Context, version, envID string) (provider.
 		LabelKind:   "branch",
 		LabelEnv:    envID,
 		LabelGolden: version,
+		// Which build was ASKED for, not the rebased tag the container was
+		// actually started from. The tag carries a digest of the reference and
+		// nobody chose it; the answer findBranch needs is whether a branch
+		// already up is the one this caller asked for, and that question is
+		// about the image the caller named.
+		LabelBranchImage: p.branchImage,
 	}, p.branchPreload(goldenLabels(info)), p.storageMount(storage))
 	if err != nil {
 		return provider.Branch{}, err

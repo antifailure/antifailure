@@ -119,13 +119,24 @@ func TestRefusalLinesCollapseRepeatsAndAreCapped(t *testing.T) {
 // reference is hashed rather than embedded.
 func TestTheDerivedTagIsDeterministicAndPerImage(t *testing.T) {
 	t.Parallel()
-	a := rebaseTag("gv_20260924_abcd", "pgvector/pgvector:pg17")
-	b := rebaseTag("gv_20260924_abcd", "pgvector/pgvector:pg17")
-	c := rebaseTag("gv_20260924_abcd", "postgres:17-alpine")
-	d := rebaseTag("gv_20260924_efgh", "pgvector/pgvector:pg17")
+	const id1 = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+	const id2 = "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+	a := rebaseTag("gv_20260924_abcd", "pgvector/pgvector:pg17", id1)
+	b := rebaseTag("gv_20260924_abcd", "pgvector/pgvector:pg17", id1)
+	c := rebaseTag("gv_20260924_abcd", "postgres:17-alpine", id1)
+	d := rebaseTag("gv_20260924_efgh", "pgvector/pgvector:pg17", id1)
 	require.Equal(t, a, b, "the same pairing must find the same copy")
 	require.NotEqual(t, a, c, "two builds are two copies")
 	require.NotEqual(t, a, d, "two goldens are two copies")
+
+	// THE ASSERTION THE FIRST VERSION OF THIS KEY DID NOT SATISFY, and the one
+	// the people this feature is for meet on every iteration: the same reference
+	// rebuilt in place is a different build, so it must be a different copy.
+	// Keyed on the reference alone, a and e were equal and the branch ran the
+	// image the previous build had left behind.
+	e := rebaseTag("gv_20260924_abcd", "pgvector/pgvector:pg17", id2)
+	require.NotEqual(t, a, e,
+		"a rebuilt image under the same name is a different build and must not reuse its copy")
 
 	require.True(t, strings.HasPrefix(a, RebaseRepo+":"),
 		"a copy must not live under the golden repository, where ListGoldens would find it")

@@ -78,15 +78,30 @@ const RebaseRepo = "antifailure/rebased"
 // inventory can name it and DestroyGolden can find it.
 const rebaseKind = "rebased"
 
-// rebaseTag is the deterministic name for one golden opened by one image.
+// rebaseTag is the deterministic name for one golden opened by one BUILD.
 //
-// Keyed by a digest of the image reference rather than by the reference itself,
-// because a tag may not contain a slash or a colon and an image reference
-// routinely contains both. Deterministic so that a second branch of the same
-// pairing finds the image the first one built: the copy is the expensive part,
-// and a comparison brings a base environment up once per run.
-func rebaseTag(version, image string) string {
-	sum := sha256.Sum256([]byte(image))
+// Keyed by a digest rather than by the text, because a tag may not contain a
+// slash or a colon and an image reference routinely contains both.
+// Deterministic so that a second branch of the same pairing finds the image the
+// first one built: the copy is the expensive part, and a comparison brings a
+// base environment up once per run.
+//
+// THE KEY IS THE IMAGE ID AND NOT THE REFERENCE, and the first version of this
+// got that wrong in the way that matters most to the people this feature is
+// for. A reference is a name somebody can repoint. Somebody hardening a storage
+// engine rebuilds `mybuild:candidate` in place and runs the comparison again,
+// which is the whole iteration loop: keyed on the name, the cache still finds
+// the copy made from the PREVIOUS build, the preflight validates the new image
+// because it resolves the name freshly, and the branch runs the old one. The
+// report then attributes its numbers to a build that never ran, silently, on
+// the one workflow this exists to serve. Keyed on the id, a rebuilt image is a
+// different key and a fresh copy is made.
+//
+// The reference is still in the digest, so two different names for one id keep
+// their own copies. That costs a duplicate image in a case nobody hits and it
+// keeps the name a person typed recoverable from nothing but the tag.
+func rebaseTag(version, image, imageID string) string {
+	sum := sha256.Sum256([]byte(imageID + "\x00" + image))
 	return RebaseRepo + ":" + version + "-on-" + hex.EncodeToString(sum[:8])
 }
 
@@ -107,7 +122,13 @@ func (p *Provider) rebase(ctx context.Context, goldenTag, version string) (strin
 		return "", err
 	}
 
-	tag := rebaseTag(version, p.branchImage)
+	// Resolved AFTER ensureImage, so the id is the id of the image this run will
+	// actually build on rather than of whatever was present before the pull.
+	base, err := p.cli.ImageInspect(ctx, p.branchImage)
+	if err != nil {
+		return "", fmt.Errorf("db.docker: inspect the database build %s: %w", p.branchImage, err)
+	}
+	tag := rebaseTag(version, p.branchImage, base.ID)
 	if _, err := p.cli.ImageInspect(ctx, tag); err == nil {
 		return tag, nil
 	}

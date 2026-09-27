@@ -9892,6 +9892,24 @@ The second is usually the question a storage engine team is really asking, becau
 it is what an upgrade does to data that already exists. The report names the
 writer on every run, so you never have to remember which way round you ran it.
 
+### Tear the environment down before you change the build
+
+If an environment is already up for this project, its database branch is running
+whichever build it was started with, and the comparison refuses rather than
+measuring it:
+
+` + "`" + "`" + "`" + `
+AF-DB-045: The environment orders-api-w-database-image-90c66a is already running
+a database branch on the build the golden was made on and this run asked for
+pgvector/pgvector:pg17.
+` + "`" + "`" + "`" + `
+
+` + "`" + `af down` + "`" + ` and run it again. The branch is not replaced for you, because a branch
+is copy on write and replacing one destroys everything written since it was made,
+to answer a question about measurement. It is not adopted either, which is the
+point: a run that asked for one build and quietly measured another would report a
+difference and name the wrong reason for it.
+
 ## Step 3: read the throughput and the distribution
 
 The run this section shows came from the command above, against
@@ -23181,13 +23199,25 @@ The data directory does not fit in the filesystem database.data_filesystem.size_
 
 The build {image} could not open the data directory of golden {version}, and the server said: {said}
 
-**What to do.** Read this as a finding about the two builds rather than as an environment that failed to start: one build wrote that data directory and the other refused to open it, so the two disagree about what is on disk. A catalog version, a block size, a WAL format or a page layout one of them does not accept all produce exactly this. Compare the two builds' pg_controldata output to see which, or build the golden on the build you are comparing against by setting database.image to it. Nothing was measured, and nothing can be until both builds read the same rows.
+**What to do.** Read this as a finding about the two builds rather than as an environment that failed to start: one build wrote that data directory and the other would not open it. READ THE SERVER'S OWN WORDS ABOVE FIRST, because they name the cause and this list does not. A catalog version, a block size, a WAL format or a page layout one build does not accept all produce this, and so does a build that cannot take ownership of the directory, which says so as a permission or access error rather than as a format one. For a format disagreement, compare the two builds' pg_controldata output, or build the golden on the build you are comparing against by setting database.image to it. For an access error, the build has to be one whose entrypoint can chown the data directory, which the published images do as root before dropping privileges. Nothing was measured, and nothing can be until both builds read the same rows.
 
 | | |
 | --- | --- |
 | Exit code | ` + "`" + `7` + "`" + ` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [providers/databases](/docs/providers/databases) |
+
+### AF-DB-045
+
+The environment {env} is already running a database branch on {running} and this run asked for {asked}.
+
+**What to do.** Tear the environment down with 'af down' and run the comparison again, or drop the image flag to measure the build it is already on. The branch is not replaced automatically: it is copy on write, so anything written since it was branched would be destroyed to answer a question about measurement, and it is not adopted either, because a run that asked for one build and measured another would report a difference and name the wrong reason for it.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `7` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/load](/docs/concepts/load) |
 
 ## Detection
 

@@ -269,8 +269,16 @@ func (o *Orchestrator) baselineOrchestrator(tree, golden, suffix string) (*Orche
 // name, the project name and therefore the environment identifier are identical:
 // it addresses the environment the caller already has rather than creating a
 // second one beside it, and `af up` on it afterwards is the same `af up`. Only
-// the database container is affected, and only because the branch is derived from
-// the golden on every Up rather than carried over.
+// the database container is affected.
+//
+// AND A BRANCH ALREADY RUNNING IS NOT AFFECTED BY THIS AT ALL, which the first
+// version of this comment got backwards: it said the branch is derived from the
+// golden on every Up rather than carried over, and a RUNNING one is carried over,
+// because that is what makes Branch idempotent after a timeout. So sharing the
+// identifier means a branch already up on another build would have been adopted
+// for a run that asked for this one, and the comparison would have measured a
+// build it did not name. The provider refuses that under AF-DB-045 rather than
+// adopting it, and the label it compares is the one it stamps at create time.
 //
 // A copy rather than a mutation of the caller's orchestrator, because the caller
 // configured that one and may still be holding it: the load comparison reads the

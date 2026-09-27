@@ -37,3 +37,19 @@ against both builds on one golden, read the throughput and the latency
 distribution, then crash the database and read what the recovery kept. Every
 output block on it is from a run, and the page says which command produced each
 one.
+
+An environment already running is refused rather than measured. The comparison
+keeps the environment identifier on purpose, so a database branch already up was
+adopted for a run that asked for a different build: the copy never happened, the
+container kept serving the build it was started with, and the report named the
+one that was asked for. Every number in it was then attributed to a build that
+did not run. That is now AF-DB-045, which says which build is running and which
+was asked for. The branch is not replaced, because a branch is copy on write and
+replacing one destroys everything written since it was made.
+
+And the copy of a golden onto another build is keyed on that build's image ID
+rather than on its name, because a name is a thing somebody repoints. Rebuilding
+an image in place and running the comparison again, which is the whole iteration
+loop for the person this is for, reused the copy made from the previous build
+while the preflight validated the new one.
+
