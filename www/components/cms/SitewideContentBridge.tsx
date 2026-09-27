@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
-import { resolveField, safeBuiltinSource, type FieldDefinition, type MediaReference } from "@antifailure/website";
+import { resolveField, safeBuiltinSource, sitePageSlug, type FieldDefinition, type MediaReference } from "@antifailure/website";
 import { useCms } from "./CmsProvider";
 
 const BLOCKED = "script,style,noscript,pre,code,textarea,input,select,option,svg,[aria-hidden='true'],[contenteditable],[data-cms-key]:not([data-cms-sitewide-key]),[data-cms-field],[data-cms-action],[data-cms-section^='custom-']";
@@ -37,7 +37,7 @@ export function SitewideContentBridge() {
   const cms = useCms();
   const originals = useRef(new Map<string, { node: Text; value: string; prefix: string; suffix: string }>());
   const images = useRef(new Map<string, { element: HTMLImageElement; src: string; srcSet: string | null; alt: string; display: string; displayPriority: string; hidden: boolean }>());
-  const page = pathname === "/cms-preview" ? "home" : pathname.replace(/^\/+|\/+$/g, "").replace(/[^a-zA-Z0-9_-]+/g, "-") || "home";
+  const page = pathname === "/cms-preview" ? "home" : sitePageSlug(pathname);
   const sectionId = `page-${page}`;
   useEffect(() => {
     const seoSection = pathname === "/" || pathname === "/cms-preview" ? "hero" : sectionId;

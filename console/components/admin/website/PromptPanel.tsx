@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
-import { pageBlockPrefix, setFieldOverride, setStyleOverride, validateWebsiteDocument, type CustomSectionKind, type WebsiteDocument, type WebsiteManifest } from "@antifailure/website";
+import { pageBlockPrefix, setFieldOverride, setStyleOverride, sitePageSlug, validateWebsiteDocument, type CustomSectionKind, type WebsiteDocument, type WebsiteManifest } from "@antifailure/website";
 import { adminMutate } from "@/lib/admin";
 import { addSection, moveSection, pageSections } from "@/lib/website-client";
 
@@ -28,7 +28,7 @@ export function applyPromptChanges(document: WebsiteDocument, manifest: WebsiteM
     if (!targets.has(change.target)) throw new Error("The assistant suggested a style outside this page.");
     next = setStyleOverride(next, change.target, change.breakpoint, change.property as Parameters<typeof setStyleOverride>[3], change.value);
   }
-  const pageId = `page-${page.replace(/^\/+|\/+$/g, "").replace(/[^a-zA-Z0-9_-]+/g, "-")}`;
+  const pageId = `page-${sitePageSlug(page)}`;
   for (const action of proposal.actions) {
     if (action.operation === "add-section") {
       const validKinds = ["text", "image", "video", "split", "features", "cta", "spacer", "shape", "divider", "embed"];

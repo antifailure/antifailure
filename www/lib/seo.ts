@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { OG_IMAGE, SITE_NAME, SITE_URL, absoluteUrl } from "./site";
 import { getRoute } from "./routes";
-import { normalizeWebsiteDocument, resolveField } from "@antifailure/website";
+import { normalizeWebsiteDocument, resolveField, sitePageSlug } from "@antifailure/website";
 import snapshot from "./cms-snapshot.generated.json";
 
 const published = normalizeWebsiteDocument(snapshot.document).document;
@@ -32,7 +32,7 @@ export function pageMetadata(path: string, overrides: Metadata = {}): Metadata {
   }
 
   const url = absoluteUrl(route.path);
-  const slug = path.replace(/^\/+|\/+$/g, "").replace(/[^a-zA-Z0-9_-]+/g, "-") || "home";
+  const slug = sitePageSlug(path);
   const titleValue = resolveField(published, `seo.${slug}.title`, route.title);
   const descriptionValue = resolveField(published, `seo.${slug}.description`, route.description);
   const title = typeof titleValue === "string" && titleValue.trim() ? titleValue : route.title;

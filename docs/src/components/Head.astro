@@ -24,7 +24,7 @@ import { resolve } from "node:path";
 const { head, entry, lastUpdated } = Astro.locals.starlightRoute;
 const snapshotPath = [resolve(process.cwd(), "../www/lib/cms-snapshot.generated.json"), resolve(process.cwd(), "www/lib/cms-snapshot.generated.json")].find(existsSync);
 const snapshot = snapshotPath ? JSON.parse(readFileSync(snapshotPath, "utf8")) : { document: { fields: {} } };
-const slug = Astro.url.pathname.replace(/^\/+|\/+$/g, "").replace(/[^a-zA-Z0-9_-]+/g, "-") || "docs";
+const slug = Astro.url.pathname.split("/").filter(Boolean).join("-").replace(/[^a-zA-Z0-9_-]+/g, "-") || "docs";
 const sourceTitle = String(head.find((tag) => tag.tag === "title")?.content ?? `${entry.data.title} | Antifailure`);
 
 const attrOf = (tag: string, key: string, value: string) =>

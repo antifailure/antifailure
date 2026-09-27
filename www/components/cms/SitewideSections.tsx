@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { pageBlockPrefix, resolveOrder, type CustomSection as Section } from "@antifailure/website";
+import { pageBlockPrefix, resolveOrder, sitePageSlug, type CustomSection as Section } from "@antifailure/website";
 import { useCms } from "./CmsProvider";
 import { CustomSection } from "./CustomSection";
 
@@ -12,7 +12,7 @@ export function SitewideSections({ children }: { children: React.ReactNode }) {
   const cms = useCms();
   if (pathname === "/" || pathname === "/cms-preview") return <>{children}</>;
   const prefix = pageBlockPrefix(pathname);
-  const pageId = `page-${pathname.replace(/^\/+|\/+$/g, "").replace(/[^a-zA-Z0-9_-]+/g, "-")}`;
+  const pageId = `page-${sitePageSlug(pathname)}`;
   const sections = cms.document.sections.custom.filter((section) => section.group === "page" && section.id.startsWith(prefix));
   const ids = sections.map((section) => section.id);
   const moves = cms.document.sections.moves.filter((move) => ids.includes(move.id)).map((move) => move.after === pageId ? { ...move, after: null } : move);

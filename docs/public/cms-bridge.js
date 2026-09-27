@@ -4,9 +4,9 @@
  * explicit edits in the shared website document. */
 (() => {
   const API = 'https://app.antifailure.dev/v1/website/published';
-  const PAGE_API = `${API}?path=${encodeURIComponent(location.pathname.replace(/\/+$/, '') || '/')}`;
+  const PAGE_API = `${API}?path=${encodeURIComponent(`/${location.pathname.split('/').filter(Boolean).join('/')}`)}`;
   const blocked = "script,style,noscript,pre,code,textarea,input,select,option,button,svg,[aria-hidden='true'],[contenteditable],[data-cms-key]:not([data-cms-sitewide-key])";
-  const page = location.pathname.replace(/^\/+|\/+$/g, '').replace(/[^a-zA-Z0-9_-]+/g, '-') || 'home';
+  const page = location.pathname.split('/').filter(Boolean).join('-').replace(/[^a-zA-Z0-9_-]+/g, '-') || 'home';
   const sectionId = `page-${page}`;
   const params = new URLSearchParams(location.search);
   const parentOrigin = params.get('parentOrigin');

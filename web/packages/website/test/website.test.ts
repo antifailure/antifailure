@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import {
   assertWebsiteDocument, emptyWebsiteDocument, normalizeWebsiteDocument, referencedAssets,
   resetStyleOverride, resolveCollection, resolveField, resolveOrder, resolveStyle, safeBuiltinSource,
-  safeHref, setFieldOverride, setStyleOverride, stableStringify, validateWebsiteDocument, pageBlockPrefix, projectWebsiteDocument,
+  safeHref, setFieldOverride, setStyleOverride, stableStringify, validateWebsiteDocument, pageBlockPrefix, projectWebsiteDocument, sitePageSlug,
   CUSTOM_SHAPES, DIVIDER_VARIANTS, isCustomShape, isDividerVariant, resolveCustomShape, resolveDividerVariant,
 } from '../src/index.ts'
 import type { FieldValue, RichTextDocument } from '../src/index.ts'
@@ -21,6 +21,11 @@ test('scoped blocks stay valid and isolated to their public route', () => {
   assert.equal(validateWebsiteDocument(document).ok, true)
   document.sections.custom[1].id = 'custom-pmissing-not-a-uuid'
   assert.equal(validateWebsiteDocument(document).ok, false)
+})
+
+test('a route slug is stable even with long runs of separators', () => {
+  assert.equal(sitePageSlug('/product/twins/'), 'product-twins')
+  assert.equal(sitePageSlug('/'.repeat(20_000) + 'docs/reference/mcp' + '/'.repeat(20_000)), 'docs-reference-mcp')
 })
 
 test('public page projection keeps shared chrome and only that page content', () => {

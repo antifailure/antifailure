@@ -1,5 +1,15 @@
 import type { WebsiteDocument } from './types.ts'
 
+/** Trim path separators in one pass. A route can come from a request query,
+ * so do not use an overlapping start/end regular expression here. */
+export function sitePageSlug(path: string): string {
+  let start = 0
+  let end = path.length
+  while (start < end && path.charCodeAt(start) === 47) start++
+  while (end > start && path.charCodeAt(end - 1) === 47) end--
+  return path.slice(start, end).replace(/[^a-zA-Z0-9_-]+/gu, '-') || 'home'
+}
+
 /** Stable, short namespace for blocks on a public page. The canonical path is
  * selected by the editor, so two routes never share authored blocks. */
 export function pageBlockPrefix(path: string): string {
@@ -13,7 +23,7 @@ export function pageBlockPrefix(path: string): string {
  * for every other article on the site. */
 export function projectWebsiteDocument(document: WebsiteDocument, path: string): WebsiteDocument {
   if (path === '/') return document
-  const page = path.replace(/^\/+|\/+$/gu, '').replace(/[^a-zA-Z0-9_-]+/gu, '-')
+  const page = sitePageSlug(path)
   const block = pageBlockPrefix(path)
   const related = (key: string) => key === 'global' || key === 'header' || key === 'footer' || key === `page-${page}` ||
     key.startsWith('header.') || key.startsWith('footer.') || key.startsWith(`page.${page}.`) || key.startsWith(`seo.${page}.`) || key.startsWith(block)

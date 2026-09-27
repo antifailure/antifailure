@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import {
-  pageBlockPrefix, projectWebsiteDocument, referencedAssets, resetStyleOverride, setFieldOverride, stableStringify, validatePreviewMessage, validateWebsiteDocument,
+  pageBlockPrefix, projectWebsiteDocument, referencedAssets, resetStyleOverride, setFieldOverride, sitePageSlug, stableStringify, validatePreviewMessage, validateWebsiteDocument,
   type FieldDefinition, type FieldValue, type MediaReference, type WebsiteDocument,
   type WebsiteManifest, type CustomSectionKind, type CustomSectionGroup, type SectionDefinition,
 } from "@antifailure/website";
@@ -30,7 +30,7 @@ const WEBSITE_ORIGIN = process.env.NEXT_PUBLIC_WEBSITE_ORIGIN ?? "https://antifa
 const API_ORIGIN = process.env.NEXT_PUBLIC_AF_API ?? "";
 const messageOf = (error: unknown) => error instanceof Error ? error.message : "That change could not be completed. Please try again.";
 const PAGE_OPTIONS = ["/", "/product", "/product/twins", "/product/safe-state", "/product/firewall", "/product/load", "/product/migrations", "/solutions", "/solutions/saas", "/solutions/fintech", "/solutions/marketplaces", "/solutions/devtools", "/pricing", "/about", "/contact", "/request-demo", "/careers", "/blog", "/changelog", "/privacy", "/terms", "/acceptable-use", "/developer-policy", "/docs", "/docs/getting-started/quickstart", "/docs/reference/mcp"];
-const pageSectionId = (path: string) => `page-${path.replace(/^\/+|\/+$/g, "").replace(/[^a-zA-Z0-9_-]+/g, "-") || "home"}`;
+const pageSectionId = (path: string) => `page-${sitePageSlug(path)}`;
 
 export function WebsiteEditor() {
   const { me } = useAdminContext();
@@ -353,7 +353,7 @@ function EditorWorkspace({ initial }: { initial: WebsiteState }) {
   const scopedDocument = projectWebsiteDocument(document, pagePath);
   const currentKey = (key: string) => {
     if (pagePath === "/") return !(key.startsWith("page.") || key.startsWith("custom-p") || key.startsWith("seo.") && !key.startsWith("seo.home."));
-    const slug = pagePath.replace(/^\/+|\/+$/g, "").replace(/[^a-zA-Z0-9_-]+/g, "-");
+    const slug = sitePageSlug(pagePath);
     return key === pageSectionId(pagePath) || key.startsWith(`page.${slug}.`) || key.startsWith(`seo.${slug}.`) || key.startsWith(pageBlockPrefix(pagePath));
   };
   const orphanFields = manifest ? Object.keys(scopedDocument.fields).filter((key) => currentKey(key) && !manifest.fields.some((field) => field.key === key)) : [];
