@@ -418,6 +418,12 @@ variable "provider_key_version" {
   description = "Which sealing key version new provider keys are sealed under. Empty leaves it unset, which the application accepts only while exactly one key is configured. It must name a version the app holds or the container refuses to start."
 }
 
+variable "cms_anthropic_secret_name" {
+  description = "Existing Key Vault secret containing the Anthropic API key used by the owner-only website editor. Leave empty to disable AI editing."
+  type        = string
+  default     = ""
+}
+
 
 variable "database_extensions" {
   type        = list(string)

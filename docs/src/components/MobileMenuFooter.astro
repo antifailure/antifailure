@@ -16,19 +16,19 @@
 const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 // `/docs`, not `/docs/`, matching www/lib/nav.ts. See SiteChrome.astro.
 const nav = [
-  { text: "Product", href: "/product" },
-  { text: "Solutions", href: "/solutions" },
+  { id: "product", text: "Product", href: "/product" },
+  { id: "solutions", text: "Solutions", href: "/solutions" },
   // `base`, not `${base}/`. This is the phone copy of the same list in
   // SiteChrome.astro, and it kept the slash after that one lost it, which
   // is what two copies of a list do.
-  { text: "Docs", href: base || "/docs" },
-  { text: "Writing", href: "/blog" },
-  { text: "Pricing", href: "/pricing" },
-  { text: "GitHub", href: "https://github.com/antifailure/antifailure", external: true },
+  { id: "docs", text: "Docs", href: base || "/docs" },
+  { id: "writing", text: "Writing", href: "/blog" },
+  { id: "pricing", text: "Pricing", href: "/pricing" },
+  { id: "github", text: "GitHub", href: "https://github.com/antifailure/antifailure", external: true },
 ];
 ---
 
-<div class="af-menu-footer">
+<div data-cms-section="header" class="af-menu-footer">
   <p class="af-menu-label">Antifailure</p>
   <ul class="af-menu-links">
     {
@@ -36,6 +36,8 @@ const nav = [
         <li>
           <a
             href={item.href}
+            data-cms-key={item.id === "github" ? "header.github.text" : `header.menus.${item.id}.text`}
+            data-cms-href={item.id === "github" ? "header.github.href" : `header.menus.${item.id}.href`}
             target={item.external ? "_blank" : undefined}
             rel={item.external ? "noopener noreferrer" : undefined}
           >
@@ -46,8 +48,8 @@ const nav = [
     }
   </ul>
   <div class="af-menu-actions">
-    <a class="af-menu-btn" href="/signin">Sign in</a>
-    <a class="af-menu-btn af-menu-btn-primary" href="/signup">Start free</a>
+    <a data-cms-key="header.actions.signin.text" data-cms-href="header.actions.signin.href" class="af-menu-btn" href="/signin">Sign in</a>
+    <a data-cms-key="header.actions.demo.text" data-cms-href="header.actions.demo.href" class="af-menu-btn af-menu-btn-primary" href="/request-demo">Request a demo</a>
   </div>
 </div>
 

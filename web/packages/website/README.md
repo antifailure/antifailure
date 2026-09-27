@@ -82,6 +82,22 @@ caller-owned hashing; it rejects non-JSON values and never invokes getters or
 
 ## Preview bridge
 
+Inner marketing and documentation pages use source-position field keys under
+`page.<route>.text.*` and `page.<route>.image.*`. Published responses accept a
+`path` query and project the shared header/footer, that page's overrides, and
+its route-scoped `custom-p<hash>-<uuid>` blocks. The no-query response remains
+the full snapshot used for static builds. A page's source text stays in
+its Next or Markdown source; an explicit override survives a copy update at
+the same structural position. If a source layout moves an edited element to a
+new position, the editor shows the old field as unmatched and lets the owner
+reset it. Source-owned default text is never copied into storage.
+
+The docs renderer keeps custom HTML, CSS, and JavaScript inside a sandboxed
+iframe with an opaque origin. Text from API documents is inserted with DOM
+text nodes, never interpreted as markup in the page itself. The hosted AI key
+is an optional server-only control-plane secret and is not part of this
+document, its preview protocol, or its published response.
+
 Messages use `{ protocol: 'antifailure-cms', version: 1, session, type, payload }`.
 The session is a UUID. `validatePreviewMessage` requires a direction:
 

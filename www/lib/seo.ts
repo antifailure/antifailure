@@ -1,6 +1,10 @@
 import type { Metadata } from "next";
 import { OG_IMAGE, SITE_NAME, SITE_URL, absoluteUrl } from "./site";
 import { getRoute } from "./routes";
+import { normalizeWebsiteDocument, resolveField } from "@antifailure/website";
+import snapshot from "./cms-snapshot.generated.json";
+
+const published = normalizeWebsiteDocument(snapshot.document).document;
 
 /**
  * Builds a page's metadata from its entry in the route registry.
@@ -28,6 +32,11 @@ export function pageMetadata(path: string, overrides: Metadata = {}): Metadata {
   }
 
   const url = absoluteUrl(route.path);
+  const slug = path.replace(/^\/+|\/+$/g, "").replace(/[^a-zA-Z0-9_-]+/g, "-") || "home";
+  const titleValue = resolveField(published, `seo.${slug}.title`, route.title);
+  const descriptionValue = resolveField(published, `seo.${slug}.description`, route.description);
+  const title = typeof titleValue === "string" && titleValue.trim() ? titleValue : route.title;
+  const description = typeof descriptionValue === "string" && descriptionValue.trim() ? descriptionValue : route.description;
 
   return {
     // `absolute` rather than a bare string, because the root layout defines a
@@ -35,8 +44,8 @@ export function pageMetadata(path: string, overrides: Metadata = {}): Metadata {
     // it. A plain string gets the template applied a second time and ships with
     // the site name twice, which is what this did before anybody read the
     // built output.
-    title: { absolute: route.title },
-    description: route.description,
+    title: { absolute: title },
+    description,
     alternates: {
       canonical: url,
       // The markdown twin of this page. Assistants and agent runtimes that
@@ -82,8 +91,8 @@ export function pageMetadata(path: string, overrides: Metadata = {}): Metadata {
       siteName: SITE_NAME,
       locale: "en_US",
       url,
-      title: route.title,
-      description: route.description,
+      title,
+      description,
       images: [
         {
           url: OG_IMAGE.url,
@@ -95,10 +104,16 @@ export function pageMetadata(path: string, overrides: Metadata = {}): Metadata {
     },
     twitter: {
       card: "summary_large_image",
-      title: route.title,
-      description: route.description,
+      title,
+      description,
       images: [OG_IMAGE.url],
     },
     ...overrides,
+    ...(title !== route.title || description !== route.description ? {
+      title: { absolute: title }, description,
+      openGraph: { ...({ type: "website", siteName: SITE_NAME, locale: "en_US", url, images: [{ url: OG_IMAGE.url, width: OG_IMAGE.width, height: OG_IMAGE.height, alt: OG_IMAGE.alt }] } as const), ...overrides.openGraph, title, description },
+      twitter: { ...({ card: "summary_large_image", images: [OG_IMAGE.url] } as const), ...overrides.twitter, title, description },
+    } : {}),
+    other: { ...overrides.other, "af-cms-source-title": route.title, "af-cms-source-description": route.description },
   };
 }

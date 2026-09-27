@@ -367,6 +367,9 @@ locals {
   provider_key_secrets_id = var.provider_key_secrets_name == "" ? {} : {
     (var.provider_key_secrets_name) = "${trimsuffix(azurerm_key_vault.this.vault_uri, "/")}/secrets/${var.provider_key_secrets_name}"
   }
+  cms_anthropic_secret_id = var.cms_anthropic_secret_name == "" ? {} : {
+    (var.cms_anthropic_secret_name) = "${trimsuffix(azurerm_key_vault.this.vault_uri, "/")}/secrets/${var.cms_anthropic_secret_name}"
+  }
 }
 
 # Stripe credentials are addressed by their versionless IDs, like the GitHub

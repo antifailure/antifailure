@@ -242,6 +242,12 @@ variable "provider_key_version" {
   description = "Which sealing key version new provider keys are sealed under. Empty leaves it unset, which the application accepts only while exactly one key is configured. It must name a version the app holds or the container refuses to start."
 }
 
+variable "cms_anthropic_secret_name" {
+  description = "Existing Key Vault secret for the owner-only website editor AI."
+  type        = string
+  default     = ""
+}
+
 # The enterprise edition. The module's copies carry the reason each exists;
 # the short version is that the enterprise image will not start without them.
 variable "enterprise_edition" {

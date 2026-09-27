@@ -33,7 +33,7 @@ export function Trust() {
           <ul className="divide-y divide-black/15 border-y border-black/15">
             {items.map((item, index) => (
               <li key={item.id} className="grid grid-cols-[28px_minmax(0,1fr)] gap-5 py-7 max-md:gap-3">
-                <span className="pt-1 font-mono text-xs text-gray-new-40">{String(index + 1).padStart(2, "0")}</span>
+                <CmsText as="span" cmsKey={`trust.items.${item.id}.number`} label={`${item.title} list number`} sectionId="trust" defaultValue={String(index + 1).padStart(2, "0")} className="pt-1 font-mono text-xs text-gray-new-40" />
                 <div>
                   <CmsText as="h3" cmsKey={`trust.items.${item.id}.title`} label="Detail title" sectionId="trust" defaultValue={ITEMS.find((source) => source.id === item.id)?.title ?? item.title ?? ""} className="text-[21px] leading-7 tracking-extra-tight text-gray-new-10" />
                   <CmsText as="p" cmsKey={`trust.items.${item.id}.body`} label="Detail description" sectionId="trust" defaultValue={ITEMS.find((source) => source.id === item.id)?.body ?? item.body ?? ""} className="mt-3 text-base leading-7 text-gray-new-40" />

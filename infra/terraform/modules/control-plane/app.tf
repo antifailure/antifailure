@@ -437,6 +437,7 @@ resource "azurerm_container_app" "this" {
       local.stripe_secret_ids,
       local.license_secret_ids,
       local.provider_key_secrets_id,
+      local.cms_anthropic_secret_id,
       var.mail_from == "" ? {} : {
         "resend-api-key" = data.azurerm_key_vault_secret.resend_api_key[0].versionless_id
       },
@@ -563,6 +564,14 @@ resource "azurerm_container_app" "this" {
       env {
         name  = "AF_SELF_SERVE_SIGNUP"
         value = var.self_serve_signup ? "1" : "0"
+      }
+
+      dynamic "env" {
+        for_each = var.cms_anthropic_secret_name == "" ? [] : [var.cms_anthropic_secret_name]
+        content {
+          name        = "AF_CMS_ANTHROPIC_API_KEY"
+          secret_name = env.value
+        }
       }
 
       dynamic "env" {

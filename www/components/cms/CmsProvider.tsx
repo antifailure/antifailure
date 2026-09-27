@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import {
-  emptyWebsiteDocument, normalizeWebsiteDocument, resolveCollection, resolveField, safeHref,
+  emptyWebsiteDocument, normalizeWebsiteDocument, projectWebsiteDocument, resolveCollection, resolveField, safeHref,
   stableStringify, validatePreviewMessage,
   type CollectionDefinition, type FieldDefinition, type FieldValue, type MediaReference,
   type PreviewChildMessage, type SectionDefinition, type WebsiteDocument, type WebsiteManifest,
@@ -12,6 +12,7 @@ import snapshot from "@/lib/cms-snapshot.generated.json";
 import { CMS_FONTS, cmsStyles } from "@/lib/cms/styles";
 import { controlPlaneUrl, websiteMediaUrl } from "@/lib/control-plane-routes";
 import { parsePreviewConnection } from "@/lib/cms/preview-origin";
+import { SitewideContentBridge } from "./SitewideContentBridge";
 
 export const CMS_API_ORIGIN = new URL(controlPlaneUrl("website.published")).origin;
 type Selection = { key?: string; sectionId?: string };
@@ -40,8 +41,9 @@ function previewConnection(): { origin: string; session: string } | null {
 
 export function CmsProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const isPreview = pathname === "/cms-preview" || pathname === "/cms-preview/";
-  const [publishedDocument, setPublishedDocument] = useState<WebsiteDocument>(() => normalizeWebsiteDocument(snapshot.document).document);
+  const [framedPreview, setFramedPreview] = useState(false);
+  const isPreview = pathname === "/cms-preview" || pathname === "/cms-preview/" || framedPreview;
+  const [publishedDocument, setPublishedDocument] = useState<WebsiteDocument>(() => projectWebsiteDocument(normalizeWebsiteDocument(snapshot.document).document, pathname));
   const [previewDocument, setPreviewDocument] = useState<WebsiteDocument>(() => normalizeWebsiteDocument(snapshot.document).document);
   const [previewEditing, setEditing] = useState(false);
   const document = isPreview ? previewDocument : publishedDocument;
@@ -53,6 +55,7 @@ export function CmsProvider({ children }: { children: ReactNode }) {
   const connection = useRef<ReturnType<typeof previewConnection>>(null);
   const scheduled = useRef(false);
   const revision = useRef(snapshot.revision);
+  useEffect(() => { setFramedPreview(Boolean(previewConnection())); }, [pathname]);
   const manifestStructure = stableStringify({ sections: document.sections.custom, collections: document.collections });
   const register = useCallback((fields: FieldDefinition[] = [], sections: SectionDefinition[] = [], collections: CollectionDefinition[] = []) => {
     let changed = false;
@@ -94,17 +97,21 @@ export function CmsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (isPreview) return;
+    revision.current = -1;
+    setPublishedDocument(projectWebsiteDocument(normalizeWebsiteDocument(snapshot.document).document, pathname));
     const controller = new AbortController();
     let fetching = false;
     const refresh = async () => {
       if (fetching || window.document.visibilityState === "hidden") return;
       fetching = true;
       try {
-        const response = await fetch(controlPlaneUrl("website.published"), { credentials: "omit", signal: controller.signal, cache: "no-cache" });
+        const url = new URL(controlPlaneUrl("website.published"));
+        url.searchParams.set("path", pathname);
+        const response = await fetch(url, { credentials: "omit", signal: controller.signal, cache: "no-cache" });
         if (!response.ok) return;
         const current: unknown = await response.json();
         if (!current || typeof current !== "object" || !("revision" in current) || !("document" in current)) return;
-        if (typeof current.revision !== "number" || !Number.isSafeInteger(current.revision) || current.revision < revision.current) return;
+        if (typeof current.revision !== "number" || !Number.isSafeInteger(current.revision) || current.revision <= revision.current) return;
         revision.current = current.revision;
         setPublishedDocument(normalizeWebsiteDocument(current.document).document);
       } catch { /* The rendered build remains available when the API is offline. */ }
@@ -114,7 +121,7 @@ export function CmsProvider({ children }: { children: ReactNode }) {
     const timer = window.setInterval(() => { void refresh(); }, 60_000);
     window.addEventListener("focus", refresh);
     return () => { controller.abort(); window.clearInterval(timer); window.removeEventListener("focus", refresh); };
-  }, [isPreview]);
+  }, [isPreview, pathname]);
 
   useEffect(() => {
     if (!isPreview) return;
@@ -197,7 +204,7 @@ export function CmsProvider({ children }: { children: ReactNode }) {
     {isPreview && <style>{`html[data-cms-editing] [data-cms-key],html[data-cms-editing] [data-cms-field]{cursor:text}html[data-cms-editing] [data-cms-key]:hover,html[data-cms-editing] [data-cms-field]:hover{outline:1px dashed #168555;outline-offset:3px}html[data-cms-editing] [data-cms-selected]{outline:2px solid #168555!important;outline-offset:4px}html[data-cms-editing] [data-cms-section]:hover{outline:1px dashed #16855566;outline-offset:-1px}[data-cms-placeholder]{padding:48px;border:1px dashed #87958b;background:#e4f1eb;color:#193e30;text-align:center;font:16px/1.5 Arial,sans-serif}`}</style>}
     {children}
   </>;
-  return <CmsContext.Provider value={value}>{isPreview ? <div className="af-cms-preview" style={{ display: "contents" }}>{content}</div> : content}</CmsContext.Provider>;
+  return <CmsContext.Provider value={value}>{isPreview ? <div className="af-cms-preview" style={{ display: "contents" }}>{content}<SitewideContentBridge /></div> : <>{content}<SitewideContentBridge /></>}</CmsContext.Provider>;
 }
 
 export function useCmsField(definition: FieldDefinition): FieldValue {

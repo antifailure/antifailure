@@ -1,4 +1,5 @@
 export type * from './types.ts'
+export { pageBlockPrefix, projectWebsiteDocument } from './page.ts'
 export {
   WEBSITE_LIMITS, STYLE_NUMBER_BOUNDS, emptyWebsiteDocument, validateWebsiteDocument,
   assertWebsiteDocument, normalizeWebsiteDocument, safeHref, safeBuiltinSource,

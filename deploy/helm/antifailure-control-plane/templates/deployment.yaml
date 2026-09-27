@@ -222,6 +222,13 @@ spec:
             - name: AF_PROVIDER_KEY_VERSION
               value: {{ .Values.providerKeys.version | quote }}
             {{- end }}
+            {{- if .Values.websiteAI.existingSecret }}
+            - name: AF_CMS_ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.websiteAI.existingSecret | quote }}
+                  key: {{ .Values.websiteAI.secretKey | quote }}
+            {{- end }}
             {{- if .Values.enterprise.enabled }}
             - name: AF_EE_SSO_KEY
               valueFrom:

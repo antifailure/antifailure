@@ -21422,6 +21422,33 @@ head -1 events_2026_03.jsonl | jq -r .occurred_at
 jq -c 'select(.env_id == "env-1234")' events_2026_03.jsonl
 ` + "`" + "`" + "`" + `
 
+## Website editor
+
+An owner opens **Administration → Website** to edit the public site. The page
+picker lists the routes in the built site, including documentation. A draft
+shows in the preview before publication; publishing updates the public content
+and requests a static refresh. Unchanged text, images and design settings use
+the version in the site's source. HTML, CSS and JavaScript blocks run in an
+isolated iframe rather than in the surrounding page.
+
+The **Ask AI** panel is optional. ` + "`" + `AF_CMS_ANTHROPIC_API_KEY` + "`" + ` is the Anthropic
+API key used only by the control-plane process for owner-requested edit
+suggestions. Leave it unset to use the manual editor without AI. The key is
+never included in the website build, preview messages or published content.
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| ` + "`" + `AF_CMS_ANTHROPIC_API_KEY` + "`" + ` | unset | Optional server-side Anthropic credential for the owner-only website assistant. Keep it in a secret store; the website build does not read it. |
+
+Hosted staging and production read it from the existing Key Vault secret named
+` + "`" + `cms-anthropic-api-key` + "`" + `; Terraform stores the secret's address, not its value.
+For a Helm installation, set ` + "`" + `websiteAI.existingSecret` + "`" + ` to the name of a
+Kubernetes Secret holding the ` + "`" + `AF_CMS_ANTHROPIC_API_KEY` + "`" + ` key.
+The assistant receives only the selected page fields and recent chat turns.
+It may suggest copy, styles and section changes, but cannot save or publish
+them. An owner reviews the proposal, applies it to the draft and publishes
+separately. Each owner has a daily allowance of 40 requests and 180,000 tokens.
+
 ## Analytics
 
 Off unless a surrogate secret is configured, and said out loud at startup either

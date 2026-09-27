@@ -18,8 +18,14 @@
  * the claim worth anything is per page, and the config's head array is static.
  */
 import Default from "@astrojs/starlight/components/Head.astro";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 const { head, entry, lastUpdated } = Astro.locals.starlightRoute;
+const snapshotPath = [resolve(process.cwd(), "../www/lib/cms-snapshot.generated.json"), resolve(process.cwd(), "www/lib/cms-snapshot.generated.json")].find(existsSync);
+const snapshot = snapshotPath ? JSON.parse(readFileSync(snapshotPath, "utf8")) : { document: { fields: {} } };
+const slug = Astro.url.pathname.replace(/^\/+|\/+$/g, "").replace(/[^a-zA-Z0-9_-]+/g, "-") || "docs";
+const sourceTitle = String(head.find((tag) => tag.tag === "title")?.content ?? `${entry.data.title} | Antifailure`);
 
 const attrOf = (tag: string, key: string, value: string) =>
   head.find((t) => t.tag === tag && t.attrs?.[key] === value)?.attrs;
@@ -35,9 +41,21 @@ const canonical = attrOf("link", "rel", "canonical")?.href;
 const robots = String(attrOf("meta", "name", "robots")?.content ?? "");
 const indexable = !robots.includes("noindex");
 
-const description =
+const sourceDescription =
   entry.data.description ??
   String(attrOf("meta", "name", "description")?.content ?? "");
+const titleValue = snapshot.document?.fields?.[`seo.${slug}.title`];
+const descriptionValue = snapshot.document?.fields?.[`seo.${slug}.description`];
+const titleEdited = typeof titleValue === "string" && Boolean(titleValue.trim());
+const descriptionEdited = typeof descriptionValue === "string" && Boolean(descriptionValue.trim());
+const title = titleEdited ? titleValue : sourceTitle;
+const description = descriptionEdited ? descriptionValue : sourceDescription;
+const articleHeadline = titleEdited ? title : entry.data.title;
+for (const tag of head) {
+  if (titleEdited && tag.tag === "title") tag.content = title;
+  if (descriptionEdited && tag.tag === "meta" && (tag.attrs?.name === "description" || tag.attrs?.property === "og:description" || tag.attrs?.name === "twitter:description")) tag.attrs.content = description;
+  if (titleEdited && tag.tag === "meta" && (tag.attrs?.property === "og:title" || tag.attrs?.name === "twitter:title")) tag.attrs.content = title;
+}
 
 const article =
   typeof canonical === "string" && indexable
@@ -47,7 +65,7 @@ const article =
         "@id": `${canonical}#techarticle`,
         url: canonical,
         mainEntityOfPage: canonical,
-        headline: entry.data.title,
+        headline: articleHeadline,
         ...(description ? { description } : {}),
         ...(lastUpdated ? { dateModified: lastUpdated.toISOString() } : {}),
         inLanguage: "en",
@@ -59,6 +77,9 @@ const article =
 ---
 
 <Default><slot /></Default>
+<meta name="af-cms-source-title" content={sourceTitle} />
+<meta name="af-cms-source-description" content={sourceDescription} />
+<script src="/docs/cms-bridge.js" defer is:inline></script>
 {
   article && (
     <script
