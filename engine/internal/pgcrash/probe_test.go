@@ -67,6 +67,7 @@ func TestAvailability_ADatabaseThatAlwaysAnsweredWasNeverUnreachable(t *testing.
 	}), 100*time.Millisecond)
 	require.False(t, a.Unreachable)
 	require.Zero(t, a.For)
+	require.Equal(t, 30, a.Samples, "an unseen outage is meaningful only if attempts were made")
 }
 
 // A database still refusing when the probe stopped has an outage with no
