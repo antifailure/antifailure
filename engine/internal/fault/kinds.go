@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/container"
@@ -138,18 +139,82 @@ func (i *Injector) containerPause(ctx context.Context, c Container, f Fault) (st
 			!cerrdefs.IsConflict(err) && !cerrdefs.IsNotFound(err) {
 			return fmt.Errorf("fault: thawing %s: %w", name(c), err)
 		}
+		return i.confirmThawed(ctx, c)
+	}
+	return fmt.Sprintf("froze every process in %s with the cgroup freezer", name(c)), undo, nil
+}
+
+// thawConfirmWindow is how long the thaw's read back waits for the daemon to
+// catch up with a request it has already accepted.
+//
+// IT IS A WAIT AND NOT A GRACE. The undo still reads the state back and still
+// refuses to call a frozen container thawed, which is the whole point of the
+// read back and the reason the 2026-09-22 defect above cannot come back. What
+// this adds is that "paused" and "the inspect failed" are treated as NOT YET
+// rather than as the answer, until the window runs out.
+//
+// WHY A WINDOW WAS NEEDED AT ALL. `ContainerUnpause` returning means the daemon
+// ACCEPTED the thaw, not that the cgroup freezer has been written and the
+// container's state recomputed. Under load those are different instants, and a
+// single inspect fired immediately after the accept reads the state the daemon
+// still has. On 2026-09-26 that reddened the `edition boundary` gate on a pull
+// request whose whole diff was a registry change: the underlying failure was
+// `TestInjectInto_RefusesAnotherEnvironmentsContainer` reporting
+// "is still frozen after the daemon accepted the thaw", and `tools/editioncheck`
+// then ran the package three times, FAIL without ee, PASS with ee, PASS again
+// without it, and printed COULD-NOT-LOOK rather than naming a violation. So the
+// cost of being wrong in the tight direction is a false red on somebody else's
+// change, plus an undo that reports failure for an environment that did thaw.
+//
+// WHY TEN SECONDS. It has to exceed the worst Docker control latency actually
+// observed on this hardware rather than a latency somebody guessed: the VM's own
+// apiproxy log timed a single `GET /containers/json` at 6.37 seconds while six
+// lanes were running, and `docker images` on the same daemon exceeded 40 seconds.
+// The cost of being generous is a slow undo on a container that really is stuck,
+// which is bounded by this number and reported honestly when it expires.
+var thawConfirmWindow = 10 * time.Second
+
+// confirmThawed reads the container's state back until it is not frozen, the
+// window expires or the container is gone.
+//
+// The three outcomes are kept apart on purpose, because they send a reader to
+// different places: thawed, still frozen after the window, and a thaw nobody
+// could confirm. A container that has VANISHED is the state the undo wanted, so
+// it is not an error, exactly as before.
+//
+// An inspect that FAILS is never read as thawed. That is the 2026-09-22 defect
+// and it is why the loop keeps the last error and reports it if the window ends
+// on one, rather than falling through to a nil return.
+func (i *Injector) confirmThawed(ctx context.Context, c Container) error {
+	deadline := time.Now().Add(thawConfirmWindow)
+	var lastErr error
+	for attempt := 0; ; attempt++ {
 		state, err := i.inspect(ctx, c.ID)
 		switch {
 		case cerrdefs.IsNotFound(err):
 			return nil
 		case err != nil:
-			return fmt.Errorf("fault: the thaw of %s was sent and could not be confirmed: %w", name(c), err)
-		case state.State != nil && state.State.Paused:
-			return fmt.Errorf("fault: %s is still frozen after the daemon accepted the thaw", name(c))
+			lastErr = err
+		case state.State == nil || !state.State.Paused:
+			return nil
+		default:
+			lastErr = nil
 		}
-		return nil
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			if lastErr != nil {
+				return fmt.Errorf("fault: the thaw of %s was sent and could not be confirmed after %d attempts over %s: %w",
+					name(c), attempt+1, thawConfirmWindow, lastErr)
+			}
+			return fmt.Errorf("fault: %s is still frozen %s after the daemon accepted the thaw", name(c), thawConfirmWindow)
+		}
+		// Short enough that the ordinary lag costs one interval and not a
+		// visible pause, and the first pass has already happened above, so a
+		// daemon that was ready pays nothing for this at all.
+		select {
+		case <-ctx.Done():
+		case <-time.After(50 * time.Millisecond):
+		}
 	}
-	return fmt.Sprintf("froze every process in %s with the cgroup freezer", name(c)), undo, nil
 }
 
 // networkPartition detaches the container from every Antifailure network it is
