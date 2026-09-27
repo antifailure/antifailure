@@ -239,3 +239,47 @@ func TestTheImageNotesReachBothWorkloadsNotes(t *testing.T) {
 			"sql=%v must carry the image note", sql)
 	}
 }
+
+// THE THIRD LINK OF THE TWO CLUSTER ARGUMENT, and the only one that is this
+// package's rather than the docker provider's.
+//
+// The lock measures a SQL comparison reports are read from cluster wide views, so
+// the two sides sharing a Postgres cluster would let one side's waiters appear in
+// the other's readings. checkCompareImages carries the argument that they cannot;
+// this is the link in it nothing was checking, and the link is thinner than the
+// prose around it suggests.
+//
+// EnvID trims the branch to sixteen characters and appends six hex of a sha256, so
+// for any branch at least that long the two sides produce IDENTICAL trimmed parts
+// and are separated by the hash tail alone. `w-database-image` is exactly sixteen
+// and is the branch this feature shipped on, which is why it is in the table: the
+// run it shipped on really did come down to 24 bits, and this test says so out
+// loud rather than leaving the next reader to discover it from two container names.
+func TestTheTwoSidesOfAComparisonHoldDifferentEnvironmentIdentifiers(t *testing.T) {
+	t.Parallel()
+	const project = "orders-api"
+	for _, branch := range []string{
+		"main",
+		"w-database-image",
+		"feature/add-billing-to-the-checkout",
+	} {
+		candidate := EnvID(project, branch)
+		baseline := EnvID(project, branch+loadBaselineSuffix)
+		require.NotEqual(t, candidate, baseline,
+			"the two sides of the comparison would address one environment, and under the "+
+				"docker provider one environment is one container and therefore one Postgres "+
+				"cluster, so each side's lock waits would include the other's")
+	}
+
+	// The sixteen character case, shown rather than asserted in the abstract: the
+	// readable parts are equal and only the tail tells them apart.
+	const long = "w-database-image"
+	candidate := EnvID(project, long)
+	baseline := EnvID(project, long+loadBaselineSuffix)
+	require.Equal(t, candidate[:len(candidate)-6], baseline[:len(baseline)-6],
+		"this is the case the branch this shipped on was in: the trimmed project and "+
+			"branch are identical on both sides")
+	require.NotEqual(t, candidate[len(candidate)-6:], baseline[len(baseline)-6:],
+		"so the whole of the difference is the six hex of sha256, and that is what the "+
+			"two cluster argument rests on for a branch of sixteen characters or more")
+}
