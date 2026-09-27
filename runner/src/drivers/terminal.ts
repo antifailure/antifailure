@@ -498,19 +498,36 @@ async function driveOnAScreen(
   // hung a run for over four hundred seconds until it was killed, and a run that
   // never ends reports nothing about anything.
   //
-  // SAY EXACTLY WHAT `by` BOUNDS, because claiming more would be the same defect
-  // one level up. It bounds the LOOP, not the parse. A chain that is already
-  // queued is awaited as one unit and cannot be cut in half, so the ceiling is
-  // observed BETWEEN polls: it stops this waiting for a producer it can never
-  // catch, and it does not abandon a parse in progress. For a program that has
-  // exited that is exactly right, because the queue is then finite and finishing
-  // it IS the drain. A caller that needs to know how far behind the grid was
-  // reads `received` and `parsedBytes`, which are the measurement rather than a
-  // flag, and a flag returned from here would have had no reader at all.
+  // The ceiling must bound the AWAIT too. A captured chain is finite, but a
+  // fast writer can already have queued more than twenty seconds of parsing
+  // inside a 1500 ms budget. Checking the clock only after that chain finishes
+  // lets the backlog defeat the budget before the next poll is reached.
+  // Exited programs still get their complete drain: no more bytes can arrive,
+  // and discarding that finite tail would judge a partial last redraw again.
   const drawn = async (by: number): Promise<void> => {
     for (;;) {
+      if (exited) {
+        await parsed;
+        return;
+      }
+      const remaining = by - Date.now();
+      if (remaining <= 0) return;
       const chain = parsed;
-      await chain;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          chain,
+          new Promise<void>((resolve) => { timer = setTimeout(resolve, remaining); }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+      // Exit can arrive while the captured chain is being parsed. Its final
+      // data may have extended the tail, so drain the current one on that path.
+      if (exited) {
+        await parsed;
+        return;
+      }
       if (parsed === chain || Date.now() >= by) return;
     }
   };
@@ -598,11 +615,11 @@ async function driveOnAScreen(
   // emulator. Draining here is what stops the transcript being judged with
   // the final redraw still queued.
   //
-  // It is SKIPPED for a program that was still writing when the budget ran out,
-  // and that is not a shortcut. Such a program has an unbounded backlog behind
+  // It is SKIPPED when the budget ran out with output or keys still pending,
+  // and that is not a shortcut. Such a program can have an unbounded backlog behind
   // it, so parsing the backlog would cost the budget again and still not buy the
   // program's last word. What it bought instead is the measurement below.
-  if (!stillWriting) await drawn(deadline);
+  if (!stillWriting && !ranOutOfTime) await drawn(deadline);
   const behind = received - parsedBytes;
   const written = received;
   const everything = screen.everything();
@@ -643,6 +660,15 @@ async function driveOnAScreen(
     return {
       cause: 'budget-exhausted',
       detail: `The budget of ${budgetMs} ms ran out with the program still writing. It had written ${written} bytes and the ${drew} screen was ${behind} of them behind, so what it drew is not its last word.`,
+      output: transcript,
+    };
+  }
+  if (behind > 0) {
+    // A quiet producer may still have a parser backlog at the deadline. Its
+    // silence is not proof that the screen was fully drawn.
+    return {
+      cause: 'budget-exhausted',
+      detail: `The budget of ${budgetMs} ms ran out before the ${drew} screen finished drawing. It had written ${written} bytes and the screen was ${behind} of them behind.`,
       output: transcript,
     };
   }

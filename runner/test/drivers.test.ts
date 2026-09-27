@@ -17,6 +17,7 @@ import * as ios from '../src/drivers/ios.ts';
 import * as android from '../src/drivers/android.ts';
 import * as desktop from '../src/drivers/desktop.ts';
 import { runTerminal, EXIT_GRACE_MS, QUIET_MS } from '../src/drivers/terminal.ts';
+import { Screen } from '../src/drivers/screen.ts';
 import { socketSink, decode, type LiveEvent } from '../src/live.ts';
 import type { WorkflowResult } from '../src/execute.ts';
 
@@ -727,6 +728,70 @@ test('a program still writing when the budget runs out is blocked, not judged', 
     `${behind} bytes behind out of ${written} written leaves nothing on the screen: ${outcome.detail}`);
   assert.ok(!/was not found/.test(outcome.detail),
     `the report blamed the expectation for a screen it never waited for: ${outcome.detail}`);
+});
+
+test('a queued parse respects the budget and preserves finished output', async (t) => {
+  // Exercise the real pty and emulator, but make each parse take 50 ms while
+  // the child emits a short line every millisecond. This creates the backlog
+  // on purpose, without depending on CI being slower than this machine.
+  // Exercise each entry into the drain and both ways a producer can finish:
+  // staying alive quietly and exiting with a finite parse still pending.
+  for (const trigger of ['startup', 'keys-pending', 'after-key', 'quiet', 'exited'] as const) {
+    await t.test(trigger, { timeout: 15_000 }, async (t) => {
+      const budgetMs = 1_500;
+      const write = Screen.prototype.write;
+      let parses = 0;
+      const slowWrite = t.mock.method(Screen.prototype, 'write', async function (this: Screen, data: string) {
+        parses += 1;
+        // These two controls need a pending parse even if the pty coalesces
+        // all the finite output into one chunk. Hold that first parse across
+        // the deadline; an exited producer must still get its complete screen.
+        const delay = parses === 1 && (trigger === 'quiet' || trigger === 'exited') ? budgetMs + 500 : 50;
+        await new Promise<void>((resolve) => setTimeout(resolve, delay));
+        await write.call(this, data);
+      });
+      const writer = 'setInterval(() => process.stdout.write("still going\\n"), 1);';
+      const finite = 'process.stdout.write("still going\\n".repeat(100) + "the burst ended\\n");';
+      const command = trigger === 'after-key'
+        ? `process.stdin.setRawMode(true); process.stdout.write("ready\\n"); process.stdin.once("data", () => { ${writer} });`
+        : trigger === 'quiet' ? `${finite} setInterval(() => {}, 1000);`
+        : trigger === 'exited' ? finite : writer;
+      const work = runTerminal({
+        workflows: [{
+          name: trigger,
+          command: execPath,
+          args: ['-e', command],
+          screen: { rows: 10, cols: 40 },
+          input: trigger === 'keys-pending' || trigger === 'after-key' ? ['<enter>'] : [],
+          expect: ['"the burst ended"'],
+          maxMs: budgetMs,
+        }],
+      });
+      let raced;
+      try {
+        raced = await withinReach(work, trigger === 'exited' ? 10_000 : 5_000);
+      } finally {
+        // Even a broken drain must release its real child after the assertion
+        // timer wins. Removing the delay lets that finite captured tail finish.
+        slowWrite.mock.restore();
+        await work;
+      }
+      assert.notEqual(raced, NEVER_RETURNED,
+        `${trigger}: the driver waited for the queued parse after its budget expired`);
+      if (raced === NEVER_RETURNED) return;
+      assert.ok(parses > 0, `${trigger}: no parse backlog was exercised`);
+      const outcome = raced[0]!.outcome;
+      if (trigger === 'exited') {
+        assert.equal(outcome.verdict, 'pass', outcome.detail);
+        assert.match(raced[0]!.steps.at(-1)!, /the burst ended/);
+        return;
+      }
+      assert.equal(outcome.verdict, 'blocked', outcome.detail);
+      assert.equal(outcome.cause, 'budget-exhausted', outcome.detail);
+      assert.match(outcome.detail, trigger === 'keys-pending' ? /keys still to send/
+        : trigger === 'quiet' ? /screen finished drawing/ : /program still writing/);
+    });
+  }
 });
 
 test('the job environment reaches the program on both paths', async () => {
