@@ -90,6 +90,28 @@ curl -fsSL https://antifailure.dev/install.sh | AF_NO_MODIFY_PATH=1 sh
 In GitHub Actions no profile is touched at all: the installer writes to
 `GITHUB_PATH`, so `af` resolves in every later step of the job.
 
+### Installing somewhere else
+
+`AF_PREFIX` moves the whole installation, both the binary and the runner the
+release ships with:
+
+```bash
+curl -fsSL https://antifailure.dev/install.sh | AF_PREFIX=/opt/antifailure sh
+```
+
+`AF_BIN_DIR` moves the binary on its own, and is the one to reach for when you
+want `af` in a directory that is already on your PATH:
+
+```bash
+curl -fsSL https://antifailure.dev/install.sh | AF_BIN_DIR=$HOME/.local/bin sh
+```
+
+It moves the binary and nothing else. The runner still goes under `AF_PREFIX`,
+which is `~/.antifailure` unless you set it too, and the PATH line the installer
+prints names the directory you chose. Both of these want a directory you can
+write to without `sudo`; if the write fails the installer says which path it
+could not write and stops rather than installing half of a release.
+
 ## Find out where you are
 
 ```bash

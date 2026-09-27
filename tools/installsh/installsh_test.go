@@ -159,17 +159,6 @@ func (s *session) install() string {
 	if err != nil {
 		s.t.Fatalf("install.sh failed: %v\n%s", err, out)
 	}
-	// Twice now a change has put a raw shell error where a message belongs: an
-	// append to a read only profile reporting "Permission denied" before the
-	// explanation, and a helper called without its argument reporting "unbound
-	// variable" where the next steps go. Both left a zero exit in some branches
-	// and both looked fine in the branch under test, so this is checked on
-	// every install rather than in one test.
-	for _, leak := range []string{"unbound variable", "sh: line", "Permission denied", "command not found"} {
-		if strings.Contains(out, leak) {
-			s.t.Errorf("a raw shell error leaked into the output: %q\n--- output ---\n%s", leak, out)
-		}
-	}
 	assertNumberedStepsAreIndented(s.t, out)
 	return out
 }
@@ -192,17 +181,30 @@ func (s *session) run() (string, error) {
 	cmd := exec.Command("/bin/sh", "-c", "cat "+filepath.Join(s.root, "install.sh")+" | sh")
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
-	assertTheFetcherSaidNothingOfItsOwn(s.t, string(out))
+	assertNoRawToolErrorReachedTheReader(s.t, string(out))
 	return string(out), err
 }
 
-// assertTheFetcherSaidNothingOfItsOwn is checked on EVERY invocation rather than
-// in one test, for the same reason install() checks for raw shell errors: the
-// leak it catches appears on whichever failure path forgot to silence the tool,
-// and the tests that walk those paths were all asserting on the sentence they
-// wanted while saying nothing about what was printed above it.
+// assertNoRawToolErrorReachedTheReader is checked on EVERY invocation, and that
+// placement is the whole point rather than a convenience.
 //
-// That is how this one survived. THREE tests drive an archive download to a
+// The shell half of this list is not new. install() has carried it since a read
+// only profile append reported "Permission denied" before the explanation and a
+// helper called without its argument reported "unbound variable" where the next
+// steps go. What WAS wrong is where it lived: install() fatals when the run
+// returned an error, so the list only ever ran on installs that SUCCEEDED, which
+// are the runs least able to produce the defect. Every failure path test calls
+// run() directly and was asserting nothing about raw output at all.
+//
+// That gap hid a second leak in the same breath as the first. `mkdir -p "$BIN_DIR"
+// "$PREFIX"` was unguarded, so an unwritable target printed `mkdir: /path:
+// Permission denied` straight after "Checksum verified" with none of the script's
+// own words, and twice over whenever BIN_DIR sat under PREFIX. The repository had
+// owned the right assertion for that since the profile defect and had it pointed
+// at the wrong set of runs.
+//
+// The fetcher half catches the leak this function was added for, and it survived
+// the same way. THREE tests drive an archive download to a
 // refusal, TestAReleaseWithNoBuildForThisPlatformSaysThat,
 // TestAVersionNobodyPublishedIsNotAMissingBuild and
 // TestADownloadRefusedByARateLimitIsNotReportedAsAMissingBuild, and all three
@@ -211,22 +213,27 @@ func (s *session) run() (string, error) {
 // that only requires its own sentence to be PRESENT cannot see anything added
 // beside it.
 //
-// The two signatures are the tools' own voices and nothing else speaks them:
-// curl writes `curl: (<code>) ...` on stderr under -sS, and wget prefixes
-// `wget: ` in both the GNU and the BusyBox spellings. install.sh's own prose
-// contains neither, and the one occurrence of `wget: ` in the file is inside a
-// comment, which never reaches a terminal.
+// Every signature here is some tool's own voice and nothing else speaks them:
+// curl writes `curl: (<code>) ...` on stderr under -sS, wget prefixes `wget: ` in
+// both the GNU and the BusyBox spellings, and `mkdir: ` is mkdir's. install.sh's
+// own prose contains none of them, and the one occurrence of `wget: ` in the file
+// is inside a comment, which never reaches a terminal.
 //
 // This is deliberately not a check that stderr is EMPTY. The script writes its
 // own refusals there, and requiring silence would be a check on a different
-// question.
-func assertTheFetcherSaidNothingOfItsOwn(t *testing.T, out string) {
+// question. It is a check that whatever the reader is told, THIS SCRIPT said it.
+func assertNoRawToolErrorReachedTheReader(t *testing.T, out string) {
 	t.Helper()
-	for _, voice := range []string{"curl: (", "wget: "} {
+	for _, voice := range []string{
+		"curl: (", "wget: ", "mkdir: ",
+		"unbound variable", "sh: line", "Permission denied", "command not found",
+	} {
 		if strings.Contains(out, voice) {
-			t.Errorf("the fetcher printed %q at the reader, so a raw tool error sits beside "+
-				"the sentence this script composes; silence the fetch with 2>/dev/null and let "+
-				"why_not report the status\n--- output ---\n%s", voice, out)
+			t.Errorf("a raw tool error reached the reader: %q. Something other than this "+
+				"script's own die() spoke, so the sentence composed for this case is sitting "+
+				"beside output nobody wrote for a reader. Guard the command, discard its "+
+				"stderr, and say what happened in this script's own words\n--- output ---\n%s",
+				voice, out)
 		}
 	}
 }
@@ -643,6 +650,62 @@ func TestAProfileItCannotWriteIsReportedRatherThanIgnored(t *testing.T) {
 	assertPrintedFullPathsRun(t, s, out)
 	if got := s.read(".zshrc"); got != "# mine\n" {
 		t.Errorf("a read only profile was modified:\n%s", got)
+	}
+}
+
+// And a TARGET DIRECTORY that cannot be created, which is the same failure one
+// step earlier and was the last place in this script where a tool spoke instead
+// of it.
+//
+// The test above is its sibling and shows why this one had to exist separately.
+// That one provokes a read only PROFILE, which is a warning on a run that still
+// succeeds, so it goes through install() and install() carried the raw error
+// check. This provokes a read only INSTALL TARGET, which is fatal, so it goes
+// through run(), and run() asserted nothing until the check moved there. The
+// defect and the check that catches it were four lines apart in the same file for
+// as long as the check sat in the wrong helper.
+//
+// AF_BIN_DIR rather than AF_PREFIX, for two reasons worth stating. It is the
+// variable this change documents, so the sentence in quickstart.md about what
+// happens when the write fails is measured here rather than asserted. And it is
+// the arm that also proves the SECOND half of the defect: BIN_DIR and PREFIX went
+// to one mkdir, BSD mkdir creates the argument that can be created before set -e
+// stops the script, so an unwritable BIN_DIR used to leave an empty PREFIX behind
+// as well.
+func TestAnInstallDirectoryItCannotCreateIsReportedRatherThanLeftToMkdir(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can write a read only directory, so this cannot be provoked here")
+	}
+	s := newSession(t)
+	locked := filepath.Join(t.TempDir(), "locked")
+	if err := os.Mkdir(locked, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	// Restored, because a read only directory inside t.TempDir() defeats the
+	// cleanup that removes it and the failure would be reported against whatever
+	// test ran next.
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	target := filepath.Join(locked, "bin")
+	s.env["AF_BIN_DIR"] = target
+
+	out, err := s.run()
+	if err == nil {
+		t.Fatalf("the installer succeeded although %s could not be created:\n%s", target, out)
+	}
+	// Its own words, naming the path and the way out. run() has already asserted
+	// that mkdir did not speak, which is the other half of this.
+	contains(t, out, target)
+	contains(t, out, "could not be created")
+	contains(t, out, "nothing was installed")
+	if _, statErr := os.Stat(filepath.Join(target, "af")); statErr == nil {
+		t.Error("af was installed into a directory that could not be created")
+	}
+	// The empty PREFIX the one shared mkdir used to leave behind. Asserted on the
+	// FILESYSTEM rather than on the message, because it is a fact about what the
+	// reader is left holding rather than about what they were told.
+	if _, statErr := os.Stat(filepath.Join(s.home, ".antifailure")); statErr == nil {
+		t.Errorf("a refused install left %s behind, so the reader has a half made "+
+			"installation and no explanation of it", filepath.Join(s.home, ".antifailure"))
 	}
 }
 

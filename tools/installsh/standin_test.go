@@ -312,12 +312,22 @@ func (s *session) onlyWget(t *testing.T) {
 // signal is the error line it prints on an HTTP error, whose shape is
 // `wget: server returned error: HTTP/1.1 403 Forbidden`.
 //
-// A real BusyBox could not be run here, and saying so is the point: Docker's API
-// was wedged on this machine and BusyBox does not build for macOS, so the flag
-// refusal and the error line are reproduced from BusyBox's documented usage
-// rather than measured. Everything else in the exchange, the redirects, the
-// statuses and the bodies, is real, because the fetching is done by the real curl
-// underneath.
+// MEASURED, on 2026-09-26, against a real `alpine:3.21` container, which is what
+// this comment used to say could not be done: BusyBox does not build for macOS
+// and Docker's API was wedged when it was written. Both properties hold. A bare
+// Alpine has no curl at all, `wget --version` answers `wget: unrecognized option:
+// version` rather than ignoring the flag, and a refused download writes
+// `wget: server returned error: HTTP/1.1 404 Not Found` on stderr in spite of the
+// quiet flag. The one difference from the shim below is the reason phrase, where
+// this writes `Refused` and BusyBox writes the real one, and it cannot matter
+// because install.sh reads the three digit code out of that line and never the
+// phrase. The whole one line install was also run inside that container end to
+// end: it resolved `latest` through the second way of asking, verified the
+// checksum, installed, and the linux arm64 binary reported its version back under
+// musl.
+//
+// Everything else in the exchange, the redirects, the statuses and the bodies, is
+// real anyway, because the fetching is done by the real curl underneath.
 func busyBoxWget(t *testing.T, dir, base string) {
 	t.Helper()
 	script := `#!/bin/sh

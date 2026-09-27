@@ -433,7 +433,20 @@ done
 unpinned=0
 [ -e "$tmp/$name/runner/package-lock.json" ] || unpinned=1
 
-mkdir -p "$BIN_DIR" "$PREFIX"
+# Guarded, and each directory on its own, because one unguarded mkdir was the
+# last raw tool error left in this script. `mkdir -p "$BIN_DIR" "$PREFIX"` under
+# set -e printed `mkdir: /some/path: Permission denied` at the reader and exited,
+# with none of this script's own words, straight after "Checksum verified". The
+# die below cannot cover it: that one fires when the FILE cannot be written into
+# a directory that already exists, and says nothing about a directory that could
+# not be created. Two arguments to one mkdir also printed the SAME line twice
+# whenever BIN_DIR sits under PREFIX, which is the default, and BSD mkdir creates
+# the second argument before set -e stops the script, so an unwritable BIN_DIR
+# left an empty PREFIX behind as well as an unexplained failure.
+mkdir -p "$BIN_DIR" 2>/dev/null \
+  || die "$BIN_DIR could not be created, so nothing was installed; check that you can write to it, or set AF_PREFIX or AF_BIN_DIR to somewhere you can"
+mkdir -p "$PREFIX" 2>/dev/null \
+  || die "$PREFIX could not be created, so nothing was installed; check that you can write to it, or set AF_PREFIX to somewhere you can"
 if ! install -m 0755 "$tmp/$name/af" "$BIN_DIR/af" 2>/dev/null; then
   cp "$tmp/$name/af" "$BIN_DIR/af" 2>/dev/null \
     && chmod 0755 "$BIN_DIR/af" 2>/dev/null \
