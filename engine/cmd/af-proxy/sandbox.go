@@ -1,9 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/antifailure/antifailure/engine/internal/mockpack"
@@ -30,20 +36,85 @@ import (
 // This runs on every allowed request, in every mode, and it is a refusal
 // rather than a redaction. Redaction protects the logs. This protects the
 // customer whose card would have been charged.
-func (p *proxy) tripwire(req *http.Request, host string) []livekey.Finding {
+func (p *proxy) tripwire(req *http.Request, host string) ([]livekey.Finding, error) {
 	found := livekey.ScanHeaders(req.Header)
 	if len(found) > 0 {
-		return found
+		return found, nil
 	}
 	// The query string carries them more often than it should, and a key in a
 	// URL is a key in every access log between here and the origin.
 	if q := req.URL.RawQuery; q != "" {
 		if f := livekey.Scan(q, "the query string"); len(f) > 0 {
-			return f
+			return f, nil
+		}
+		decoded, err := url.QueryUnescape(q)
+		if err != nil {
+			return nil, fmt.Errorf("invalid query encoding: %w", err)
+		}
+		if f := livekey.Scan(decoded, "the decoded query string"); len(f) > 0 {
+			return f, nil
 		}
 	}
 	_ = host
-	return nil
+	if req.Body == nil {
+		return nil, nil
+	}
+	// gRPC bodies are bidirectional streams. Reading to EOF here waits for a
+	// response the upstream cannot send until forwarding begins. Metadata is
+	// still covered by the header and query checks above.
+	if strings.HasPrefix(strings.ToLower(req.Header.Get("Content-Type")), "application/grpc") {
+		return nil, nil
+	}
+	const maxBody = 8 << 20
+	data, err := io.ReadAll(io.LimitReader(req.Body, maxBody+1))
+	if err != nil {
+		return nil, fmt.Errorf("reading request body: %w", err)
+	}
+	if len(data) > maxBody {
+		return nil, fmt.Errorf("request body exceeds credential inspection limit")
+	}
+	req.Body = io.NopCloser(bytes.NewReader(data))
+	if f := livekey.Scan(string(data), "the request body"); len(f) > 0 {
+		return f, nil
+	}
+	mediaType, params, err := mime.ParseMediaType(req.Header.Get("Content-Type"))
+	if err != nil && req.Header.Get("Content-Type") != "" {
+		return nil, fmt.Errorf("invalid content type: %w", err)
+	}
+	switch mediaType {
+	case "application/x-www-form-urlencoded":
+		decoded, err := url.QueryUnescape(string(data))
+		if err != nil {
+			return nil, fmt.Errorf("invalid form encoding: %w", err)
+		}
+		return livekey.Scan(decoded, "the decoded form body"), nil
+	case "application/json":
+		var value any
+		if err := json.Unmarshal(data, &value); err != nil {
+			return nil, fmt.Errorf("invalid JSON body: %w", err)
+		}
+		encoded, _ := json.Marshal(value)
+		return livekey.Scan(string(encoded), "the decoded JSON body"), nil
+	case "multipart/form-data":
+		reader := multipart.NewReader(bytes.NewReader(data), params["boundary"])
+		for {
+			part, err := reader.NextPart()
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if err != nil {
+				return nil, fmt.Errorf("invalid multipart body: %w", err)
+			}
+			contents, err := io.ReadAll(part)
+			if err != nil {
+				return nil, fmt.Errorf("reading multipart part: %w", err)
+			}
+			if f := livekey.Scan(string(contents), "multipart field "+part.FormName()); len(f) > 0 {
+				return f, nil
+			}
+		}
+	}
+	return nil, nil
 }
 
 // refuseLiveCredential writes the refusal for a tripped wire.

@@ -92,6 +92,8 @@ func NewExecutor(opts ExecutorOptions) (*Executor, error) {
 
 // Result is what a run did.
 type Result struct {
+	// Refused means plan validation stopped before the first write.
+	Refused bool
 	// Tables is how many tables were rewritten.
 	Tables int
 	// Rows is how many rows were rewritten.
@@ -115,7 +117,7 @@ type Result struct {
 // are which.
 func (e *Executor) Apply(ctx context.Context, conn *pgx.Conn, plan Plan) (Result, error) {
 	if !plan.Runnable() {
-		return Result{}, fmt.Errorf("masking: the plan has %d problems and will not be run; %s",
+		return Result{Refused: true}, fmt.Errorf("masking: the plan has %d problems and will not be run; %s",
 			len(plan.Problems), describeProblems(plan.Problems))
 	}
 	started := e.clock.Now()

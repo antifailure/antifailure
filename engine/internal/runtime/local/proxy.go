@@ -463,18 +463,22 @@ type Decision struct {
 	KeyID string `json:"key_id"`
 }
 
-// Decisions reads the sidecar's decision log for an environment.
+// Decisions reads the sidecar's decision log for an environment. A negative
+// limit requests the complete log and fails if it exceeds the inspection cap.
 //
 // Read from the container's output rather than a mounted file, because a file
 // needs a volume, a volume needs cleaning up, and a volume is one more thing
 // that can outlive the environment.
 func (r *Runtime) Decisions(ctx context.Context, envID string, limit int) ([]Decision, error) {
-	if limit <= 0 {
+	if limit == 0 {
 		limit = 200
 	}
 	id := proxyName(envID)
 	if _, err := r.cli.ContainerInspect(ctx, id, client.ContainerInspectOptions{}); err != nil {
 		if cerrdefs.IsNotFound(err) {
+			if limit < 0 {
+				return nil, fmt.Errorf("egress sidecar is absent, so its decisions cannot be verified")
+			}
 			// Nothing running is not an error. Somebody asking what the
 			// environment reached before bringing it up should be told that,
 			// not handed a Docker error.
@@ -483,19 +487,31 @@ func (r *Runtime) Decisions(ctx context.Context, envID string, limit int) ([]Dec
 		return nil, aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
 	}
 
+	tail := "all"
+	if limit > 0 {
+		tail = strconv.Itoa(limit + 50)
+	}
 	rc, err := r.cli.ContainerLogs(ctx, id, client.ContainerLogsOptions{
-		ShowStdout: true, ShowStderr: true, Tail: strconv.Itoa(limit + 50),
+		ShowStdout: true, ShowStderr: true, Tail: tail,
 	})
 	if err != nil {
 		return nil, aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
 	}
 	defer func() { _ = rc.Close() }()
 
-	body, err := io.ReadAll(io.LimitReader(rc, 8<<20))
+	const maxLog = 64 << 20
+	body, err := io.ReadAll(io.LimitReader(rc, maxLog+1))
 	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
 	}
+	if len(body) > maxLog {
+		return nil, fmt.Errorf("egress decision log exceeds the 64 MiB inspection limit")
+	}
 
+	return parseDecisions(body, limit)
+}
+
+func parseDecisions(body []byte, limit int) ([]Decision, error) {
 	var out []Decision
 	for _, line := range strings.Split(stripDockerLogFraming(string(body)), "\n") {
 		line = strings.TrimSpace(line)
@@ -504,10 +520,9 @@ func (r *Runtime) Decisions(ctx context.Context, envID string, limit int) ([]Dec
 		}
 		var d Decision
 		if err := json.Unmarshal([]byte(line), &d); err != nil {
-			// A truncated trailing line is normal when the container is still
-			// writing. Skipping it is right; failing on it would make the log
-			// unreadable exactly while something is happening.
-			continue
+			// A malformed or truncated decision is missing evidence. The caller
+			// must not report a clean egress check from a partial stream.
+			return nil, fmt.Errorf("egress decision log contains incomplete JSON: %w", err)
 		}
 		if d.Event != "decision" {
 			continue
@@ -517,7 +532,7 @@ func (r *Runtime) Decisions(ctx context.Context, envID string, limit int) ([]Dec
 		}
 		out = append(out, d)
 	}
-	if len(out) > limit {
+	if limit > 0 && len(out) > limit {
 		out = out[len(out)-limit:]
 	}
 	return out, nil

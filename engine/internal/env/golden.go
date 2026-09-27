@@ -1151,7 +1151,7 @@ func (o *Orchestrator) MaskApply(ctx context.Context) (masking.Result, error) {
 	}
 	plan := masking.BuildPlan(tables, rules.Assign(tables), hash)
 	if !plan.Runnable() {
-		return masking.Result{}, aferrors.Coded(aferrors.AFMSK010,
+		return masking.Result{Refused: true}, aferrors.Coded(aferrors.AFMSK010,
 			"detail", masking.DescribeProblems(plan.Problems))
 	}
 
