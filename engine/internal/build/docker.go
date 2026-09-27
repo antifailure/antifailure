@@ -272,26 +272,25 @@ func (b *DockerBuilder) Build(ctx context.Context, req Request) (Result, error) 
 	if err == nil && b.buildKit && needsSession(buildErr) {
 		// A plain Linux daemon requires a BuildKit session. The Docker CLI
 		// knows how to open one, and can read the same bounded tar context this
-		// builder already sent. Only when Buildx is unavailable do we ask the
-		// slower legacy builder to repeat the work.
-		if dockerPath, available := buildxAvailable(ctx); available {
+		// builder already sent. If Buildx is unavailable or its setup fails,
+		// the slower legacy builder remains the safety net.
+		if dockerPath, available := b.buildxAvailable(ctx); available {
 			if req.Progress != nil {
 				req.Progress("BuildKit needs a session; building with Docker Buildx")
 			}
 			log, buildErr, err = b.attemptBuildx(ctx, dockerPath, req, opts, extra, ref)
-			if err != nil {
-				return res, b.startFailure(err, req)
+			if err == nil {
+				res.Log = log
+				res.Duration = b.clock.Since(started)
+				if buildErr != nil {
+					return res, buildFailure(buildErr, req, res.Duration.Round(time.Second).String())
+				}
+				if _, inspectErr := b.cli.ImageInspect(ctx, ref); inspectErr == nil {
+					return res, nil
+				}
 			}
-			res.Log = log
-			res.Duration = b.clock.Since(started)
-			if buildErr != nil {
-				return res, buildFailure(buildErr, req, res.Duration.Round(time.Second).String())
-			}
-			if _, inspectErr := b.cli.ImageInspect(ctx, ref); inspectErr == nil {
-				return res, nil
-			}
-			// A Docker context can point Buildx at a different daemon. Only an
-			// image the API client can inspect is one the environment can run.
+			// A CLI infrastructure failure or a missing loaded image must not
+			// break a build the daemon's legacy builder could still complete.
 		}
 		if ctx.Err() != nil {
 			return res, b.startFailure(ctx.Err(), req)

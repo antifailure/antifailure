@@ -2,7 +2,9 @@ package build
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -48,14 +50,38 @@ func TestBuildxOutput_DropsOversizedLinesWithoutLeakingFragments(t *testing.T) {
 
 func TestBuildxAvailable_AbsentDockerKeepsTheLegacyPath(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	path, ok := buildxAvailable(t.Context())
+	path, ok := (&DockerBuilder{}).buildxAvailable(t.Context())
 	require.False(t, ok)
 	require.Empty(t, path)
 }
 
+func TestBuildxAvailable_RejectsADifferentDaemonBeforeSendingSource(t *testing.T) {
+	b := requireBuilder(t)
+	dir := t.TempDir()
+	docker := filepath.Join(dir, "docker")
+	contents := "#!/bin/sh\nif [ \"$1\" = buildx ]; then echo buildx; else echo another-daemon; fi\n"
+	require.NoError(t, os.WriteFile(docker, []byte(contents), 0o755))
+	t.Setenv("PATH", dir)
+	path, ok := b.buildxAvailable(t.Context())
+	require.False(t, ok)
+	require.Empty(t, path)
+}
+
+func TestBuildxSetupFailure_DistinguishesTheBuilderFromTheDockerfile(t *testing.T) {
+	t.Parallel()
+	require.True(t, buildxSetupFailure([]string{"ERROR: failed to initialize builder: connection refused"}))
+	require.True(t, buildxSetupFailure([]string{"ERROR: builder could not start"}))
+	require.False(t, buildxSetupFailure([]string{"#4 ERROR: process /bin/sh exited with code 7"}))
+	require.False(t, buildxSetupFailure([]string{"#4 RUN curl https://service.test", "#4 ERROR: connection refused"}))
+}
+
 func TestAttemptBuildx_BuildsTheManagedImageVisibleToTheDaemon(t *testing.T) {
 	b := requireBuilder(t)
-	dockerPath, ok := buildxAvailable(t.Context())
+	// A user's selected context and builder may be remote. The archive must go
+	// to the daemon the SDK selected before these CLI settings are consulted.
+	t.Setenv("DOCKER_CONTEXT", "somewhere-that-does-not-exist")
+	t.Setenv("BUILDX_BUILDER", "somewhere-that-does-not-exist")
+	dockerPath, ok := b.buildxAvailable(t.Context())
 	if !ok {
 		t.Skip("Docker Buildx CLI is unavailable")
 	}
@@ -90,15 +116,17 @@ func TestAttemptBuildx_BuildsTheManagedImageVisibleToTheDaemon(t *testing.T) {
 	require.Equal(t, req.EnvID, image.Config.Labels[dockerutil.LabelEnv])
 	// The generated Dockerfile consumed the context and the build arg. An
 	// image inspect alone would miss a success that built the wrong thing.
-	output, err := exec.CommandContext(ctx, dockerPath, "run", "--rm", ref,
-		"sh", "-c", "cat /app.txt /flavor").CombinedOutput()
+	run := exec.CommandContext(ctx, dockerPath, "--host", b.cli.DaemonHost(), "run", "--rm", ref,
+		"sh", "-c", "cat /app.txt /flavor")
+	run.Env = dockerBuildEnv()
+	output, err := run.CombinedOutput()
 	require.NoError(t, err, string(output))
 	require.Equal(t, "from buildx\nmint", string(output))
 }
 
 func TestAttemptBuildx_ReportsDockerfileFailureWithItsOutput(t *testing.T) {
 	b := requireBuilder(t)
-	dockerPath, ok := buildxAvailable(t.Context())
+	dockerPath, ok := b.buildxAvailable(t.Context())
 	if !ok {
 		t.Skip("Docker Buildx CLI is unavailable")
 	}
