@@ -273,10 +273,24 @@ func TestListDocs_ListsEveryPageAndStaysCheapEnoughToCallFirst(t *testing.T) {
 
 	// The point of this tool is that it can be called before you know what you
 	// want. A listing that costs as much as reading a page would not be.
+	//
+	// PER PAGE RATHER THAN A FLAT NUMBER, and the flat number is what asked for
+	// this. It was 6000, chosen when this shipped, and the listing reached 6008
+	// bytes the day a 117th documentation page was added. At that point the
+	// assertion had stopped measuring whether orienting is cheap and started
+	// charging a tax for writing a page: the next page over the line reds a
+	// required context for a reason that has nothing to do with this tool, and
+	// the fix anybody reaches for is to raise the number, which is how a guard
+	// stops meaning anything. Cost PER PAGE is what cheap means here and it does
+	// not drift as the corpus grows. Measured at 51.4 bytes a page across 117
+	// pages, so 60 leaves room for a longer title and still refuses what this is
+	// really guarding against, which is a description leaking into the listing at
+	// a hundred bytes each and which the assertion below names outright.
 	body, err := json.Marshal(got)
 	require.NoError(t, err)
-	require.Less(t, len(body), 6000,
-		"the orientation call has to stay cheap, or nobody can afford to orient")
+	require.Positive(t, got.PagesTotal, "a budget per page needs a page count")
+	require.Less(t, len(body), got.PagesTotal*60,
+		"the orientation call has to stay cheap per page, or nobody can afford to orient")
 	require.NotContains(t, string(body), "\"description\"",
 		"descriptions are what make this listing expensive; they belong to the "+
 			"per section call")
