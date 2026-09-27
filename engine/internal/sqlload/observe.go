@@ -124,12 +124,24 @@ func (o *observer) run(ctx context.Context, opts Options) {
 // and a connection that died would drop out of it silently. The name is set on
 // every client connection at connect time and the server reports it, so the
 // question is asked of the server end to end.
+//
+// AND the database, which the name alone cannot supply. pg_stat_activity is
+// cluster wide and ClientApplicationName is a constant every run of this
+// package shares, so a concurrent run against a sibling database on the same
+// server was counted here as one of this run's own backends. Every number this
+// sample feeds is a claim about THIS run: BackendsSeen says so in the result's
+// own words, and a peak of four active backends on a run of three clients is
+// not a surprising measurement, it is a false one. The waiter predicate in
+// lockwait.go was missing for the same reason and is fixed in the same commit;
+// the two are one defect read twice, and a branch here is a template copy on a
+// cluster that carries several of them at once, so the neighbour is the normal
+// case rather than a contrived one.
 const activeQuery = `
 SELECT pid,
        state = 'active' AS busy,
        state IN ('active', 'idle in transaction', 'idle in transaction (aborted)') AS in_tx
 FROM pg_stat_activity
-WHERE application_name = $1`
+WHERE application_name = $1 AND datname = current_database()`
 
 // sampleTimeout bounds one reading of pg_stat_activity.
 //
