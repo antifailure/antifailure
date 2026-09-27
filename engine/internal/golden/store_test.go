@@ -254,7 +254,7 @@ func TestS3Store(t *testing.T) {
 			"bucket of its own, so a server started by hand needs one made in it: "+
 			"docker run -d --name af-minio -p 49000:9000 "+
 			"-e MINIO_ROOT_USER=%s -e MINIO_ROOT_PASSWORD=<secret> "+
-			"bitnamilegacy/minio server /bitnami/minio/data. Name `server` and that "+
+			"ghcr.io/antifailure/minio server /bitnami/minio/data. Name `server` and that "+
 			"directory: the default command makes this image start, stop and restart "+
 			"MinIO before it settles, and it cannot write a directory at the root",
 			endpoint, bucket, access)

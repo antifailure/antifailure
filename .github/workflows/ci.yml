@@ -846,9 +846,51 @@ jobs:
         # time its older manifests are collected. The image self reports
         # `DEVELOPMENT.2025-07-23T15-54-02Z` rather than a RELEASE stamp, which
         # is Bitnami building without the release ldflags and not a development
-        # branch. THIS IS A STOPGAP: it removes a third party's ability to stop
-        # this repository's CI only until that namespace goes too, and the
-        # durable answer is a mirror of a chosen image in a registry we control.
+        # branch.
+        #
+        # AND IT IS NO LONGER PULLED FROM THAT NAMESPACE, which is the half the
+        # paragraph above used to end by asking for. It called itself a stopgap
+        # that removed a third party's ability to stop this repository's CI only
+        # until `bitnamilegacy` went the way quay just had, and named the durable
+        # answer: a mirror of a chosen image in a registry we control. That
+        # mirror now exists. `mirror-object-store.yml` copied this exact index
+        # into `ghcr.io/antifailure/minio` with `crane copy`, and the reference
+        # below names our copy.
+        #
+        # THE DIGEST DID NOT CHANGE, AND THAT IS THE WHOLE PROOF. `crane copy`
+        # moves manifests as bytes rather than pulling and pushing, so the index
+        # digest is preserved, and a digest is taken over those bytes. So this
+        # line names byte for byte the image #579 measured and reviewed, not a
+        # re serialisation of it that merely contains the same layers. The mirror
+        # run reads the digest back off ghcr and fails on a mismatch rather than
+        # printing a warning, and the copy in use here was additionally verified
+        # by hand: an anonymous token, a manifest read of 200 with
+        # `docker-content-digest` equal to this digest, both child manifests
+        # present at `{amd64, linux}` and `{arm64, linux}`, and every config and
+        # layer blob of both children readable with no credential at all.
+        #
+        # ANONYMOUS IS THE PROPERTY THAT MATTERS, not merely that we own it. The
+        # Docker Hub route was already closed, and this file's own comment
+        # records how: an anonymous pull token for docker.io/minio/minio comes
+        # back carrying an EMPTY access list. A runner and a fresh clone have no
+        # login, and neither does `just stores` on a developer's Mac, so a
+        # private mirror would have reintroduced exactly the failure it exists to
+        # escape. This job therefore needs no registry login and no read scope on
+        # packages, and this workflow's permissions block is unchanged: it grants
+        # read access to the repository contents and nothing else.
+        #
+        # WHAT NOW HOLDS THE PIN AND THE MIRROR EQUAL. Before this switch, one
+        # image key was named in ci.yml, the justfile and the mirror's own
+        # source, so TestEveryPinnedImageAgreesOnOneDigest held all three equal.
+        # That gate groups on the name before the colon, so the moment this line
+        # became `ghcr.io/...` it and the mirror's `bitnamilegacy/...` source
+        # became different keys and nothing held them to one digest any more.
+        # TestTheMirrorAndThePinsNameOneImage in tools/gatecheck is what replaces
+        # it. Its own arms enumerate everything it refuses; the three worth
+        # naming here are a consumer pinned to a digest the mirror does not copy,
+        # a consumer that names the upstream directly instead of our copy, which
+        # is the one no digest comparison can catch, and a mirror workflow it
+        # cannot read at all.
         #
         # `server` IS STILL PASSED, AND DROPPING IT MAKES THE WAIT BELOW LIE.
         # This image's entrypoint runs a setup phase when, and only when, its
@@ -878,7 +920,7 @@ jobs:
           set -euo pipefail
           docker run -d --name af-minio -p 49000:9000 \
             -e MINIO_ROOT_USER=aftestaccess -e MINIO_ROOT_PASSWORD=aftestsecret123 \
-            bitnamilegacy/minio:2025.7.23-debian-12-r5@sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20 \
+            ghcr.io/antifailure/minio:2025.7.23-debian-12-r5@sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20 \
             server /bitnami/minio/data
           docker run -d --name af-azurite -p 41000:10000 \
             mcr.microsoft.com/azure-storage/azurite:3.37.0@sha256:830430c1da1a2d537e08f3e6764dd1f5ae00cf0346bcaf625b968ec3f0971fd5 \
