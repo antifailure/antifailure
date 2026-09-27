@@ -22,11 +22,21 @@ not touched the runner.
 A silence now ends the wait only when the screen ALREADY shows what the workflow
 expected, which is the rule both web planners follow: more output can only ever
 turn an unmet expectation into a met one, because the transcript accumulates. An
-exit still ends it at once, and the budget still bounds it. So a workflow whose
-expectation never appears, against a program that never exits, now spends its
-declared budget before reporting the failure rather than ending 600 ms after the
-last byte. That is the cost, it falls only on the failing case, and it is the right
-way round: the alternative spends correctness to buy latency.
+exit still ends it at once, and the budget still bounds it.
+
+WHAT THIS CHANGES FOR A WORKFLOW YOU ALREADY HAVE, because it is a timing change you
+will see. A terminal workflow that FAILS, against a program that does not exit on
+its own, now takes the `maxMs` it declared before reporting the failure, where it
+used to report about 600 ms after the program's last byte. With no `maxMs` that is
+the 30 s default. A workflow that PASSES is unchanged, and so is one whose program
+exits: a met expectation still ends the wait one silence after the last byte,
+measured at 640 ms against a 30 s budget. If a pipeline gets slower after this
+upgrade, it is a workflow that was failing, and the extra time is the driver making
+sure the failure is the program's rather than its own.
+
+That is the cost, it falls only on the case that has already gone wrong, and it is
+the right way round: the alternative spends correctness to buy latency, and what it
+bought was a fast answer that was sometimes untrue.
 
 Two residuals that were only in a handover are now stated beside the code they
 constrain: the drain for a program that has exited still has no ceiling, so such a
