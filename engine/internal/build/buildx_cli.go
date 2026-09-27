@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os/exec"
 	"strings"
@@ -59,7 +60,8 @@ func (b *DockerBuilder) attemptBuildx(
 		return output.lines, nil, ctx.Err()
 	}
 	if err != nil {
-		if _, exited := err.(*exec.ExitError); exited {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			return output.lines, err, nil
 		}
 		return output.lines, nil, err
