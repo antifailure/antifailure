@@ -218,6 +218,42 @@ var ErrLoadBaselineSameCommit = ErrLoadBaselineNothingVaried
 // An image lacking an extension the manifest declares is refused too, by the
 // same machinery and under the same code the golden path uses, because the
 // extension check runs inside the provider's own image check.
+// AND THAT REFUSAL IS WHAT PUTS THE TWO SIDES ON TWO POSTGRES CLUSTERS, which
+// nothing else here states and which a defect in another package made load
+// bearing.
+//
+// The lock measures a SQL comparison reports come from pg_stat_activity and
+// pg_locks, and both are CLUSTER wide rather than per database. So "one cluster
+// or two" decides whether one side's waiters can turn up in the other side's
+// readings. On this axis it is always two, and the chain is written down because
+// every link of it lives somewhere else:
+//
+//   - The provider is docker, because the refusal below turns every other kind
+//     away. A provider that hosts databases somebody else runs is exactly where
+//     a branch is a DATABASE on a shared cluster rather than a server of its own.
+//   - A docker branch is a CONTAINER, named af-db-<envID> by branchName, so one
+//     environment identifier is one container is one cluster.
+//   - The two sides hold different identifiers, because the baseline's branch
+//     name carries loadBaselineSuffix and EnvID hashes the branch.
+//
+// THE THIRD LINK IS THINNER THAN IT LOOKS, AND THE RUN THIS SHIPPED ON SHOWS IT.
+// EnvID trims the branch to sixteen characters and appends six hex of a sha256.
+// That run used the branch `w-database-image`, which is exactly sixteen
+// characters, so both sides produced the SAME trimmed parts and were told apart
+// by the hash tail alone: orders-api-w-database-image-90c66a against
+// orders-api-w-database-image-b75167. The property rests on 24 bits.
+//
+// IT IS STILL SAFE HERE, and not because of the hash. If that tail ever collided
+// the two sides would share an identifier, Branch would find the other side's
+// running container, and it REFUSES to adopt it under AF-DB-045: on this axis the
+// two sides name different builds, so the branch image label cannot match. A
+// collision therefore produces a refusal rather than one cluster measured as two.
+//
+// THE BOUNDARY, stated because it is not this axis's to fix. `af load compare
+// --sql` with NO image named permits every provider, and a provider whose
+// branches are databases on one cluster puts both sides on one. The lock measures
+// are trustworthy there because those queries scope themselves to
+// current_database(), not because of any container boundary.
 func checkCompareImages(ctx context.Context, o *Orchestrator, imgs compareImages) error {
 	if !imgs.varied() && imgs.rebasedSides() == nil {
 		// Nothing was named, so nothing new can be wrong and nothing is
