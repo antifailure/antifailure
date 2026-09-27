@@ -80,7 +80,7 @@ const tryAgain = "Try it again"
 // recorded:true, the submission key it sent, and a uuid, before it renders
 // this. So a workflow that ends here has proved the whole path, browser to
 // database, and not merely that something answered.
-const recordedSentence = "It is written down."
+const recordedSentence = "Application received."
 
 // theCareersFormReachesTheControlPlane is the scheduled check.
 //

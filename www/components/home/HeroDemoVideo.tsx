@@ -123,7 +123,7 @@ function FilmControl({
   return (
     <button
       type="button"
-      className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-x-2 border border-black/40 bg-black/[0.02] px-4 font-mono text-[12px] font-medium tracking-extra-tight whitespace-nowrap text-black transition-colors duration-200 hover:border-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-neon max-sm:min-h-10 max-sm:gap-x-1.5 max-sm:px-3 max-sm:text-[11px]"
+      className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-x-2 border border-black/40 bg-black/[0.02] px-4 font-mono text-[12px] font-medium tracking-extra-tight whitespace-nowrap text-black transition-colors duration-200 hover:border-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-neon max-sm:gap-x-1.5 max-sm:px-3 max-sm:text-[11px]"
       onClick={onClick}
     >
       {children}
@@ -330,7 +330,7 @@ export function HeroDemoVideo() {
           <video
             ref={videoRef}
             className={cn("relative block w-full bg-white object-contain", fullscreen ? "h-screen" : "aspect-video")}
-            src="/home/antifailure-demo.mp4"
+            src="/home/antifailure-demo-20260926.mp4"
             poster="/home/antifailure-demo.jpg"
             muted={muted}
             playsInline
@@ -351,7 +351,7 @@ export function HeroDemoVideo() {
               aria-label="Play the film"
               onClick={togglePlay}
             >
-              <span className="inline-flex min-h-11 items-center gap-x-3 border border-black/40 bg-white px-5 font-mono text-[13px] font-medium tracking-extra-tight whitespace-nowrap text-black transition-colors duration-200 group-hover:border-black group-hover:bg-[#F6FDFA] group-focus-visible:outline group-focus-visible:outline-2 group-focus-visible:outline-neon max-sm:min-h-10 max-sm:px-4 max-sm:text-[11px]">
+              <span className="inline-flex min-h-11 items-center gap-x-3 border border-black/40 bg-white px-5 font-mono text-[13px] font-medium tracking-extra-tight whitespace-nowrap text-black transition-colors duration-200 group-hover:border-black group-hover:bg-[#F6FDFA] group-focus-visible:outline group-focus-visible:outline-2 group-focus-visible:outline-neon max-sm:px-4 max-sm:text-[11px]">
                 <PlayIcon />
                 PLAY THE FILM
               </span>

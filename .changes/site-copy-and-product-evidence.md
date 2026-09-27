@@ -17,6 +17,10 @@ The closing panel uses an agent-to-twin diagram instead of the aurora image.
 The Isolated Twin section shows a focused version of the real console with
 recorded demo environments. It replaces the animated lifecycle mockup and
 reflows the environment table into readable records on phones.
+Mobile comparisons and request ledgers reflow without clipped labels. Form
+fields use a readable phone size, and menu and video controls retain their
+tap targets. The demo recording has a new URL so cached older clips do not
+replace it for returning visitors.
 
 The mobile menu removes repeated links and keeps keyboard focus inside the
 open menu. The sign-in privacy summary uses an accessible dialog, and the

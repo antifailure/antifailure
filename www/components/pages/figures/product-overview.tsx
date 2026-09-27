@@ -261,8 +261,8 @@ export function POV02({ rows }: { rows: { miss: string; have: string }[] }) {
       rail="COVERAGE"
       summary="A six-dimension comparison showing that staging leaves production scale, rare records, concurrency, branch isolation, side-effect containment, and merge judgment fragmented, while a disposable twin closes the loop."
     >
-      <div className="grid grid-cols-[minmax(76px,0.72fr)_minmax(0,1fr)_minmax(0,1fr)] items-end gap-2 border-b border-black/[0.08] pb-2.5 sm:grid-cols-[minmax(104px,0.72fr)_minmax(0,1fr)_24px_minmax(0,1fr)]">
-        <Eyebrow>Dimension</Eyebrow>
+      <div className="grid grid-cols-2 items-end gap-3 border-b border-black/[0.08] pb-2.5 sm:grid-cols-[minmax(104px,0.72fr)_minmax(0,1fr)_24px_minmax(0,1fr)] sm:gap-2">
+        <div className="hidden sm:block"><Eyebrow>Dimension</Eyebrow></div>
         <div>
           <div className="text-[11px] font-medium text-black sm:text-[12px]">Shared staging</div>
           <p className="mt-0.5 font-mono text-[11px] text-gray-new-50 sm:text-[11px]">fragmented signals</p>
@@ -278,21 +278,21 @@ export function POV02({ rows }: { rows: { miss: string; have: string }[] }) {
         {rows.map((row, index) => (
           <li
             key={row.miss}
-            className="grid grid-cols-[minmax(76px,0.72fr)_minmax(0,1fr)_minmax(0,1fr)] items-start gap-2 py-2.5 sm:grid-cols-[minmax(104px,0.72fr)_minmax(0,1fr)_24px_minmax(0,1fr)]"
+            className="grid grid-cols-2 items-start gap-3 py-4 sm:grid-cols-[minmax(104px,0.72fr)_minmax(0,1fr)_24px_minmax(0,1fr)] sm:gap-2 sm:py-2.5"
           >
-            <span className="pr-1 font-mono text-[11px] uppercase leading-3 tracking-[0.08em] text-gray-new-50 sm:text-[11px]">
+            <span className="col-span-2 pr-1 font-mono text-[11px] uppercase leading-4 tracking-[0.08em] text-gray-new-50 sm:col-span-1 sm:leading-3">
               {COVERAGE_DIMENSIONS[index] ?? `Dimension ${index + 1}`}
             </span>
             <div className="flex min-w-0 items-start gap-1.5">
               <span className="mt-[5px] h-px w-3 shrink-0 bg-black/22" aria-hidden="true" />
-              <span className="min-w-0 text-[11px] leading-3.5 text-black/55 sm:text-[12px] sm:leading-4">{row.miss}</span>
+              <span className="min-w-0 break-words text-sm leading-5 text-black/55 sm:text-[12px] sm:leading-4">{row.miss}</span>
             </div>
             <div className="hidden justify-center text-black/22 sm:flex" aria-hidden="true">
               <Arrow />
             </div>
             <div className="flex min-w-0 items-start gap-1.5 border-l-2 border-[#285D49] pl-2">
               <span className="mt-[3px] font-mono text-[11px] font-semibold text-[#285D49]" aria-hidden="true">✓</span>
-              <span className="min-w-0 text-[11px] leading-3.5 text-black/80 sm:text-[12px] sm:leading-4">{row.have}</span>
+              <span className="min-w-0 break-words text-sm leading-5 text-black/80 sm:text-[12px] sm:leading-4">{row.have}</span>
             </div>
           </li>
         ))}
@@ -303,11 +303,11 @@ export function POV02({ rows }: { rows: { miss: string; have: string }[] }) {
           <Eyebrow tone="sage">Closed decision loop</Eyebrow>
           <StatusPill tone="FAIL">PR gate</StatusPill>
         </div>
-        <ol className="mt-2.5 grid grid-cols-4 gap-1 border border-[#285D49]/14 bg-[#F1F7F4] p-1.5" aria-label="Twin decision sequence">
+        <ol className="mt-2.5 grid grid-cols-2 gap-1 border border-[#285D49]/14 bg-[#F1F7F4] p-1.5 sm:grid-cols-4" aria-label="Twin decision sequence">
           {["Safe state", "Workload", "Containment", "Evidence"].map((item, index) => (
             <li key={item} className="relative min-w-0 bg-white px-1.5 py-2 text-center text-[11px] leading-3 text-black/70 sm:text-[11px]">
               {item}
-              {index < 3 ? <span className="absolute -right-1.5 top-1/2 z-10 -translate-y-1/2 font-mono text-[11px] text-[#285D49]" aria-hidden="true">→</span> : null}
+              {index < 3 ? <span className="absolute -right-1.5 top-1/2 z-10 hidden -translate-y-1/2 font-mono text-[11px] text-[#285D49] sm:block" aria-hidden="true">→</span> : null}
             </li>
           ))}
         </ol>

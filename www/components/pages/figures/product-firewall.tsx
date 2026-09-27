@@ -177,9 +177,9 @@ function Seal({ label, detail, tone = "sage" }: { label: string; detail: string;
 
 function SummaryMetric({ label, value, tone = "plain" }: { label: string; value: string; tone?: Tone }) {
   return (
-    <div className={cn("min-w-0 rounded-[10px] border px-3 py-2.5 text-center", toneClasses[tone])}>
+    <div className={cn("min-w-0 rounded-[10px] border px-1 py-2.5 text-center sm:px-3", toneClasses[tone])}>
       <div className="font-mono text-[18px] leading-none text-black">{value}</div>
-      <div className="mt-1 font-mono text-[11px] uppercase tracking-[0.1em] text-gray-new-50">{label}</div>
+      <div className="mt-1 font-mono text-[11px] uppercase tracking-normal text-gray-new-50 sm:tracking-[0.1em]">{label}</div>
     </div>
   );
 }
@@ -443,10 +443,10 @@ export function PFW05() {
       </div>
 
       <div className="mt-3 overflow-hidden rounded-[10px] border border-black/[0.08]">
-        <div className="grid grid-cols-[minmax(0,1fr)_5.5rem_5.5rem] gap-3 bg-black px-3 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.1em] text-white/60">
-          <span>attempted effect</span>
+        <div className="grid grid-cols-2 gap-x-3 gap-y-2 bg-black px-3 py-2 font-mono text-[11px] font-medium uppercase tracking-[0.1em] text-white/60 sm:grid-cols-[minmax(0,1fr)_5.5rem_5.5rem]">
+          <span className="col-span-2 sm:col-span-1">attempted effect</span>
           <span>mode</span>
-          <span>receipt</span>
+          <span className="text-right sm:text-left">receipt</span>
         </div>
         {LEDGER_ROWS.map((row, index) => {
           const blocked = row.result === "blocked";
@@ -454,17 +454,17 @@ export function PFW05() {
             <div
               key={row.receipt}
               className={cn(
-                "grid grid-cols-[minmax(0,1fr)_5.5rem_5.5rem] items-center gap-3 border-t border-black/[0.06] px-3 py-2.5 font-mono text-[12px]",
+                "grid grid-cols-2 items-center gap-x-3 gap-y-2 border-t border-black/[0.06] px-3 py-3 font-mono text-[12px] sm:grid-cols-[minmax(0,1fr)_5.5rem_5.5rem] sm:py-2.5",
                 blocked ? "bg-[#fbefef]" : index % 2 === 0 ? "bg-white" : "bg-[#f7f7f5]",
               )}
             >
-              <span className="flex min-w-0 items-center gap-2 text-black/75" title={row.target}>
+              <span className="col-span-2 flex min-w-0 items-start gap-2 text-black/75 sm:col-span-1 sm:items-center" title={row.target}>
                 <OutcomeDot blocked={blocked} />
                 <span className="shrink-0 text-gray-new-50">{row.method}</span>
-                <span className="min-w-0 truncate">{row.target}</span>
+                <span className="min-w-0 break-words sm:truncate">{row.target}</span>
               </span>
               <span className={blocked ? "text-[#A73737]" : "text-[#285D49]"}>{row.mode}</span>
-              <span className="text-gray-new-50">{row.receipt}</span>
+              <span className="text-right text-gray-new-50 sm:text-left">{row.receipt}</span>
             </div>
           );
         })}

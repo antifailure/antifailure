@@ -252,14 +252,8 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                   app router cannot navigate into it, so the one link that
                   remains is already the safe one. */}
             </div>
-            {/* The filled action was "Request access" once, then "Install the
-                engine", then "Start free" while the hosted plane opened itself
-                to a stranger. Self-serve is off now, so a stranger cannot
-                create an organization on their own, and the way into the
-                hosted plane is a booked demo. So the filled action leads there.
-                Signing in stays beside it for the operators who already have an
-                organization, and installing the open-source engine is one click
-                away in the hero and in the nav, needing no account at all. */}
+            {/* The homepage leads with a demo. Self-service remains available
+                through the sign-in flow. */}
             <div className="flex gap-x-3.5">
               <Button href="/signin" theme="outlined" size="xxs">
                 Sign in
@@ -483,10 +477,10 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                 above 1280 is two products wearing one name. "Install the
                 engine" is a link in the menu above this. */}
             <div className="mt-8 flex gap-3 max-sm:flex-col">
-              <Button href="/signin" theme="outlined" className="flex-1">
+              <Button href="/signin" theme="outlined" className="min-h-11 flex-none sm:flex-1">
                 Sign in
               </Button>
-              <Button href="/request-demo" theme="filled" className="flex-1">
+              <Button href="/request-demo" theme="filled" className="min-h-11 flex-none sm:flex-1">
                 Request a demo
               </Button>
             </div>

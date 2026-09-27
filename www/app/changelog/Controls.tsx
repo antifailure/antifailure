@@ -128,7 +128,7 @@ export function ChangelogControls({ total }: { total: number }) {
       <div className="flex flex-wrap items-center gap-x-10 gap-y-5">
         <label
           htmlFor="changelog-search"
-          className="flex min-w-0 flex-1 items-center gap-x-3 border-b border-black/20 pb-2.5 focus-within:border-black max-lg:max-w-none max-md:w-full max-md:flex-none max-w-[560px]"
+          className="flex min-h-11 min-w-0 flex-1 items-center gap-x-3 border-b border-black/20 focus-within:border-black max-lg:max-w-none max-md:w-full max-md:flex-none max-w-[560px]"
         >
           <span className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-gray-new-40">
             Find
@@ -146,7 +146,7 @@ export function ChangelogControls({ total }: { total: number }) {
             // accent blue, which is the only saturated colour anywhere on this
             // page, and the Clear beside the result count does the same job in
             // the site's own type and is reachable from the keyboard.
-            className="min-w-0 flex-1 bg-transparent text-[16px] tracking-extra-tight text-black outline-none [&::-webkit-search-cancel-button]:appearance-none placeholder:text-gray-new-50"
+            className="min-h-11 min-w-0 flex-1 bg-transparent text-[16px] tracking-extra-tight text-black outline-none [&::-webkit-search-cancel-button]:appearance-none placeholder:text-gray-new-50"
           />
         </label>
 

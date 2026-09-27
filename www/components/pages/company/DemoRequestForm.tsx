@@ -318,12 +318,12 @@ export function DemoRequestForm() {
         />
       </div>
 
-      <label className="mt-4 flex items-start gap-3">
+      <label className="mt-4 flex min-h-11 cursor-pointer items-center gap-3">
         <input
           type="checkbox"
           name="marketingOptIn"
           disabled={sending}
-          className="mt-0.5 size-4 shrink-0 rounded-[4px] border-black/25 text-black accent-black focus-visible:ring-2 focus-visible:ring-black/10"
+          className="size-4 shrink-0 rounded-[4px] border-black/25 text-black accent-black focus-visible:ring-2 focus-visible:ring-black/10"
         />
         <span className="text-[13px] leading-5 tracking-extra-tight text-gray-new-40">
           Send me occasional product updates.

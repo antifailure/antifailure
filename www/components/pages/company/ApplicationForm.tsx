@@ -58,15 +58,22 @@ type State =
   | { kind: "sent"; reference: string };
 
 const FIELD =
-  "mt-1.5 h-11 w-full rounded-[8px] border border-black/15 bg-white px-3 text-[15px] text-black outline-none placeholder:text-gray-new-50 focus-visible:border-black/45 focus-visible:ring-2 focus-visible:ring-black/10 disabled:opacity-60";
+  "mt-1.5 h-11 w-full rounded-[8px] border border-black/15 bg-white px-3 text-base text-black outline-none placeholder:text-gray-new-50 focus-visible:border-black/45 focus-visible:ring-2 focus-visible:ring-black/10 disabled:opacity-60";
 const LABEL = "block text-[13px] tracking-extra-tight text-gray-new-40";
 
 export function ApplicationForm() {
   const [state, setState] = useState<State>({ kind: "idle" });
   const [role, setRole] = useState<Role | "">("");
+  const confirmationRef = useRef<HTMLDivElement>(null);
   const id = useId();
 
   const sending = state.kind === "sending";
+
+  useEffect(() => {
+    if (state.kind === "sent") {
+      confirmationRef.current?.scrollIntoView({ block: "center", behavior: "instant" });
+    }
+  }, [state.kind]);
 
   // The role a card above linked at. Read on mount and again on every
   // fragment change, because a reader who is already on this page and presses
@@ -190,7 +197,7 @@ export function ApplicationForm() {
 
   if (state.kind === "sent") {
     return (
-      <div role="status" className="rounded-[8px] bg-white p-7 ring-1 ring-black/10 max-md:p-6">
+      <div ref={confirmationRef} role="status" className="rounded-[8px] bg-white p-7 ring-1 ring-black/10 max-md:p-6">
         <h2 className="text-[22px] leading-snug tracking-tighter text-black">
           Application received.
         </h2>

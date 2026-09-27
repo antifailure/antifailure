@@ -356,9 +356,9 @@ export function PTW03({ items }: { items: readonly IsolationItem[] }) {
             <Status tone="block">fail closed</Status>
           </div>
 
-          <div className="mt-3 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+          <div className="mt-3 grid grid-cols-1 items-center gap-2 sm:grid-cols-[1fr_auto_1fr]">
             <SystemNode eyebrow="workload" title="Declared journeys" note="Synthetic but production-shaped." />
-            <Arrow />
+            <div className="justify-self-center rotate-90 sm:rotate-0"><Arrow /></div>
             <SystemNode eyebrow="runtime" title="Candidate app" tone="dark" note="Can only see twin-scoped dependencies." />
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2">
@@ -368,7 +368,7 @@ export function PTW03({ items }: { items: readonly IsolationItem[] }) {
             <SystemNode eyebrow="identity" title="Twin secrets" tone="mint" />
           </div>
           <div className="mt-3 border-t border-[#285D49]/20 pt-3">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
               <span className="text-[12px] text-black/60">Every resource</span>
               <span className="font-mono text-[12px] text-[#285D49]">environment label required</span>
             </div>

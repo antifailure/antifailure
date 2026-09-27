@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { controlPlaneUrl } from "@/lib/control-plane-routes";
 import { leadSubmitted } from "@/lib/analytics";
 
@@ -47,19 +47,27 @@ type State =
 // exact same vocabulary rather than a second copy that drifts. One source of
 // truth for what an input on this site looks like.
 export const FIELD =
-  "mt-1.5 h-11 w-full rounded-[8px] border border-black/15 bg-white px-3 text-[15px] text-black outline-none placeholder:text-gray-new-50 focus-visible:border-black/45 focus-visible:ring-2 focus-visible:ring-black/10 disabled:opacity-60";
+  "mt-1.5 h-11 w-full rounded-[8px] border border-black/15 bg-white px-3 text-base text-black outline-none placeholder:text-gray-new-50 focus-visible:border-black/45 focus-visible:ring-2 focus-visible:ring-black/10 disabled:opacity-60";
 export const LABEL = "block text-[13px] tracking-extra-tight text-gray-new-40";
 
 export function EnterpriseForm() {
   const [state, setState] = useState<State>({ kind: "idle" });
   const formRef = useRef<HTMLFormElement>(null);
+  const confirmationRef = useRef<HTMLDivElement>(null);
   const id = useId();
 
   const sending = state.kind === "sending";
 
+  useEffect(() => {
+    if (state.kind === "sent") {
+      confirmationRef.current?.scrollIntoView({ block: "center", behavior: "instant" });
+    }
+  }, [state.kind]);
+
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (sending) return;
+    if (!event.currentTarget.reportValidity()) return;
     const data = new FormData(event.currentTarget);
     setState({ kind: "sending" });
 
@@ -140,6 +148,7 @@ export function EnterpriseForm() {
   if (state.kind === "sent") {
     return (
       <div
+        ref={confirmationRef}
         role="status"
         className="rounded-[8px] bg-white p-7 ring-1 ring-black/10 max-md:p-6"
       >

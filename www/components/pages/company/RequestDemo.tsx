@@ -122,7 +122,7 @@ export function RequestDemo() {
       <div className="relative flex flex-col bg-[#f7f7f5] px-6 py-6 sm:px-8 lg:px-14 max-sm:pb-[max(1.5rem,env(safe-area-inset-bottom))]">
         <a
           href="/"
-          className="inline-flex h-9 w-fit shrink-0 items-center gap-2 text-[13px] text-black/60 hover:text-black"
+          className="inline-flex min-h-11 w-fit shrink-0 items-center gap-2 text-[13px] text-black/60 hover:text-black"
         >
           <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" aria-hidden>
             <path d="M10 3 5 8l5 5" stroke="currentColor" strokeWidth="1.4" />
