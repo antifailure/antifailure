@@ -442,6 +442,7 @@ errors:
     docs: concepts/goldens
     retryable: false
     exit_code: 3
+
   - code: AF-DB-042
     area: DB
     message: "database.data_filesystem.size_bytes asks for {declared} bytes and the Docker daemon reports {memory} bytes of memory."
@@ -463,7 +464,6 @@ errors:
     docs: providers/databases
     retryable: false
     exit_code: 7
-
 
   # Masking
   - code: AF-MSK-001
