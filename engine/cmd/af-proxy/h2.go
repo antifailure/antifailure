@@ -205,7 +205,17 @@ func (p *proxy) decideH2(
 		TLS: isTLS, Mode: string(d.Mode), Rule: d.RuleHost, Reason: d.Reason(),
 		Allowed: d.Allowed(), Via: via,
 	}
-	if found := p.tripwire(r, host); len(found) > 0 {
+	if found, scanErr := p.tripwire(r, host); scanErr != nil {
+		rec.Status = http.StatusForbidden
+		rec.Allowed = false
+		rec.Reason = "Credential inspection could not complete: " + scanErr.Error()
+		rec.Duration = time.Since(started).String()
+		p.emit(rec)
+		relayRaw(w, func(raw io.Writer) {
+			writeRawForbidden(raw, "Antifailure refused a request it could not inspect for live credentials.")
+		})
+		return
+	} else if len(found) > 0 {
 		rec.Status = http.StatusForbidden
 		rec.Allowed = false
 		rec.Reason = "This request carries a live credential: " + livekey.Describe(found)

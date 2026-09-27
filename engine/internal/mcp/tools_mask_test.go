@@ -553,11 +553,30 @@ func TestApplyMasking_ARefusedPlanIsReportedAsNothingWritten(t *testing.T) {
 	t.Parallel()
 	// The executor refuses a plan with problems before it writes anything, so
 	// this is not a half applied table and the caller has to be told so.
-	_, _, fault := runMaskApplyFor(t, masking.Result{},
+	_, _, fault := runMaskApplyFor(t, masking.Result{Refused: true},
 		errors.New("the plan has 2 problems and will not be run"))
 
 	require.NotNil(t, fault)
-	require.Contains(t, fault.Detail, "before anything is written")
+	require.Contains(t, fault.Detail, "before any data was rewritten")
+	require.True(t, fault.Retryable)
+}
+
+func TestApplyMasking_PartialProgressIsReported(t *testing.T) {
+	t.Parallel()
+	_, _, fault := runMaskApplyFor(t, masking.Result{Rows: 20000, Tables: 1},
+		errors.New("connection lost"))
+	require.NotNil(t, fault)
+	require.Contains(t, fault.Detail, "20000 committed rows")
+	require.Contains(t, fault.Detail, "partly rewritten")
+	require.False(t, fault.Retryable)
+}
+
+func TestApplyMasking_ExecutionErrorWithoutProgressDoesNotPromiseNoWrites(t *testing.T) {
+	t.Parallel()
+	_, _, fault := runMaskApplyFor(t, masking.Result{}, errors.New("connection lost"))
+	require.NotNil(t, fault)
+	require.Contains(t, fault.Detail, "branch must be verified")
+	require.NotContains(t, fault.Detail, "before any data was rewritten")
 }
 
 func TestApplyMasking_AResumedRunSaysItsCountsAreNotTheWholeTable(t *testing.T) {

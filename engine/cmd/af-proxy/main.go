@@ -678,7 +678,15 @@ func (p *proxy) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	// production must not leave an environment running unreviewed code against
 	// a copy of production data, and which HTTP library the application chose
 	// has nothing to do with that.
-	if found := p.tripwire(r, host); len(found) > 0 {
+	if found, scanErr := p.tripwire(r, host); scanErr != nil {
+		rec.Status = http.StatusForbidden
+		rec.Allowed = false
+		rec.Reason = "Credential inspection could not complete: " + scanErr.Error()
+		rec.Duration = time.Since(started).String()
+		p.emit(rec)
+		http.Error(w, "Antifailure refused a request it could not inspect for live credentials.", http.StatusForbidden)
+		return
+	} else if len(found) > 0 {
 		rec.Status = http.StatusForbidden
 		rec.Allowed = false
 		rec.Reason = "This request carries a live credential: " + livekey.Describe(found)

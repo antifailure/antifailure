@@ -84,7 +84,15 @@ func (p *proxy) serveTransparentHTTP(conn net.Conn) {
 		Mode: string(d.Mode), Rule: d.RuleHost, Reason: d.Reason(),
 		Allowed: d.Allowed(), Via: "transparent",
 	}
-	if found := p.tripwire(req, host); len(found) > 0 {
+	if found, scanErr := p.tripwire(req, host); scanErr != nil {
+		rec.Status = http.StatusForbidden
+		rec.Allowed = false
+		rec.Reason = "Credential inspection could not complete: " + scanErr.Error()
+		rec.Duration = time.Since(started).String()
+		p.emit(rec)
+		writeRawForbidden(conn, "Antifailure refused a request it could not inspect for live credentials.")
+		return
+	} else if len(found) > 0 {
 		rec.Status = http.StatusForbidden
 		rec.Allowed = false
 		rec.Reason = "This request carries a live credential: " + livekey.Describe(found)

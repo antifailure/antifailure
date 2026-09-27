@@ -863,6 +863,11 @@ stripping it would hide that the key is in there.
 
 The value is never printed. The detector recognises the prefixes providers use,
 which is the same detector CI runs over the repository.
+For inspected HTTP requests, it checks headers, decoded query parameters, and
+request bodies, including JSON, URL encoded forms, and multipart forms. A body
+larger than the inspection limit or one that cannot be decoded is refused
+before forwarding. Streaming gRPC payloads are not buffered for inspection;
+their metadata is checked. Opaque TLS traffic cannot be inspected.
 
 ## What the sidecar refuses whatever the policy says
 
