@@ -28,7 +28,7 @@
 // draw keeps their evidence the program's own output and nothing else.
 
 import { spawn } from 'node:child_process';
-import { failureSentence, judgeAll, notFound, observed } from '../workflow.ts';
+import { failureSentence, judgeAll, meetsAll, notFound, observed } from '../workflow.ts';
 import { classify, type Attempt, type Cause } from '../verdict.ts';
 import { nullSink, type LiveSink } from '../live.ts';
 import { openScreen, type Screen } from './screen.ts';
@@ -140,8 +140,21 @@ const KEY_RESPONSE_MS = 1_000;
  *  descheduled mid flight on a loaded machine went silent for longer than a
  *  redraw takes, the driver read that as the end, and the transcript was judged
  *  at line 523 of 20000. Raising the bar to a silence no descheduled writer is
- *  likely to reach is what closed that, and the residual is stated where the
+ *  likely to reach is what closed that, and the residual was stated where the
  *  test that covers it lives.
+ *
+ *  LIKELY WAS THE LOAD BEARING WORD, AND IT HAS NOW BEEN MEASURED. A silence of
+ *  this length is reached by a descheduled writer on a loaded machine, and 600 ms
+ *  is not a bar that stops one: `runner`, a required check, failed once in 333
+ *  observations, on pull requests that had not touched the runner. Induced at one
+ *  position with only the length of the silence varying, 300 ms and 500 ms never
+ *  failed, 700 ms failed 2 runs in 3 and 1000 ms failed 3 in 3, so the transition
+ *  sits exactly on this constant. Raising it again would only move that
+ *  transition, which is why `lastWord` no longer accepts a silence on its own: it
+ *  looks at the SCREEN, and the residual that remains is stated there.
+ *
+ *  So what this number means has narrowed. It is how long a program must be quiet
+ *  before the driver LOOKS, and no longer how long before it CONCLUDES.
  *
  *  runner/test/drivers.test.ts derives the timing of its late burst from this
  *  and from QUIET_MS, so the test covering this boundary cannot quietly lose
@@ -504,6 +517,19 @@ async function driveOnAScreen(
   // lets the backlog defeat the budget before the next poll is reached.
   // Exited programs still get their complete drain: no more bytes can arrive,
   // and discarding that finite tail would judge a partial last redraw again.
+  //
+  // SO THE CEILING IS NOT TOTAL, AND THE RESIDUAL IS HERE RATHER THAN ONLY IN A
+  // HANDOVER. The exited path takes `await parsed` with no ceiling at all, in both
+  // of the two places above, so a program that EXITS having written more than its
+  // budget can pay to parse holds the driver for the whole parse. Measured
+  // emulator parse rate on a loaded 16GB Mac: 46 to 150 KB/s, so a program that
+  // exits having written 20 MB would hold it for minutes. It is deliberate: the
+  // queue is then finite, finishing it IS the drain, and cutting it would judge a
+  // transcript on a screen nobody waited for, which is the defect this whole file
+  // was rewritten for. No test reaches it, because every exiting program in the
+  // suite writes at most 129 KB. Closing it would mean reporting `blocked` with
+  // the two byte counts rather than a verdict about the program, which is a
+  // decision about what a customer is told and not a refactor.
   const drawn = async (by: number): Promise<void> => {
     for (;;) {
       if (exited) {
@@ -565,12 +591,94 @@ async function driveOnAScreen(
   // when the key's settle returns, so it is given the REST of the window to
   // start printing, and a program that never printed at all waits no longer
   // than one that answered.
+  //
+  // AND A SILENCE IS NOT EVIDENCE ON ITS OWN, which is the correction this wait
+  // needed and the reason it now looks at the SCREEN before it accepts one. The
+  // silence above is measured on DELIVERY, so its clock counts the gap since the
+  // DRIVER last read rather than the gap since the PROGRAM last wrote. Those are
+  // the same number only while the program is the one deciding. A program merely
+  // DESCHEDULED is silent without being finished, and accepting that silence
+  // reported `expectation-not-met`, which says "your program did not print this",
+  // about output nobody had waited for. That is the same defect one level over
+  // from the one this file was rewritten for, and it is worse, because a flake
+  // costs us time and this lies to the author about their own program.
+  //
+  // MEASURED, because "likely" is what the comment beside EXIT_GRACE_MS used to
+  // say and 600 ms is not a bar a loaded machine respects. At one position, with
+  // only the length of one induced silence varying, against the test that covers
+  // this: 300 ms and 500 ms never failed, 700 ms failed 2 runs in 3, 1000 ms
+  // failed 3 in 3. The transition sits exactly on the constant. On CI it was one
+  // failure in 333 observations of `runner`, a required check, on pull requests
+  // that had not touched the runner.
+  //
+  // SO THE ASYMMETRY DECIDES IT, and it is the rule the other surface already
+  // follows: both planners stop the moment the expectation is met and keep going
+  // otherwise, at workflow.ts's `meetsAll` and at model.ts's `judgeAll`. More
+  // output can only ever turn an UNMET expectation into a MET one, because the
+  // transcript accumulates and text is only ever added to it. So a met
+  // expectation needs no more waiting, and an unmet one on a program that has not
+  // exited means the looking is not finished. Every branch here ends on a fact:
+  // the expectation being visible, the process being gone, or the budget the
+  // author declared running out.
+  //
+  // WHAT IT COSTS, since it is not free and the cost falls in one place. A
+  // workflow whose expectation never appears, against a program that never
+  // exits, now spends its whole budget before reporting the failure rather than
+  // ending 600 ms after the last byte. A met expectation pays nothing: the fast
+  // path is unchanged. That is correctness bought with latency on the failing
+  // case, which is the right way round, because the alternative spends
+  // correctness to buy latency.
+  //
+  // THE RESIDUAL THIS LEAVES, because it does leave one and a reader deserves it
+  // rather than a claim of safety. A program whose expectation is ALREADY MET and
+  // which then goes quiet is accepted, so a program that would have gone on to
+  // contradict itself, printing the expected words and then an error, is still
+  // judged on the earlier screen. That is a deliberate limit rather than an
+  // oversight: the expectation is what the author said to look for, the
+  // transcript only ever grows, and waiting for a program to take something back
+  // would mean never accepting any screen from a program that has not exited.
+  // Closing it would need the author to say what must NOT appear, which is a
+  // manifest change and a different feature. What is no longer possible is the
+  // defect this fix is for: reporting that a program did not print something when
+  // the driver had stopped listening while it was descheduled.
+  //
+  // The screen is judged at most once per silence. `drawn` first, because a grid
+  // the emulator has not caught up with would answer for output that has already
+  // arrived, and `judgedFor` keeps the cost to one judgement per gap however long
+  // the gap is.
+  //
+  // NEITHER OF THOSE TWO IS COVERED BY A TEST, and saying so is worth more than
+  // pretending otherwise, because neither can change a VERDICT: they decide how
+  // long it takes to reach one. Removing the `drawn` here was mutation tested and
+  // SURVIVED, and the reason is worth knowing. Every settle above returns only
+  // once its own `drawn` reached a fixed point, so the grid is already caught up
+  // by the time this wait begins, EXCEPT when a settle ended on SETTLE_CEILING_MS
+  // instead, which needs a program that writes continuously for three seconds.
+  // Then, without this line, the first judgement reads a stale grid, says the
+  // words are absent, and `judgedFor` stops it looking again while the program
+  // stays quiet, so a workflow that PASSES waits out its whole budget first. A
+  // test for that would have to make the emulator lag by an amount that is a
+  // property of the host, which is the calibration this file keeps deleting, so
+  // the line stays and its justification is this paragraph rather than a check.
+  //
+  // There is no guard here for a workflow that expects NOTHING, which would never
+  // be met and so would wait out its whole budget. schemas/manifest.v1.json gives
+  // a terminal workflow's `expect` minItems 1 and says why in its own words: such
+  // a workflow "can only ever report that nothing confirmed or contradicted it,
+  // which is blocked, so a manifest that declares one has written a workflow that
+  // cannot pass". A branch for it here would be one nothing can reach, and the
+  // outcome without it is the one the schema describes, reached a budget later.
+  let judgedFor = 0;
   const lastWord = async (): Promise<LastWord> => {
     for (;;) {
       if (exited) return 'exited';
       const silent = Date.now() - lastDataAt >= EXIT_GRACE_MS;
       if (Date.now() >= deadline) return silent ? 'quiet' : 'still-writing';
-      if (silent) return 'quiet';
+      if (silent && judgedFor !== lastDataAt) {
+        judgedFor = lastDataAt;
+        await drawn(deadline);
+        if (meetsAll(workflow.expect, [...shown, screen.everything()].join('\n'))) return 'quiet';
+      }
       await sleep(10);
     }
   };
