@@ -817,7 +817,15 @@ test('silence ordering 2: a program that EXITS during the silence is judged at o
     EXIT_GRACE_MS * 2,
     'process.exit(0);',
   );
-  const raced = await withinReach(runTerminal({
+  // The work promise is kept and awaited in a `finally`, which is not tidiness.
+  // When the race wins, `withinReach` returns and the DRIVER CARRIES ON: it still
+  // holds the pseudo terminal, and this file already paid for learning what that
+  // costs, an abandoned driver keeping the event loop alive so the FILE never
+  // finishes and the summary reads `pass 0 fail 0 cancelled 2`, which a reader
+  // scanning counters sees as no failure at all. Awaiting the work releases the
+  // child, and it costs the rest of the budget only on a run that was failing
+  // anyway.
+  const work = runTerminal({
     workflows: [{
       name: 'quiet-then-exit',
       command: execPath,
@@ -826,7 +834,13 @@ test('silence ordering 2: a program that EXITS during the silence is judged at o
       expect: ['"never printed"'],
       maxMs: 30_000,
     }],
-  }), EXIT_GRACE_MS * 16);
+  });
+  let raced;
+  try {
+    raced = await withinReach(work, EXIT_GRACE_MS * 16);
+  } finally {
+    await work;
+  }
   if (raced === NEVER_RETURNED) {
     assert.fail(`${NEVER_RETURNED} within ${EXIT_GRACE_MS * 16} ms for a program that exited during the silence, so its exit was not what ended the wait`);
   }
@@ -847,7 +861,11 @@ test('silence ordering 3: a program whose screen already shows the words is not 
   // the wait is one grace once the last byte has landed, so eight of them is
   // generous and still an order of magnitude short of the budget.
   const program = 'process.stdout.write("ready to go\\n"); setInterval(() => {}, 1000);';
-  const raced = await withinReach(runTerminal({
+  // Kept and awaited for the reason given in the test above, and it matters more
+  // here: this program is a `setInterval` that can never exit on its own, so an
+  // abandoned driver would hold it until the 30 s budget with nothing waiting on
+  // either of them.
+  const work = runTerminal({
     workflows: [{
       name: 'tui-that-shows-it',
       command: execPath,
@@ -856,7 +874,13 @@ test('silence ordering 3: a program whose screen already shows the words is not 
       expect: ['"ready to go"'],
       maxMs: 30_000,
     }],
-  }), EXIT_GRACE_MS * 8);
+  });
+  let raced;
+  try {
+    raced = await withinReach(work, EXIT_GRACE_MS * 8);
+  } finally {
+    await work;
+  }
   if (raced === NEVER_RETURNED) {
     assert.fail(`${NEVER_RETURNED} within ${EXIT_GRACE_MS * 8} ms for a program already showing what was expected, so a met expectation is now paying the budget`);
   }
