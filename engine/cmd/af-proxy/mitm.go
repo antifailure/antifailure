@@ -256,7 +256,15 @@ func (p *proxy) serveInspected(w net.Conn, req *http.Request, host string) bool 
 	// The tripwire runs before anything is forwarded, in every mode. A
 	// credential that can act on production must not reach an environment
 	// running unreviewed code against a copy of production data.
-	if found := p.tripwire(req, host); len(found) > 0 {
+	if found, scanErr := p.tripwire(req, host); scanErr != nil {
+		rec.Status = http.StatusForbidden
+		rec.Allowed = false
+		rec.Reason = "Credential inspection could not complete: " + scanErr.Error()
+		rec.Duration = time.Since(started).String()
+		p.emit(rec)
+		writeRawForbidden(w, "Antifailure refused a request it could not inspect for live credentials.")
+		return false
+	} else if len(found) > 0 {
 		rec.Status = http.StatusForbidden
 		rec.Allowed = false
 		rec.Reason = "This request carries a live credential: " + livekey.Describe(found)

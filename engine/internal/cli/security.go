@@ -280,9 +280,9 @@ func profileTouchesDependency(profile *change.Profile) bool {
 	return false
 }
 
-// securityLogLimit is how many captured messages a family reads. It matches the
-// limit the egress summary uses for decisions, so a reader family sees the same
-// window of the run the report does.
+// securityLogLimit is how many captured messages a family reads. Egress
+// decisions use the complete sidecar log so high volume runs cannot hide
+// earlier decisions from containment analysis.
 const securityLogLimit = 500
 
 // resolveSecurityPolicy overlays the registered families' default levels under
