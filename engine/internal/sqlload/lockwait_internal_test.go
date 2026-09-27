@@ -38,7 +38,7 @@ func aWait(blocked, blocking string) LockWait {
 	return LockWait{
 		BlockedTransaction: "tx", BlockedStatement: blocked,
 		BlockingTransaction: "tx", BlockingStatement: blocking,
-		BlockingState: "active", BlockingInRun: true,
+		BlockingState: "active", BlockingNamed: true, BlockingInRun: true,
 		LockType: "transactionid", Mode: "ShareLock",
 	}
 }
@@ -307,4 +307,78 @@ func TestNoIntervalIsChargedForASampleThatFoundNothing(t *testing.T) {
 	require.Zero(t, totals.waits)
 	require.Zero(t, totals.waitMS)
 	require.Empty(t, totals.list())
+}
+
+// TestAHolderIsOneOfFourThings covers every combination the wait queue reading
+// can hand back, which is the whole of the decision and cannot be reached
+// through a server.
+//
+// The prepared transaction case is the reason this is a unit test.
+// max_prepared_transactions is zero on a default Postgres, including the one
+// this suite starts, so the input that proved three outcomes were too few is
+// unbuildable there. It was measured against a server configured for it once:
+// pg_locks carries a prepared transaction with a NULL pid, pg_blocking_pids
+// reports it as pid ZERO with cardinality one, and the production query returns
+// blocker_pid 0 with an empty coalesced state. Those readings are what this
+// table encodes.
+func TestAHolderIsOneOfFourThings(t *testing.T) {
+	const ourPID, strangerPID = 4242, 9999
+	reg := &statements{pids: []uint32{ourPID}, current: make([]atomic.Pointer[stmtRef], 1)}
+	reg.current[0].Store(&stmtRef{Transaction: "bump the counter", Label: "hold it"})
+	blockedPID := int32(ourPID)
+
+	pid := func(n int32) *int32 { return &n }
+
+	t.Run("no pid came back, so nothing about the holder is claimed", func(t *testing.T) {
+		w := lockWaitFrom(blockedPID, nil, "active", "counters", "transactionid", "ShareLock", reg)
+		require.False(t, w.BlockingNamed)
+		require.False(t, w.BlockingPrepared)
+		require.False(t, w.BlockingInRun, "an unnamed holder was attributed to this run")
+		require.Empty(t, w.BlockingState,
+			"a state was carried for a holder the server never named, which is a fact "+
+				"about nobody")
+		require.Empty(t, w.BlockingStatement)
+	})
+
+	t.Run("pid zero is a prepared transaction and never a session", func(t *testing.T) {
+		w := lockWaitFrom(blockedPID, pid(0), "", "counters", "transactionid", "ShareLock", reg)
+		require.True(t, w.BlockingNamed, "the server did name it, as zero")
+		require.True(t, w.BlockingPrepared)
+		require.False(t, w.BlockingInRun,
+			"pid zero reached the registry as though it were a backend pid")
+		require.Empty(t, w.BlockingStatement,
+			"a prepared transaction was given one of this mix's statement labels")
+	})
+
+	t.Run("a pid of this run carries the mix's own label", func(t *testing.T) {
+		w := lockWaitFrom(blockedPID, pid(ourPID), "active", "", "tuple", "ExclusiveLock", reg)
+		require.True(t, w.BlockingNamed)
+		require.False(t, w.BlockingPrepared)
+		require.True(t, w.BlockingInRun)
+		require.Equal(t, "hold it", w.BlockingStatement)
+		require.Equal(t, "active", w.BlockingState)
+	})
+
+	t.Run("a stranger's pid is named and not ours", func(t *testing.T) {
+		w := lockWaitFrom(blockedPID, pid(strangerPID), "idle in transaction",
+			"counters", "relation", "AccessShareLock", reg)
+		require.True(t, w.BlockingNamed)
+		require.False(t, w.BlockingPrepared)
+		require.False(t, w.BlockingInRun)
+		require.Empty(t, w.BlockingStatement,
+			"a backend outside the run was given one of this mix's statement labels")
+		require.Equal(t, "idle in transaction", w.BlockingState)
+	})
+
+	t.Run("a stranger whose state was withheld is still named", func(t *testing.T) {
+		// The ordinary case off superuser, and the one an earlier assertion
+		// forbade: the row is there, the state is not.
+		w := lockWaitFrom(blockedPID, pid(strangerPID), "", "counters", "relation",
+			"AccessShareLock", reg)
+		require.True(t, w.BlockingNamed,
+			"a holder whose state an unprivileged role cannot read was reported as "+
+				"never having been named")
+		require.False(t, w.BlockingPrepared)
+		require.Empty(t, w.BlockingState)
+	})
 }

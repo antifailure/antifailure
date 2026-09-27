@@ -75,7 +75,7 @@ func sqlResult() *sqlload.Result {
 		LockWaitPairs: []sqlload.LockWait{{
 			BlockedTransaction: "checkout", BlockedStatement: "select order",
 			BlockingTransaction: "checkout", BlockingStatement: "select order",
-			BlockingState: "idle in transaction", BlockingInRun: true,
+			BlockingState: "idle in transaction", BlockingNamed: true, BlockingInRun: true,
 			Relation: "orders", LockType: "transactionid", Mode: "ShareLock",
 			Waits: 6, WaitedMS: 2200,
 		}},
@@ -723,6 +723,27 @@ func TestSQLWorkloadContention_KeepsNoContentionApartFromNotMeasured(t *testing.
 	require.Equal(t, "idle in transaction", got.Contention.Pairs[0].BlockingState)
 	require.Equal(t, "orders", got.Contention.Pairs[0].Relation)
 	require.True(t, got.Contention.Pairs[0].BlockingInRun)
+	// BlockingNamed asserted on the DOCUMENT rather than only on the engine's
+	// own shape, because this copy is a separate assignment and a miswired or
+	// deleted one would leave every other field right while a model lost the
+	// distinction between a stranger and a holder nobody identified. Both
+	// values, so the assertion cannot pass against a field hardcoded either way.
+	require.True(t, got.Contention.Pairs[0].BlockingNamed,
+		"a named holder reached the model as unnamed")
+	require.False(t, got.Contention.Pairs[0].BlockingPrepared,
+		"an ordinary session reached the model as a prepared transaction")
+
+	unnamedRun := sqlOutcome()
+	unnamedRun.Result.LockWaitPairs = []sqlload.LockWait{{
+		BlockedTransaction: "checkout", BlockedStatement: "select order",
+		BlockingNamed: false, BlockingInRun: false,
+		LockType: "transactionid", Mode: "ShareLock", Waits: 1, WaitedMS: 200,
+	}}
+	unnamedDoc := describeSQLWorkload(unnamedRun, nil, false)
+	require.Len(t, unnamedDoc.Contention.Pairs, 1)
+	require.False(t, unnamedDoc.Contention.Pairs[0].BlockingNamed,
+		"a holder nobody identified reached the model as a named one, so it will be "+
+			"described as another session")
 	require.Contains(t, got.Contention.Note, "pg_blocking_pids",
 		"a measured run has to carry what the instrument could not see")
 }

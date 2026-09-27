@@ -72,8 +72,83 @@ type LockWait struct {
 	BlockingStatement   string `json:"blocking_statement,omitempty"`
 	// BlockingState is pg_stat_activity's own word for what the holder was
 	// doing: active, idle in transaction, and so on.
+	//
+	// EMPTY IS NORMAL AND HAS THREE CAUSES, none of them "the holder was doing
+	// nothing". A test that required a state here failed on another lane's CI
+	// and was right to, because all three are measured facts about Postgres
+	// rather than races worth ignoring:
+	//
+	//   - AN UNPRIVILEGED ROLE, which is the ordinary case for a customer
+	//     pointing this product at their own server. Without superuser and
+	//     without pg_read_all_stats or pg_monitor, a foreign backend's ROW is
+	//     visible while state, backend_type and query are WITHHELD. Read twice
+	//     at one instant against one server: as superuser, pid 1641 is
+	//     "client backend / postgres / active"; as a role with LOGIN and
+	//     nothing else, the same pid is present with usename readable, state
+	//     withheld and query "<insufficient privilege>". ROWS VISIBLE, COLUMNS
+	//     MASKED: over the same unfiltered reading the row count was identical
+	//     at six either way, while backend_type IS NULL went from zero rows as
+	//     superuser to five as the plain role. That sentence is here because
+	//     the obvious wrong conclusion is that an unprivileged role sees
+	//     nothing at all, and it sees everything except the columns that
+	//     matter. So on such a deployment this is empty for EVERY holder
+	//     outside the run, always, not sometimes.
+	//   - A BACKEND THAT IS NOT A CLIENT, which an idle server already has
+	//     several of: the autovacuum launcher, the background writer, the
+	//     checkpointer, the logical replication launcher and the walwriter all
+	//     report a NULL state, measured as superuser so it is the server's own
+	//     answer rather than a privilege effect.
+	//   - THE HOLDER'S ROW BEING GONE by the time the outer join is evaluated,
+	//     because the wait queues and pg_stat_activity are two reads.
+	//
+	// When looking at this yourself, do not filter on usename to find a
+	// foreign backend: usename is itself withholdable, so the filter can
+	// remove the very rows it is looking for and answer zero, which reads as
+	// "an unprivileged role sees nothing at all" and is wrong. Count the
+	// unfiltered view.
+	//
+	// BlockingNamed is what separates all three from the different question of
+	// whether a holder was identified at all.
 	BlockingState string `json:"blocking_state,omitempty"`
+	// BlockingNamed says whether the server named a holder at all, and it is
+	// the difference between "somebody else held it" and "nobody knows who
+	// held it".
+	//
+	// Three outcomes, not two, and the third is not hypothetical: the query's
+	// own comment says pg_blocking_pids returns an empty array for a backend
+	// that is genuinely waiting when the holder disconnected between the two
+	// reads, and the outer join onto pg_stat_activity yields no state for a pid
+	// whose row has gone. Both arrived with BlockingInRun false and an empty
+	// state, which is indistinguishable from a stranger, and af load sql
+	// therefore printed "another session on this database" about a holder
+	// nothing had identified. That is the same defect as reading a null wait
+	// count as a zero, one level in: an absence rendered as a finding.
+	//
+	// The WAIT is still reported when this is false, because the wait is the
+	// part that was measured. Dropping it would trade a false claim for a
+	// missing one.
+	BlockingNamed bool `json:"blocking_named"`
+	// BlockingPrepared says the named holder is a PREPARED TRANSACTION, which
+	// is a real holder with no session at all.
+	//
+	// Measured rather than reasoned about, because it is the case that proved
+	// three outcomes were still one too few. pg_locks carries a prepared
+	// transaction with a NULL pid, and pg_blocking_pids reports it as pid ZERO
+	// rather than by omitting it: a backend blocked on one answered
+	// "blockers {0}, cardinality 1". So the pid is present, BlockingNamed is
+	// true, and the outer join on b.pid = 0 finds nothing, which left the
+	// renderer saying "another session on this database" about something that
+	// is not a session. That is the same false attribution this field's
+	// neighbour was added to remove, one costume along.
+	//
+	// It earns its own answer rather than being folded into "not named",
+	// because the remedy is specific and a reader can act on it: a two phase
+	// commit holder is released with COMMIT PREPARED or ROLLBACK PREPARED and
+	// there is no session to cancel.
+	BlockingPrepared bool `json:"blocking_prepared"`
 	// BlockingInRun says whether the holder was one of this run's own clients.
+	// Meaningless unless BlockingNamed is true, and false in both directions
+	// when it is not, which is why the two are separate fields.
 	//
 	// A boolean rather than the neighbour's application_name, and the
 	// distinction is the attribution rule this file is built on. The WAITER is
@@ -195,6 +270,18 @@ var LockWaitBound = fmt.Sprintf(
 // every relation OID it can lock is resolvable in this database's pg_class,
 // including the shared catalogues, which appear in every database's pg_class
 // and are the one case where pg_locks.database is zero.
+//
+// IF YOU EVER ADD AN OID SAFETY PREDICATE HERE, KEY IT ON l.relation AND NOT ON
+// l.database ALONE. pg_locks leaves database NULL for every lock type that
+// names no relation, which includes the transactionid waits a ROW conflict
+// produces, so "l.database = 0 OR l.database = <this one>" is NULL for them and
+// a NULL in a WHERE clause is a row discarded. Written that way it silently
+// drops row level contention, the commonest and most interesting kind, while
+// tuple and relation waits keep arriving so the instrument still looks as
+// though it works. Measured, not reasoned about: it cost
+// TestLockContentionInsideTheRunIsSeenAndBothStatementsAreNamed, which is why
+// that test now requires a row conflict to produce a transactionid wait. Where
+// there is no relation there is no OID to resolve and nothing to protect.
 //
 // AS MATERIALIZED needs Postgres 12, which is where the keyword was added and
 // also where a plain CTE stopped being a fence on its own. On anything older
@@ -364,18 +451,7 @@ func readLockWaits(ctx context.Context, conn *pgx.Conn, reg *statements) (lockSa
 		}
 		out.pids[blocked] = true
 
-		w := LockWait{Relation: relation, LockType: lockType, Mode: mode}
-		if ref, _ := reg.lookup(blocked); ref != nil {
-			w.BlockedTransaction, w.BlockedStatement = ref.Transaction, ref.Label
-		}
-		if blocker != nil {
-			ref, mine := reg.lookup(*blocker)
-			w.BlockingInRun = mine
-			w.BlockingState = state
-			if ref != nil {
-				w.BlockingTransaction, w.BlockingStatement = ref.Transaction, ref.Label
-			}
-		}
+		w := lockWaitFrom(blocked, blocker, state, relation, lockType, mode, reg)
 		key := lockKey(w)
 		seen := out.waiting[key]
 		seen.wait = w
@@ -383,6 +459,52 @@ func readLockWaits(ctx context.Context, conn *pgx.Conn, reg *statements) (lockSa
 		out.waiting[key] = seen
 	}
 	return out, rows.Err()
+}
+
+// lockWaitFrom turns one row of the wait queue reading into a pair.
+//
+// A pure function, separated from the query for one reason: it decides which of
+// FOUR things a holder is, and that decision is worth testing without a server.
+// max_prepared_transactions is zero by default, so the case that proved three
+// outcomes were too few cannot be built on the suite's own Postgres at all, and
+// a test that skips on the only machine that runs it is worse than no test. The
+// query is proved against a real server; this is proved against every
+// combination of inputs.
+func lockWaitFrom(
+	blocked int32, blocker *int32, state, relation, lockType, mode string,
+	reg *statements,
+) LockWait {
+	w := LockWait{Relation: relation, LockType: lockType, Mode: mode}
+	if ref, _ := reg.lookup(blocked); ref != nil {
+		w.BlockedTransaction, w.BlockedStatement = ref.Transaction, ref.Label
+	}
+	if blocker == nil {
+		// No pid came back, so the wait is the only thing known. Every field
+		// about the holder stays zero, which is what BlockingNamed false means.
+		return w
+	}
+	w.BlockingNamed = true
+	// Zero is the lock manager naming a holder that has no backend, which
+	// today means a prepared transaction. It must not reach the registry as
+	// though it were a pid, and it must never be reported as a session.
+	w.BlockingPrepared = *blocker == 0
+	if w.BlockingPrepared {
+		// Belt and braces rather than load bearing, and said so because a
+		// mutation of this return SURVIVES: lookup already refuses a pid of
+		// zero or less, and the server's own state column is empty for a pid
+		// that matches no backend, so removing this changes no field. It stays
+		// as a statement of intent, because a reader should not have to derive
+		// "a prepared transaction is never one of our clients" from a bounds
+		// check two functions away.
+		return w
+	}
+	ref, mine := reg.lookup(*blocker)
+	w.BlockingInRun = mine
+	w.BlockingState = state
+	if ref != nil {
+		w.BlockingTransaction, w.BlockingStatement = ref.Transaction, ref.Label
+	}
+	return w
 }
 
 // lockKey is a pair's identity for aggregation.
@@ -395,7 +517,9 @@ func lockKey(w LockWait) string {
 	return w.BlockedTransaction + "\x00" + w.BlockedStatement +
 		"\x00" + w.BlockingTransaction + "\x00" + w.BlockingStatement +
 		"\x00" + w.BlockingState + "\x00" + w.Relation +
-		"\x00" + w.LockType + "\x00" + w.Mode + "\x00" + boolKey(w.BlockingInRun)
+		"\x00" + w.LockType + "\x00" + w.Mode +
+		"\x00" + boolKey(w.BlockingInRun) + boolKey(w.BlockingNamed) +
+		boolKey(w.BlockingPrepared)
 }
 
 func boolKey(b bool) string {

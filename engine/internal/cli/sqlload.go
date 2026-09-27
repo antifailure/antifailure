@@ -376,9 +376,8 @@ func printSQLLockWaits(e *Env, res *sqlload.Result) {
 	e.Out.Println("")
 	for _, w := range shown {
 		e.Out.Printf("    %s\n",
-			e.Out.Wrap(lockSide(w.BlockedTransaction, w.BlockedStatement, true, ""), 6))
-		e.Out.Printf("      waited on %s\n", e.Out.Wrap(
-			lockSide(w.BlockingTransaction, w.BlockingStatement, w.BlockingInRun, w.BlockingState), 8))
+			e.Out.Wrap(blockedSide(w), 6))
+		e.Out.Printf("      waited on %s\n", e.Out.Wrap(holderSide(w), 8))
 		e.Out.Printf("      %s\n", e.Out.S(StyleDim, e.Out.Wrap(fmt.Sprintf(
 			"queued on %s, %d times, %s", lockOn(w), w.Waits, roundedMS(w.WaitedMS)), 8)))
 	}
@@ -396,31 +395,69 @@ func printSQLLockWaits(e *Env, res *sqlload.Result) {
 // reads as complete.
 const maxLockPairsPrinted = 10
 
-// lockSide names one end of a blocking pair for a reader.
+// blockedSide names the backend that WAITED, which is always one of this run's
+// own clients because the query asks about nobody else's.
 //
-// Every branch here is a different fact rather than a different formatting of
-// one. A statement is the mix's own label. A holder inside the run with no
-// statement is idle in transaction, which is to say holding its locks and
-// doing nothing, and that is usually the finding. A holder outside the run is
-// somebody else's session, and saying so is what stops a reader looking for a
-// bug in a mix that has none.
-func lockSide(transaction, statement string, inRun bool, state string) string {
-	if !inRun {
-		if state != "" {
-			return "another session on this database, " + state
+// Empty is possible and means the label could not be joined: the wait queues
+// and the client's own account of what it is running are two readings taken
+// microseconds apart. It never means no statement was involved.
+func blockedSide(w sqlload.LockWait) string {
+	if w.BlockedStatement == "" {
+		return "a client of this run, between statements"
+	}
+	if w.BlockedTransaction == "" {
+		return w.BlockedStatement
+	}
+	return w.BlockedTransaction + " / " + w.BlockedStatement
+}
+
+// holderSide names the backend that was IN FRONT, and there are three answers
+// rather than two.
+//
+// The first version of this had two, so a holder the server declined to name
+// fell into the stranger branch and af load sql printed "another session on
+// this database" about a lock whose holder nothing had identified. A wait with
+// no named holder is a real and documented outcome of pg_blocking_pids, and
+// "somebody else had it" is a claim about whose lock it was, made by something
+// that did not know. Each branch below is a different fact:
+//
+//   - not named: the wait happened and the holder is unknown.
+//   - named and outside the run: somebody else's session, which is what stops a
+//     reader hunting a bug in a mix that has none.
+//   - named and inside the run: the mix's own label, or, with no statement
+//     against it, a client idle in transaction, holding its locks and running
+//     nothing, which is usually the finding.
+func holderSide(w sqlload.LockWait) string {
+	if !w.BlockingNamed {
+		return "a holder the server would not name"
+	}
+	// Before the stranger branch, because a prepared transaction reaches here
+	// NAMED, as pid zero, and calling it a session was the defect this
+	// function was rewritten for in the first place. Measured: a backend
+	// blocked on a prepared transaction gets "blockers {0}" from
+	// pg_blocking_pids, so the pid is present and the state is absent. The
+	// remedy is named because it is not the usual one: there is no session to
+	// cancel.
+	if w.BlockingPrepared {
+		return "a prepared transaction, which has no session, released with " +
+			"COMMIT PREPARED or ROLLBACK PREPARED"
+	}
+	if !w.BlockingInRun {
+		if w.BlockingState != "" {
+			return "another session on this database, " + w.BlockingState
 		}
 		return "another session on this database"
 	}
-	if statement == "" {
-		if state != "" {
-			return "a client of this run, " + state
+	if w.BlockingStatement == "" {
+		if w.BlockingState != "" {
+			return "a client of this run, " + w.BlockingState
 		}
 		return "a client of this run, between statements"
 	}
-	if transaction == "" {
-		return statement
+	if w.BlockingTransaction == "" {
+		return w.BlockingStatement
 	}
-	return transaction + " / " + statement
+	return w.BlockingTransaction + " / " + w.BlockingStatement
 }
 
 // lockOn says what was queued for, which is the part that tells a reader
