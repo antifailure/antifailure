@@ -110,6 +110,20 @@ type Options struct {
 	// them two. The candidate comes up first and the baseline is pinned to
 	// whatever the candidate used.
 	PinGolden string
+	// BranchImage is the database build this environment's branches run,
+	// instead of the golden's own, with the golden's data directory copied onto
+	// it.
+	//
+	// The load comparison's, and the reason it exists is the one experiment the
+	// baseline mechanism could not express. The oracle's rule is that only the
+	// application varies and everything else comes from the candidate's
+	// manifest, and database.image lives in that manifest, so both sides of
+	// every comparison ran one database build. Somebody comparing two builds of
+	// their own storage engine needs the opposite: one application, one golden,
+	// two databases. This is the field that lets a side say which build opens
+	// the rows, and it is empty for every other caller, which is what keeps an
+	// ordinary `af up` branching exactly the image it always did.
+	BranchImage string
 	// Rebuild forces images to be built even when an identical one exists.
 	Rebuild bool
 	// LockWait is how long a session waits for another process to release
@@ -1326,6 +1340,7 @@ func (o *Orchestrator) newDatabaseProvider(ctx context.Context) (provider.Databa
 		p, err := dockerdb.New(dockerdb.Options{
 			Version: databaseVersion(m), Clock: o.opts.Clock, Getenv: o.opts.Getenv,
 			Image:            databaseImage(m),
+			BranchImage:      o.opts.BranchImage,
 			Extensions:       databaseExtensions(m),
 			PreloadLibraries: databasePreloadLibraries(m),
 			StorageBytes:     databaseStorageBytes(m),

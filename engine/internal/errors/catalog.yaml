@@ -457,6 +457,20 @@ errors:
     docs: guides/chaos
     retryable: false
     exit_code: 3
+  - code: AF-DB-044
+    area: DB
+    message: "The build {image} could not open the data directory of golden {version}, and the server said: {said}"
+    next_step: "Read this as a finding about the two builds rather than as an environment that failed to start: one build wrote that data directory and the other would not open it. READ THE SERVER'S OWN WORDS ABOVE FIRST, because they name the cause and this list does not. A catalog version, a block size, a WAL format or a page layout one build does not accept all produce this, and so does a build that cannot take ownership of the directory, which says so as a permission or access error rather than as a format one. For a format disagreement, compare the two builds' pg_controldata output, or build the golden on the build you are comparing against by setting database.image to it. For an access error, the build has to be one whose entrypoint can chown the data directory, which the published images do as root before dropping privileges. Nothing was measured, and nothing can be until both builds read the same rows."
+    docs: providers/databases
+    retryable: false
+    exit_code: 7
+  - code: AF-DB-045
+    area: DB
+    message: "The environment {env} is already running a database branch on {running} and this run asked for {asked}."
+    next_step: "Tear the environment down with 'af down' and run the comparison again, or drop the image flag to measure the build it is already on. The branch is not replaced automatically: it is copy on write, so anything written since it was branched would be destroyed to answer a question about measurement, and it is not adopted either, because a run that asked for one build and measured another would report a difference and name the wrong reason for it."
+    docs: concepts/load
+    retryable: false
+    exit_code: 7
 
   # Masking
   - code: AF-MSK-001
