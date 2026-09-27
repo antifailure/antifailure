@@ -270,12 +270,31 @@ func (b *DockerBuilder) Build(ctx context.Context, req Request) (Result, error) 
 
 	log, buildErr, err := b.attempt(ctx, req, opts, extra, b.buildKit)
 	if err == nil && b.buildKit && needsSession(buildErr) {
-		// BuildKit over this endpoint wants a session, and this client has
-		// none. See needsSession for what that means and why the answer is to
-		// build rather than to explain.
-		// Guarded like every other call to it in this file: a caller that
-		// wants no progress passes nil, and a fallback that panicked while
-		// reporting itself would be worse than the problem it reports.
+		// A plain Linux daemon requires a BuildKit session. The Docker CLI
+		// knows how to open one, and can read the same bounded tar context this
+		// builder already sent. If Buildx is unavailable or its setup fails,
+		// the slower legacy builder remains the safety net.
+		if dockerPath, available := b.buildxAvailable(ctx); available {
+			if req.Progress != nil {
+				req.Progress("BuildKit needs a session; building with Docker Buildx")
+			}
+			log, buildErr, err = b.attemptBuildx(ctx, dockerPath, req, opts, extra, ref)
+			if err == nil {
+				res.Log = log
+				res.Duration = b.clock.Since(started)
+				if buildErr != nil {
+					return res, buildFailure(buildErr, req, res.Duration.Round(time.Second).String())
+				}
+				if _, inspectErr := b.cli.ImageInspect(ctx, ref); inspectErr == nil {
+					return res, nil
+				}
+			}
+			// A CLI infrastructure failure or a missing loaded image must not
+			// break a build the daemon's legacy builder could still complete.
+		}
+		if ctx.Err() != nil {
+			return res, b.startFailure(ctx.Err(), req)
+		}
 		if req.Progress != nil {
 			req.Progress(sessionFallbackNotice)
 		}

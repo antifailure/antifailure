@@ -9438,6 +9438,18 @@ A generated Dockerfile installs dependencies before copying source, so editing
 a file does not reinstall the dependency graph. If you write your own, do the
 same: it is the difference between a two second rebuild and a two minute one.
 
+## Builder choice
+
+Antifailure uses Docker's BuildKit builder when the local daemon supports it.
+On a daemon that requires a BuildKit session, it uses the Docker Buildx CLI if
+available and loads the resulting image into the same daemon used to run the
+environment. If Buildx is unavailable, the build continues with Docker's
+legacy builder. The build log says when either fallback is used.
+
+Set ` + "`" + `DOCKER_BUILDKIT=0` + "`" + ` to use the legacy builder deliberately. Antifailure
+still checks its content digest before building, so an unchanged service image
+is reused regardless of the builder.
+
 Related: [detection](/docs/concepts/detection), [the local runtime](/docs/guides/local-runtime).
 `,
 	"guides/chaos.md": `---
