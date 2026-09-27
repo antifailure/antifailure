@@ -38,12 +38,34 @@ import (
 // rounds disagree by a factor of two cannot resolve a thirty percent change,
 // and now it says so instead of calling one.
 
-// RoundP95 is one round's p95 per route on each side, in round order. Round k
+// RoundP95 is one round's p95 per unit on each side, in round order. Round k
 // on the base and round k on this build were sent the same request sequence,
 // back to back, which is what makes them a pair.
+//
+// THE KEY IS THE UNIT'S SCOPE, not its route. For the HTTP mix the two are the
+// same string, because a mix's rows carry no scenario, which is why this file
+// read the route name directly for as long as HTTP was the only thing
+// compared. A SQL workload's rows are a transaction and the statements inside
+// it, so two transactions can hold a statement with the same label and keying
+// on the label alone would pool two different statements' latencies into one
+// ratio. UnitKey is what both sides must build the key with.
 type RoundP95 struct {
 	Base      map[string]float64 `json:"base"`
 	Candidate map[string]float64 `json:"candidate"`
+}
+
+// UnitKey is the key one row of the per unit table is known by, and the same
+// string the verdict rows carry as their Scope.
+//
+// Exported so that a caller filling RoundP95 cannot spell the key a second
+// way. Getting it wrong raises no error: the row simply never finds its rounds
+// and reports that too few rounds reached it on both sides, forever, which
+// reads as a quiet workload rather than as a bug in the harness.
+func UnitKey(scenario, unit string) string {
+	if scenario == "" {
+		return unit
+	}
+	return scenario + " " + unit
 }
 
 // minimumRoundPairs is how many rounds must have sent a route on both sides
@@ -162,17 +184,25 @@ func ResolveByRounds(c *Comparison, rounds []RoundP95) {
 	// known before any interval is drawn: the family is every route this
 	// comparison will put a verdict on, and each interval's width depends on
 	// its size.
+	nouns := nounsFor(c.Kind)
 	type pairs struct{ logBase, logCand, logRatio []float64 }
 	measured := map[int]pairs{}
 	family := 0
 	for i := range c.Routes {
 		r := &c.Routes[i]
-		if r.Scenario != "" || !r.InBaseline || !r.InCandidate {
+		// A row present on one side only has no pair to be a ratio of, and is
+		// left with its pooled numbers and no interval. There is deliberately
+		// no test on the scenario here: this file once skipped every row that
+		// carried one, which was correct while the HTTP mix was the only thing
+		// compared and silently blinded every SQL unit, because a statement's
+		// scenario is the transaction it belongs to and is never empty.
+		if !r.InBaseline || !r.InCandidate {
 			continue
 		}
+		key := routeScope(*r)
 		var p pairs
 		for _, round := range rounds {
-			b, cand := round.Base[r.Route], round.Candidate[r.Route]
+			b, cand := round.Base[key], round.Candidate[key]
 			if b <= 0 || cand <= 0 {
 				continue
 			}
@@ -190,9 +220,9 @@ func ResolveByRounds(c *Comparison, rounds []RoundP95) {
 		n := len(p.logRatio)
 		res := RouteResolution{Method: ResolutionRounds, Rounds: n, Family: family}
 		if n < minimumRoundPairs {
-			res.Detail = fmt.Sprintf("only %d of %d rounds sent this route on both sides, "+
+			res.Detail = fmt.Sprintf("only %d of %d rounds %s this %s on both sides, "+
 				"so the spread between rounds, which is the noise this comparison is judged "+
-				"against, is not known", n, len(rounds))
+				"against, is not known", n, len(rounds), nouns.ran, nouns.unit)
 			r.Resolution = res
 			continue
 		}
