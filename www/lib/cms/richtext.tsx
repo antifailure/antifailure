@@ -37,6 +37,7 @@ export function RichText({ value, inline = false }: { value: RichTextDocument; i
     }
     const children = (node.content ?? []).map(render);
     if (node.type === "paragraph") return inline ? <Fragment key={index}>{index > 0 && <br />}{children}</Fragment> : <p key={index}>{children}</p>;
+    if (node.type === "heading") return node.attrs.level === 2 ? <h2 key={index}>{children}</h2> : <h3 key={index}>{children}</h3>;
     if (node.type === "listItem") return <li key={index}>{children}</li>;
     return node.type === "orderedList" ? <ol key={index}>{children}</ol> : <ul key={index}>{children}</ul>;
   }

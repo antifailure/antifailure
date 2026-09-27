@@ -742,6 +742,11 @@ console.log("\nReachability");
       .map((r) => path.join(OUT, r))
       .find(existsSync);
 
+  const sitemapRoutes = [...readFileSync(path.join(OUT, "sitemap.xml"), "utf8")
+    .matchAll(/<loc>[^<]*?(\/[^<]*)?<\/loc>/g)]
+    .map((m) => new URL(m[0].replace(/<\/?loc>/g, "")).pathname.replace(/\/$/, "") || "/");
+  const authoredDocs = new Set(sitemapRoutes.filter((route) => route.startsWith("/docs/")));
+
   const seen = new Set(["/"]);
   const depth = new Map([["/", 0]]);
   const queue = ["/"];
@@ -753,23 +758,23 @@ console.log("\nReachability");
     const file = fileFor(here);
     if (!file) continue;
     for (const href of hrefs(readFileSync(file, "utf8"))) {
-      if (seen.has(href) || href.startsWith("/docs") || href.startsWith("/_next")) continue;
+      const destination = href.split(/[?#]/, 1)[0];
+      // Starlight has its own sitemap. A CMS-authored documentation page is
+      // listed in the website sitemap and must be reachable like every other
+      // website page, even though its path also starts with /docs.
+      if (seen.has(destination) || (destination.startsWith("/docs") && !authoredDocs.has(destination)) || destination.startsWith("/_next")) continue;
       // Files and configured redirects are not page routes. Links to a page
       // that does not exist are failures even in customized navigation.
-      const destination = href.split(/[?#]/, 1)[0];
       if (!fileFor(destination) && !has(destination.slice(1))
         && !redirects.some((route) => route.route === destination && route.redirect)) {
         brokenDestinations.add(`${here} links to ${destination}`);
       }
-      seen.add(href);
-      depth.set(href, depth.get(here) + 1);
-      queue.push(href);
+      seen.add(destination);
+      depth.set(destination, depth.get(here) + 1);
+      queue.push(destination);
     }
   }
 
-  const sitemapRoutes = [...readFileSync(path.join(OUT, "sitemap.xml"), "utf8")
-    .matchAll(/<loc>[^<]*?(\/[^<]*)?<\/loc>/g)]
-    .map((m) => new URL(m[0].replace(/<\/?loc>/g, "")).pathname.replace(/\/$/, "") || "/");
   const unreachable = sitemapRoutes.filter((r) => !seen.has(r));
   const deepest = Math.max(...[...depth.values()]);
   const navigation = assessNavigation({ customized: customizedNavigation,

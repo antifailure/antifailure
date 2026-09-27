@@ -34,9 +34,8 @@ import { cn } from "@/lib/cn";
  */
 export function PageShell({ children }: { children: ReactNode }) {
   return (
-    <SiteLayout overlay={false}>
+    <SiteLayout overlay={false} closing={<PagesClose />}>
       {children}
-      <PagesClose />
     </SiteLayout>
   );
 }
@@ -164,7 +163,7 @@ export function PageHero({
         {path ? <PageJsonLd path={path} /> : null}
         {path ? <Breadcrumbs path={path} /> : null}
         {figure ? (
-          <div className="grid grid-cols-2 items-start gap-x-16 gap-y-12 max-xl:grid-cols-1">
+          <div data-cms-layout="split" className="grid grid-cols-2 items-start gap-x-16 gap-y-12 max-xl:grid-cols-1">
             <div className="min-w-0">{copy}</div>
             <div className="min-w-0 max-w-[560px]">{figure}</div>
           </div>
@@ -269,6 +268,7 @@ export function Split({
 }) {
   return (
     <div
+      data-cms-layout="split"
       className={cn(
         "grid grid-cols-2 items-start gap-x-16 gap-y-12 max-xl:grid-cols-1",
         reverse && "[&>*:first-child]:max-xl:order-2",

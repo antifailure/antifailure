@@ -16,10 +16,20 @@ class Title(HTMLParser):
         super().__init__()
         self.in_title = False
         self.value = ""
+        self.description = ""
+        self.published = ""
+        self.tags = []
 
     def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
         if tag == "title":
             self.in_title = True
+        if tag == "meta" and attrs.get("name") == "description":
+            self.description = attrs.get("content", "")
+        if tag == "meta" and attrs.get("property") == "article:published_time":
+            self.published = attrs.get("content", "")
+        if tag == "meta" and attrs.get("property") == "article:tag":
+            self.tags.append(attrs.get("content", ""))
 
     def handle_endtag(self, tag):
         if tag == "title":
@@ -67,7 +77,10 @@ def main():
             raise SystemExit(f"built page has no title: {path}")
         label = re.sub(r"\s+[·|]\s+Antifailure$", "", label)
         section = "Docs" if path.startswith("/docs") else "Writing" if path.startswith("/blog") else "Product" if path.startswith("/product") else "Solutions" if path.startswith("/solutions") else "Website"
-        pages.append({"path": path, "title": label, "section": section})
+        page = {"path": path, "title": label, "section": section}
+        if section == "Writing" and path != "/blog":
+            page.update({"description": title.description[:300], "published": title.published[:32], "tags": title.tags[:12]})
+        pages.append(page)
     if len(pages) < 100:
         raise SystemExit(f"page catalog found only {len(pages)} indexable pages")
     pages.sort(key=lambda item: (item["section"], item["path"]))

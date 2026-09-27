@@ -1,4 +1,8 @@
-import type { ReactNode } from "react";
+import { createElement, type ReactNode } from "react";
+import snapshot from "@/lib/cms-snapshot.generated.json";
+import { normalizeWebsiteDocument, pageContentKey, resolveField } from "@antifailure/website";
+import { builtAuthoredPage, builtAuthoredPages } from "@/lib/authored-pages";
+import { RichText } from "@/lib/cms/richtext";
 import { MIGRATION_LOCKS } from "@/content/blog/what-staging-misses";
 import { MASKING_ATTESTATION } from "@/content/blog/proving-the-masking-worked";
 import { EGRESS_MODES } from "@/content/blog/five-answers-to-an-outbound-call";
@@ -36,11 +40,39 @@ export type Post = {
   body: ReactNode;
 };
 
-export const POSTS: readonly Post[] = [
+const SOURCE_POSTS: readonly Post[] = [
   MIGRATION_LOCKS,
   MASKING_ATTESTATION,
   EGRESS_MODES,
 ];
+
+/** Defaults stay separate from the built snapshot so Reset really returns to
+ * source copy after a later static refresh. */
+export function getSourcePost(slug: string): Post | undefined {
+  return SOURCE_POSTS.find((post) => post.slug === slug);
+}
+
+const document = normalizeWebsiteDocument(snapshot.document).document;
+const sourcePost = (post: Post): Post => {
+  const path = `/blog/${post.slug}`;
+  const text = (field: string, fallback: string) => resolveField(document, pageContentKey(path, field), fallback);
+  const tags = text("tags", post.tags.join(", ")).split(",").map((tag) => tag.trim()).filter(Boolean);
+  return { ...post, title: text("title", post.title), dek: text("description", post.dek),
+    summary: text("summary", post.summary), tags: tags.length ? tags : post.tags,
+    published: text("published", post.published), updated: text("updated", post.updated ?? "") || undefined };
+};
+
+const authoredPosts: Post[] = builtAuthoredPages().filter((page) => page.kind === "post").flatMap((page) => {
+  const entry = builtAuthoredPage(page.path);
+  if (!entry) return [];
+  const content = entry.content;
+  return [{ slug: page.path.slice("/blog/".length), title: content.title, dek: content.description,
+    summary: content.summary, published: content.published, updated: content.updated || undefined,
+    tags: content.tags, body: createElement(RichText, { value: content.body }) }];
+});
+
+export const POSTS: readonly Post[] = [...SOURCE_POSTS.map(sourcePost), ...authoredPosts];
+if (new Set(POSTS.map((post) => post.slug)).size !== POSTS.length) throw new Error("A CMS article path conflicts with a source article.");
 
 /** Newest first, which is the order the index and the feed both want. */
 export const POSTS_BY_DATE = [...POSTS].sort(

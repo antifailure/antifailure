@@ -7,6 +7,7 @@ import { FOOTER_MENUS, LEGAL_LINKS } from "@/lib/nav";
 import { CmsMedia, CmsSection } from "@/components/cms/Editable";
 import { useCmsCollection, useCmsCollectionsBatch, useCmsString } from "@/components/cms/CmsProvider";
 import { safeHref } from "@antifailure/website";
+import { builtAuthoredPages } from "@/lib/authored-pages";
 
 function FooterLink({ href, children }: { href: string; children: ReactNode }) {
   // 44px of row on a coarse pointer, and the mouse rendering untouched.
@@ -102,6 +103,7 @@ export function SiteFooter() {
                     <FooterLink href={item.href}><span data-cms-key={`footer.columns.${col.id}.items.${item.id}.text`}>{item.text}</span></FooterLink>
                   </li>
                 ))}
+                {col.id === "resources" && builtAuthoredPages().some((page) => page.kind === "page") && <li><FooterLink href="/pages">Pages</FooterLink></li>}
               </ul>
             </nav>
           ))}

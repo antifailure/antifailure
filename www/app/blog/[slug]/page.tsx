@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { pageContentKey } from "@antifailure/website";
+import { CmsText } from "@/components/cms/Editable";
+import { BlogMeta } from "@/components/cms/BlogMeta";
 import { notFound } from "next/navigation";
 import { Container } from "@/components/layout/Container";
 import { Breadcrumbs } from "@/components/layout/Breadcrumbs";
 import { PageShell } from "@/components/pages/kit";
-import { POSTS, POSTS_BY_DATE, formatDate, getPost, postModified } from "@/lib/blog";
+import { POSTS, POSTS_BY_DATE, getPost, getSourcePost, postModified } from "@/lib/blog";
 import { PageJsonLd, PostJsonLd } from "@/lib/jsonld";
 import { OG_IMAGE, SITE_NAME, absoluteUrl, pageTitle } from "@/lib/site";
 
@@ -73,6 +76,7 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
   const { slug } = await params;
   const post = getPost(slug);
   if (!post) notFound();
+  const source = getSourcePost(slug) ?? post;
 
   // The next two posts, so a reader who finished one has somewhere to go and
   // every post has at least two internal links pointing out of it.
@@ -90,23 +94,9 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
         <header className="pt-28 pb-10 safe-paddings max-lg:pt-16 max-md:pt-12">
           <Container size="1600">
             <Breadcrumbs path={`/blog/${post.slug}`} />
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[12px] uppercase tracking-[0.12em] text-gray-new-50">
-              <time dateTime={post.published}>{formatDate(post.published)}</time>
-              {post.updated ? (
-                <>
-                  <span aria-hidden="true">·</span>
-                  <span>Updated {formatDate(post.updated)}</span>
-                </>
-              ) : null}
-              <span aria-hidden="true">·</span>
-              <span>{post.tags.join(", ")}</span>
-            </div>
-            <h1 className="mt-5 max-w-[1000px] text-[56px] leading-dense tracking-tighter max-xl:text-[46px] max-lg:text-[38px] max-md:text-[30px]">
-              {post.title}
-            </h1>
-            <p className="mt-7 max-w-[680px] text-[20px] leading-snug tracking-extra-tight text-gray-new-40 max-md:text-[17px]">
-              {post.dek}
-            </p>
+            <BlogMeta slug={post.slug} published={source.published} updated={source.updated} tags={source.tags} summary={source.summary} />
+            <CmsText cmsKey={pageContentKey(`/blog/${post.slug}`, "title")} label="Article title" sectionId={`page-blog-${post.slug}`} defaultValue={source.title} as="h1" className="mt-5 max-w-[1000px] text-[56px] leading-dense tracking-tighter max-xl:text-[46px] max-lg:text-[38px] max-md:text-[30px]" />
+            <CmsText cmsKey={pageContentKey(`/blog/${post.slug}`, "description")} label="Article introduction" sectionId={`page-blog-${post.slug}`} defaultValue={source.dek} as="p" className="mt-7 max-w-[680px] text-[20px] leading-snug tracking-extra-tight text-gray-new-40 max-md:text-[17px]" />
           </Container>
         </header>
 
@@ -119,6 +109,7 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
           </Container>
         </div>
       </article>
+
 
       <section className="border-t border-black/12 py-16 safe-paddings max-md:py-12">
         <Container size="1600">

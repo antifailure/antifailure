@@ -82,6 +82,7 @@ export function cmsStyles(document: WebsiteDocument, mediaUrl: (id: string) => s
         rules.push(`@media ${offsetMedia}{[data-cms-section="hero"]{--cms-hero-offset:${style.paddingTop - authoredTop}px}}`);
       }
       const sectionSelector = `[data-cms-section=${JSON.stringify(key)}]`;
+      if (style.iconAlign) rules.push(`@media ${media}{${sectionSelector} [data-cms-icon-row]{align-items:${style.iconAlign}!important}${style.iconAlign === "end" ? `${sectionSelector} [data-cms-icon-row]>svg{transform:translateY(24%)!important}` : ""}}`);
       if (style.layout === "stack") rules.push(`@media ${media}{${sectionSelector} [data-cms-layout]{display:grid!important;grid-template-columns:minmax(0,1fr)!important}}`);
       if (style.layout === "media-left" || style.layout === "media-right") rules.push(`@media ${media}{${sectionSelector} [data-cms-layout]{display:grid!important;grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important}${sectionSelector} [data-cms-layout]>[data-cms-media-slot]{order:${style.layout === "media-left" ? "-1" : "1"}}}`);
       if (style.fontFamily?.startsWith("asset:") && isAssetId(style.fontFamily.slice(6))) fonts.add(style.fontFamily.slice(6));

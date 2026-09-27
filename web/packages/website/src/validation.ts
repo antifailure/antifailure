@@ -1,9 +1,11 @@
 import type {
-  CollectionPatch, CustomSection, FieldValue, MediaReference, OrderMove,
+  AuthoredPage, CollectionPatch, CustomSection, FieldValue, MediaReference, OrderMove,
   ResponsiveStyle, RichTextDocument, RichTextMark, SectionGroup, SectionMove,
   StyleValues, ValidationIssue, WebsiteDocument, WebsiteNormalizationResult,
   WebsiteValidationResult,
 } from './types.ts'
+import { isAuthoredPagePath } from './authored-path.ts'
+import { sitePageSlug } from './page-slug.ts'
 
 export const WEBSITE_LIMITS = Object.freeze({
   bytes: 1_048_576,
@@ -11,6 +13,7 @@ export const WEBSITE_LIMITS = Object.freeze({
   sections: 80,
   collectionItems: 80,
   collections: 80,
+  pages: 100,
   richTextDepth: 10,
   textLength: 100_000,
 })
@@ -239,8 +242,17 @@ function parseRichText(raw: Dict, path: string, errors: ValidationIssue[]): Rich
     } else if (current.type === 'hardBreak') {
       onlyKeys(current, ['type'], at, errors)
     } else {
-      onlyKeys(current, ['type', 'content'], at, errors)
-      const childTypes = current.type === 'paragraph' ? ['text', 'hardBreak']
+      onlyKeys(current, current.type === 'heading' ? ['type', 'attrs', 'content'] : ['type', 'content'], at, errors)
+      if (current.type === 'heading') {
+        const attrs = object(current.attrs, `${at}.attrs`, errors)
+        if (attrs) {
+          onlyKeys(attrs, ['level'], `${at}.attrs`, errors)
+          if (attrs.level !== 2 && attrs.level !== 3) issue(errors, `${at}.attrs.level`, 'Choose heading level 2 or 3.')
+          else result.attrs = { level: attrs.level }
+        }
+      }
+      const childTypes = current.type === 'paragraph' || current.type === 'heading' ? ['text', 'hardBreak']
+        : current.type === 'doc' ? ['paragraph', 'heading', 'bulletList', 'orderedList']
         : current.type === 'bulletList' || current.type === 'orderedList' ? ['listItem']
         : ['paragraph', 'bulletList', 'orderedList']
       if (current.content !== undefined || current.type !== 'paragraph') {
@@ -292,6 +304,7 @@ export const STYLE_NUMBER_BOUNDS: Readonly<Record<string, readonly [number, numb
 })
 const STYLE_ENUMS: Readonly<Record<string, readonly string[]>> = Object.freeze({
   textAlign: ['left', 'center', 'right', 'justify'],
+  iconAlign: ['center', 'end'],
   layout: ['default', 'stack', 'media-left', 'media-right', 'center'], imageFit: ['cover', 'contain'],
   position: ['relative', 'absolute', 'fixed'],
 })
@@ -400,6 +413,27 @@ function parseCollections(value: unknown, path: string, errors: ValidationIssue[
   return result
 }
 
+function parsePages(value: unknown, path: string, errors: ValidationIssue[]): AuthoredPage[] {
+  const result: AuthoredPage[] = []
+  const seen = new Set<string>()
+  for (const [index, value_] of list(value, path, errors, WEBSITE_LIMITS.pages).entries()) {
+    const at = `${path}[${index}]`
+    const raw = object(value_, at, errors)
+    if (!raw) continue
+    onlyKeys(raw, ['path', 'kind'], at, errors)
+    if (!isAuthoredPagePath(raw.path)) { issue(errors, `${at}.path`, 'Use a short lowercase site path without an extension.'); continue }
+    if (raw.kind !== 'page' && raw.kind !== 'post') { issue(errors, `${at}.kind`, 'Choose a page or an article.'); continue }
+    if ((raw.kind === 'post' && !/^\/blog\/[a-z0-9-]+$/u.test(raw.path)) || (raw.kind === 'page' && raw.path.startsWith('/blog/'))) {
+      issue(errors, `${at}.path`, 'Articles live under /blog; other pages use their own path.'); continue
+    }
+    const key = sitePageSlug(raw.path)
+    if (seen.has(key)) { issue(errors, `${at}.path`, 'This page path shares an editing key with another page.'); continue }
+    seen.add(key)
+    result.push({ path: raw.path, kind: raw.kind })
+  }
+  return result
+}
+
 /** Count JSON size without executing toJSON/accessor hooks. Shared references
  * are counted at each occurrence; circular references are rejected locally by
  * value parsing, without losing unrelated overrides on tolerant reads. */
@@ -435,7 +469,7 @@ export function normalizeWebsiteDocument(input: unknown): WebsiteNormalizationRe
     // A global resource limit is the exception to per-entry read tolerance.
     return { document, warnings }
   }
-  onlyKeys(raw, ['schemaVersion', 'sourceVersion', 'fields', 'styles', 'sections', 'collections'], '$', warnings)
+  onlyKeys(raw, ['schemaVersion', 'sourceVersion', 'fields', 'styles', 'sections', 'collections', 'pages'], '$', warnings)
   if (raw.schemaVersion !== 1) issue(warnings, '$.schemaVersion', 'Expected schema version 1.')
   if (raw.sourceVersion !== undefined) {
     if (typeof raw.sourceVersion !== 'string' || raw.sourceVersion.length > 200 || CONTROLS.test(raw.sourceVersion)) issue(warnings, '$.sourceVersion', 'Expected a source version of at most 200 characters.')
@@ -454,6 +488,7 @@ export function normalizeWebsiteDocument(input: unknown): WebsiteNormalizationRe
     }
   }
   document.collections = parseCollections(raw.collections, '$.collections', warnings, budget)
+  if (raw.pages !== undefined) document.pages = parsePages(raw.pages, '$.pages', warnings)
   return { document, warnings }
 }
 

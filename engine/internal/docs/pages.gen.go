@@ -21911,6 +21911,15 @@ and requests a static refresh. Unchanged text, images and design settings use
 the version in the site's source. HTML, CSS and JavaScript blocks run in an
 isolated iframe rather than in the surrounding page.
 
+The **Pages** view lists built routes and individual Writing articles. Owners
+can create a page at a new path or an article under ` + "`" + `/blog` + "`" + `, then edit its
+title, introduction, summary, rich body, date and topics. A draft URL is
+available for preview before it exists publicly. Publishing rebuilds its HTML, Markdown
+version and sitemap entry; new articles also enter the Writing index and RSS
+feed. The editor links newly authored pages from the site's Pages index so
+visitors and crawlers can reach them. Existing pages retain source defaults
+until an owner changes a field.
+
 The **Ask AI** panel is optional. ` + "`" + `AF_CMS_ANTHROPIC_API_KEY` + "`" + ` is the Anthropic
 API key used only by the control-plane process for owner-requested edit
 suggestions. Leave it unset to use the manual editor without AI. The key is
@@ -28437,7 +28446,7 @@ Install [cosign](https://docs.sigstore.dev/cosign/system_config/installation/).
 The identity is long and you need it three times, so name it once:
 
 ` + "`" + "`" + "`" + `sh
-TAG=v1.8.1
+TAG=v1.9.0
 REPO=antifailure/antifailure
 WORKFLOW=.github/workflows/release.yml
 
@@ -28506,10 +28515,10 @@ trusting either of us.
 ` + "`" + "`" + "`" + `sh
 git clone https://github.com/antifailure/antifailure
 cd antifailure
-git checkout v1.8.1
-./tools/release/build.sh linux amd64 1.8.1 \
+git checkout v1.9.0
+./tools/release/build.sh linux amd64 1.9.0 \
   "$(git rev-parse HEAD)" "$(git show -s --format=%cI HEAD)" dist stage
-sha256sum dist/antifailure_1.8.1_linux_amd64.tar.gz
+sha256sum dist/antifailure_1.9.0_linux_amd64.tar.gz
 ` + "`" + "`" + "`" + `
 
 That hash should be the line for your platform in ` + "`" + `checksums.txt` + "`" + `. You need the

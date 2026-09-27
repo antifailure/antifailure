@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import {
-  pageBlockPrefix, projectWebsiteDocument, referencedAssets, resetStyleOverride, setFieldOverride, sitePageSlug, stableStringify, validatePreviewMessage, validateWebsiteDocument,
+  authoredPage, pageBlockPrefix, projectWebsiteDocument, referencedAssets, resetStyleOverride, setFieldOverride, sitePageSlug, stableStringify, validatePreviewMessage, validateWebsiteDocument,
   type FieldDefinition, type FieldValue, type MediaReference, type WebsiteDocument,
   type WebsiteManifest, type CustomSectionKind, type CustomSectionGroup, type SectionDefinition,
 } from "@antifailure/website";
 import { adminMutate, operatorMay, useAdminContext } from "@/lib/admin";
 import { query, useApi } from "@/lib/api";
 import { createWebsiteAutosave, type WebsiteAutosave } from "@/lib/website-autosave";
+import { removeAuthoredPageDocument } from "@/lib/website-page";
 import { addSection, duplicateSection, moveSection, pageSections, removeCustomSection, resetSection, SECTION_PRESETS, type WebsiteRevision, type WebsiteState } from "@/lib/website-client";
 import { Drawer } from "@/components/admin/primitives";
 import { Button, Confirm, inputClass, selectClass } from "@/components/ui";
@@ -19,10 +20,12 @@ import { RichTextInput } from "./RichTextInput";
 import { AssetLibrary, type WebsiteAsset } from "./AssetLibrary";
 import { CollectionEditor } from "./CollectionEditor";
 import { PromptPanel } from "./PromptPanel";
+import { PageLibrary, type PageOption } from "./PageLibrary";
+import { PageDetails, SourceArticleDetails } from "./PageDetails";
 import "./website.css";
 
 type Device = "desktop" | "tablet" | "mobile";
-type Panel = "sections" | "header" | "footer" | "styles";
+type Panel = "sections" | "pages" | "header" | "footer" | "styles";
 type Selection = { key?: string; sectionId?: string };
 type PublishAttempt = { operation: "publish" | "restore"; expectedRevision: number; requestId: string; revision?: number };
 const DEVICE_WIDTH: Record<Device, number> = { desktop: 1440, tablet: 820, mobile: 390 };
@@ -66,7 +69,8 @@ function EditorWorkspace({ initial }: { initial: WebsiteState }) {
   const [inspectorMode, setInspectorMode] = useState<"edit" | "prompt">("edit");
   const [pagePath, setPagePath] = useState("/");
   const [pageInput, setPageInput] = useState("/");
-  const [pageOptions, setPageOptions] = useState<Array<{ path: string; title: string; section: string }>>(() => PAGE_OPTIONS.map((path) => ({ path, title: path === "/" ? "Homepage" : path, section: "Website" })));
+  const [pageOptions, setPageOptions] = useState<PageOption[]>(() => PAGE_OPTIONS.map((path) => ({ path, title: path === "/" ? "Homepage" : path, section: "Website" })));
+  const [catalogReady, setCatalogReady] = useState(false);
   const [contentSearch, setContentSearch] = useState("");
   const [fieldLimit, setFieldLimit] = useState(40);
   const [codeLanguage, setCodeLanguage] = useState("html");
@@ -82,6 +86,8 @@ function EditorWorkspace({ initial }: { initial: WebsiteState }) {
   const [fontAssets, setFontAssets] = useState<Array<{ id: string; name: string }>>([]);
   const [assetPicker, setAssetPicker] = useState<{ key?: string; kind?: "image" | "video" | "font" } | null>(null);
   const [addBlock, setAddBlock] = useState<CustomSectionGroup | null>(null);
+  const [newPageKind, setNewPageKind] = useState<"page" | "post" | null>(null);
+  const [removePagePath, setRemovePagePath] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState<WebsiteRevision[]>([]);
   const [historyCursor, setHistoryCursor] = useState<number | null>(null);
@@ -110,6 +116,8 @@ function EditorWorkspace({ initial }: { initial: WebsiteState }) {
   previewState.current = { document: historical?.document ?? document, assetUrls, mode: historical ? "preview" : mode };
   const disabled = !canWrite || busy || Boolean(pendingPublish) || Boolean(historical) || snapshot.status === "conflict";
   const recoveryKey = `antifailure:website:draft:${me?.adminUserId}`;
+  const currentAuthoredPage = authoredPage(document, pagePath);
+  const hasAuthoredPage = Boolean(currentAuthoredPage);
 
   useEffect(() => {
     try {
@@ -127,7 +135,14 @@ function EditorWorkspace({ initial }: { initial: WebsiteState }) {
       const pages = result.pages.filter((row): row is { path: string; title: string; section: string } =>
         row && typeof row.path === "string" && /^\/(?:[a-z0-9_-]+(?:\/[a-z0-9_-]+)*)?$/i.test(row.path) &&
         typeof row.title === "string" && row.title.length <= 180 && typeof row.section === "string" && row.section.length <= 40);
-      if (pages.length >= PAGE_OPTIONS.length) setPageOptions(pages);
+      if (pages.length >= PAGE_OPTIONS.length) { setPageOptions(pages.map((page) => {
+        const row = page as PageOption;
+        return { path: page.path, title: page.title, section: page.section,
+          ...(typeof row.description === "string" && row.description.length <= 300 ? { description: row.description } : {}),
+          ...(typeof row.published === "string" && /^\d{4}-\d{2}-\d{2}$/u.test(row.published) ? { published: row.published } : {}),
+          ...(Array.isArray(row.tags) && row.tags.every((tag) => typeof tag === "string" && tag.length <= 40) ? { tags: row.tags.slice(0, 12) } : {}),
+        };
+      })); setCatalogReady(true); }
     }).catch(() => { /* The curated paths and direct URL entry remain available offline. */ });
     return () => controller.abort();
   }, []);
@@ -139,7 +154,8 @@ function EditorWorkspace({ initial }: { initial: WebsiteState }) {
 
   useEffect(() => {
     const id = crypto.randomUUID();
-    const url = new URL(pagePath === "/" ? "/cms-preview" : pagePath, WEBSITE_ORIGIN);
+    const url = new URL(pagePath === "/" ? "/cms-preview" : hasAuthoredPage ? "/cms-page-preview" : pagePath, WEBSITE_ORIGIN);
+    if (hasAuthoredPage) url.searchParams.set("path", pagePath);
     url.searchParams.set("parentOrigin", window.location.origin); url.searchParams.set("session", id);
     setReady(false); setManifest(null); setPreviewError(null); setSession(id); setPreviewUrl(url.toString());
     const suggestedDevice: Device = window.innerWidth < 768 ? "mobile" : window.innerWidth < 1024 ? "tablet" : "desktop";
@@ -149,7 +165,7 @@ function EditorWorkspace({ initial }: { initial: WebsiteState }) {
       const held = sessionStorage.getItem(recoveryKey);
       if (held) { const parsed = validateWebsiteDocument(JSON.parse(held)); if (parsed.ok && stableStringify(parsed.document) !== stableStringify(initial.document)) setRecovery(parsed.document); }
     } catch { setDevice(suggestedDevice); }
-  }, [initial.document, recoveryKey, pagePath]);
+  }, [initial.document, recoveryKey, pagePath, hasAuthoredPage]);
 
   useEffect(() => {
     try {
@@ -253,14 +269,14 @@ function EditorWorkspace({ initial }: { initial: WebsiteState }) {
   }, [server.refresh]);
 
   function choose(selection: Selection) { setSelection(selection); setInspectorTab("content"); setMobilePanel(null); }
-  function openPage() {
-    const path = pageInput.trim();
+  function openPath(path: string) {
     if (!/^\/(?:[a-z0-9_-]+(?:\/[a-z0-9_-]+)*)?$/i.test(path) || path.startsWith("/admin") || path.startsWith("/api")) {
       setError("Enter a website path such as /product/twins or /docs/reference/mcp."); return;
     }
-    setPagePath(path); setSelection({ sectionId: path === "/" ? "hero" : pageSectionId(path) }); setPanel("sections"); setError(null);
+    setPagePath(path); setPageInput(path); setSelection({ sectionId: path === "/" ? "hero" : pageSectionId(path) }); setPanel("sections"); setError(null);
     try { sessionStorage.setItem("antifailure:website:page", path); } catch { /* Navigation still works. */ }
   }
+  function openPage() { openPath(pageInput.trim()); }
   function chooseDevice(next: Device) {
     setDevice(next);
     try { sessionStorage.setItem("antifailure:website:preview-device", next); } catch { /* Device selection still works without browser storage. */ }
@@ -340,6 +356,11 @@ function EditorWorkspace({ initial }: { initial: WebsiteState }) {
     const after = rows.some((item) => item.id === selection.sectionId) ? selection.sectionId! : rows.at(-1)?.id ?? null;
     edit(addSection(document, kind, addBlock, after, id)); choose({ sectionId: id }); setAddBlock(null);
   }
+  function removeAuthoredPage(path: string) {
+    if (!authoredPage(document, path)) return;
+    edit(removeAuthoredPageDocument(document, path), `remove:${path}`);
+    setRemovePagePath(null); openPath("/");
+  }
   function toggleSection(id: string) { edit({ ...document, sections: { ...document.sections, hidden: document.sections.hidden.includes(id) ? document.sections.hidden.filter((item) => item !== id) : [...document.sections.hidden, id] } }); }
   function selectAsset(asset: WebsiteAsset) {
     if (assetPicker?.key) {
@@ -374,7 +395,8 @@ function EditorWorkspace({ initial }: { initial: WebsiteState }) {
       manifest?.fields.some((field) => field.sectionId === selection.sectionId && (Object.hasOwn(document.fields, field.key) || Object.hasOwn(document.styles, field.key))) ||
       collectionDefinitions.some((collection) => Object.hasOwn(document.collections, collection.key)))
   );
-  const title = panel === "styles" ? "Site styles" : selectedField?.label ?? (selectedSection && "label" in selectedSection ? selectedSection.label : selectedSection?.kind) ?? "Choose an element";
+  const title = panel === "styles" ? "Site styles" : panel === "pages" ? "Page details" : selectedField?.label ?? (selectedSection && "label" in selectedSection ? selectedSection.label : selectedSection?.kind) ?? "Choose an element";
+  const pageRootSelected = !selection.key && selection.sectionId === pageSectionId(pagePath);
   const scale = Math.min(1, previewSize.width / DEVICE_WIDTH[device]);
   const width = DEVICE_WIDTH[device];
   const saveLabel = snapshot.status === "saving" ? "Saving…" : snapshot.status === "dirty" ? "Unsaved changes" : snapshot.status === "error" ? "Save failed" : snapshot.status === "conflict" ? "Draft changed elsewhere" : snapshot.hasUnsavedChanges ? "Unsaved changes" : "All changes saved";
@@ -405,12 +427,13 @@ function EditorWorkspace({ initial }: { initial: WebsiteState }) {
     <div className="cms-panel-heading"><h2>Website</h2><button className="cms-text-button" onClick={() => { setHistoryOpen(true); void loadHistory(); }}>History</button></div>
     <form className="cms-page-picker" onSubmit={(event) => { event.preventDefault(); openPage(); }}><label htmlFor="cms-page-path">Page</label><div><input id="cms-page-path" type="text" list="cms-page-options" value={pageInput} onChange={(event) => setPageInput(event.target.value)} spellCheck={false} aria-describedby="cms-page-help" /><button type="submit" aria-label="Open page">→</button></div><datalist id="cms-page-options">{pageOptions.map((item) => <option value={item.path} label={`${item.section} · ${item.title}`} key={item.path} />)}</datalist><p id="cms-page-help">Search {pageOptions.length} pages by title, or enter a site path.</p></form>
     <nav className="cms-panel-tabs" aria-label="Website settings">
-      {(["sections", "header", "footer", "styles"] as Panel[]).map((item) => <button key={item} aria-pressed={panel === item} onClick={() => {
-        setPanel(item); setInspectorTab(item === "styles" ? "design" : "content");
+      {(["sections", "pages", "header", "footer", "styles"] as Panel[]).map((item) => <button key={item} aria-pressed={panel === item} onClick={() => {
+        setPanel(item); setNewPageKind(null); setInspectorTab(item === "styles" ? "design" : "content");
         if (item === "header" || item === "footer") choose({ sectionId: manifest?.sections.find((section) => section.group === item)?.id ?? item });
       }}>{item === "sections" ? "Page" : item[0].toUpperCase() + item.slice(1)}</button>)}
     </nav>
-    {panel === "sections" ? <div className="cms-section-list">{pagePath === "/" && <><h3>Above the fold</h3>{sectionRows("hero")}</>}<h3>{pagePath === "/" ? "Homepage" : "Page content"}</h3>{sectionRows("page")}</div> :
+    {panel === "sections" ? <div className="cms-section-list">{pagePath === "/" && <><h3>Above the fold</h3>{sectionRows("hero")}</>}<h3>{pagePath === "/" ? "Homepage" : "Page content"}</h3>{sectionRows("page")}{pagePath === "/blog" && <button className="cms-add-button" disabled={disabled} onClick={() => { setNewPageKind("post"); setPanel("pages"); }}>+ New article</button>}</div> :
+      panel === "pages" ? <PageLibrary document={document} options={pageOptions} active={pagePath} disabled={disabled} catalogReady={catalogReady} startKind={newPageKind} onOpen={(path) => { setNewPageKind(null); openPath(path); }} onCreate={(next, path) => { edit(next, `create:${path}`); setNewPageKind(null); openPath(path); }} /> :
       panel === "styles" ? <div className="cms-panel-description"><h3>Your brand, everywhere.</h3><p>Set the site’s typography and colors. Select any section or text to fine-tune it separately.</p><button className="cms-add-button" onClick={() => { setAssetPicker({ kind: "font" }); }}>Manage custom fonts</button><p className="cms-help">Unchanged settings follow the website’s current design. Each device keeps its own adjustments.</p></div> :
         <div className="cms-panel-description"><h3>Shared {panel}</h3><p>Changes appear across the website.</p>{manifest?.sections.filter((item) => item.group === panel).map((item) => <button className="cms-section-select" key={item.id} onClick={() => choose({ sectionId: item.id })}>{item.label}</button>)}</div>}
     <div className="cms-sidebar-bottom"><button className="cms-library-button" onClick={() => setAssetPicker({})}>Media library <span>↗</span></button>
@@ -420,11 +443,13 @@ function EditorWorkspace({ initial }: { initial: WebsiteState }) {
 
   const inspector = <>
     <div className="cms-inspector-mode" role="group" aria-label="Editor mode"><button aria-pressed={inspectorMode === "edit"} onClick={() => setInspectorMode("edit")}>Edit</button><button aria-pressed={inspectorMode === "prompt"} onClick={() => setInspectorMode("prompt")}>Ask AI</button></div>
-    {inspectorMode === "prompt" ? <PromptPanel document={document} manifest={manifest} page={pagePath} sectionId={selection.sectionId} selectedKey={selection.key} disabled={disabled} onApply={(next) => edit(next, "ai-proposal")} /> : <>
+    {inspectorMode === "prompt" ? <PromptPanel document={document} manifest={manifest} page={pagePath} sectionId={selection.sectionId} selectedKey={selection.key} existingPaths={[...pageOptions.map((page) => page.path), ...(document.pages ?? []).map((page) => page.path)]} catalogReady={catalogReady} disabled={disabled} onApply={(next, newPath) => { edit(next, "ai-proposal"); if (newPath) openPath(newPath); }} /> : <>
     <div className="cms-panel-heading"><div><h2>{title}</h2><p>{panel === "styles" ? "Across the website" : selectedCustomized ? "Customized" : "Follows source defaults"}</p></div></div>
     <div className="cms-inspector-tabs"><button aria-pressed={inspectorTab === "content"} onClick={() => setInspectorTab("content")} disabled={panel === "styles"}>Content</button><button aria-pressed={inspectorTab === "design"} onClick={() => setInspectorTab("design")}>Design</button></div>
     <fieldset disabled={disabled} className="cms-inspector-body">
-      {manifest && (inspectorTab === "design" || panel === "styles") ? <DesignInspector document={document} target={target} device={device} manifest={manifest} onChange={(next) => edit(next, `style:${target}`)} disabled={disabled} fontAssets={fontAssets} /> : <>
+      {manifest && (inspectorTab === "design" || panel === "styles") ? <DesignInspector document={document} target={target} device={device} manifest={manifest} onChange={(next) => edit(next, `style:${target}`)} disabled={disabled} fontAssets={fontAssets} /> : currentAuthoredPage && pageRootSelected ?
+        <PageDetails document={document} page={currentAuthoredPage} disabled={disabled} onChange={edit} onRemove={() => setRemovePagePath(pagePath)} /> : <>
+        {pageRootSelected && pagePath.startsWith("/blog/") && (manifest ? <SourceArticleDetails document={document} path={pagePath} definitions={manifest.fields} source={pageOptions.find((item) => item.path === pagePath)} disabled={disabled} onChange={edit} /> : <p className="cms-help" role="status">Loading article settings…</p>)}
         {selectedField && <button className="cms-text-button cms-back" onClick={() => choose({ sectionId: selectedField.sectionId })}>← All section content</button>}
         {!selection.key && (fields.length > 6 || collectionDefinitions.length > 0) && <input className={`${inputClass} cms-content-search`} type="search" aria-label="Find a setting" placeholder="Find a setting…" value={contentSearch} onChange={(event) => setContentSearch(event.target.value)} />}
         {!fields.length && <p className="cms-help">Click text, media or a section in the preview to start editing.</p>}
@@ -465,7 +490,7 @@ function EditorWorkspace({ initial }: { initial: WebsiteState }) {
           {!ready && <div className="cms-preview-loading" role="status"><strong>Loading {pagePath === "/" ? "the homepage" : pagePath}</strong><span>Your saved draft will appear here.</span></div>}
           {previewError && <div className="cms-preview-error" role="alert"><p>{previewError}</p><button className="cms-small-button" onClick={() => { setReady(false); setPreviewError(null); if (iframe.current) iframe.current.src = previewUrl; }}>Reload preview</button></div>}
         </div>
-        <div className="cms-canvas-bottom"><span>{server.refresh?.status === "failed" ? "Static page refresh needs attention" : server.refresh && !["deployed", "superseded"].includes(server.refresh.status) ? "Published content is live. Refreshing static pages…" : "Source defaults stay in sync automatically"}</span>{server.refresh?.status === "failed" && <button onClick={() => void adminMutate("admin.administration.website.retryRefresh", { revision: server.refresh!.revision }).then(() => query<WebsiteState>("admin.administration.website.get")).then(setServer).catch((cause) => setError(messageOf(cause)))}>Retry refresh</button>}<a href={new URL(pagePath, WEBSITE_ORIGIN).toString()} target="_blank" rel="noreferrer">View live page ↗</a></div>
+        <div className="cms-canvas-bottom"><span>{server.refresh?.status === "failed" ? "Static page refresh needs attention" : server.refresh && !["deployed", "superseded"].includes(server.refresh.status) ? "Published content is live. Refreshing static pages…" : currentAuthoredPage && !pageOptions.some((page) => page.path === pagePath) ? "This new URL appears after you publish and the site refresh finishes" : "Source defaults stay in sync automatically"}</span>{server.refresh?.status === "failed" && <button onClick={() => void adminMutate("admin.administration.website.retryRefresh", { revision: server.refresh!.revision }).then(() => query<WebsiteState>("admin.administration.website.get")).then(setServer).catch((cause) => setError(messageOf(cause)))}>Retry refresh</button>}{(!currentAuthoredPage || pageOptions.some((page) => page.path === pagePath)) && <a href={new URL(pagePath, WEBSITE_ORIGIN).toString()} target="_blank" rel="noreferrer">View live page ↗</a>}</div>
       </div>
       <aside className="cms-inspector" aria-label="Element inspector">{inspector}</aside>
     </div>
@@ -476,6 +501,7 @@ function EditorWorkspace({ initial }: { initial: WebsiteState }) {
       onSelectBuiltin={assetPicker?.key ? (asset) => { edit(setFieldOverride(document, assetPicker.key!, { type: "media", source: "builtin", src: asset.src, kind: asset.kind, alt: "" })); setAssetPicker(null); } : undefined} />
     <Drawer open={historyOpen} title="Published versions" onClose={() => setHistoryOpen(false)}><div className="cms-history"><p>Preview any published version, then restore it as a new version.</p>{historyError && <p role="alert" className="text-fail">{historyError}<button onClick={() => void loadHistory()}>Try again</button></p>}{!history.length && !historyLoading && <p>No published versions yet. Your first publish starts the history.</p>}{history.map((item) => <div key={item.revision} className="cms-history-row"><div><strong>Version {item.revision}{item.revision === server.publishedRevision ? " · Live" : ""}</strong><span>{new Date(item.createdAt).toLocaleString()}</span></div><button className="cms-small-button" disabled={historyLoading} onClick={() => void previewHistory(item.revision)}>Preview</button></div>)}{historyLoading && <p role="status">Loading versions…</p>}{historyCursor && <button className="cms-add-button" disabled={historyLoading} onClick={() => void loadHistory(true)}>Load older versions</button>}</div></Drawer>
     <Confirm open={restoreRevision !== null} title={`Restore version ${restoreRevision}?`} confirmLabel="Restore and publish" cancelLabel="Keep current version" tone="primary" busy={busy} error={error} onConfirm={() => { if (restoreRevision !== null) void publish(restoreRevision); }} onCancel={() => setRestoreRevision(null)}>This publishes the selected version as a new version. The current version remains in history.</Confirm>
+    <Confirm open={removePagePath !== null} title="Remove this page from the draft?" confirmLabel="Remove page" cancelLabel="Keep page" tone="danger" onConfirm={() => { if (removePagePath) removeAuthoredPage(removePagePath); }} onCancel={() => setRemovePagePath(null)}>The page and its authored blocks will disappear after you publish. Earlier published versions remain in history.</Confirm>
     <Confirm open={Boolean(recovery)} title="Recover unsaved changes?" confirmLabel="Recover changes" cancelLabel="Use saved draft" tone="primary" onConfirm={() => { if (recovery) edit(recovery); setRecovery(null); }} onCancel={() => { setRecovery(null); sessionStorage.removeItem(recoveryKey); }}>This browser kept edits that were not confirmed saved. Recover them into your draft, then review before publishing.</Confirm>
   </div>;
 }

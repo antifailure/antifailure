@@ -2,7 +2,7 @@ import { after, before, beforeEach, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { sql } from '@antifailure/db'
-import { emptyWebsiteDocument } from '@antifailure/website'
+import { emptyWebsiteDocument, pageContentKey } from '@antifailure/website'
 import { appRouter } from '../src/routers/index.ts'
 import { actorOf } from '../src/admin/trpc.ts'
 import { resolveAdminSession } from '../src/admin/session.ts'
@@ -89,6 +89,30 @@ describe('the website draft and publication boundary', { skip: hasDb ? false : '
     await owner.caller.saveDraft({ document: changed('Private'), expectedRevision: 0, requestId: randomUUID() })
     const publicRows = await h.pool.withoutTenant((db) => db.execute<{ document: unknown }>(sql`SELECT document FROM website_published`))
     assert.deepEqual(publicRows[0]!.document, emptyWebsiteDocument())
+  })
+
+  test('a new article stays a recoverable draft until its body is complete, then publishes at its path', async () => {
+    const path = '/blog/a-tested-release'
+    const key = (name: string) => pageContentKey(path, name)
+    const draft = emptyWebsiteDocument()
+    draft.pages = [{ path, kind: 'post' }]
+    draft.fields[key('title')] = 'A tested release'
+    draft.fields[key('description')] = 'The check that caught a deployment problem.'
+    draft.fields[key('summary')] = 'How a rehearsal found the problem.'
+    draft.fields[key('published')] = '2026-09-27'
+    draft.fields[key('tags')] = 'Engineering, Releases'
+    draft.fields[key('body')] = { type: 'doc', content: [{ type: 'paragraph' }] }
+    const saved = await owner.caller.saveDraft({ document: draft, expectedRevision: 0, requestId: randomUUID() })
+    assert.equal(saved.draftRevision, 1)
+    await assert.rejects(() => owner.caller.publish({ expectedRevision: 1, requestId: randomUUID() }), { code: 'BAD_REQUEST' })
+    assert.equal((await owner.caller.get()).publishedRevision, 0)
+    draft.fields[key('body')] = { type: 'doc', content: [{ type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'The rehearsal' }] }, { type: 'paragraph', content: [{ type: 'text', text: 'The release was tested on an isolated twin.' }] }] }
+    await owner.caller.saveDraft({ document: draft, expectedRevision: 1, requestId: randomUUID() })
+    const published = await owner.caller.publish({ expectedRevision: 2, requestId: randomUUID() })
+    assert.equal(published.publishedRevision, 1)
+    assert.equal(published.refresh?.status, 'queued')
+    const current = await h.pool.withoutTenant((db) => db.execute<{ document: { pages?: Array<{ path: string }> } }>(sql`SELECT document FROM website_published`))
+    assert.equal(current[0]!.document.pages?.[0]?.path, path)
   })
 
   test('a lost save response retries the same receipt after later edits', async () => {

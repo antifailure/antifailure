@@ -22,6 +22,28 @@ owner permission; customer accounts cannot access drafts or publish content.
    makes the saved content available to visitors. **History** previews an older
    version and restores it as a new publication.
 
+Open **Pages** to browse every built route, including individual articles.
+**New page** creates a marketing page at a chosen path; **New article** creates
+an entry under `/blog`. Add its title, introduction, summary and body in the
+inspector. Articles also have a date and topics. Rich text supports H2/H3
+headings, links and lists. Images, video, splits and sandboxed code can be
+added as page sections. A new URL is previewable in the editor immediately;
+it becomes a public, crawlable page after publication and the static refresh.
+The blog index, feed, sitemap and Markdown version include new articles from
+that same build. Existing articles remain in the Pages list and keep their
+source figures and tables while their copy and metadata can be edited.
+
+Page-wide Ask AI requests start with the entire page selected. Design requests
+use a stronger model than short copy changes. A Twins page request to align
+small label icons with adjacent text can produce a desktop baseline-alignment edit
+that is visible in the preview before it is applied to the draft. Suggestions
+still require the editor to accept them and publish.
+Ask AI can also propose a new page or Writing article. It checks the proposed
+path against built and draft pages, shows the title, introduction and body for
+review, and opens the private draft after acceptance. If there is too little
+source material for a factual body, the editor must complete the draft before
+publication; the publish gate refuses an empty body.
+
 The editor labels customized fields. **Reset** removes the customization and
 uses the current code default. A later code change automatically updates fields
 that have no override. Customizations retain their values. If two tabs edit the

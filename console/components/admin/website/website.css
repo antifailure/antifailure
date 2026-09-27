@@ -29,6 +29,9 @@
 .cms-prompt-change { display: grid; gap: 5px; padding: 11px 12px; border-bottom: 1px solid var(--color-rule); overflow-wrap: anywhere; }
 .cms-prompt-change small { color: var(--color-muted); font-size: 10px; }
 .cms-prompt-change span { color: var(--color-ink); font-size: 12px; line-height: 1.45; }
+.cms-prompt-full-body summary { min-height: 44px; display: flex; align-items: center; color: var(--color-ink); font-size: 12px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.cms-prompt-full-body summary:focus-visible { outline: 2px solid var(--color-ink); outline-offset: 2px; }
+.cms-prompt-full-body p { max-height: 280px; overflow: auto; white-space: pre-wrap; color: var(--color-ink); font-size: 12px; line-height: 1.6; }
 .cms-prompt-proposal-actions { display: flex; align-items: center; gap: 10px; padding: 11px; }
 .cms-prompt-proposal-actions button { min-height: 36px; padding: 0 10px; font-size: 11px; }
 .cms-prompt-proposal-actions button:first-child { background: var(--color-ink); color: var(--color-card); border-radius: 3px; }
@@ -160,6 +163,29 @@
 .cms-collection > summary { display: flex; justify-content: space-between; align-items: center; min-height: 34px; font-weight: 500; cursor: pointer; }
 .cms-collection > summary > span { color: var(--color-dim); font-size: 10px; font-weight: 400; }
 .cms-collection-body { padding: 10px 0 0; }
+.cms-page-library { padding: 4px 0 20px; }
+.cms-page-library-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin: 2px 0 20px; }
+.cms-page-library-actions button { min-height: 40px; border: 1px solid var(--color-rule-strong); border-radius: var(--radius-md); background: var(--color-card); font-size: 12px; font-weight: 500; }
+.cms-page-library-actions button:hover, .cms-page-library-actions button:focus-visible { border-color: var(--color-ink); }
+.cms-page-library-actions button:disabled { opacity: .45; cursor: not-allowed; }
+.cms-page-library-search, .cms-page-create label, .cms-page-details label { display: grid; gap: 7px; font-size: 12px; font-weight: 500; color: var(--color-muted); }
+.cms-page-library-search input, .cms-page-create input, .cms-page-create textarea, .cms-page-details input, .cms-page-details textarea { font-size: 13px; font-weight: 400; }
+.cms-page-library-list { margin-top: 10px; max-height: min(54vh,560px); overflow-y: auto; border-top: 1px solid var(--color-rule); }
+.cms-page-library-list button { display: grid; width: 100%; gap: 4px; padding: 12px 2px; border-bottom: 1px solid var(--color-rule); text-align: left; }
+.cms-page-library-list button:hover span, .cms-page-library-list button[aria-current=page] span { color: var(--color-ink); text-decoration: underline; text-underline-offset: 3px; }
+.cms-page-library-list button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 500; }
+.cms-page-library-list button small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-dim); font-size: 10px; }
+.cms-page-create { display: grid; gap: 22px; padding: 24px 20px; }
+.cms-page-create label { gap: 9px; }
+.cms-page-create textarea { min-height: 116px; resize: vertical; }
+.cms-page-create > p { font-size: 11px; line-height: 1.6; color: var(--color-dim); }
+.cms-page-create .cms-page-create-error { color: var(--color-fail); }
+.cms-page-create-submit { min-height: 44px; border-radius: var(--radius-md); background: var(--color-ink); color: var(--color-card); padding: 0 18px; font-size: 13px; font-weight: 600; }
+.cms-page-details { display: grid; gap: 18px; padding-bottom: 24px; }
+.cms-page-details-top { display: grid; gap: 5px; padding: 2px 0 14px; border-bottom: 1px solid var(--color-rule); }
+.cms-page-details-top span { font-size: 10px; color: var(--color-dim); text-transform: uppercase; letter-spacing: .08em; }
+.cms-page-details-top strong { font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+.cms-page-details .cms-page-remove { justify-self: start; min-height: 40px; color: var(--color-fail); text-decoration: underline; text-underline-offset: 3px; font-size: 12px; }
 .cms-collection-item { border-bottom: 1px solid var(--color-rule); }
 .cms-collection-item > summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 42px; cursor: pointer; font-size: 12px; }
 .cms-collection-item summary small { color: var(--color-dim); }
@@ -193,6 +219,9 @@
   .cms-sidebar-bottom { margin-top: 22px; }
 }
 @media (max-width: 639px) {
+  .cms-page-library-actions button, .cms-page-library-list button, .cms-page-create-submit, .cms-page-details .cms-page-remove { min-height: 44px; font-size: 14px; }
+  .cms-page-library-search, .cms-page-create label, .cms-page-details label { font-size: 13px; }
+  .cms-page-library-search input, .cms-page-create input, .cms-page-create textarea, .cms-page-details input, .cms-page-details textarea { font-size: 16px; }
   .cms-inspector-mode button, .cms-prompt-scope select, .cms-prompt-form > div button, .cms-prompt-proposal-actions button { min-height: 44px; font-size: 14px; }
   .cms-prompt-intro p, .cms-prompt-example button, .cms-prompt-message p { font-size: 13px; }
   .cms-prompt-scope label, .cms-prompt-form label { font-size: 13px; }

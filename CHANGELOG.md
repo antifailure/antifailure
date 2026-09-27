@@ -14,6 +14,42 @@ and the per change entries are what make it a wall. `just relnotes` refuses an
 unbalanced marker, a second region in one section, an empty region, and a
 section that omits all of itself.
 
+## v1.9.0
+
+The Website editor can now create a public page or Writing article without a
+source change. Open **Pages**, choose a title and URL, write the body, and review
+the private preview before publishing. New articles appear in the Writing
+index, RSS feed and sitemap after the static refresh. Each existing article is
+available in the page list for individual copy and metadata edits. Empty or
+incomplete drafts cannot be published.
+
+**Ask AI** can propose a new page or article as a private draft and show its
+content before the owner accepts it. A page-wide request on the Isolated Twin
+page can align the small label icons with their text without stretching the
+illustrations or moving the headline. The assistant uses the larger model for
+design and page creation and the smaller model for short copy edits. Review and
+publication remain separate actions. No new server secret or database migration
+is required beyond the Website editor setup in v1.8.1 (#602).
+
+On Linux Docker daemons that reject a sessionless BuildKit API call, the engine
+can now use the Docker CLI's Buildx session against the same daemon. It checks
+that daemon before sending the build context and still tries the legacy builder
+if Buildx setup fails. A repository dogfood run built its first service image
+in 31 seconds versus 95 seconds before this change; timings depend on the
+runner and cache. The CLI path retains managed labels, image loading and
+redacted build logs (#600).
+
+### Fixed
+
+- The terminal driver waits for a bounded output drain before judging a step
+  complete, so a delayed last line is not reported missing (#596).
+- The PostgreSQL crash test measures availability at its actual probe
+  resolution rather than requiring a 100 ms sampler to catch a shorter
+  recovery window (#601).
+- The network gate test keeps its probe port allocated on one loopback
+  address, so a new positive-control listener cannot accidentally reuse the
+  denied endpoint (#602).
+
 ## v1.8.1
 
 The Website editor now reaches the public site beyond the homepage. Open a

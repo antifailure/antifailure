@@ -40,6 +40,7 @@ export function SitewideContentBridge() {
   const page = pathname === "/cms-preview" ? "home" : sitePageSlug(pathname);
   const sectionId = `page-${page}`;
   useEffect(() => {
+    if (pathname === "/cms-page-preview") return;
     const seoSection = pathname === "/" || pathname === "/cms-preview" ? "hero" : sectionId;
     const sourceTitle = window.document.querySelector<HTMLMetaElement>('meta[name="af-cms-source-title"]')?.content ?? window.document.title;
     const sourceDescription = window.document.querySelector<HTMLMetaElement>('meta[name="af-cms-source-description"]')?.content ?? window.document.querySelector<HTMLMetaElement>('meta[name="description"]')?.content ?? "";
@@ -59,7 +60,7 @@ export function SitewideContentBridge() {
       const tag = window.document.querySelector<HTMLMetaElement>(selector);
       if (tag && typeof title === "string") tag.content = title;
     }
-    if (pathname === "/" || pathname === "/cms-preview") return;
+    if (pathname === "/" || pathname === "/cms-preview" || pathname === "/cms-page-preview") return;
     const root = window.document.querySelector("main");
     if (!root) return;
     root.setAttribute("data-cms-section", sectionId);

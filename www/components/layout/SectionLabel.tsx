@@ -9,7 +9,7 @@ export function SectionLabel({
   className?: string;
 }) {
   return (
-    <div className={cn("flex items-center gap-2 text-black/70 max-md:gap-1.5", className)}>
+    <div data-cms-icon-row="true" className={cn("flex items-center gap-2 text-black/70 max-md:gap-1.5", className)}>
       <svg
         viewBox="0 0 12 12"
         className="size-3 flex-none text-[#33bf00] max-md:size-2.5"
