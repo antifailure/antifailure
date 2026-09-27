@@ -112,7 +112,7 @@ export function SaasPage() {
 
       <RelatedGrid
         items={[
-          { href: "/product/migrations", title: "Migration Safety", description: "Bring a change you are about to ship." },
+          { href: "/docs/concepts/sql-workloads", title: "SQL workloads", description: "How database changes are exercised before deployment." },
           { href: "/request-demo", title: "Request a demo", description: "See how Antifailure would test it in a demo with the founder." },
           { href: "/solutions", title: "All solutions", description: "Teams and jobs." },
         ]}

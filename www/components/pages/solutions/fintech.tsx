@@ -55,8 +55,8 @@ export function FintechPage() {
 
       <RelatedGrid
         items={[
-          { href: "/product/firewall", title: "Side-Effect Firewall", description: "How egress is denied and simulated." },
-          { href: "/product/twins", title: "Isolated Twin", description: "Where the contained run lives." },
+          { href: "/docs/concepts/egress", title: "Egress", description: "How external calls are denied or simulated." },
+          { href: "/product", title: "Product overview", description: "How a contained run is created and checked." },
           { href: "/solutions", title: "All solutions", description: "Teams and jobs." },
         ]}
       />

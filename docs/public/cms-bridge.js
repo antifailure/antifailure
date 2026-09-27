@@ -112,10 +112,8 @@
   const fonts = [
     { key: 'inter', label: 'Inter', family: 'Inter, Arial, sans-serif' },
     { key: 'geist', label: 'Geist', family: 'Geist, Arial, sans-serif' },
-    { key: 'geist-mono', label: 'Geist Mono', family: 'Geist Mono, monospace' },
     { key: 'system-serif', label: 'Editorial serif', family: 'Georgia, serif' },
     { key: 'system-sans', label: 'System sans', family: 'Arial, sans-serif' },
-    { key: 'system-mono', label: 'System monospace', family: 'Courier New, monospace' },
   ];
   const sourceSections = [{ id: sectionId, label: location.pathname, group: 'page' }, { id: 'header', label: 'Header', group: 'header' }, { id: 'footer', label: 'Footer', group: 'footer' }];
   const manifest = { schemaVersion: 1, sourceVersion: document.querySelector('meta[name="af-source-version"]')?.content || 'docs-source', fields, sections: sourceSections.slice(), collections: [], fonts, builtinAssets: [] };

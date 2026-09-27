@@ -28,7 +28,7 @@ test('new pages and posts have safe paths, page-specific fields, and publishable
   const document = emptyWebsiteDocument()
   document.pages = [{ path: '/guides/deploy-safely', kind: 'page' }, { path: '/blog/a-real-change', kind: 'post' }]
   assert.equal(validateWebsiteDocument(document).ok, true)
-  for (const path of ['/admin/secret', '/api/action', '/blog/post.html', '/../../bad', '//evil.example']) assert.equal(isAuthoredPagePath(path), false)
+  for (const path of ['/admin/secret', '/api/action', '/blog/post.html', '/../../bad', '//evil.example', '/product/twins', '/product/safe-state', '/product/firewall', '/product/load', '/product/migrations']) assert.equal(isAuthoredPagePath(path), false)
   assert.equal(validateWebsiteDocument({ ...document, pages: [...document.pages, document.pages[0]] }).ok, false)
   assert.equal(unpublishablePages(document).length > 0, true)
   for (const page of document.pages) {

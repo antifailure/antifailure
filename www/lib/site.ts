@@ -171,7 +171,7 @@ export const CONTACT_POINTS = [
  */
 export const SAME_AS: readonly string[] = [REPO_URL];
 
-/** Absolute URL for a site-relative path. Accepts "/" and "/product/twins". */
+/** Absolute URL for a site-relative path. Accepts "/" and "/product". */
 export function absoluteUrl(pathname: string): string {
   if (pathname === "/") return SITE_URL;
   return `${SITE_URL}${pathname.startsWith("/") ? pathname : `/${pathname}`}`;

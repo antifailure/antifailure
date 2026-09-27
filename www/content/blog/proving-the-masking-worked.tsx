@@ -29,7 +29,7 @@ export const MASKING_ATTESTATION: Post = {
       <h2>Verify before branching</h2>
       <p>A reusable snapshot, called a golden, must pass verification before Antifailure can branch it. A failed scan stops environment creation so your team can correct the masking rules first.</p>
       <p>Keep the attestation with the run evidence. It records what was checked and gives reviewers a concrete basis for deciding whether the data is ready for testing.</p>
-      <p><a href="/product/safe-state">See the data preparation flow</a> or read the <a href="/docs/security/data-boundary">data boundary guide</a>.</p>
+      <p><a href="/docs/concepts/masking">See the data preparation flow</a> or read the <a href="/docs/security/data-boundary">data boundary guide</a>.</p>
     </>
   ),
 };

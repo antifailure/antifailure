@@ -58,8 +58,8 @@ export function DevtoolsPage() {
 
       <RelatedGrid
         items={[
-          { href: "/product/migrations", title: "Migration Safety", description: "Locks, rewrites, plans, lint." },
-          { href: "/product/load", title: "Load", description: "Production's own route mix against the branch." },
+          { href: "/docs/concepts/sql-workloads", title: "SQL workloads", description: "Locks, rewrites, plans, lint." },
+          { href: "/docs/concepts/load", title: "Load testing", description: "Production's route mix against the branch." },
           { href: "/solutions", title: "All solutions", description: "Teams and jobs." },
         ]}
       />

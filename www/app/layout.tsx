@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
-import { GeistMono } from "geist/font/mono";
 import { GeistSans } from "geist/font/sans";
 import "./globals.css";
 import { SiteJsonLd } from "@/lib/jsonld";
@@ -91,7 +90,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html
       lang="en"
-      className={`${inter.variable} ${GeistSans.variable} ${GeistMono.variable}`}
+      className={`${inter.variable} ${GeistSans.variable}`}
     >
       <head>
         {/* Rendered server side and present in the HTML a crawler receives.

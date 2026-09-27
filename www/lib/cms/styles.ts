@@ -3,10 +3,8 @@ import { isAssetId, isSafeFieldKey, type StyleValues, type WebsiteDocument } fro
 export const CMS_FONTS = [
   { key: "inter", label: "Inter", family: "Inter, Arial, sans-serif" },
   { key: "geist", label: "Geist", family: "Geist, Arial, sans-serif" },
-  { key: "geist-mono", label: "Geist Mono", family: "'Geist Mono', monospace" },
   { key: "system-serif", label: "Editorial serif", family: "Georgia, 'Times New Roman', serif" },
   { key: "system-sans", label: "System sans", family: "Arial, Helvetica, sans-serif" },
-  { key: "system-mono", label: "System monospace", family: "'Courier New', monospace" },
 ];
 
 const pixelProperties = new Set(["fontSize", "letterSpacing", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "marginTop", "marginBottom", "gap", "maxWidth", "minHeight", "width", "borderRadius"]);
@@ -22,7 +20,9 @@ export function styleDeclarations(style: StyleValues): string {
     }
   }
   if (style.fontFamily) {
-    const bundled: Record<string, string> = { inter: "var(--font-inter),Arial,sans-serif", geist: "var(--font-geist-sans),Arial,sans-serif", "geist-mono": "var(--font-geist-mono),monospace" };
+    // Old saved mono choices follow the site text font rather than restoring
+    // the retired slashed-zero face after a publication refresh.
+    const bundled: Record<string, string> = { inter: "var(--font-inter),Arial,sans-serif", geist: "var(--font-geist-sans),Arial,sans-serif", "geist-mono": "var(--font-inter),Arial,sans-serif", "system-mono": "var(--font-inter),Arial,sans-serif" };
     const font = bundled[style.fontFamily] ?? CMS_FONTS.find((candidate) => candidate.key === style.fontFamily)?.family;
     if (font) declarations.push(`font-family:${font}!important`);
     else if (style.fontFamily.startsWith("asset:") && isAssetId(style.fontFamily.slice(6))) declarations.push(`font-family:"cms-${style.fontFamily.slice(6)}",sans-serif!important`);

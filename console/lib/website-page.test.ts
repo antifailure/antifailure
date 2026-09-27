@@ -26,7 +26,7 @@ test("a new route cannot shadow a built site page or escape the article namespac
   for (const path of ["/about", "/admin/secret", "/blog/post.html", "//other-site", "/docs/../bad"]) {
     assert.throws(() => createAuthoredPage(blank, [], { kind: "page", title: "Page", description: "Intro", path, today: "2026-09-27" }));
   }
-  assert.throws(() => createAuthoredPage(blank, ["/product/twins"], { kind: "page", title: "Twins", description: "Intro", path: "/product/twins", today: "2026-09-27" }), /already belongs/);
+  assert.throws(() => createAuthoredPage(blank, [], { kind: "page", title: "Twins", description: "Intro", path: "/product/twins", today: "2026-09-27" }), /lowercase path/);
   assert.throws(() => createAuthoredPage(blank, ["/guides/deploy-safely"], { kind: "page", title: "Same key", description: "Intro", path: "/guides-deploy-safely", today: "2026-09-27" }), /editing key/);
   assert.throws(() => createAuthoredPage(blank, [], { kind: "post", title: "Outside", description: "Intro", path: "/outside", today: "2026-09-27" }), /under|lowercase/);
 });

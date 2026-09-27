@@ -65,65 +65,6 @@ export const ROUTES: readonly Route[] = [
     priority: 0.9,
     parent: "/",
   },
-  {
-    path: "/product/twins",
-    title: pageTitle("Isolated Twin"),
-    description:
-      "A temporary copy of the application stack for every risky change, created per pull request and destroyed with it.",
-    summary: "How a per-pull-request copy of the stack is created, isolated and torn down.",
-    section: "product",
-    indexable: true,
-    priority: 0.8,
-    parent: "/product",
-  },
-  {
-    path: "/product/safe-state",
-    title: pageTitle("Safe State"),
-    description:
-      "Sanitized, referentially consistent, production-shaped Postgres. Masking is compiled to SQL, read back by a scanner, and signed before it can be branched.",
-    summary:
-      "How production data is masked deterministically, read back column by column, and signed before use.",
-    section: "product",
-    indexable: true,
-    priority: 0.8,
-    parent: "/product",
-  },
-  {
-    path: "/product/firewall",
-    title: pageTitle("Side-Effect Firewall"),
-    description:
-      "Fail-closed egress with a per-host decision: block, allow, sandbox, capture, mock, emulate, or synth.",
-    summary:
-      "The seven per-host egress modes, and what happens to a request that matches none of them.",
-    section: "product",
-    indexable: true,
-    priority: 0.8,
-    parent: "/product",
-  },
-  {
-    path: "/product/load",
-    title: pageTitle("Load"),
-    description:
-      "Traffic shaped like production's own, read from a trace export or an access log, sent at the twin and compared against the p95 a trace export carries for each route.",
-    summary:
-      "Where the traffic shape comes from, which routes are sent, and what a regression is measured against.",
-    section: "product",
-    indexable: true,
-    priority: 0.8,
-    parent: "/product",
-  },
-  {
-    path: "/product/migrations",
-    title: pageTitle("Migration Safety"),
-    description:
-      "Pending migrations rehearsed on a branch with production's shape: per-statement timing, the strongest lock held per table, table rewrites, and query plans before and after.",
-    summary:
-      "What migration rehearsal measures: locks, per-statement timing, table rewrites, plan diffs.",
-    section: "product",
-    indexable: true,
-    priority: 0.9,
-    parent: "/product",
-  },
 
   // Solutions
   {

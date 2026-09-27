@@ -45,7 +45,7 @@
   --color-green-52: #34d59a;
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-title: var(--font-geist-sans), var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+  --font-mono: var(--font-sans);
   --leading-dense: 1.125;
   --tracking-tighter: -0.04em;
   --tracking-extra-tight: -0.02em;
@@ -342,7 +342,7 @@ main:focus {
   padding: 0.12em 0.36em;
   border-radius: 4px;
   background: rgba(0, 0, 0, 0.055);
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-sans);
   /* 0.88em rather than a fixed px size, so inline code inside a heading scales
      with the heading instead of shrinking to body size. */
   font-size: 0.88em;

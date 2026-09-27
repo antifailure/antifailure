@@ -49,22 +49,6 @@
   src: url("/docs/fonts/Geist-SemiBold.woff2") format("woff2");
 }
 
-@font-face {
-  font-family: "Geist Mono";
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url("/docs/fonts/GeistMono-Regular.woff2") format("woff2");
-}
-
-@font-face {
-  font-family: "Geist Mono";
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url("/docs/fonts/GeistMono-Medium.woff2") format("woff2");
-}
-
 /* The site's tokens, verbatim. */
 @theme {
   --color-neon: #33bf00;
@@ -80,7 +64,7 @@
   --color-green-52: #34d59a;
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-title: "Geist", "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-mono: "Inter", ui-sans-serif, system-ui, sans-serif;
   --leading-dense: 1.125;
   --tracking-tighter: -0.04em;
   --tracking-extra-tight: -0.02em;
@@ -103,7 +87,7 @@
   color-scheme: only light;
 
   --sl-font: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --sl-font-mono: "Geist Mono", ui-monospace, SFMono-Regular, monospace;
+  --sl-font-mono: "Inter", ui-sans-serif, system-ui, sans-serif;
 
   --sl-content-width: 47rem;
   --sl-sidebar-width: 18rem;

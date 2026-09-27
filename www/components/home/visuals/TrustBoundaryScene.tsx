@@ -17,7 +17,7 @@ import { useInViewPlay } from "@/lib/useInViewPlay";
 import { usePausedRaf } from "@/lib/usePausedRaf";
 
 const LOOP_MS = 14000;
-const FONT = "var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace";
+const FONT = "var(--font-sans)";
 
 const CP = { x: 6, y: 22, w: 168, h: 278 };
 const DP = { x: 198, y: 22, w: 196, h: 278 };

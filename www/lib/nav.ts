@@ -20,66 +20,7 @@ export const HEADER_MENUS: HeaderMenu[] = [
   {
     id: "product",
     text: "Product",
-    sections: [
-      {
-        id: "core",
-        title: "Core",
-        items: [
-          {
-            id: "overview",
-            title: "Overview",
-            href: "/product",
-            description: "MCP tools for deployment testing",
-          },
-          {
-            id: "twins",
-            title: "Isolated Twin",
-            href: "/product/twins",
-            description: "Temporary copy of the application stack",
-          },
-          {
-            id: "safe-state",
-            title: "Safe State",
-            href: "/product/safe-state",
-            description: "Masked data with relationships intact",
-          },
-          {
-            id: "firewall",
-            title: "Side-Effect Firewall",
-            href: "/product/firewall",
-            description: "Control external calls during tests",
-          },
-          {
-            id: "load",
-            title: "Load",
-            href: "/product/load",
-            description: "Traffic shaped like production's access log",
-          },
-          {
-            id: "migrations",
-            title: "Migration Safety",
-            href: "/product/migrations",
-            description: "Locks, rewrites, and query plans",
-          },
-        ],
-      },
-    ],
-    featured: [
-      {
-        id: "migrations",
-        title: "Migration rehearsal",
-        description: "Exclusive locks, table rewrites, and query plans on production's own shape.",
-        href: "/product/migrations",
-        visual: "fleet",
-      },
-      {
-        id: "twins",
-        title: "Isolated Twin",
-        description: "A temporary copy of the application stack, destroyed with the pull request.",
-        href: "/product/twins",
-        visual: "twin",
-      },
-    ],
+    href: "/product",
   },
   {
     id: "solutions",
@@ -124,13 +65,6 @@ export const HEADER_MENUS: HeaderMenu[] = [
         href: "/request-demo",
         visual: "twin",
       },
-      {
-        id: "migrations",
-        title: "Migration rehearsal",
-        description: "Exclusive locks, table rewrites, and query plans on production's own shape.",
-        href: "/product/migrations",
-        visual: "fleet",
-      },
     ],
   },
   { id: "docs", text: "Docs", href: "/docs" },
@@ -169,9 +103,7 @@ export const FOOTER_MENUS = [
     heading: "Product",
     items: [
       { id: "overview", text: "Overview", href: "/product" },
-      { id: "twins", text: "Isolated Twin", href: "/product/twins" },
-      { id: "safe-state", text: "Safe State", href: "/product/safe-state" },
-      { id: "load", text: "Load", href: "/product/load" },
+      { id: "quickstart", text: "Quickstart", href: "/docs/getting-started/quickstart" },
       { id: "pricing", text: "Pricing", href: "/pricing" },
     ],
   },
@@ -179,8 +111,8 @@ export const FOOTER_MENUS = [
     id: "features",
     heading: "Features",
     items: [
-      { id: "firewall", text: "Side-Effect Firewall", href: "/product/firewall" },
-      { id: "migrations", text: "Migration Safety", href: "/product/migrations" },
+      { id: "load", text: "Load testing", href: "/docs/concepts/load" },
+      { id: "migration", text: "SQL workloads", href: "/docs/concepts/sql-workloads" },
       { id: "insights", text: "Insights", href: "/docs/concepts/insights" },
       { id: "agents", text: "Agents", href: "/docs/concepts/agents" },
       { id: "egress", text: "Egress", href: "/docs/concepts/egress" },

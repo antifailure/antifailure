@@ -32,7 +32,7 @@ const DEVICE_WIDTH: Record<Device, number> = { desktop: 1440, tablet: 820, mobil
 const WEBSITE_ORIGIN = process.env.NEXT_PUBLIC_WEBSITE_ORIGIN ?? "https://antifailure.dev";
 const API_ORIGIN = process.env.NEXT_PUBLIC_AF_API ?? "";
 const messageOf = (error: unknown) => error instanceof Error ? error.message : "That change could not be completed. Please try again.";
-const PAGE_OPTIONS = ["/", "/product", "/product/twins", "/product/safe-state", "/product/firewall", "/product/load", "/product/migrations", "/solutions", "/solutions/saas", "/solutions/fintech", "/solutions/marketplaces", "/solutions/devtools", "/pricing", "/about", "/contact", "/request-demo", "/careers", "/blog", "/changelog", "/privacy", "/terms", "/acceptable-use", "/developer-policy", "/docs", "/docs/getting-started/quickstart", "/docs/reference/mcp"];
+const PAGE_OPTIONS = ["/", "/product", "/solutions", "/solutions/saas", "/solutions/fintech", "/solutions/marketplaces", "/solutions/devtools", "/pricing", "/about", "/contact", "/request-demo", "/careers", "/blog", "/changelog", "/privacy", "/terms", "/acceptable-use", "/developer-policy", "/docs", "/docs/getting-started/quickstart", "/docs/reference/mcp"];
 const pageSectionId = (path: string) => `page-${sitePageSlug(path)}`;
 
 export function WebsiteEditor() {
@@ -271,7 +271,7 @@ function EditorWorkspace({ initial }: { initial: WebsiteState }) {
   function choose(selection: Selection) { setSelection(selection); setInspectorTab("content"); setMobilePanel(null); }
   function openPath(path: string) {
     if (!/^\/(?:[a-z0-9_-]+(?:\/[a-z0-9_-]+)*)?$/i.test(path) || path.startsWith("/admin") || path.startsWith("/api")) {
-      setError("Enter a website path such as /product/twins or /docs/reference/mcp."); return;
+      setError("Enter a website path such as /product or /docs/reference/mcp."); return;
     }
     setPagePath(path); setPageInput(path); setSelection({ sectionId: path === "/" ? "hero" : pageSectionId(path) }); setPanel("sections"); setError(null);
     try { sessionStorage.setItem("antifailure:website:page", path); } catch { /* Navigation still works. */ }

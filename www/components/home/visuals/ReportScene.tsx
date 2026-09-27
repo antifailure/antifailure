@@ -148,7 +148,7 @@ function JourneyFrame({ i, error }: { i: number; error?: boolean }) {
           <rect x="0.5" y="0.5" width="63" height="43" fill="none" stroke="#b91c1c" strokeWidth="1" />
         </>
       )}
-      <text x="32" y="41" textAnchor="middle" fontSize="6" fill={error ? "#b91c1c" : "rgba(0,0,0,0.45)"} fontFamily="ui-monospace, monospace">
+      <text x="32" y="41" textAnchor="middle" fontSize="6" fill={error ? "#b91c1c" : "rgba(0,0,0,0.45)"} fontFamily="var(--font-sans)">
         {labels[i]}
       </text>
     </svg>

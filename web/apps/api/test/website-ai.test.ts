@@ -31,28 +31,28 @@ test('bounded model response becomes a reviewable valid draft edit', async () =>
   assert.equal(document.styles.hero?.mobile?.fontSize, 48)
 })
 
-test('a whole-page Twins icon alignment request produces a scoped label override', async () => {
+test('a whole-page Product icon alignment request produces a scoped label override', async () => {
   const requestInput = websitePromptInput.parse({
-    page: '/product/twins', scope: 'page',
+    page: '/product', scope: 'page',
     prompt: 'Make this whole page cleaner and make the bottom of every icon align with the bottom of the text next to it',
-    targets: ['page-product-twins'], fontKeys: [],
-    fields: [{ key: 'page.product-twins.text.heading', label: 'h1 · An isolated environment', kind: 'text', value: 'An isolated environment for every change.' }],
+    targets: ['page-product'], fontKeys: [],
+    fields: [{ key: 'page.product.text.heading', label: 'h1 · Product overview', kind: 'text', value: 'See how your change behaves before you deploy.' }],
   })
   let body: Record<string, unknown> = {}
   const proposal = await requestWebsiteProposal(requestInput, 'test-key', async (_url, init) => {
     body = JSON.parse(String(init?.body)) as Record<string, unknown>
     return providerResponse({ message: 'The label icons now share the text baseline.', edits: [],
-      styles: [{ target: 'page-product-twins', breakpoint: 'desktop', property: 'iconAlign', value: 'end' }], actions: [] })
+      styles: [{ target: 'page-product', breakpoint: 'desktop', property: 'iconAlign', value: 'end' }], actions: [] })
   })
   assert.equal(body.model, 'claude-sonnet-4-6')
   assert.equal(body.max_tokens, 4000)
   const messages = body.messages as Array<{ content: string }>
   assert.equal((JSON.parse(messages.at(-1)!.content) as { scope: string }).scope, 'page')
   const document = applyWebsiteProposal(emptyWebsiteDocument(), requestInput, proposal, [{
-    key: 'page.product-twins.text.heading', label: 'h1', kind: 'text', sectionId: 'page-product-twins',
-    defaultValue: 'An isolated environment for every change.',
+    key: 'page.product.text.heading', label: 'h1', kind: 'text', sectionId: 'page-product',
+    defaultValue: 'See how your change behaves before you deploy.',
   }])
-  assert.equal(document.styles['page-product-twins']?.desktop?.iconAlign, 'end')
+  assert.equal(document.styles['page-product']?.desktop?.iconAlign, 'end')
 })
 
 test('a prompt can create one private article draft without taking an existing route', async () => {

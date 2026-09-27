@@ -246,7 +246,7 @@ const markdownHref = `${base}/${slug === "" ? "index" : slug}.md`;
      control in the bar, and is the only shadow of its kind on the site. The
      marketing site's menu button is a flat pair of rules with no background at
      all; this is that button. */
-  :global(starlight-menu-button button) {
+  :global(.sidebar > .sl-menu-button) {
     top: calc((3.5rem - var(--sl-menu-button-size, 2.75rem)) / 2) !important;
     inset-inline-end: 1.25rem;
     background: transparent;
@@ -255,12 +255,12 @@ const markdownHref = `${base}/${slug === "" ? "index" : slug}.md`;
     color: #000;
   }
 
-  :global(starlight-menu-button[aria-expanded="true"] button) {
+  :global(.sidebar > .sl-menu-button[aria-expanded="true"]) {
     background: transparent;
     color: #000;
   }
 
-  :global(starlight-menu-button button svg) {
+  :global(.sidebar > .sl-menu-button svg) {
     width: 1.25rem;
     height: 1.25rem;
   }

@@ -1,4 +1,4 @@
-import { Faq, PageHeading, PageHero, PageSection, PageShell, RelatedGrid, Split, Steps, type FaqItem } from "@/components/pages/kit";
+import { Faq, PageHeading, PageHero, PageSection, PageShell, Split, Steps, type FaqItem } from "@/components/pages/kit";
 import { Illustrative } from "@/components/layout/Illustrative";
 import { POV01, POV02, POV03, POV04 } from "@/components/pages/figures/product-overview";
 import { MonoLabel, StatusPill } from "@/components/home/visuals/primitives";
@@ -232,15 +232,6 @@ export function OverviewPage() {
         />
         <Faq path="/product" items={PRODUCT_FAQ} />
       </PageSection>
-
-
-      <RelatedGrid
-        items={[
-          { href: "/product/twins", title: "Isolated Twin", description: "How the orchestrator provisions and tears down." },
-          { href: "/product/migrations", title: "Migration Safety", description: "Locks, rewrites and plans, before it ships." },
-          { href: "/docs", title: "Docs", description: "How a twin run works, end to end." },
-        ]}
-      />
     </PageShell>
   );
 }

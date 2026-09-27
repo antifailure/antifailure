@@ -30,18 +30,43 @@
       }
     },
     {
+      "route": "/product/twins",
+      "redirect": "/product",
+      "statusCode": 301
+    },
+    {
+      "route": "/product/safe-state",
+      "redirect": "/product",
+      "statusCode": 301
+    },
+    {
+      "route": "/product/firewall",
+      "redirect": "/product",
+      "statusCode": 301
+    },
+    {
+      "route": "/product/load",
+      "redirect": "/product",
+      "statusCode": 301
+    },
+    {
+      "route": "/product/migrations",
+      "redirect": "/product",
+      "statusCode": 301
+    },
+    {
       "route": "/product/crowdi",
-      "redirect": "/product/load",
+      "redirect": "/product",
       "statusCode": 301
     },
     {
       "route": "/product/workload",
-      "redirect": "/product/load",
+      "redirect": "/product",
       "statusCode": 301
     },
     {
       "route": "/product/exploratory-users",
-      "redirect": "/product/load",
+      "redirect": "/product",
       "statusCode": 301
     },
     {

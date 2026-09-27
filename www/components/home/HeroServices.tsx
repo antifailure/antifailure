@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useCmsCollection, useCmsString } from "@/components/cms/CmsProvider";
 import { CmsMedia, CmsSection, CmsText } from "@/components/cms/Editable";
@@ -12,33 +11,25 @@ export const HERO_SERVICES: {
   lineOne: string;
   lineTwo: string;
   kind: FeatureKind;
-  href: string;
 }[] = [
-  { id: "twin", title: "Isolated Twin", lineOne: "Your stack, isolated", lineTwo: "for each change.", kind: "twin", href: "/product/twins" },
-  { id: "state", title: "Safe State", lineOne: "Masked Postgres.", lineTwo: "Relationships intact.", kind: "state", href: "/product/safe-state" },
-  { id: "firewall", title: "Side-Effect Firewall", lineOne: "Test payments and mail.", lineTwo: "Contain external calls.", kind: "firewall", href: "/product/firewall" },
-  { id: "workload", title: "Load", lineOne: "Your traffic mix.", lineTwo: "Against the new build.", kind: "workload", href: "/product/load" },
-  { id: "migration", title: "Migration Safety", lineOne: "Locks, rewrites, plans.", lineTwo: "Before you deploy.", kind: "migration", href: "/product/migrations" },
+  { id: "twin", title: "Isolated Twin", lineOne: "Your stack, isolated", lineTwo: "for each change.", kind: "twin" },
+  { id: "state", title: "Safe State", lineOne: "Masked Postgres.", lineTwo: "Relationships intact.", kind: "state" },
+  { id: "firewall", title: "Side-Effect Firewall", lineOne: "Test payments and mail.", lineTwo: "Contain external calls.", kind: "firewall" },
+  { id: "workload", title: "Load", lineOne: "Your traffic mix.", lineTwo: "Against the new build.", kind: "workload" },
+  { id: "migration", title: "Migration Safety", lineOne: "Locks, rewrites, plans.", lineTwo: "Before you deploy.", kind: "migration" },
 ];
 
-const SERVICE_CONTENT = HERO_SERVICES.map(({ id, title, lineOne, lineTwo, href }) => ({ id, title, lineOne, lineTwo, href }));
+const SERVICE_CONTENT = HERO_SERVICES.map(({ id, title, lineOne, lineTwo }) => ({ id, title, lineOne, lineTwo }));
 
 function ServiceItem({ item }: { item: (typeof SERVICE_CONTENT)[number] }) {
   const key = `hero-services.items.${item.id}`;
   const source = HERO_SERVICES.find((service) => service.id === item.id);
-  const href = useCmsString(`${key}.href`, source?.href ?? item.href ?? "/product/twins", {
-    label: `${source?.title ?? item.title ?? "Feature"} link`, sectionId: "hero-services", kind: "url",
-  });
   const kind = source?.kind;
   return (
     <li className="min-w-0 max-lg:w-[220px] max-lg:shrink-0 max-lg:snap-start">
-      <Link
-        prefetch={false}
-        href={href}
-        className="group block border-t border-stroke pt-4 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-black"
-      >
+      <div className="border-t border-stroke pt-4">
         <p className="min-h-[72px] text-base leading-6 tracking-extra-tight text-gray-new-40 [overflow-wrap:anywhere]">
-          <CmsText cmsKey={`${key}.title`} label="Feature name" sectionId="hero-services" defaultValue={source?.title ?? item.title ?? ""} as="span" className="block font-medium text-gray-new-10 group-hover:underline group-hover:underline-offset-4" />
+          <CmsText cmsKey={`${key}.title`} label="Feature name" sectionId="hero-services" defaultValue={source?.title ?? item.title ?? ""} as="span" className="block font-medium text-gray-new-10" />
           <CmsText cmsKey={`${key}.lineOne`} label="First description line" sectionId="hero-services" defaultValue={source?.lineOne ?? item.lineOne ?? ""} as="span" className="block" />
           <CmsText cmsKey={`${key}.lineTwo`} label="Second description line" sectionId="hero-services" defaultValue={source?.lineTwo ?? item.lineTwo ?? ""} as="span" className="block" />
         </p>
@@ -47,7 +38,7 @@ function ServiceItem({ item }: { item: (typeof SERVICE_CONTENT)[number] }) {
             {kind ? <FeatureDiagram kind={kind} /> : null}
           </CmsMedia>
         </div>
-      </Link>
+      </div>
     </li>
   );
 }

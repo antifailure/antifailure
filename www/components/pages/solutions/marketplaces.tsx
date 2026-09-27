@@ -56,8 +56,8 @@ export function MarketplacesPage() {
 
       <RelatedGrid
         items={[
-          { href: "/product/load", title: "Load", description: "Traffic shaped like production's access log." },
-          { href: "/product/firewall", title: "Side-Effect Firewall", description: "Partner webhooks stay captured." },
+          { href: "/docs/concepts/load", title: "Load testing", description: "Traffic shaped like production's access log." },
+          { href: "/docs/concepts/egress", title: "Egress", description: "How partner webhooks stay contained." },
           { href: "/solutions", title: "All solutions", description: "Teams and jobs." },
         ]}
       />

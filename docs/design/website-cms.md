@@ -34,7 +34,7 @@ that same build. Existing articles remain in the Pages list and keep their
 source figures and tables while their copy and metadata can be edited.
 
 Page-wide Ask AI requests start with the entire page selected. Design requests
-use a stronger model than short copy changes. A Twins page request to align
+use a stronger model than short copy changes. A Product overview request to align
 small label icons with adjacent text can produce a desktop baseline-alignment edit
 that is visible in the preview before it is applied to the draft. Suggestions
 still require the editor to accept them and publish.

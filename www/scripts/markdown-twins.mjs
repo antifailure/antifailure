@@ -1,7 +1,7 @@
 /**
  * Writes a markdown twin of every page next to it in out/.
  *
- * /product/twins.html gets /product/twins.md, and the page's metadata points at
+ * /product.html gets /product.md, and the page's metadata points at
  * it with <link rel="alternate" type="text/markdown">.
  *
  * Why bother. A page of this site is roughly 300KB of HTML, of which the actual

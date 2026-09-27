@@ -244,7 +244,7 @@ export function CircularMap({
                     x={LABEL_X}
                     y={y + 3.5}
                     fill="#61646b"
-                    fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+                    fontFamily="var(--font-sans)"
                     fontSize="9"
                     letterSpacing="0.08em"
                   >
