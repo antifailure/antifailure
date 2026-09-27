@@ -52,6 +52,7 @@ export function usePageViews(): void {
   const last = useRef<string | null>(null);
 
   useEffect(() => {
+    if (pathname === "/cms-preview") return;
     if (last.current === pathname) return;
     last.current = pathname;
     pageViewed(routeIdFor(pathname));

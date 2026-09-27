@@ -14,6 +14,89 @@ and the per change entries are what make it a wall. `just relnotes` refuses an
 unbalanced marker, a second region in one section, an empty region, and a
 section that omits all of itself.
 
+## v1.7.0
+
+The homepage can now be edited from **Administration → Website**. Select text
+or media in a preview of the actual site, change its content or design, and
+publish when it is ready. Drafts save automatically. Header and footer edits
+apply across the marketing site, and untouched settings continue to follow the
+defaults in the code.
+
+This release also brings SQL workloads into build comparisons, reports the lock
+queues those workloads encounter, and gives database disk-fill faults a bounded
+filesystem they can safely fill.
+
+### For operators, before you upgrade
+
+Migration `0050` adds the website draft, publication history, media library,
+and refresh queue. It creates new tables without changing existing product
+tables. Media is stored in PostgreSQL, with a 256 MiB library limit, and needs
+to be included in database backups. Website editing and publishing are owner
+permissions; customer accounts cannot read drafts or unpublished media.
+
+Publishing changes the document visitors receive immediately. Static HTML and
+search-readable pages refresh separately through the existing website deploy
+workflow, and the editor reports that refresh independently. Local and staging
+control planes do not dispatch the production website workflow. The first
+rollout must bring up the CMS API before the website integration, or use the
+explicit first-rollout procedure in `docs/design/website-cms.md`.
+
+Publishing this tag also moves `ghcr.io/antifailure/control-plane:latest` to
+this release. Self-hosted installations following `latest` receive it on their
+next pull.
+
+### Added
+
+- A visual homepage editor with section ordering, hiding, duplication, and
+  reusable text, image, video, split, feature, call-to-action, spacer, shape,
+  divider, and code blocks. Colors, typography, spacing, alignment, image
+  framing, position, and layer order have separate desktop, tablet, and phone
+  controls.
+- An upload library for images, videos, and WOFF2 fonts. Draft media has private
+  previews, publishing makes referenced files public, and archived files remain
+  available to versions that use them. Undo, redo, published history, and
+  restoration let an owner revise or recover a design.
+- HTML, CSS, and JavaScript blocks that run inside sandboxed frames. They can
+  load HTTPS resources and provide interactive content, but cannot access the
+  surrounding site's document, admin credentials, or top-level navigation.
+- `af load compare --sql` compares the same SQL mix on this build and its base
+  over the same golden data and settings. It reports transaction and statement
+  latency distributions, committed transactions per second, and observed lock
+  waiting on both sides (#573).
+- SQL workload reports name waiting and blocking statements, with sampled
+  `lock_waits` and `lock_wait_ms` available to stored history and comparisons.
+  Unobserved contention is reported as unknown, and sampled counts are identified
+  as lower bounds (#572).
+- `database.data_filesystem.size_bytes` gives a database branch a bounded
+  filesystem for `disk_fill`. The fault refuses an unbounded volume and leaves
+  the declared headroom; its undo frees the space (#578).
+
+### Changed
+
+The website explains the MCP workflow with shorter copy, diagrams of actual
+capabilities, a focused view of the real console, and the product demo recording.
+The hero retains its green artwork and offers installation and a demo request.
+Mobile layouts, navigation, forms, and media controls have been revised (#585).
+
+The object-store test image is mirrored into the project's own registry and
+pinned by digest, with checks that the mirror and its consumers agree (#581,
+#584).
+
+### Fixed
+
+- The installer resolves the latest release without the unauthenticated GitHub
+  API rate limit and distinguishes network failures, missing releases, and
+  unavailable platform builds. BusyBox wget remains supported (#580).
+- Terminal workflows wait for program output to settle and respect their time
+  budget while parsing it. Active programs that exhaust the budget return a
+  blocked result; exited programs have their output drained before judgment
+  (#582, #585).
+- Progress records clear the live terminal status line before printing and
+  adapt to a resized terminal (#569).
+- The scheduled sign-in and demo-request probes check the routes the site
+  actually serves and report unreachable servers with a valid status value
+  (#571, #574).
+
 ## v1.6.0
 
 Antifailure could rehearse a change against a copy of production and say what

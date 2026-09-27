@@ -1,10 +1,11 @@
+import { CmsMedia, CmsSection } from "@/components/cms/Editable";
 import { Container } from "@/components/layout/Container";
 import { Heading } from "@/components/layout/Heading";
 import { FailClosedScene } from "./visuals/FailClosedScene";
 
 export function Firewall() {
   return (
-    <section
+    <CmsSection sectionId="firewall" label="Side-effect firewall" group="page"
       className="relative scroll-mt-[60px] pt-10 pb-10 max-xl:pt-8 max-xl:pb-8 max-lg:pt-7 max-lg:pb-7 max-md:pt-6 max-md:pb-6 safe-paddings max-lg:scroll-mt-0"
       id="firewall"
     >
@@ -14,15 +15,16 @@ export function Firewall() {
       >
         <div className="min-w-0 border-t border-black/12 pt-9 max-lg:pt-7">
           <Heading
+            cmsKey="firewall.heading" sectionId="firewall"
             icon="firewall"
             label="Side-Effect Firewall"
             title="<strong>Test payments without charging customers.</strong> Check emails without sending them to users."
           />
           <div className="mt-8 max-xl:mt-6 max-lg:mt-5">
-            <FailClosedScene />
+            <CmsMedia cmsKey="firewall.visual" label="Firewall visual" sectionId="firewall"><FailClosedScene /></CmsMedia>
           </div>
         </div>
       </Container>
-    </section>
+    </CmsSection>
   );
 }

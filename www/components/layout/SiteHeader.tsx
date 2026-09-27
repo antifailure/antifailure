@@ -2,14 +2,107 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Button } from "./Button";
 import { Container } from "./Container";
 import { Logo } from "./Logo";
 import { cn } from "@/lib/cn";
-import { GITHUB_URL, HEADER_MENUS } from "@/lib/nav";
+import { GITHUB_URL, HEADER_MENUS, type FeaturedCard, type HeaderMenu, type NavItem, type NavSection } from "@/lib/nav";
 import { HeaderMini, MenuCardArt, ProductMiniStyles } from "@/components/home/visuals/headerMinis";
 import { Chevron, GitHubIcon } from "../icons";
+import { useCms, useCmsCollection, useCmsCollectionsBatch, useCmsString } from "@/components/cms/CmsProvider";
+import { CmsMedia, CmsSection } from "@/components/cms/Editable";
+import { safeHref, type FieldDefinition } from "@antifailure/website";
+
+const HEADER_ACTIONS = [
+  { id: "signin", text: "Sign in", href: "/signin" },
+  { id: "demo", text: "Request a demo", href: "/request-demo" },
+];
+const FEATURED_IMAGE_FIELDS: FieldDefinition[] = HEADER_MENUS.flatMap((menu) =>
+  (menu.featured ?? []).map((card) => ({
+    key: `header.menus.${menu.id}.featured.${card.id}.image`,
+    label: `${card.title} image`,
+    sectionId: "header",
+    kind: "media",
+    defaultValue: null,
+  })),
+);
+
+/** Resolve nested lists by stable IDs. Each list keeps its own ordering and
+ * source defaults, so adding a link in code does not replace an edited menu. */
+function useHeaderMenus(): HeaderMenu[] {
+  const { register, document } = useCms();
+  const featuredImageFields = useMemo(() => {
+    const menuIds = new Set([
+      ...HEADER_MENUS.map((menu) => menu.id),
+      ...(document.collections["header.menus"]?.custom ?? []).map((menu) => menu.id),
+    ]);
+    const fields = new Map(FEATURED_IMAGE_FIELDS.map((field) => [field.key, field]));
+    for (const menuId of menuIds) {
+      for (const card of document.collections[`header.menus.${menuId}.featured`]?.custom ?? []) {
+        const key = `header.menus.${menuId}.featured.${card.id}.image`;
+        if (fields.has(key) || typeof card.fields.title !== "string") continue;
+        fields.set(key, { key, label: `${card.fields.title} image`, sectionId: "header", kind: "media", defaultValue: null });
+      }
+    }
+    return [...fields.values()];
+  }, [document.collections]);
+  useEffect(() => { register(featuredImageFields); }, [register, featuredImageFields]);
+  const menus = useCmsCollection("header.menus", "Main navigation", "header", HEADER_MENUS)
+    .filter((menu) => typeof menu.text === "string" && menu.text.trim())
+    .map((menu) => ({
+      ...menu,
+      href: safeHref(menu.href) ? menu.href : undefined,
+      sections: Array.isArray(menu.sections) ? menu.sections : [],
+      featured: Array.isArray(menu.featured) ? menu.featured : [],
+    }));
+  // Discovery includes hidden source parents. Resolved edits are only used
+  // for custom parents, never as the source defaults of an existing menu.
+  const sourceMenus = [
+    ...HEADER_MENUS,
+    ...menus.filter((menu) => !HEADER_MENUS.some((source) => source.id === menu.id)),
+  ];
+  const sections = useCmsCollectionsBatch(sourceMenus.map((menu) => ({
+    key: `header.menus.${menu.id}.sections`,
+    label: `${menu.text} groups`,
+    sectionId: "header",
+    defaults: menu.sections ?? [],
+  })));
+  const details = useCmsCollectionsBatch(sourceMenus.flatMap((menu) => [
+    ...[
+      ...(menu.sections ?? []),
+      ...((sections[`header.menus.${menu.id}.sections`] ?? []) as NavSection[])
+        .filter((section) => !(menu.sections ?? []).some((source) => source.id === section.id)),
+    ]
+      .filter((section) => typeof section.title === "string")
+      .map((section) => ({
+      key: `header.menus.${menu.id}.sections.${section.id}.items`,
+      label: `${menu.text}: ${section.title} links`,
+      sectionId: "header",
+      defaults: Array.isArray(section.items) ? section.items : [],
+    })),
+    {
+      key: `header.menus.${menu.id}.featured`,
+      label: `${menu.text} featured links`,
+      sectionId: "header",
+      defaults: menu.featured ?? [],
+    },
+  ]));
+  return menus.map((menu) => ({
+    ...menu,
+    sections: ((sections[`header.menus.${menu.id}.sections`] ?? []) as NavSection[])
+      .filter((section) => typeof section.title === "string")
+      .map((section) => ({
+      ...section,
+      items: ((details[`header.menus.${menu.id}.sections.${section.id}.items`] ?? []) as NavItem[])
+        .filter((item) => typeof item.title === "string" && safeHref(item.href))
+        .map((item) => ({ ...item, description: typeof item.description === "string" ? item.description : "" })),
+    })),
+    featured: ((details[`header.menus.${menu.id}.featured`] ?? []) as FeaturedCard[])
+      .filter((item) => typeof item.title === "string" && safeHref(item.href))
+      .map((item) => ({ ...item, description: typeof item.description === "string" ? item.description : "" })),
+  })).filter((menu) => menu.href || menu.sections.length);
+}
 
 function HeaderLink({
   href,
@@ -37,14 +130,19 @@ function HeaderLink({
 }
 
 export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
+  const menus = useHeaderMenus();
+  const actions = useCmsCollection("header.actions", "Header buttons", "header", HEADER_ACTIONS)
+    .filter((action) => typeof action.text === "string" && safeHref(action.href));
+  const githubHref = useCmsString("header.github.href", GITHUB_URL, { label: "GitHub destination", sectionId: "header", kind: "url" });
+  const githubLabel = useCmsString("header.github.text", "GitHub", { label: "GitHub label", sectionId: "header" });
   const pathname = usePathname();
-  const [open, setOpen] = useState<number | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
   const [mobile, setMobile] = useState(false);
-  const [mobileSection, setMobileSection] = useState<number | null>(null);
+  const [mobileSection, setMobileSection] = useState<string | null>(null);
   const headerRef = useRef<HTMLElement>(null);
   const [height, setHeight] = useState(0);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const panelRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const panelRefs = useRef(new Map<string, HTMLDivElement>());
 
   const clearClose = () => {
     if (timeoutRef.current) {
@@ -53,9 +151,9 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
     }
   };
 
-  const enterMenu = (index: number | null) => {
+  const enterMenu = (id: string | null) => {
     clearClose();
-    setOpen(index);
+    setOpen(id);
   };
 
   const leaveMenu = () => {
@@ -82,7 +180,7 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
       setHeight(0);
       return;
     }
-    const panel = panelRefs.current[open];
+    const panel = panelRefs.current.get(open);
     if (!panel) {
       setHeight(0);
       return;
@@ -147,7 +245,7 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
     // <header> on the inner element the panel's nineteen links belonged to no
     // landmark at all: every other nav on the page sits inside header, main or
     // footer, and the navigation itself did not.
-    <header ref={headerRef} className={cn("sticky top-0 z-50", overlay && "-mb-16 max-xl:-mb-14")}>
+    <CmsSection sectionId="header" label="Header" group="header" as="header" ref={headerRef} className={cn("sticky top-0 z-50", overlay && "-mb-16 max-xl:-mb-14")}>
       <ProductMiniStyles />
       <div
         className={cn(
@@ -161,14 +259,14 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
             <Logo />
             <nav className="group/main-nav max-xl:hidden" aria-label="Main">
               <ul className="flex items-center">
-                {HEADER_MENUS.map((menu, index) => {
+                {menus.map((menu, index) => {
                   const hasSubmenu = Boolean(menu.sections?.length);
-                  const isActive = open === index;
+                  const isActive = open === menu.id;
                   return (
                     <li
-                      key={menu.text}
+                      key={menu.id}
                       className="flex h-16 items-center"
-                      onMouseEnter={() => enterMenu(hasSubmenu ? index : null)}
+                      onMouseEnter={() => enterMenu(hasSubmenu ? menu.id : null)}
                       onMouseLeave={leaveMenu}
                     >
                       {menu.href && !hasSubmenu ? (
@@ -189,7 +287,7 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                             pathname === menu.href ? "text-black" : "text-black/70",
                           )}
                         >
-                          {menu.text}
+                          <span data-cms-key={`header.menus.${menu.id}.text`}>{menu.text}</span>
                         </HeaderLink>
                       ) : (
                         <button
@@ -210,10 +308,10 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                           // The panel already carried this id and nothing
                           // pointed at it, so the button announced that it
                           // expands something without ever saying what.
-                          aria-controls={`submenu-${index}`}
-                          onClick={() => enterMenu(isActive ? null : index)}
+                          aria-controls={`submenu-${menu.id}`}
+                          onClick={() => enterMenu(isActive ? null : menu.id)}
                         >
-                          {menu.text}
+                          <span data-cms-key={`header.menus.${menu.id}.text`}>{menu.text}</span>
                           <Chevron
                             className={cn(
                               "h-2.5 w-2.5 text-gray-new-50 opacity-60 transition-transform duration-200",
@@ -232,13 +330,13 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
           <div className="flex items-center gap-x-8 max-xl:hidden">
             <div className="flex items-center gap-x-6">
               <a
-                href={GITHUB_URL}
+                href={githubHref}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="group flex items-center gap-1.5 rounded-sm text-black transition-colors duration-200 hover:text-gray-new-40"
               >
                 <GitHubIcon className="h-[18px] w-[18px] text-gray-new-20" />
-                <span className="text-sm leading-none tracking-extra-tight">GitHub</span>
+                <span data-cms-key="header.github.text" className="text-sm leading-none tracking-extra-tight">{githubLabel}</span>
               </a>
               {/* There is no Discord. The link that used to sit here was
                   labelled Discord and went to the sign-up form, which is a
@@ -255,12 +353,11 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
             {/* The homepage leads with a demo. Self-service remains available
                 through the sign-in flow. */}
             <div className="flex gap-x-3.5">
-              <Button href="/signin" theme="outlined" size="xxs">
-                Sign in
-              </Button>
-              <Button href="/request-demo" theme="filled" size="xxs">
-                Request a demo
-              </Button>
+              {actions.map((action) => (
+                <Button key={action.id} cmsKey={`header.actions.${action.id}.text`} href={action.href} theme={action.id === "demo" ? "filled" : "outlined"} size="xxs">
+                  <span data-cms-key={`header.actions.${action.id}.text`}>{action.text}</span>
+                </Button>
+              ))}
             </div>
           </div>
 
@@ -308,15 +405,16 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
         onMouseLeave={leaveMenu}
       >
         <div className="relative w-full">
-          {HEADER_MENUS.map((menu, index) => {
-            const isActive = open === index;
+          {menus.map((menu) => {
+            const isActive = open === menu.id;
             const sections = menu.sections ?? [];
             return (
               <div
-                key={menu.text}
-                id={`submenu-${index}`}
+                key={menu.id}
+                id={`submenu-${menu.id}`}
                 ref={(el) => {
-                  panelRefs.current[index] = el;
+                  if (el) panelRefs.current.set(menu.id, el);
+                  else panelRefs.current.delete(menu.id);
                 }}
                 className={cn(
                   "absolute top-0 left-0 w-full transition-opacity duration-200",
@@ -336,8 +434,8 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                     <div className="flex items-start justify-between gap-x-20 pl-[195px] xl:gap-x-16 xl:pl-[143px] max-xl:pl-0">
                       <ul className="flex shrink-0 gap-x-16">
                         {sections.map((section) => (
-                          <li key={section.title} className="w-[240px] data-[wide]:w-[544px]" data-wide={section.items.length > 4 ? "" : undefined}>
-                            <span className="mb-6 block text-[11px] font-medium uppercase leading-none tracking-[0.1em] text-black/55">
+                          <li key={section.id} className="w-[240px] data-[wide]:w-[544px]" data-wide={section.items.length > 4 ? "" : undefined}>
+                            <span data-cms-key={`header.menus.${menu.id}.sections.${section.id}.title`} className="mb-6 block text-[11px] font-medium uppercase leading-none tracking-[0.1em] text-black/55">
                               {section.title}
                             </span>
                             {/* A column of six ran the panel far taller than
@@ -347,12 +445,12 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                                 one column as before. */}
                             <ul className="flex flex-col gap-y-6 data-[wide]:grid data-[wide]:grid-cols-2 data-[wide]:gap-x-16" data-wide={section.items.length > 4 ? "" : undefined}>
                               {section.items.map((item) => (
-                                <li key={item.href}>
+                                <li key={item.id}>
                                   <HeaderLink href={item.href} className="group block" onClick={closeNow}>
-                                    <span className="block text-[16px] font-medium leading-none tracking-tight text-black transition-colors duration-200 group-hover:text-black/55">
+                                    <span data-cms-key={`header.menus.${menu.id}.sections.${section.id}.items.${item.id}.title`} className="block text-[16px] font-medium leading-none tracking-tight text-black transition-colors duration-200 group-hover:text-black/55">
                                       {item.title}
                                     </span>
-                                    <span className="mt-1.5 block text-[13.5px] leading-snug tracking-tight text-black/60">
+                                    <span data-cms-key={`header.menus.${menu.id}.sections.${section.id}.items.${item.id}.description`} className="mt-1.5 block text-[13.5px] leading-snug tracking-tight text-black/60">
                                       {item.description}
                                     </span>
                                   </HeaderLink>
@@ -367,22 +465,24 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                           <div className="flex flex-col gap-3">
                             {menu.featured.map((card) => (
                               <Link prefetch={false}
-                                key={card.href}
+                                key={card.id}
                                 href={card.href}
                                 onClick={closeNow}
                                 className="flex h-[128px] items-center justify-between gap-6 rounded-[14px] border border-black/[0.1] bg-[#f6f6f4] py-4 pr-4 pl-6 transition-colors duration-200 hover:bg-[#E4F1EB]"
                               >
                                 <span className="min-w-0 max-w-[260px]">
-                                  <span className="block text-[16px] font-medium leading-snug tracking-tight text-black">
+                                  <span data-cms-key={`header.menus.${menu.id}.featured.${card.id}.title`} className="block text-[16px] font-medium leading-snug tracking-tight text-black">
                                     {card.title}
                                   </span>
-                                  <span className="mt-1.5 block text-[13.5px] leading-5 tracking-tight text-black/60">
+                                  <span data-cms-key={`header.menus.${menu.id}.featured.${card.id}.description`} className="mt-1.5 block text-[13.5px] leading-5 tracking-tight text-black/60">
                                     {card.description}
                                   </span>
                                 </span>
+                                <CmsMedia cmsKey={`header.menus.${menu.id}.featured.${card.id}.image`} label={`${card.title} image`} sectionId="header" className="h-24 w-40 shrink-0">
                                 {card.visual === "twin" || card.visual === "fleet" ? (
                                   <MenuCardArt kind={card.visual} />
                                 ) : null}
+                                </CmsMedia>
                               </Link>
                             ))}
                           </div>
@@ -410,37 +510,37 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
           className="fixed inset-0 top-14 z-40 hidden overflow-y-auto bg-white px-5 pt-6 pb-[max(4rem,env(safe-area-inset-bottom))] max-xl:block"
         >
           <div className="flex flex-col">
-            {HEADER_MENUS.map((menu, index) => {
+            {menus.map((menu) => {
               const hasSubmenu = Boolean(menu.sections?.length);
-              const expanded = mobileSection === index;
+              const expanded = mobileSection === menu.id;
               if (!hasSubmenu && menu.href) {
                 return (
                   <HeaderLink
-                    key={menu.text}
+                    key={menu.id}
                     href={menu.href}
                     className="border-b border-gray-new-90 py-4 text-[18px] tracking-tighter"
                     onClick={closeNow}
                   >
-                    {menu.text}
+                    <span data-cms-key={`header.menus.${menu.id}.text`}>{menu.text}</span>
                   </HeaderLink>
                 );
               }
               return (
-                <div key={menu.text} className="border-b border-gray-new-90">
+                <div key={menu.id} className="border-b border-gray-new-90">
                   <button
                     type="button"
                     className="flex w-full items-center justify-between py-4 text-left text-[18px] tracking-tighter"
                     aria-expanded={expanded}
-                    onClick={() => setMobileSection(expanded ? null : index)}
+                    onClick={() => setMobileSection(expanded ? null : menu.id)}
                   >
-                    {menu.text}
+                    <span data-cms-key={`header.menus.${menu.id}.text`}>{menu.text}</span>
                     <Chevron className={cn("h-3 w-3 text-gray-new-50 transition", expanded && "rotate-180")} />
                   </button>
                   {expanded ? (
                     <div className="flex flex-col gap-5 pb-5">
                       {menu.sections?.map((section) => (
-                        <div key={section.title}>
-                          <div className="mb-3 text-[10px] font-medium uppercase tracking-snug text-gray-new-50">
+                        <div key={section.id}>
+                          <div data-cms-key={`header.menus.${menu.id}.sections.${section.id}.title`} className="mb-3 text-[10px] font-medium uppercase tracking-snug text-gray-new-50">
                             {section.title}
                           </div>
                           {/* The same thumbnails the desktop dropdown gets. The
@@ -450,15 +550,15 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                           <div className="flex flex-col gap-3.5">
                             {section.items.map((item) => (
                               <HeaderLink
-                                key={item.href}
+                                key={item.id}
                                 href={item.href}
                                 className="group flex items-center gap-3 text-[16px] tracking-extra-tight"
                                 onClick={closeNow}
                               >
                                 <HeaderMini title={item.title} />
                                 <span className="min-w-0">
-                                  {item.title}
-                                  <span className="mt-0.5 block text-[13px] leading-snug text-gray-new-50">
+                                  <span data-cms-key={`header.menus.${menu.id}.sections.${section.id}.items.${item.id}.title`}>{item.title}</span>
+                                  <span data-cms-key={`header.menus.${menu.id}.sections.${section.id}.items.${item.id}.description`} className="mt-0.5 block text-[13px] leading-snug text-gray-new-50">
                                     {item.description}
                                   </span>
                                 </span>
@@ -477,16 +577,15 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                 above 1280 is two products wearing one name. "Install the
                 engine" is a link in the menu above this. */}
             <div className="mt-8 flex gap-3 max-sm:flex-col">
-              <Button href="/signin" theme="outlined" className="min-h-11 flex-none sm:flex-1">
-                Sign in
-              </Button>
-              <Button href="/request-demo" theme="filled" className="min-h-11 flex-none sm:flex-1">
-                Request a demo
-              </Button>
+              {actions.map((action) => (
+                <Button key={action.id} cmsKey={`header.actions.${action.id}.text`} href={action.href} theme={action.id === "demo" ? "filled" : "outlined"} className="min-h-11 flex-none sm:flex-1">
+                  <span data-cms-key={`header.actions.${action.id}.text`}>{action.text}</span>
+                </Button>
+              ))}
             </div>
           </div>
         </nav>
       ) : null}
-    </header>
+    </CmsSection>
   );
 }

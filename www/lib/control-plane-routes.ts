@@ -42,6 +42,7 @@
  */
 
 import { CONTROL_PLANE_URL } from "./site";
+import { isAssetId } from "@antifailure/website";
 
 /**
  * What a probe of this route does to the deployment it is aimed at.
@@ -51,9 +52,8 @@ import { CONTROL_PLANE_URL } from "./site";
  */
 export type ProbeEffect =
   /**
-   * The request cannot reach the route's handler. Middleware in front of it
-   * refuses first, or the handler's own validation refuses before it touches
-   * anything. Nothing is written and nothing is sent.
+   * Middleware or validation refuses before any mutation, or a read-only
+   * handler returns public data. Nothing is written and nothing is sent.
    */
   | "inert"
   /**
@@ -92,6 +92,26 @@ export interface ControlPlaneRoute {
  * the line, before the pull request that added it can merge.
  */
 export const CONTROL_PLANE_ROUTES = {
+  "website.published": {
+    method: "GET",
+    path: "/v1/website/published",
+    calledFrom: "components/cms/CmsProvider.tsx",
+    whenMissing:
+      "Published website edits cannot refresh in the browser until the next static deployment.",
+    probeEffect: "inert",
+    probeReason:
+      "admin/website-public.ts reads the single public website_published row and returns its document. This GET handler performs no writes and dispatches no work.",
+  },
+  "website.media": {
+    method: "GET",
+    path: "/v1/website/media/:id",
+    calledFrom: "components/cms/CmsProvider.tsx",
+    whenMissing:
+      "Published images, videos and custom fonts cannot load on the website.",
+    probeEffect: "inert",
+    probeReason:
+      "admin/website-media.ts validates its id parameter before a database read. The probe sends this literal path, so the parameter is :id rather than a UUID and the handler returns 400 without reading an asset, a capability key or any private data. Real media callers substitute a validated UUID through websiteMediaUrl.",
+  },
   "applications.create": {
     method: "POST",
     path: "/v1/applications",
@@ -145,4 +165,11 @@ export type ControlPlaneRouteName = keyof typeof CONTROL_PLANE_ROUTES;
  */
 export function controlPlaneUrl(name: ControlPlaneRouteName): string {
   return CONTROL_PLANE_URL + CONTROL_PLANE_ROUTES[name].path;
+}
+
+/** Bind the only parameterized public website route after validating it.
+ * The inventory's literal template doubles as an inert route-presence probe. */
+export function websiteMediaUrl(assetId: string): string {
+  if (!isAssetId(assetId)) throw new TypeError("Website media requires an asset UUID.");
+  return CONTROL_PLANE_URL + CONTROL_PLANE_ROUTES["website.media"].path.replace(":id", encodeURIComponent(assetId));
 }

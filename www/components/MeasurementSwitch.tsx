@@ -33,6 +33,10 @@ import {
 
 /** Named separately from the render so an unhandled state cannot compile. */
 const REASONS: Record<MeasurementOff, { state: string; detail: string }> = {
+  preview: {
+    state: "Preview activity stays private.",
+    detail: "Website previews are excluded from analytics and session recording. Your browser's measurement preference is unchanged.",
+  },
   reader: {
     state: "Not counting or recording this visit.",
     detail:

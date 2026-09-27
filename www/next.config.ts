@@ -5,9 +5,10 @@ const isDev = process.env.NODE_ENV !== "production";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  outputFileTracingRoot: path.resolve(__dirname),
+  outputFileTracingRoot: path.resolve(__dirname, ".."),
+  transpilePackages: ["@antifailure/website"],
   turbopack: {
-    root: path.resolve(__dirname),
+    root: path.resolve(__dirname, ".."),
   },
 
   // Local only. Production does not use this: deploy.yml builds the Starlight

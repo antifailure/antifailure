@@ -23,6 +23,7 @@ COPY web/package.json web/package-lock.json ./
 COPY web/apps/api/package.json ./apps/api/
 COPY web/packages/db/package.json ./packages/db/
 COPY web/packages/policy/package.json ./packages/policy/
+COPY web/packages/website/package.json ./packages/website/
 
 # Scoped to this workspace, not the whole tree. A plain `npm ci` here would
 # install every workspace member's dependencies into an image that runs one
@@ -70,6 +71,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 WORKDIR /console
 
 COPY console/package.json console/package-lock.json ./
+COPY web/packages/website /web/packages/website
 RUN npm ci --no-audit --no-fund
 
 COPY console/ ./
@@ -117,6 +119,7 @@ COPY web/package.json ./
 COPY web/apps/api ./apps/api
 COPY web/packages/db ./packages/db
 COPY web/packages/policy ./packages/policy
+COPY web/packages/website ./packages/website
 
 # The bootstrap entrypoint. Shipped in the same image as the application so
 # that the schema it applies and the code that reads it are the same build:

@@ -48,7 +48,7 @@ import { sweepDeviceAuthorizations } from './auth/device.ts'
 import { parseAllowlist, describeAllowlist, signupUrlFrom, sweepOAuthStates } from './auth/signin.ts'
 import { selfServeSignupFrom, describeSelfServeSignup } from './auth/provision.ts'
 import { leadNotifierFrom } from './enterprise/leads.ts'
-import { siteOriginsFrom, siteOriginsSummary } from './siteorigin.ts'
+import { siteOriginFrom, siteOriginsFrom, siteOriginsSummary } from './siteorigin.ts'
 import { keyringFrom } from './providers/seal.ts'
 import { findConsoleBuild } from './console/static.ts'
 import { appConfigFrom, InstallationTokens } from './github/app.ts'
@@ -73,6 +73,7 @@ import {
 } from './hosted.ts'
 import { POSTHOG_REGIONS, postHogRegionFrom, postHogSummary } from './analytics/posthog.ts'
 import { createPostHogSink, postHogSinkSummary } from './analytics/posthog-sink.ts'
+import { startWebsiteRefreshWorker } from './website-refresh.ts'
 
 function required(name: string, ...fallbacks: string[]): string {
   for (const n of [name, ...fallbacks]) {
@@ -614,6 +615,23 @@ export async function startControlPlane(hooks: BootHooks = {}): Promise<ControlP
     ...(emailSignIn ? { emailSignIn } : {}),
   })
 
+  // Publishing commits the content before it queues this refresh. The worker
+  // reconciles the deployed marker and resumes queued work after a restart.
+  let productionWebsitePublishing = false
+  try {
+    productionWebsitePublishing = siteOriginFrom(appBaseUrl) === 'https://app.antifailure.dev'
+  } catch { /* A non-origin console URL cannot authorize production publishing. */ }
+  const websiteRefresh = adminPool
+    ? startWebsiteRefreshWorker({
+        adminPool,
+        clock: systemClock,
+        github,
+        installationTokens,
+        productionPublishing: productionWebsitePublishing,
+        log: (message) => console.log(message),
+      })
+    : null
+
   // Partitions, kept ahead of the writes. Skipped when this process is not the
   // one that owns the schema, because it is DDL and needs the migration role.
   // An installation that runs migrations from a separate job sets
@@ -808,10 +826,12 @@ export async function startControlPlane(hooks: BootHooks = {}): Promise<ControlP
         // whatever the last ten seconds grouped is otherwise lost on every
         // deploy, and a deploy is exactly when an operator is looking.
         void Promise.resolve()
+          .then(() => websiteRefresh?.stop())
           .then(() => hooks.beforeClose?.())
           .then(() => failures.flush())
           .catch((err) => console.error('failure store flush on shutdown', err))
           .then(() => postHogSink.shutdown())
+          .then(() => adminPool?.close())
           .then(() => pool.close())
           .then(() => process.exit(0))
       })
@@ -833,10 +853,12 @@ export async function startControlPlane(hooks: BootHooks = {}): Promise<ControlP
             return
           }
           void Promise.resolve()
+            .then(() => websiteRefresh?.stop())
             .then(() => hooks.beforeClose?.())
             .then(() => failures.flush())
             .catch((err) => console.error('failure store flush on close', err))
             .then(() => postHogSink.shutdown())
+            .then(() => adminPool?.close())
             .then(() => pool.close())
             .then(() => resolve())
             .catch(reject)

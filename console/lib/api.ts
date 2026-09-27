@@ -71,6 +71,24 @@ async function readError(res: Response): Promise<ApiError> {
   return new ApiError(message, res.status, code, requestId);
 }
 
+/** Binary operator uploads share the same credentials and error handling as
+ * JSON requests. The caller supplies its existing operator CSRF header. */
+export async function upload<T>(path: string, file: File, headers: Record<string, string>): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: {
+      ...headers,
+      accept: "application/json",
+      "content-type": file.type || "application/octet-stream",
+      "x-file-name": encodeURIComponent(file.name),
+    },
+    body: file,
+  });
+  if (!res.ok) throw await readError(res);
+  return (await res.json()) as T;
+}
+
 /** A tRPC query. GET, so it is cacheable and cannot be a CSRF target. */
 export async function query<T>(path: string, input?: unknown): Promise<T> {
   const qs = input === undefined ? "" : `?input=${encodeURIComponent(JSON.stringify(input))}`;

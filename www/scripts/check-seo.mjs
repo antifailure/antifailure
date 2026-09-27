@@ -19,6 +19,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { twinCells } from "./twin-cells.mjs";
+import { assessNavigation, cmsNavigationWasEdited } from "./cms-seo-policy.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = path.join(ROOT, "out");
@@ -86,6 +87,13 @@ if (!existsSync(OUT)) {
 
 const read = (rel) => readFileSync(path.join(OUT, rel), "utf8");
 const has = (rel) => existsSync(path.join(OUT, rel));
+// Read the exact snapshot that produced this export, and verify its marker.
+// A custom header/footer may intentionally omit source-default destinations.
+// Every normal CI build has revision zero and keeps the strict source checks.
+const customizedNavigation = cmsNavigationWasEdited(
+  JSON.parse(readFileSync(path.join(ROOT, "lib/cms-snapshot.generated.json"), "utf8")),
+  JSON.parse(read("cms-version.json")),
+);
 
 function jsonLdNodes(html) {
   const nodes = [];
@@ -671,7 +679,16 @@ for (const page of trustPages) {
       node?.about?.["@id"] === "https://antifailure.dev/#organization",
     `${page.route} carries linked ${page.schemaType} JSON-LD`,
   );
-  assert(home.includes(`href="${page.route}"`), `home navigation links to ${page.route}`);
+  const homeNavigation = assessNavigation({
+    customized: customizedNavigation,
+    missingHomeRoutes: home.includes(`href="${page.route}"`) ? [] : [page.route],
+    unreachableRoutes: [],
+  });
+  if (homeNavigation.notices.missingHomeRoutes.length) {
+    console.log(`  note CMS navigation intentionally differs from the source layout; ${page.route} remains in the sitemap.`);
+  } else {
+    assert(homeNavigation.missingHomeRoutes.length === 0, `home navigation links to ${page.route}`);
+  }
   for (const href of page.links) {
     assert(html.includes(`href="${href}"`), `${page.route} visibly links to ${href}`);
   }
@@ -728,12 +745,22 @@ console.log("\nReachability");
   const seen = new Set(["/"]);
   const depth = new Map([["/", 0]]);
   const queue = ["/"];
+  const brokenDestinations = new Set();
+  const redirects = has("staticwebapp.config.json")
+    ? JSON.parse(read("staticwebapp.config.json")).routes ?? [] : [];
   while (queue.length > 0) {
     const here = queue.shift();
     const file = fileFor(here);
     if (!file) continue;
     for (const href of hrefs(readFileSync(file, "utf8"))) {
       if (seen.has(href) || href.startsWith("/docs") || href.startsWith("/_next")) continue;
+      // Files and configured redirects are not page routes. Links to a page
+      // that does not exist are failures even in customized navigation.
+      const destination = href.split(/[?#]/, 1)[0];
+      if (!fileFor(destination) && !has(destination.slice(1))
+        && !redirects.some((route) => route.route === destination && route.redirect)) {
+        brokenDestinations.add(`${here} links to ${destination}`);
+      }
       seen.add(href);
       depth.set(href, depth.get(here) + 1);
       queue.push(href);
@@ -745,8 +772,15 @@ console.log("\nReachability");
     .map((m) => new URL(m[0].replace(/<\/?loc>/g, "")).pathname.replace(/\/$/, "") || "/");
   const unreachable = sitemapRoutes.filter((r) => !seen.has(r));
   const deepest = Math.max(...[...depth.values()]);
-  assert(
-    unreachable.length === 0,
+  const navigation = assessNavigation({ customized: customizedNavigation,
+    missingHomeRoutes: [], unreachableRoutes: unreachable, brokenDestinations: [...brokenDestinations] });
+  assert(navigation.brokenDestinations.length === 0,
+    "every crawled marketing link points to a built page, asset, or configured redirect",
+    navigation.brokenDestinations.join(", "));
+  if (navigation.notices.unreachableRoutes.length) {
+    console.log(`  note CMS navigation leaves ${unreachable.length} routes discoverable through the sitemap: ${unreachable.join(", ")}`);
+  } else assert(
+    navigation.unreachableRoutes.length === 0,
     `every route in the sitemap is reachable from the home page (deepest is ${deepest} clicks)`,
     unreachable.length > 0
       ? `${unreachable.length} reachable only through the sitemap: ${unreachable.join(", ")}`

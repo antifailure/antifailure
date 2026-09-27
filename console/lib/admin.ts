@@ -18,7 +18,7 @@
  */
 
 import { createContext, useContext } from "react";
-import { mutate, query, rest, useApi, usePages, type ApiError } from "@/lib/api";
+import { mutate, query, rest, upload, useApi, usePages, type ApiError } from "@/lib/api";
 import { ADMIN_CSRF_HEADER, createAdminCsrf } from "@/lib/admin-csrf";
 
 /** Every permission string the platform catalog defines. Kept as a plain string
@@ -248,6 +248,10 @@ export async function adminPost<T>(path: string, body?: unknown): Promise<T> {
   // What it does NOT do is unwrap a tRPC envelope, because there is not one:
   // these routes answer with their body.
   return csrf.send((headers) => rest<T>(path, { method: "POST", body: body ?? {}, headers }));
+}
+
+export async function adminUpload<T>(path: string, file: File): Promise<T> {
+  return csrf.send((headers) => upload<T>(path, file, headers));
 }
 
 

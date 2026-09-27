@@ -1,6 +1,7 @@
-export type NavItem = { title: string; href: string; description: string };
-export type NavSection = { title: string; items: NavItem[] };
+export type NavItem = { id: string; title: string; href: string; description: string };
+export type NavSection = { id: string; title: string; items: NavItem[] };
 export type FeaturedCard = {
+  id: string;
   title: string;
   description: string;
   href: string;
@@ -8,6 +9,7 @@ export type FeaturedCard = {
   visual?: string;
 };
 export type HeaderMenu = {
+  id: string;
   text: string;
   href?: string;
   sections?: NavSection[];
@@ -16,37 +18,45 @@ export type HeaderMenu = {
 
 export const HEADER_MENUS: HeaderMenu[] = [
   {
+    id: "product",
     text: "Product",
     sections: [
       {
+        id: "core",
         title: "Core",
         items: [
           {
+            id: "overview",
             title: "Overview",
             href: "/product",
             description: "MCP tools for deployment testing",
           },
           {
+            id: "twins",
             title: "Isolated Twin",
             href: "/product/twins",
             description: "Temporary copy of the application stack",
           },
           {
+            id: "safe-state",
             title: "Safe State",
             href: "/product/safe-state",
             description: "Masked data with relationships intact",
           },
           {
+            id: "firewall",
             title: "Side-Effect Firewall",
             href: "/product/firewall",
             description: "Control external calls during tests",
           },
           {
+            id: "load",
             title: "Load",
             href: "/product/load",
             description: "Traffic shaped like production's access log",
           },
           {
+            id: "migrations",
             title: "Migration Safety",
             href: "/product/migrations",
             description: "Locks, rewrites, and query plans",
@@ -56,12 +66,14 @@ export const HEADER_MENUS: HeaderMenu[] = [
     ],
     featured: [
       {
+        id: "migrations",
         title: "Migration rehearsal",
         description: "Exclusive locks, table rewrites, and query plans on production's own shape.",
         href: "/product/migrations",
         visual: "fleet",
       },
       {
+        id: "twins",
         title: "Isolated Twin",
         description: "A temporary copy of the application stack, destroyed with the pull request.",
         href: "/product/twins",
@@ -70,27 +82,33 @@ export const HEADER_MENUS: HeaderMenu[] = [
     ],
   },
   {
+    id: "solutions",
     text: "Solutions",
     sections: [
       {
+        id: "teams",
         title: "Teams",
         items: [
           {
+            id: "saas",
             title: "B2B SaaS",
             href: "/solutions/saas",
             description: "Subscriptions, tenants, schema changes",
           },
           {
+            id: "fintech",
             title: "Fintech",
             href: "/solutions/fintech",
             description: "Payments and ledger checks",
           },
           {
+            id: "marketplaces",
             title: "Marketplaces",
             href: "/solutions/marketplaces",
             description: "Queues, workers, dual-writes",
           },
           {
+            id: "devtools",
             title: "Developer tools",
             href: "/solutions/devtools",
             description: "Schema changes on large tables",
@@ -100,12 +118,14 @@ export const HEADER_MENUS: HeaderMenu[] = [
     ],
     featured: [
       {
+        id: "demo",
         title: "Bring your next change",
         description: "See Antifailure on a change relevant to your team.",
         href: "/request-demo",
         visual: "twin",
       },
       {
+        id: "migrations",
         title: "Migration rehearsal",
         description: "Exclusive locks, table rewrites, and query plans on production's own shape.",
         href: "/product/migrations",
@@ -113,9 +133,9 @@ export const HEADER_MENUS: HeaderMenu[] = [
       },
     ],
   },
-  { text: "Docs", href: "/docs" },
-  { text: "Writing", href: "/blog" },
-  { text: "Pricing", href: "/pricing" },
+  { id: "docs", text: "Docs", href: "/docs" },
+  { id: "writing", text: "Writing", href: "/blog" },
+  { id: "pricing", text: "Pricing", href: "/pricing" },
 ];
 
 export const GITHUB_URL = "https://github.com/antifailure/antifailure";
@@ -139,65 +159,70 @@ export const STATUS_URL = "https://antifailure.github.io/antifailure/";
  * else. A document that exists and is not linked is a document nobody finds.
  */
 export const LEGAL_LINKS = [
-  { text: "Privacy", href: "/privacy" },
-  { text: "Terms", href: "/terms" },
+  { id: "privacy", text: "Privacy", href: "/privacy" },
+  { id: "terms", text: "Terms", href: "/terms" },
 ];
 
 export const FOOTER_MENUS = [
   {
+    id: "product",
     heading: "Product",
     items: [
-      { text: "Overview", href: "/product" },
-      { text: "Isolated Twin", href: "/product/twins" },
-      { text: "Safe State", href: "/product/safe-state" },
-      { text: "Load", href: "/product/load" },
-      { text: "Pricing", href: "/pricing" },
+      { id: "overview", text: "Overview", href: "/product" },
+      { id: "twins", text: "Isolated Twin", href: "/product/twins" },
+      { id: "safe-state", text: "Safe State", href: "/product/safe-state" },
+      { id: "load", text: "Load", href: "/product/load" },
+      { id: "pricing", text: "Pricing", href: "/pricing" },
     ],
   },
   {
+    id: "features",
     heading: "Features",
     items: [
-      { text: "Side-Effect Firewall", href: "/product/firewall" },
-      { text: "Migration Safety", href: "/product/migrations" },
-      { text: "Insights", href: "/docs/concepts/insights" },
-      { text: "Agents", href: "/docs/concepts/agents" },
-      { text: "Egress", href: "/docs/concepts/egress" },
-      { text: "Masking", href: "/docs/concepts/masking" },
+      { id: "firewall", text: "Side-Effect Firewall", href: "/product/firewall" },
+      { id: "migrations", text: "Migration Safety", href: "/product/migrations" },
+      { id: "insights", text: "Insights", href: "/docs/concepts/insights" },
+      { id: "agents", text: "Agents", href: "/docs/concepts/agents" },
+      { id: "egress", text: "Egress", href: "/docs/concepts/egress" },
+      { id: "masking", text: "Masking", href: "/docs/concepts/masking" },
     ],
   },
   {
+    id: "company",
     heading: "Company",
     items: [
-      { text: "Solutions", href: "/solutions" },
-      { text: "B2B SaaS", href: "/solutions/saas" },
-      { text: "Fintech", href: "/solutions/fintech" },
-      { text: "Marketplaces", href: "/solutions/marketplaces" },
-      { text: "Developer tools", href: "/solutions/devtools" },
-      { text: "About", href: "/about" },
-      { text: "Careers", href: "/careers" },
-      { text: "Contact", href: "/contact" },
-      { text: "Request a demo", href: "/request-demo" },
+      { id: "solutions", text: "Solutions", href: "/solutions" },
+      { id: "saas", text: "B2B SaaS", href: "/solutions/saas" },
+      { id: "fintech", text: "Fintech", href: "/solutions/fintech" },
+      { id: "marketplaces", text: "Marketplaces", href: "/solutions/marketplaces" },
+      { id: "devtools", text: "Developer tools", href: "/solutions/devtools" },
+      { id: "about", text: "About", href: "/about" },
+      { id: "careers", text: "Careers", href: "/careers" },
+      { id: "contact", text: "Contact", href: "/contact" },
+      { id: "demo", text: "Request a demo", href: "/request-demo" },
     ],
   },
   {
+    id: "resources",
     heading: "Resources",
     items: [
-      { text: "Documentation", href: "/docs" },
-      { text: "Quickstart", href: "/docs/getting-started/quickstart" },
-      { text: "Writing", href: "/blog" },
-      { text: "Changelog", href: "/changelog" },
-      { text: "Manifest", href: "/docs/reference/manifest" },
-      { text: "Error reference", href: "/docs/reference/errors" },
-      { text: "Enterprise", href: "/docs/enterprise/licensing" },
+      { id: "docs", text: "Documentation", href: "/docs" },
+      { id: "quickstart", text: "Quickstart", href: "/docs/getting-started/quickstart" },
+      { id: "writing", text: "Writing", href: "/blog" },
+      { id: "changelog", text: "Changelog", href: "/changelog" },
+      { id: "manifest", text: "Manifest", href: "/docs/reference/manifest" },
+      { id: "errors", text: "Error reference", href: "/docs/reference/errors" },
+      { id: "enterprise", text: "Enterprise", href: "/docs/enterprise/licensing" },
     ],
   },
   {
+    id: "connect",
     heading: "Connect",
     items: [
-      { text: "GitHub", href: GITHUB_URL },
-      { text: "Status", href: STATUS_URL },
-      { text: "Sign in", href: "/signin" },
-      { text: "Request a demo", href: "/request-demo" },
+      { id: "github", text: "GitHub", href: GITHUB_URL },
+      { id: "status", text: "Status", href: STATUS_URL },
+      { id: "signin", text: "Sign in", href: "/signin" },
+      { id: "demo", text: "Request a demo", href: "/request-demo" },
     ],
   },
 ];

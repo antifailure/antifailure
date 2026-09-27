@@ -1,22 +1,22 @@
 name: Deploy
+run-name: Deploy ${{ github.event_name == 'workflow_dispatch' && format('CMS {0}', inputs.cms_revision) || github.sha }}
 
-# The site is a manual snapshot until this runs.
-#
-# `az staticwebapp show -n af-site -g af-web` reports provider SwaCli, and both
-# repositoryUrl and branch are null. There is no repository connection: the live
-# site is whatever somebody last pushed from their own machine with the SWA CLI.
-# So every documentation change sits on main, green, and invisible. The 78 link
-# fixes in 0c69add are on main right now and antifailure.dev still serves the
-# broken ones.
-#
-# Worse than being stale is that nothing says so. A deploy that never happens
-# produces no red check, no failed run, nothing to notice. This makes shipping
-# the site look like shipping the code: a push moves it, and a failure is
-# visible.
+# Code changes and CMS publishes use the same static build and live checks.
+# Dispatch inputs describe the request; the build always reads the latest
+# published document so a delayed request cannot restore an older revision.
 on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      cms_revision:
+        description: CMS revision requesting a static refresh (informational)
+        type: string
+        required: false
+      cms_content_hash:
+        description: Published content hash requesting a static refresh (informational)
+        type: string
+        required: false
 
 concurrency:
   group: deploy-${{ github.ref }}
@@ -45,10 +45,41 @@ permissions:
   contents: read
 
 jobs:
+  cms-readiness:
+    name: CMS API readiness
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - name: Check the published CMS endpoint before building the site
+        id: check
+        run: |
+          set -euo pipefail
+          headers=$(mktemp)
+          code=$(curl -sS -m 15 -D "$headers" -o /dev/null -w '%{http_code}' https://app.antifailure.dev/v1/website/published) || code=000
+          if [ "$code" = 200 ]; then
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$code" = 404 ] && grep -qi '^x-request-id:' "$headers"; then
+            marker=$(curl -sS -m 15 -o /dev/null -w '%{http_code}' https://antifailure.dev/cms-version.json) || marker=000
+            if [ "$marker" = 404 ]; then
+              echo 'ready=false' >> "$GITHUB_OUTPUT"
+              echo '::notice::First CMS rollout: the production API has not been promoted. The existing site remains live. Run Deploy after the production control plane is ready.'
+              exit 0
+            fi
+          fi
+          echo "::error::CMS API returned $code. A released CMS site cannot be rebuilt until its published document is available."
+          exit 1
+
   site:
     name: site
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      CMS_PUBLISHED_URL: https://app.antifailure.dev/v1/website/published
+      CMS_LIVE_MARKER_URL: https://antifailure.dev/cms-version.json
 
     # INERT UNTIL THE TOKEN EXISTS, on purpose.
     #
@@ -62,7 +93,8 @@ jobs:
     #
     # That command is for a person to run. Nothing here reads the token, and no
     # step prints it.
-    if: ${{ github.repository == 'antifailure/antifailure' }}
+    needs: cms-readiness
+    if: ${{ github.repository == 'antifailure/antifailure' && needs.cms-readiness.outputs.ready == 'true' }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -221,11 +253,22 @@ jobs:
 
           go run ./tools/routecheck -root . -origin "$control" -allow-write-probes
 
+      - name: Check the CMS revision immediately before uploading
+        id: cms_current
+        if: ${{ env.TOKEN != '' }}
+        env:
+          TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+        # A newer publish gets its own refresh job. Ending this run without an
+        # upload preserves the currently deployed artifact instead of replacing
+        # it with content that was superseded while docs and checks were built.
+        run: node scripts/cms-snapshot.mjs --check-current
+        working-directory: www
+
       - name: Publish
         # Skipped, with the job still green, until somebody sets the token.
         # A skipped publish is honest; a failing one teaches people to ignore
         # a red main.
-        if: ${{ env.TOKEN != '' }}
+        if: ${{ env.TOKEN != '' && steps.cms_current.outputs.current == 'true' }}
         env:
           TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
         uses: Azure/static-web-apps-deploy@1a947af9992250f3bc2e68ad0754c0b0c11566c9 # v1
@@ -241,6 +284,13 @@ jobs:
           skip_app_build: true
           skip_api_build: true
 
+      - name: The live site serves the CMS revision this build rendered
+        if: ${{ env.TOKEN != '' && steps.cms_current.outputs.current == 'true' }}
+        env:
+          TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+        run: node scripts/cms-snapshot.mjs --verify-live
+        working-directory: www
+
       - name: The API answers
         # A publish is not a working endpoint, and this is the one part of the
         # site that can be deployed, report success, and still be dead: a
@@ -254,7 +304,7 @@ jobs:
         # the platform's, which proves the request reached our code: a managed
         # function that is missing entirely produces a 404 too, from the CDN,
         # and the two are indistinguishable from the status line alone.
-        if: ${{ env.TOKEN != '' }}
+        if: ${{ env.TOKEN != '' && steps.cms_current.outputs.current == 'true' }}
         env:
           TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
         run: |
@@ -338,7 +388,7 @@ jobs:
         # a stronger claim than it is: one handshake from one runner proves one
         # edge node answered one client. It catches a lapsed certificate within
         # a deploy cycle. It cannot see a fault that only some clients hit.
-        if: ${{ env.TOKEN != '' }}
+        if: ${{ env.TOKEN != '' && steps.cms_current.outputs.current == 'true' }}
         env:
           TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
         run: tools/site/check-tls.sh
@@ -362,7 +412,7 @@ jobs:
         # and a caller reading an operation that is not there yet gets a 404.
         # It stops being tolerable the moment the versions differ, and that is
         # the one case this fails on.
-        if: ${{ env.TOKEN != '' }}
+        if: ${{ env.TOKEN != '' && steps.cms_current.outputs.current == 'true' }}
         env:
           TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
         run: |
@@ -465,7 +515,7 @@ jobs:
         # The script exits 0 on a rejected submission. The site is already
         # published at this point and a crawler will find it anyway; failing
         # the deploy over a notification would be the wrong trade.
-        if: ${{ env.TOKEN != '' }}
+        if: ${{ env.TOKEN != '' && steps.cms_current.outputs.current == 'true' }}
         env:
           TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
         # --submit, because the script prints and stops without it. A script
@@ -491,7 +541,7 @@ jobs:
         # minutes instead of somebody finding out by filling in the form.
         #
         # It files no job applications. See tools/sitesmoke.
-        if: ${{ env.TOKEN != '' }}
+        if: ${{ env.TOKEN != '' && steps.cms_current.outputs.current == 'true' }}
         env:
           TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
         run: |

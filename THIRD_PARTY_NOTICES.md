@@ -813,16 +813,50 @@ says so.
 - `zod` 4.6.5, MIT
 - `zod-to-json-schema` 3.25.2, ISC
 
-### The console export (8)
+### The console export (42)
 
 - `@swc/helpers` 0.5.23, Apache-2.0
+- `@tiptap/core` 3.31.3, MIT
+- `@tiptap/extension-blockquote` 3.31.3, MIT
+- `@tiptap/extension-bold` 3.31.3, MIT
+- `@tiptap/extension-code` 3.31.3, MIT
+- `@tiptap/extension-code-block` 3.31.3, MIT
+- `@tiptap/extension-document` 3.31.3, MIT
+- `@tiptap/extension-hard-break` 3.31.3, MIT
+- `@tiptap/extension-heading` 3.31.3, MIT
+- `@tiptap/extension-horizontal-rule` 3.31.3, MIT
+- `@tiptap/extension-italic` 3.31.3, MIT
+- `@tiptap/extension-link` 3.31.3, MIT
+- `@tiptap/extension-list` 3.31.3, MIT
+- `@tiptap/extension-paragraph` 3.31.3, MIT
+- `@tiptap/extension-strike` 3.31.3, MIT
+- `@tiptap/extension-text` 3.31.3, MIT
+- `@tiptap/extension-underline` 3.31.3, MIT
+- `@tiptap/extensions` 3.31.3, MIT
+- `@tiptap/react` 3.31.3, MIT
+- `@tiptap/starter-kit` 3.31.3, MIT
 - `geist` 1.7.2, OFL-1.1
+- `linkifyjs` 4.3.3, MIT
 - `next` 16.3.5, MIT
 - `next/dist/compiled/process` vendored in next 16.3.5, MIT
 - `next/dist/compiled/react` vendored in next 16.3.5, MIT
 - `next/dist/compiled/react-dom` vendored in next 16.3.5, MIT
 - `next/dist/compiled/react-server-dom-turbopack` vendored in next 16.3.5, MIT
 - `next/dist/compiled/scheduler` vendored in next 16.3.5, MIT
+- `orderedmap` 2.1.1, MIT
+- `prosemirror-commands` 1.7.2, MIT
+- `prosemirror-dropcursor` 1.8.4, MIT
+- `prosemirror-gapcursor` 1.4.1, MIT
+- `prosemirror-history` 1.5.0, MIT
+- `prosemirror-keymap` 1.2.3, MIT
+- `prosemirror-model` 1.25.12, MIT
+- `prosemirror-schema-list` 1.5.1, MIT
+- `prosemirror-state` 1.4.4, MIT
+- `prosemirror-transform` 1.12.2, MIT
+- `prosemirror-view` 1.42.6, MIT
+- `rope-sequence` 1.3.4, MIT
+- `use-sync-external-store` 1.7.0, MIT
+- `w3c-keyname` 2.2.8, MIT
 
 ## The enterprise control plane image, in addition
 

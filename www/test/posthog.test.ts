@@ -54,12 +54,13 @@ interface BrowserOptions {
   webdriver?: boolean
   userAgent?: string
   origin?: string
+  pathname?: string
 }
 
 /** As much of a browser as the gate reads, which is the same set lib/beacon.ts
  *  reads, because the gate asks the beacon rather than asking the browser a
  *  second way. */
-function install(options: BrowserOptions = {}): void {
+function install(options: BrowserOptions = {}) {
   const origin = options.origin ?? 'https://www.antifailure.dev'
   const store = new Map<string, string>()
   const local = new Map<string, string>()
@@ -71,9 +72,26 @@ function install(options: BrowserOptions = {}): void {
       enumerable: true,
     })
 
-  define('location', { search: '', pathname: '/', href: `${origin}/`, hostname: 'www.antifailure.dev', origin })
-  define('document', { referrer: '', visibilityState: 'visible', addEventListener() {} })
-  define('window', { addEventListener() {}, location: { origin } })
+  const browser = { previewMounted: false, listeners: new Map<string, Array<() => void>>() }
+  const pathname = options.pathname ?? '/'
+  const here = { search: '', pathname, href: `${origin}${pathname}`, hostname: 'www.antifailure.dev', origin }
+  const navigate = (_data: unknown, _unused: string, destination?: string | URL | null) => {
+    if (destination == null) return
+    const next = new URL(destination, here.href)
+    Object.assign(here, { href: next.href, pathname: next.pathname, search: next.search, origin: next.origin })
+  }
+  define('location', here)
+  define('document', {
+    referrer: '', visibilityState: 'visible', addEventListener() {},
+    querySelector: () => browser.previewMounted ? {} : null,
+  })
+  define('window', {
+    addEventListener(name: string, callback: () => void) {
+      browser.listeners.set(name, [...(browser.listeners.get(name) ?? []), callback])
+    },
+    location: here,
+    history: { pushState: navigate, replaceState: navigate },
+  })
   define('navigator', {
     userAgent: options.userAgent ?? 'Mozilla/5.0 (Macintosh) AppleWebKit/605 Safari/605',
     webdriver: options.webdriver ?? false,
@@ -87,6 +105,7 @@ function install(options: BrowserOptions = {}): void {
   })
   define('sessionStorage', asStore(store))
   define('localStorage', asStore(local))
+  return browser
 }
 
 let moduleCount = 0
@@ -422,6 +441,117 @@ describe('the switch on the privacy page, which has to reach the vendor too', ()
     await new Promise((resolve) => setTimeout(resolve, 0))
     assert.equal(vendorLoads, 0)
     assert.equal(stubRecord().inits.length, 0)
+    unwatch()
+  })
+})
+
+describe('private preview capture boundary', () => {
+  beforeEach(() => { vendorLoads = 0; resetStub() })
+
+  async function ready(options: BrowserOptions = {}) {
+    const browser = install(options)
+    const beacon = await import('../lib/beacon')
+    beacon.setMeasurement(true)
+    const posthog = await load()
+    return { browser, beacon, posthog }
+  }
+
+  it('does not load the vendor on a direct preview entry', async () => {
+    const { posthog, beacon } = await ready({ pathname: '/cms-preview/' })
+    const unwatch = posthog.watchMeasurement()
+    await posthog.startProductAnalytics()
+    assert.equal(vendorLoads, 0)
+    assert.equal(stubRecord().inits.length, 0)
+    assert.equal(stubRecord().optedOut, 0)
+    assert.equal(localStorage.getItem('af.analytics.optout.v1'), null)
+    assert.equal(beacon.measurementStatus().off, 'preview')
+    unwatch()
+  })
+
+  it('navigation while the vendor chunk loads cannot initialize it on preview', async () => {
+    const { posthog } = await ready()
+    const starting = posthog.startProductAnalytics()
+    window.history.pushState({}, '', '/cms-preview')
+    await starting
+    assert.equal(stubRecord().inits.length, 0)
+    assert.equal(stubRecord().optedOut, 0)
+  })
+
+  it('live then preview pauses before navigation without persisting consent or destroying the recorder', async () => {
+    const { posthog, beacon } = await ready()
+    const original = window.history.pushState
+    let stoppedBeforeNavigation = false
+    window.history.pushState = function (...args) {
+      original.apply(this, args)
+      stoppedBeforeNavigation = stubRecord().stopped > 0
+    }
+    const unwatch = posthog.watchMeasurement()
+    await posthog.startProductAnalytics()
+    window.history.pushState({}, '', '/cms-preview')
+    assert.equal(stoppedBeforeNavigation, true)
+    assert.equal(stubRecord().stopped, 1)
+    assert.equal(stubRecord().discarded, 0, 'dispose is permanent in this SDK, so temporary preview cannot use it')
+    assert.equal(stubRecord().optedOut, 0, 'preview is not a reader opt-out')
+    assert.equal(localStorage.getItem('af.analytics.optout.v1'), null)
+    assert.equal(beacon.measurementStatus().off, 'preview')
+    assert.ok(stubRecord().reconfigured.some((config) => config.autocapture === false && config.capture_pageview === false))
+    unwatch()
+  })
+
+  it('the event gate drops clicks and replay snapshots on preview and while draft DOM is mounted', async () => {
+    const { posthog, browser } = await ready()
+    const options = posthog.posthogOptions(location.origin)!
+    assert.equal(options.session_recording?.blockSelector, '.af-cms-preview')
+    const beforeSend = options.before_send
+    assert.equal(typeof beforeSend, 'function')
+    if (typeof beforeSend !== 'function') throw new Error('Missing event gate')
+    const snapshot = { uuid: '00000000-0000-4000-8000-000000000001', event: '$snapshot', properties: { draft: 'Private text' } } as Parameters<typeof beforeSend>[0]
+    const click = { uuid: '00000000-0000-4000-8000-000000000002', event: '$autocapture', properties: { label: 'Private CTA' } } as Parameters<typeof beforeSend>[0]
+    assert.strictEqual(beforeSend(click), click, 'public events remain enabled')
+    browser.previewMounted = true
+    assert.equal(beforeSend(snapshot), null, 'DOM committed before URL is still excluded')
+    assert.equal(beforeSend(click), null)
+    browser.previewMounted = false
+    window.history.pushState({}, '', '/cms-preview')
+    assert.equal(beforeSend(snapshot), null)
+    assert.equal(beforeSend(click), null)
+  })
+
+  it('preview then live resumes only after the preview DOM is gone, without a new opt-in', async () => {
+    const { posthog, browser, beacon } = await ready()
+    const unwatch = posthog.watchMeasurement()
+    await posthog.startProductAnalytics()
+    window.history.pushState({}, '', '/cms-preview')
+    browser.previewMounted = true
+    window.history.pushState({}, '', '/pricing')
+    await posthog.startProductAnalytics()
+    assert.equal(stubRecord().started, 0, 'old draft DOM remains blocked after the URL changes')
+    browser.previewMounted = false
+    await posthog.startProductAnalytics()
+    assert.equal(stubRecord().started, 1)
+    assert.equal(stubRecord().inits.length, 1, 'resume does not recreate the vendor or its consent state')
+    assert.equal(stubRecord().optedOut, 0)
+    assert.equal(beacon.measurementStatus().measuring, true)
+    assert.equal(localStorage.getItem('af.analytics.optout.v1'), null)
+    unwatch()
+  })
+
+  it('direct preview then live starts normally, while a real opt-out remains honored', async () => {
+    const { posthog, beacon } = await ready({ pathname: '/cms-preview' })
+    const unwatch = posthog.watchMeasurement()
+    await posthog.startProductAnalytics()
+    window.history.pushState({}, '', '/')
+    await posthog.startProductAnalytics()
+    // The route notification can own the asynchronous import, so wait for
+    // that operation rather than a wall-clock timer.
+    for (let index = 0; index < 20; index++) await Promise.resolve()
+    assert.equal(stubRecord().inits.length, 1)
+    beacon.setMeasurement(false)
+    window.history.pushState({}, '', '/cms-preview')
+    window.history.pushState({}, '', '/')
+    await posthog.startProductAnalytics()
+    assert.equal(beacon.measurementStatus().off, 'reader')
+    assert.equal(stubRecord().started, 0)
     unwatch()
   })
 })

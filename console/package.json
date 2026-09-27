@@ -12,6 +12,14 @@
     "test:layout": "node test/layout.mjs"
   },
   "dependencies": {
+    "@antifailure/website": "file:../web/packages/website",
+    "@floating-ui/dom": "1.8.0",
+    "@tiptap/core": "3.31.3",
+    "@tiptap/extension-link": "3.31.3",
+    "@tiptap/extension-underline": "3.31.3",
+    "@tiptap/pm": "3.31.3",
+    "@tiptap/react": "3.31.3",
+    "@tiptap/starter-kit": "3.31.3",
     "geist": "^1.7.2",
     "next": "^16.3.5",
     "react": "^19.3.0",

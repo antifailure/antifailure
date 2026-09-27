@@ -395,6 +395,7 @@ function NavDrawer({
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const { me, status, error, reload } = useAdminContext();
   const [menu, setMenu] = useState(false);
+  const pathname = usePathname();
 
   if (status === "loading") {
     // A quiet hold rather than a spinner. The portal is one fetch from ready
@@ -446,6 +447,12 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   }
 
   if (!me) return <SignIn onSignedIn={reload} />;
+
+  // The website editor owns its navigation and preview workspace. The session
+  // checks above still run before it, including the impersonation refusal.
+  if (pathname.replace(/\/$/, "") === "/admin/administration/website") {
+    return <main className="min-w-0">{children}</main>;
+  }
 
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[236px_1fr]">

@@ -6,6 +6,7 @@ import "./globals.css";
 import { SiteJsonLd } from "@/lib/jsonld";
 import { PageViews } from "@/components/PageViews";
 import { ProductAnalytics } from "@/components/ProductAnalytics";
+import { CmsProvider } from "@/components/cms/CmsProvider";
 import { OG_IMAGE, SITE_DESCRIPTION, SITE_NAME, SITE_TITLE, SITE_URL, pageTitle } from "@/lib/site";
 
 const inter = Inter({
@@ -104,7 +105,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <a href="#main" className="skip-to-content">
           Skip to content
         </a>
-        {children}
+        <CmsProvider>{children}</CmsProvider>
         {/* One page view per route, and nothing else. No cookie and no vendor:
             www/lib/beacon.ts is the whole of what this one sends and the whole
             of what it does not. */}

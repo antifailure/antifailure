@@ -5,15 +5,17 @@
   "description": "Public Antifailure website: marketing pages, docs, and sign-in.",
   "license": "MIT",
   "scripts": {
-    "dev": "next dev",
+    "dev": "node scripts/cms-snapshot.mjs && next dev",
     "images": "node scripts/optimize-images.mjs",
-    "build": "node scripts/optimize-images.mjs && next build && node scripts/markdown-twins.mjs",
+    "build": "node scripts/cms-snapshot.mjs && node scripts/optimize-images.mjs && next build && node scripts/markdown-twins.mjs",
     "start": "next start",
     "check:seo": "node scripts/check-seo.mjs",
-    "test": "ls test/*.test.ts > /dev/null && node --import ./test/resolve.ts --test --test-concurrency=1 test/*.test.ts",
+    "test": "ls test/*.test.ts > /dev/null && node --import ./test/resolve.ts --test --test-concurrency=1 test/*.test.ts scripts/cms-snapshot.test.mjs",
+    "typecheck": "node scripts/cms-snapshot.mjs && tsc --noEmit",
     "og": "node scripts/make-og.mjs"
   },
   "dependencies": {
+    "@antifailure/website": "file:../web/packages/website",
     "geist": "^1.7.2",
     "motion": "^13.4.0",
     "next": "^16.3.5",

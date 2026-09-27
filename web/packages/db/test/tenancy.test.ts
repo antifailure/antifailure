@@ -180,6 +180,41 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
           'org_id would claim a tenancy it does not have and would put this table into the ' +
           "loops below, which demand an isolation it is not supposed to have",
       ],
+      [
+        'website_draft',
+        'one installation-wide marketing homepage, not tenant content. Only the operator role has ' +
+          'a database grant; the application role cannot read drafts. website.test.ts proves this.',
+      ],
+      [
+        'website_published',
+        'the same homepage after an owner publishes it. The application role has SELECT behind ' +
+          'a public-read policy, and the HTTP response exposes only the published document.',
+      ],
+      [
+        'website_history',
+        'immutable operator-only publication history for the installation. The application role ' +
+          'has no grant, and website.test.ts proves a tenant cannot read it.',
+      ],
+      [
+        'website_mutations',
+        'operator-only idempotency receipts for CMS saves and publishes. A tenant has no grant ' +
+          'on request IDs, actor IDs, or stored responses.',
+      ],
+      [
+        'website_assets',
+        'media belongs to the installation. The application role can select only published rows ' +
+          'and approved columns through its public-read policy; draft bytes stay operator-only.',
+      ],
+      [
+        'website_secrets',
+        'the installation-wide signing key for private media previews. Only the operator role ' +
+          'can read it; a tenant has no grant.',
+      ],
+      [
+        'website_refresh_jobs',
+        'installation-wide dispatch and reconciliation state. Only the operator role has a grant ' +
+          'and the public response never returns its lease token.',
+      ],
       // The analytics tables carry a keyed hash of the organization rather than
       // its id, and that is the whole point of them: see migrations/0032. An
       // org_id here would make the stream joinable back to a customer, so the

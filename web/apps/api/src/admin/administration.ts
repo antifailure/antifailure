@@ -44,6 +44,7 @@ import { capsFor, round } from '../costs.ts'
 import { CONTROL_NAMES, controlStates } from './controls.ts'
 import { recruitmentRouter } from './recruitment.ts'
 import { leadsRouter } from './leads.ts'
+import { websiteRouter } from './website.ts'
 
 /**
  * How far back the operator activity summary reads, in entries.
@@ -85,6 +86,7 @@ function num(value: string | number | null | undefined): number {
 }
 
 export const administrationRouter = router({
+  website: websiteRouter,
   applications: recruitmentRouter,
   leads: leadsRouter,
   /**

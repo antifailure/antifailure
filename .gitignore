@@ -80,6 +80,9 @@ local.settings.json
 
 # Node
 node_modules/
+# A site build fetches published CMS content; drafts and snapshots never belong in Git.
+/www/lib/cms-snapshot.generated.json
+/www/public/cms-version.json
 .next/
 .turbo/
 out/

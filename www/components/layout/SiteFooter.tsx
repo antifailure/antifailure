@@ -1,8 +1,14 @@
+"use client";
+
 import Link from "next/link";
+import { type ReactNode } from "react";
 import { Container } from "./Container";
 import { FOOTER_MENUS, LEGAL_LINKS } from "@/lib/nav";
+import { CmsMedia, CmsSection } from "@/components/cms/Editable";
+import { useCmsCollection, useCmsCollectionsBatch, useCmsString } from "@/components/cms/CmsProvider";
+import { safeHref } from "@antifailure/website";
 
-function FooterLink({ href, children }: { href: string; children: string }) {
+function FooterLink({ href, children }: { href: string; children: ReactNode }) {
   // 44px of row on a coarse pointer, and the mouse rendering untouched.
   //
   // These twenty eight links sit flush: the row is 29px and the gap between
@@ -45,8 +51,25 @@ function FooterLink({ href, children }: { href: string; children: string }) {
 }
 
 export function SiteFooter() {
+  const columns = useCmsCollection("footer.columns", "Footer columns", "footer", FOOTER_MENUS)
+    .filter((column) => typeof column.heading === "string");
+  // Hidden columns still contribute their current code defaults to the editor.
+  const sourceColumns = [
+    ...FOOTER_MENUS,
+    ...columns.filter((column) => !FOOTER_MENUS.some((source) => source.id === column.id)),
+  ];
+  const links = useCmsCollectionsBatch(sourceColumns.map((column) => ({
+    key: `footer.columns.${column.id}.items`,
+    label: `${column.heading} links`,
+    sectionId: "footer",
+    defaults: Array.isArray(column.items) ? column.items : [],
+  })));
+  const legal = useCmsCollection("footer.legal", "Legal links", "footer", LEGAL_LINKS)
+    .filter((item) => typeof item.text === "string" && safeHref(item.href));
+  const logoHref = useCmsString("footer.logo.href", "/", { label: "Footer logo destination", sectionId: "footer", kind: "url" });
+  const logoLabel = useCmsString("footer.logo.label", "Antifailure home", { label: "Footer logo accessible label", sectionId: "footer" });
   return (
-    <footer className="relative z-30 mt-auto bg-black">
+    <CmsSection sectionId="footer" label="Footer" group="footer" as="footer" className="relative z-30 mt-auto bg-black">
       <Container size="1920">
         <div className="grid grid-cols-6 gap-x-8 pt-16 pb-24 max-xl:grid-cols-3 max-xl:gap-y-12 max-xl:pt-12 max-xl:pb-16 max-md:grid-cols-2 max-md:gap-x-6 max-md:gap-y-10 max-md:pt-10 max-md:pb-14">
           <div className="max-xl:col-span-3 max-md:col-span-2">
@@ -54,7 +77,8 @@ export function SiteFooter() {
                 alone in its grid cell with nothing to overlap, so the padding
                 buys the hit area and the negative margin gives back the space,
                 which is the same trade the header logo makes. */}
-            <Link prefetch={false} href="/" aria-label="Antifailure home" className="inline-flex p-2 -m-2">
+            <Link prefetch={false} href={logoHref} aria-label={logoLabel} className="inline-flex p-2 -m-2">
+              <CmsMedia cmsKey="footer.logo.image" label="Footer logo" sectionId="footer" className="h-7 w-7">
               <svg viewBox="0 0 18 18" className="h-7 w-7" fill="none" aria-hidden>
                 <path
                   d="M1.8 6.4V1.8H6.4M11.6 1.8H16.2V6.4M16.2 11.6V16.2H11.6M6.4 16.2H1.8V11.6"
@@ -63,16 +87,19 @@ export function SiteFooter() {
                   strokeLinecap="square"
                 />
               </svg>
+              </CmsMedia>
             </Link>
           </div>
 
-          {FOOTER_MENUS.map((col) => (
-            <nav key={col.heading} aria-label={col.heading}>
-              <h2 className="text-[14px] font-medium tracking-tight text-white">{col.heading}</h2>
+          {columns.map((col) => (
+            <nav key={col.id} aria-label={col.heading}>
+              <h2 data-cms-key={`footer.columns.${col.id}.heading`} className="text-[14px] font-medium tracking-tight text-white">{col.heading}</h2>
               <ul className="mt-4">
-                {col.items.map((item) => (
-                  <li key={`${col.heading}-${item.href}-${item.text}`}>
-                    <FooterLink href={item.href}>{item.text}</FooterLink>
+                {((links[`footer.columns.${col.id}.items`] ?? []) as { id: string; href: string; text: string }[])
+                  .filter((item) => typeof item.text === "string" && safeHref(item.href))
+                  .map((item) => (
+                  <li key={item.id}>
+                    <FooterLink href={item.href}><span data-cms-key={`footer.columns.${col.id}.items.${item.id}.text`}>{item.text}</span></FooterLink>
                   </li>
                 ))}
               </ul>
@@ -91,9 +118,9 @@ export function SiteFooter() {
           aria-label="Legal"
           className="flex flex-wrap items-center gap-x-6 gap-y-6 pb-10 text-[13px] tracking-tight text-[#8a8a8a] max-md:gap-x-5 max-md:pb-[max(2rem,env(safe-area-inset-bottom))]"
         >
-          {LEGAL_LINKS.map((item) => (
+          {legal.map((item) => (
             <Link prefetch={false}
-              key={item.href}
+              key={item.id}
               // `leading-5` before the padding, and it is load bearing rather
               // than tidy. 13px text inherits the 1.5 line height, so the line
               // box is 19.5px and 12px of padding either side reaches 43.5, not
@@ -110,11 +137,11 @@ export function SiteFooter() {
               className="px-2.5 py-3 -mx-2.5 -my-3 leading-5 transition-colors duration-200 hover:text-white"
               href={item.href}
             >
-              {item.text}
+              <span data-cms-key={`footer.legal.${item.id}.text`}>{item.text}</span>
             </Link>
           ))}
         </nav>
       </Container>
-    </footer>
+    </CmsSection>
   );
 }

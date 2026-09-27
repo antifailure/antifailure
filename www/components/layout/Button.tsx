@@ -46,6 +46,7 @@ export function Button({
   className,
   children,
   type = "button",
+  cmsKey,
   ...props
 }: {
   href?: string;
@@ -53,6 +54,7 @@ export function Button({
   size?: keyof typeof sizes;
   className?: string;
   children: ReactNode;
+  cmsKey?: string;
 } & ButtonHTMLAttributes<HTMLButtonElement>) {
   const cls = cn(
     "inline-flex cursor-pointer items-center justify-center whitespace-nowrap rounded-full text-center leading-none transition-colors duration-200",
@@ -65,20 +67,20 @@ export function Button({
     const docs = href === "/docs" || href.startsWith("/docs/");
     if (docs) {
       return (
-        <a href={href} className={cls}>
+        <a href={href} className={cls} data-cms-action={cmsKey}>
           {children}
         </a>
       );
     }
     return (
-      <Link prefetch={false} href={href} className={cls}>
+      <Link prefetch={false} href={href} className={cls} data-cms-action={cmsKey}>
         {children}
       </Link>
     );
   }
 
   return (
-    <button type={type} className={cls} {...props}>
+    <button type={type} className={cls} data-cms-action={cmsKey} {...props}>
       {children}
     </button>
   );

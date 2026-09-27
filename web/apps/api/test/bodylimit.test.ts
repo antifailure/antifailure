@@ -32,6 +32,9 @@ import {
   type ApiHarness,
 } from './harness.ts'
 import type { Billing } from '../src/billing/index.ts'
+import { createServer } from '../src/server.ts'
+import type { Pool } from '@antifailure/db'
+import type { GitHubClient } from '../src/auth/github.ts'
 
 const SECRET = 'a-body-limit-webhook-secret'
 // Read with a fallback rather than a non-null assertion, so a catalog key that
@@ -110,6 +113,35 @@ describe('the body limit catalog', () => {
     assert.equal(bodyLimitFor('POST', '/mcp'), null)
     assert.equal(bodyLimitFor('POST', '/auth/mcp/token'), null)
   })
+
+  test('only the website upload delegates its body limit to the authenticated media reader', () => {
+    assert.equal(bodyLimitFor('POST', '/v1/admin/website/media'), null)
+    assert.equal(bodyLimitFor('PUT', '/v1/admin/website/media'), DEFAULT_BODY_BYTES)
+    assert.equal(bodyLimitFor('POST', '/v1/admin/website/media/another'), DEFAULT_BODY_BYTES)
+  })
+})
+
+// ---------------------------------------------------------------------------
+
+describe('website upload authentication precedes buffering', () => {
+  for (const declaredLength of [undefined, String(100 * 1024 * 1024)]) {
+    test(`refuses an anonymous ${declaredLength ? 'declared oversized' : 'streaming'} body without reading it`, async () => {
+      const { app } = createServer({ pool: {} as Pool, github: {} as GitHubClient })
+      let reads = 0
+      const stream = new ReadableStream<Uint8Array>({
+        pull(controller) { reads++; controller.enqueue(new Uint8Array(16)); controller.close() },
+      }, { highWaterMark: 0 })
+      const request = new Request('http://app.test/v1/admin/website/media', {
+        method: 'POST',
+        headers: { 'content-type': 'video/mp4', ...(declaredLength ? { 'content-length': declaredLength } : {}) },
+        body: stream,
+        duplex: 'half',
+      } as RequestInit)
+      const response = await app.fetch(request)
+      assert.equal(response.status, 401)
+      assert.equal(reads, 0, 'unauthenticated media was buffered before refusing it')
+    })
+  }
 })
 
 // ---------------------------------------------------------------------------

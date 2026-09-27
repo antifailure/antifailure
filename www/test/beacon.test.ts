@@ -119,7 +119,8 @@ function install(options: {
     },
   })
 
-  g.location = { search: url.search, pathname: url.pathname, href: url.href, hostname: url.hostname }
+  const here = { search: url.search, pathname: url.pathname, href: url.href, hostname: url.hostname, origin: url.origin }
+  g.location = here
   g.document = {
     referrer: options.referrer ?? '',
     get visibilityState() {
@@ -130,6 +131,19 @@ function install(options: {
     },
   }
   g.window = {
+    location: here,
+    history: {
+      pushState(_state: unknown, _unused: string, destination?: string | URL | null) {
+        if (destination == null) return
+        const next = new URL(destination, here.href)
+        Object.assign(here, { search: next.search, pathname: next.pathname, href: next.href, origin: next.origin })
+      },
+      replaceState(_state: unknown, _unused: string, destination?: string | URL | null) {
+        if (destination == null) return
+        const next = new URL(destination, here.href)
+        Object.assign(here, { search: next.search, pathname: next.pathname, href: next.href, origin: next.origin })
+      },
+    },
     addEventListener(name: string, fn: () => void) {
       h.listeners.set(name, [...(h.listeners.get(name) ?? []), fn])
     },
@@ -445,6 +459,85 @@ describe('the beacon decides whether to measure at all', () => {
     // Cleared rather than set to "on". The absence of an objection is not a
     // consent and this file must not be able to record one.
     assert.equal(h.local.has('af.analytics.optout.v1'), false)
+  })
+})
+
+describe('private website previews never produce measurement traffic', () => {
+  it('denies direct preview entry, CTAs, leads, and static export variants without storing an opt out', async () => {
+    for (const pathname of ['/cms-preview', '/cms-preview/', '/cms-preview.html', '/cms-preview/nested']) {
+      install({ href: `https://antifailure.dev${pathname}?af-analytics=off` })
+      const beacon = await loadBeacon()
+      beacon.pageViewed('home')
+      beacon.ctaEngaged('waitlist_open')
+      beacon.leadSubmitted('recorded')
+      advance(10_000)
+      await settle()
+      assert.deepEqual(beacon.measurementStatus(), { measuring: false, off: 'preview' })
+      assert.equal(h.attempts, 0, pathname)
+      assert.equal(h.sent.length, 0, pathname)
+      assert.equal(h.local.size, 0, 'preview must not store a reader preference')
+      assert.equal(h.storage.size, 0, 'preview must not create a measured session')
+    }
+  })
+
+  it('live then preview: defeats the cached yes and discards queued events before navigation', async () => {
+    install()
+    const beacon = await loadBeacon()
+    beacon.pageViewed('pricing')
+    const transitions: Array<{ enabled: boolean; path: string; reason?: string }> = []
+    const unsubscribe = beacon.onMeasurementChanged((enabled, reason) => transitions.push({ enabled, path: location.pathname, reason }))
+    window.history.pushState({}, '', '/cms-preview')
+    assert.deepEqual(transitions[0], { enabled: false, path: '/pricing', reason: 'preview' }, 'recorders are stopped before the URL is committed')
+    beacon.ctaEngaged('waitlist_open')
+    advance(10_000)
+    for (const listener of h.listeners.get('pagehide') ?? []) listener()
+    await settle()
+    assert.equal(h.attempts, 0)
+    assert.equal(h.sent.length, 0, 'neither the normal timer nor unload leaks the old queue')
+    assert.equal(h.local.size, 0)
+    unsubscribe()
+  })
+
+  it('preview then live: resumes measurement without a poisoned cached decision', async () => {
+    install({ href: 'https://antifailure.dev/cms-preview' })
+    const beacon = await loadBeacon()
+    beacon.ctaEngaged('waitlist_open')
+    window.history.replaceState({}, '', '/pricing')
+    beacon.pageViewed('pricing')
+    advance(4_000)
+    await settle()
+    assert.deepEqual(beacon.measurementStatus(), { measuring: true, off: null })
+    assert.deepEqual(events().map((event) => event.name), ['site.page_viewed'])
+    assert.equal(h.local.size, 0)
+  })
+
+  it('back navigation enters the same temporary boundary and keeps an existing preference', async () => {
+    install()
+    const beacon = await loadBeacon()
+    beacon.setMeasurement(false)
+    location.pathname = '/cms-preview'
+    for (const listener of h.listeners.get('popstate') ?? []) listener()
+    assert.equal(beacon.measurementStatus().off, 'preview')
+    location.pathname = '/pricing'
+    for (const listener of h.listeners.get('popstate') ?? []) listener()
+    assert.equal(beacon.measurementStatus().off, 'reader')
+    assert.equal(h.local.get('af.analytics.optout.v1'), 'off')
+  })
+
+  it('preview during a batch request prevents remaining batches and retries', async () => {
+    install()
+    const beacon = await loadBeacon()
+    for (let index = 0; index < 25; index++) beacon.ctaEngaged('waitlist_open')
+    h.respond = () => {
+      window.history.pushState({}, '', '/cms-preview')
+      return 500
+    }
+    advance(4_000)
+    await settle()
+    advance(120_000)
+    await settle()
+    assert.equal(h.attempts, 1, 'the public-page request already in flight is the last one')
+    assert.equal(h.timers.length, 0)
   })
 })
 

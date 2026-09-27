@@ -9,6 +9,7 @@
 
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
+import { CONSOLE_CSP, consoleCsp } from '../src/console/index.ts'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -36,6 +37,31 @@ async function fakeBuild(): Promise<string> {
 }
 
 const ok = await available()
+
+describe('website editor preview policy', () => {
+  test('production allows only the real site as a frame, even with development origins configured', () => {
+    const policy = consoleCsp(true, ['http://localhost:4330', 'https://attacker.test'])
+    assert.equal(policy, CONSOLE_CSP)
+    assert.equal(policy.split('; ').find((part) => part.startsWith('frame-src')), 'frame-src https://antifailure.dev')
+    assert.ok(policy.includes("connect-src 'self'"))
+    assert.ok(policy.includes("frame-ancestors 'none'"))
+  })
+
+  test('local previews require an explicit loopback origin and keep outbound connections closed', () => {
+    const policy = consoleCsp(false, [
+      'http://localhost:4330', 'http://localhost:4330', 'http://127.0.0.1:4331',
+      'https://attacker.test', 'http://localhost.attacker.test',
+      'http://localhost:4330/path', 'http://localhost:4330?query=1',
+      'http://localhost:4330; frame-src *', 'http://user:pass@localhost:4330',
+    ])
+    assert.equal(policy.split('; ').find((part) => part.startsWith('frame-src')),
+      'frame-src https://antifailure.dev http://localhost:4330 http://127.0.0.1:4331')
+    assert.ok(policy.includes("connect-src 'self'"))
+    assert.ok(policy.includes("frame-ancestors 'none'"))
+    assert.doesNotMatch(policy, /attacker|\*|user:pass/)
+    assert.equal(consoleCsp(false), CONSOLE_CSP)
+  })
+})
 
 describe('serving the console build', { skip: ok ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: ApiHarness
@@ -103,8 +129,9 @@ describe('serving the console build', { skip: ok ? false : 'no Postgres at AF_TE
     assert.equal(
       csp,
       "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; " +
-        "img-src 'self' data: https://avatars.githubusercontent.com; font-src 'self'; " +
-        "connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "img-src 'self' data: blob: https://avatars.githubusercontent.com https://antifailure.dev; " +
+        "media-src 'self' blob: https://antifailure.dev; font-src 'self'; connect-src 'self'; " +
+        "frame-src https://antifailure.dev; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
     )
     assert.equal(res.headers.get('x-frame-options'), 'DENY')
     assert.equal(res.headers.get('x-content-type-options'), 'nosniff')
