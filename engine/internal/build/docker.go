@@ -270,12 +270,32 @@ func (b *DockerBuilder) Build(ctx context.Context, req Request) (Result, error) 
 
 	log, buildErr, err := b.attempt(ctx, req, opts, extra, b.buildKit)
 	if err == nil && b.buildKit && needsSession(buildErr) {
-		// BuildKit over this endpoint wants a session, and this client has
-		// none. See needsSession for what that means and why the answer is to
-		// build rather than to explain.
-		// Guarded like every other call to it in this file: a caller that
-		// wants no progress passes nil, and a fallback that panicked while
-		// reporting itself would be worse than the problem it reports.
+		// A plain Linux daemon requires a BuildKit session. The Docker CLI
+		// knows how to open one, and can read the same bounded tar context this
+		// builder already sent. Only when Buildx is unavailable do we ask the
+		// slower legacy builder to repeat the work.
+		if dockerPath, available := buildxAvailable(ctx); available {
+			if req.Progress != nil {
+				req.Progress("BuildKit needs a session; building with Docker Buildx")
+			}
+			log, buildErr, err = b.attemptBuildx(ctx, dockerPath, req, opts, extra, ref)
+			if err != nil {
+				return res, b.startFailure(err, req)
+			}
+			res.Log = log
+			res.Duration = b.clock.Since(started)
+			if buildErr != nil {
+				return res, buildFailure(buildErr, req, res.Duration.Round(time.Second).String())
+			}
+			if _, inspectErr := b.cli.ImageInspect(ctx, ref); inspectErr == nil {
+				return res, nil
+			}
+			// A Docker context can point Buildx at a different daemon. Only an
+			// image the API client can inspect is one the environment can run.
+		}
+		if ctx.Err() != nil {
+			return res, b.startFailure(ctx.Err(), req)
+		}
 		if req.Progress != nil {
 			req.Progress(sessionFallbackNotice)
 		}
