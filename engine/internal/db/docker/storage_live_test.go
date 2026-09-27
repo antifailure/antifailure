@@ -20,12 +20,14 @@ package docker_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 	"github.com/stretchr/testify/require"
 
@@ -160,17 +162,85 @@ func TestABranchWithItsOwnFilesystemKeepsItsDataAcrossAStopAndStart(t *testing.T
 		"the branch came back without the table for some reason other than a data directory that was thrown away: %q", out)
 }
 
-// requireBranchReady waits for Postgres to answer again after a restart.
+// requireBranchReady waits for Postgres to answer again after a restart, over
+// TCP rather than over the unix socket, and the difference is the whole point.
+//
+// THIS COST MAIN TWO RED COMMITS AND BLOCKED cd TWICE. The gate polled
+// `pg_isready` with no host, which uses the unix socket, and returned as soon as
+// SOMETHING answered on it. On the falsification arm below the data directory is
+// deliberately empty, so the image's entrypoint runs `initdb` and starts a
+// TEMPORARY server to do it. The official entrypoint starts that one with
+// `-c listen_addresses=”`, so it accepts unix socket connections and listens on
+// no TCP port at all. It then SHUTS IT DOWN and starts the real server. So the
+// gate was satisfied by a server that was about to stop, and the assertion after
+// it landed in the gap, which is why the two failures read as two unrelated
+// faults:
+//
+//	psql: error: connection to server on socket "/var/run/postgresql/.s.PGSQL.5432"
+//	failed: No such file or directory          <- the socket after the temp server went
+//	FATAL: terminating connection due to administrator command
+//	                                           <- the connection when it went
+//
+// MEASURED RATHER THAN REASONED, on postgres:17-alpine against an empty volume,
+// probing both every 500 ms:
+//
+//	t=1000ms  socket=no  tcp=no
+//	t=1500ms  socket=OK  tcp=no     <- the temporary init server, socket only
+//	t=2000ms  socket=OK  tcp=OK     <- the real server
+//
+// That window is about half a second on an idle machine and far wider on a
+// loaded CI runner, which is why this failed there and passed on a laptop. TCP
+// is refused for the whole of it, so requiring TCP is a discriminator with a
+// mechanism behind it rather than a longer sleep.
+//
+// The probe is also a QUERY rather than `pg_isready`, because a query is what
+// every caller does next, and a gate should prove the capability the caller
+// needs rather than a nearby one.
+//
+// AND IT NEEDS NO PASSWORD, WHICH IS A PROPERTY WORTH STATING RATHER THAN
+// RELYING ON. A review read this as a defect, on the reasonable ground that the
+// product's own TCP connection string carries the managed password and this
+// probe carries none. The difference is WHERE it connects FROM. `initdb` in the
+// stock image writes these host lines, read out of a running container rather
+// than assumed:
+//
+//	host  all  all  127.0.0.1/32  trust
+//	host  all  all  ::1/128       trust
+//	host  all  all  all           scram-sha-256
+//
+// This probe runs INSIDE the branch through `docker exec`, so it arrives from
+// 127.0.0.1 and matches the trust line. The product connects from outside the
+// container, matches the last line, and needs the password. So the two are not
+// the same connection and only one of them is passwordless.
+//
+// If the provider ever sets `POSTGRES_HOST_AUTH_METHOD`, those trust lines go
+// and this probe stops working. That is the one change that would break it, and
+// it is named here so the next person does not have to rediscover it.
 func requireBranchReady(t *testing.T, ctx context.Context, envID string) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Minute)
-	for time.Now().Before(deadline) {
-		if _, code := inBranch(t, ctx, envID, "pg_isready -U antifailure -d antifailure"); code == 0 {
-			return
+	require.NoError(t, branchReady(t, ctx, envID, 2*time.Minute),
+		"the branch did not start accepting connections over TCP again")
+}
+
+// branchReady is requireBranchReady's body with the deadline exposed, so a test
+// can prove the gate REFUSES a server that only listens on the socket. Without
+// that arm the TCP requirement above is an assertion nothing checks.
+func branchReady(t *testing.T, ctx context.Context, envID string, within time.Duration) error {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	last := ""
+	for {
+		out, code := inBranch(t, ctx, envID,
+			`psql -h 127.0.0.1 -U antifailure -d antifailure -tAc 'SELECT 1' 2>&1`)
+		if code == 0 && strings.Contains(out, "1") {
+			return nil
+		}
+		last = strings.TrimSpace(out)
+		if !time.Now().Before(deadline) {
+			return fmt.Errorf("no answer over TCP within %s; the last attempt said %q", within, last)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	t.Fatalf("the branch did not accept connections again within two minutes")
 }
 
 // TestTheDataDirectoryIsOnTheWritableLayerWhenNoSizeIsDeclared is the control.
@@ -310,4 +380,86 @@ func TestDestroyTakesTheAnchorAndTheVolumeWithTheBranch(t *testing.T) {
 	require.Error(t, err, "the anchor is still running after the branch was destroyed")
 	_, err = cli.VolumeInspect(ctx, "af-pgdata-"+envID, client.VolumeInspectOptions{})
 	require.Error(t, err, "the data directory volume is still there after the branch was destroyed")
+}
+
+// THE GATE MUST REFUSE A SERVER THAT ONLY LISTENS ON THE SOCKET, because that
+// is the state the image's entrypoint passes through while it initialises a data
+// directory, and satisfying the gate there is what reddened main twice.
+//
+// This is the falsification arm for requireBranchReady rather than for the
+// product. It plants exactly the condition the old gate could not tell from
+// readiness: a Postgres started with `listen_addresses=”`, which accepts unix
+// socket connections and listens on no TCP port. `pg_isready` with no host
+// answers YES to it, and the gate must answer NO.
+//
+// The window is made permanent instead of being waited for. Racing the real
+// entrypoint's half second of init would be a test that passes for timing
+// reasons, and this repository has three of those already tonight.
+func TestBranchReadinessRefusesTheSocketOnlyServerTheEntrypointPassesThrough(t *testing.T) {
+	requireImage(t, "postgres:17-alpine")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	cli, err := dockerutil.Client()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = cli.Close() })
+
+	// inBranch addresses a container by the name the product gives a branch, so
+	// the planted server takes that shape rather than the helper being widened
+	// for a test.
+	envID := fmt.Sprintf("socketonly-%d", time.Now().UnixNano()%1e9)
+	name := "af-db-" + envID
+	created, err := cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config: &container.Config{
+			Image:  "postgres:17-alpine",
+			Labels: dockerutil.Managed("db-test", name, time.Now()),
+			Env: []string{
+				"POSTGRES_USER=antifailure",
+				"POSTGRES_DB=antifailure",
+				"POSTGRES_PASSWORD=socketonly",
+			},
+			// The entrypoint passes these to the real server too, so the server
+			// that ends up running is socket only for the whole test rather
+			// than for the half second the init server lives.
+			Cmd: []string{"postgres", "-c", "listen_addresses="},
+		},
+		Name: name,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		clean, cancelClean := context.WithTimeout(context.Background(), time.Minute)
+		defer cancelClean()
+		// Reported rather than discarded. This container's kind is `db-test`,
+		// which the provider's own candidate cleanup does not sweep, so a
+		// removal that failed silently would leave a Postgres running and the
+		// test would pass over the top of it. A leak nobody is told about is
+		// found days later by whoever runs out of memory.
+		if err := dockerutil.RemoveContainer(clean, cli, created.ID); err != nil {
+			t.Errorf("the planted socket only server was left behind: %v", err)
+		}
+	})
+	_, err = cli.ContainerStart(ctx, created.ID, client.ContainerStartOptions{})
+	require.NoError(t, err)
+
+	// The control, and it is what makes the refusal below mean something: the
+	// server really is up and really does answer, on the socket, which is the
+	// probe the old gate used.
+	var socketOK bool
+	for deadline := time.Now().Add(2 * time.Minute); time.Now().Before(deadline); {
+		if _, code := inBranch(t, ctx, envID, "pg_isready -U antifailure -d antifailure"); code == 0 {
+			socketOK = true
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	require.True(t, socketOK,
+		"the planted server never answered on the socket either, so this test is not describing the case it names")
+
+	// And the gate says no, because nothing is listening on TCP.
+	err = branchReady(t, ctx, envID, 5*time.Second)
+	require.Error(t, err,
+		"the readiness gate accepted a server listening on no TCP port, which is the state the entrypoint passes through while it initialises a data directory")
+	require.Contains(t, err.Error(), "no answer over TCP",
+		"the refusal does not say what it could not reach")
 }
