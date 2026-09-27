@@ -365,7 +365,16 @@ func (p *Provider) waitReadyOrGone(ctx context.Context, conn secrets.Value, id s
 		if !p.clock.Now().Before(deadline) {
 			return aferrors.Coded(aferrors.AFDB002, "host", "127.0.0.1")
 		}
-		p.clock.Sleep(ctx, time.Second)
+		// The sleep's own error is the context ending, and it is returned rather
+		// than discarded. Discarding it left the loop able to spin through every
+		// remaining second of the five minute budget after a cancel, because the
+		// check above it runs before the ping rather than after the wait: a
+		// cancel landing during the sleep is not noticed until the next ping has
+		// already been attempted. It reports the cancel as the cancel, which is
+		// what branchReady's caller distinguishes from the finding.
+		if err := p.clock.Sleep(ctx, time.Second); err != nil {
+			return err
+		}
 	}
 }
 

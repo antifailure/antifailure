@@ -20,6 +20,7 @@ bytea
 checkpointer
 citus
 cobra
+controldata
 CREATEDB
 CREATEROLE
 cspell
