@@ -308,3 +308,32 @@ func TestLateCaptureCannotRewriteEarlierFactsOrEraseAnUnresolvedFailure(t *testi
 	cancel()
 	require.Error(t, (Store{Root: t.TempDir()}).ImportIncident(ctx, base))
 }
+
+func TestReservationReleaseIsBoundedAndIdempotent(t *testing.T) {
+	s := Store{Root: t.TempDir()}
+	require.NoError(t, s.Put("reservations", "rpl_one", map[string]string{"attemptId": "rpl_one"}))
+	entries, err := s.List("reservations")
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.NoError(t, s.ClearReservation("rpl_one"))
+	require.NoError(t, s.ClearReservation("rpl_one"))
+	entries, err = s.List("reservations")
+	require.NoError(t, err)
+	require.Empty(t, entries)
+	require.Error(t, s.ClearReservation("../outside"))
+}
+
+func TestMalformedWritesAndUnreadableStoresNeverPublishAReference(t *testing.T) {
+	s := Store{Root: t.TempDir()}
+	require.Error(t, s.Put("incidents", "one", make(chan int)))
+	_, err := s.Blob("not-a-digest")
+	require.Error(t, err)
+	_, err = s.List("unknown-kind")
+	require.Error(t, err)
+	require.False(t, s.IsRetired("../outside"))
+	require.NoError(t, os.WriteFile(filepath.Join(s.Root, "incidents"), []byte("not a directory"), 0o600))
+	require.Error(t, s.Put("incidents", "one", validIncident()))
+	_, err = s.List("incidents")
+	require.Error(t, err)
+	require.Error(t, s.Retire(context.Background(), "one", "", time.Date(2026, 9, 27, 0, 0, 0, 0, time.UTC)))
+}
