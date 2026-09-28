@@ -38,6 +38,7 @@
 # this surface together, in the commit that gives the MCP server a tool that
 # RUNS the pass rather than reading its output.
 AccessProbe	cli-only	A step inside af ci's security pass, which drives the authenticated authorization differential against a live environment. Nothing on the MCP server runs that pass, and read_security_findings reads a finished run's findings rather than producing any.
+SaveIncident	cli-only	Approves an immutable scenario and its outcome assertion from explicit local input. Candidate-driven MCP calls can replay approved scenarios but cannot replace their evaluator or policy.
 BaselineTwin	cli-only	Builds a SECOND environment from the base revision so the security families have something to compare the candidate against. The pass that needs it is af ci's, and this surface reads that pass's output rather than running it.
 DependencyFiles	cli-only	Reads the dependency manifests af ci's security pass scans. The third of the same pass, and it arrives here when a tool runs the pass rather than reading its findings.
 

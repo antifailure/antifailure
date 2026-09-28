@@ -1598,6 +1598,39 @@
       "planned": false
     },
     {
+      "code": "AF-RPL-001",
+      "area": "RPL",
+      "areaName": "Agent incident replay",
+      "message": "Your replay evidence could not be prepared: {detail}",
+      "resolution": "Inspect the incident, supply the named prerequisite, and retry. No replay verdict was reached.",
+      "docs": "https://antifailure.dev/docs/guides/agent-replay",
+      "retryable": false,
+      "exitCode": 3,
+      "planned": false
+    },
+    {
+      "code": "AF-RPL-002",
+      "area": "RPL",
+      "areaName": "Agent incident replay",
+      "message": "Your replay is inconclusive: {detail}",
+      "resolution": "Inspect the replay report and recover any pending environments before retrying.",
+      "docs": "https://antifailure.dev/docs/guides/agent-replay",
+      "retryable": false,
+      "exitCode": 7,
+      "planned": false
+    },
+    {
+      "code": "AF-RPL-003",
+      "area": "RPL",
+      "areaName": "Agent incident replay",
+      "message": "Your candidate did not satisfy the saved outcome assertion.",
+      "resolution": "Inspect the candidate outcome, fix the agent, and run the same scenario again.",
+      "docs": "https://antifailure.dev/docs/guides/agent-replay",
+      "retryable": false,
+      "exitCode": 8,
+      "planned": false
+    },
+    {
       "code": "AF-RUN-001",
       "area": "RUN",
       "areaName": "Runtime",

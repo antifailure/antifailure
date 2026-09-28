@@ -1300,6 +1300,14 @@ func SelectGolden(goldens []provider.GoldenVersion, want string) (*provider.Gold
 
 // DestroyGolden removes one.
 func (o *Orchestrator) DestroyGolden(ctx context.Context, version string) error {
+	unlock, lockErr := o.ReplayStore().LockPublication(ctx)
+	if lockErr != nil {
+		return lockErr
+	}
+	defer unlock()
+	if err := o.checkReplayGoldenPin(version); err != nil {
+		return err
+	}
 	s, err := o.open(ctx, "af golden gc")
 	if err != nil {
 		return err

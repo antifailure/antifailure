@@ -461,6 +461,14 @@ const (
 	// The candidate behaves differently from the baseline: {detail}
 	AFORC010 Code = "AF-ORC-010"
 
+	// Agent incident replay
+	// Your replay evidence could not be prepared: {detail}
+	AFRPL001 Code = "AF-RPL-001"
+	// Your replay is inconclusive: {detail}
+	AFRPL002 Code = "AF-RPL-002"
+	// Your candidate did not satisfy the saved outcome assertion.
+	AFRPL003 Code = "AF-RPL-003"
+
 	// Runtime
 	// The command '{command}' is not available in this version.
 	AFRUN001 Code = "AF-RUN-001"
@@ -2106,6 +2114,33 @@ var catalog = map[Code]Entry{
 		Message:   "The candidate behaves differently from the baseline: {detail}",
 		NextStep:  "Read the differences above. Each one is either the change you meant to make or a regression; raise oracle.fail_on if this class of difference is expected.",
 		Docs:      "concepts/oracle",
+		Retryable: false,
+		ExitCode:  ExitTestFailure,
+	},
+	AFRPL001: {
+		Code:      AFRPL001,
+		Area:      "RPL",
+		Message:   "Your replay evidence could not be prepared: {detail}",
+		NextStep:  "Inspect the incident, supply the named prerequisite, and retry. No replay verdict was reached.",
+		Docs:      "guides/agent-replay",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFRPL002: {
+		Code:      AFRPL002,
+		Area:      "RPL",
+		Message:   "Your replay is inconclusive: {detail}",
+		NextStep:  "Inspect the replay report and recover any pending environments before retrying.",
+		Docs:      "guides/agent-replay",
+		Retryable: false,
+		ExitCode:  ExitVerification,
+	},
+	AFRPL003: {
+		Code:      AFRPL003,
+		Area:      "RPL",
+		Message:   "Your candidate did not satisfy the saved outcome assertion.",
+		NextStep:  "Inspect the candidate outcome, fix the agent, and run the same scenario again.",
+		Docs:      "guides/agent-replay",
 		Retryable: false,
 		ExitCode:  ExitTestFailure,
 	},

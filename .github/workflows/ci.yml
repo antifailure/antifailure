@@ -1180,6 +1180,38 @@ jobs:
         run: npm test
         working-directory: runner
 
+  agent-replay:
+    name: agent replay
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: engine/go.mod
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: sdk/typescript/package-lock.json
+      - name: Install replay prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          npm --prefix sdk/typescript ci --no-audit --no-fund
+      - run: npm run typecheck
+        working-directory: sdk/typescript
+      - run: npm test
+        working-directory: sdk/typescript
+      - run: npm run build
+        working-directory: sdk/typescript
+      - name: Build the real CLI
+        run: go build -o ../bin/af ./cmd/af
+        working-directory: engine
+      - name: Replay the failure and prove the negative controls
+        run: npm run test:e2e
+        working-directory: sdk/typescript
+
   www:
     name: www
     runs-on: ubuntu-latest
