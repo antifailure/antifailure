@@ -176,7 +176,7 @@ func main() {
 	if err != nil {
 		p.emit(record{Event: "evidence_unavailable", Reason: "private evidence control unavailable"})
 	} else {
-		defer control.Close()
+		defer func() { _ = control.Close() }()
 	}
 	p.transport.DialContext = p.dialGuarded
 	p.transportH2.DialContext = p.dialGuarded
@@ -965,7 +965,7 @@ func evidenceStatusMode(out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		return err
 	}
