@@ -138,12 +138,12 @@ func TestWhatTheSQLWorkloadCommandPrintsAboutLockContention(t *testing.T) {
 			{
 				BlockedTransaction: "bump the counter", BlockedStatement: "take the row",
 				BlockingTransaction: "bump the counter", BlockingStatement: "hold it",
-				BlockingState: "active", BlockingInRun: true,
+				BlockingState: "active", BlockingNamed: true, BlockingInRun: true,
 				LockType: "transactionid", Mode: "ShareLock", Waits: 4, WaitedMS: 3600,
 			},
 			{
 				BlockedTransaction: "bump the counter", BlockedStatement: "take the row",
-				BlockingState: "idle in transaction", BlockingInRun: false,
+				BlockingState: "idle in transaction", BlockingNamed: true, BlockingInRun: false,
 				Relation: "counters", LockType: "tuple", Mode: "ExclusiveLock",
 				Waits: 2, WaitedMS: 400,
 			},
@@ -263,4 +263,130 @@ func TestWhatTheSQLWorkloadCommandPrintsWhenNothingQueuedAndWhenNobodyLooked(t *
 	require.Contains(t, unwatchedOut, "not the same as having found no contention")
 	require.NotContains(t, unwatchedOut, "No client of this run was ever seen waiting",
 		"an unwatched run was drawn as a run that never queued")
+}
+
+// TestAHolderTheServerWouldNotNameIsNotReportedAsAStranger.
+//
+// Three outcomes were collapsed into two, and the third was printed as a claim
+// the product cannot support.
+//
+// A wait pair's holder can be one of this run's own clients, or another session
+// on this database, or NOT NAMED AT ALL. The third is not hypothetical and the
+// query's own comment says so: pg_blocking_pids returns an empty array for a
+// backend that is genuinely waiting when the holder disconnected between the
+// two reads, and the LEFT JOIN onto pg_stat_activity yields a null state for a
+// pid whose row has gone or that is a background worker. The wait is the fact
+// and the holder is what may be missing.
+//
+// Both of those arrived with BlockingInRun false and an empty state, which is
+// exactly the shape of a stranger, so the renderer said "another session on
+// this database" about a holder nothing had identified. That is the same defect
+// as reading a null lock wait count as a zero, one level in: an absence
+// rendered as a finding.
+func TestAHolderTheServerWouldNotNameIsNotReportedAsAStranger(t *testing.T) {
+	waits, waitMS, seen := 2, 400.0, 3
+	res := &sqlload.Result{
+		Source: sqlload.SourceDeclared, Clients: 3,
+		Transactions: 10, Duration: time.Second, Refused: []sqlload.Refused{},
+		BackendsSeen: &seen, LockWaits: &waits, LockWaitMS: &waitMS,
+		LockWaitNote: sqlload.LockWaitBound,
+		LockWaitPairs: []sqlload.LockWait{{
+			BlockedTransaction: "bump the counter", BlockedStatement: "take the row",
+			// Everything about the holder absent, which is what the query
+			// produces when the server named nobody.
+			BlockingInRun: false, BlockingState: "",
+			LockType: "transactionid", Mode: "ShareLock", Waits: 2, WaitedMS: 400,
+		}},
+	}
+
+	var buf bytes.Buffer
+	e := &Env{Out: NewOutput(&buf, &buf)}
+	printSQLLoad(e, res, nil)
+	printed := buf.String()
+	t.Logf("\n%s", printed)
+
+	require.NotContains(t, printed, "another session on this database",
+		"a holder the server would not name was reported as a stranger holding the lock, "+
+			"which is a claim about whose lock it was made by something that did not know")
+	require.Contains(t, printed, "a holder the server would not name",
+		"the absence has to be said out loud, or a reader fills it in")
+	// The wait itself is still reported, because the wait is the part that was
+	// measured. Losing it would trade a false claim for a missing finding.
+	require.Contains(t, printed, "bump the counter / take the row")
+	require.Contains(t, printed, "2 times")
+}
+
+// TestANamedHolderWithNoStateIsStillNamedAsAStranger.
+//
+// The customer's ordinary case, which is why it has its own test rather than
+// being folded into the one above.
+//
+// Where the engine does not connect as superuser, and it usually will not, a
+// foreign backend's row is visible while its state is WITHHELD: measured twice
+// at one instant against one server, a pid that reads "client backend /
+// postgres / active" as superuser reads with state withheld and query
+// "<insufficient privilege>" as a role holding only LOGIN. So a holder that
+// really was identified arrives with an empty state on every such deployment,
+// always rather than sometimes.
+//
+// That must still say "another session on this database", because the server
+// DID name it. Only an unnamed holder gets the other sentence. Collapsing the
+// two would either invent a stranger, or refuse to name one the server named.
+func TestANamedHolderWithNoStateIsStillNamedAsAStranger(t *testing.T) {
+	named := sqlload.LockWait{
+		BlockedTransaction: "bump the counter", BlockedStatement: "take the row",
+		BlockingNamed: true, BlockingInRun: false, BlockingState: "",
+		Relation: "counters", LockType: "relation", Mode: "AccessShareLock",
+		Waits: 1, WaitedMS: 200,
+	}
+	require.Equal(t, "another session on this database", holderSide(named),
+		"a holder the server named, whose state an unprivileged role cannot read, "+
+			"was either unnamed or given a state nobody reported")
+
+	// The one next to it, so the pair is asserted together and a renderer that
+	// merged them fails here rather than in front of a reader.
+	unnamed := named
+	unnamed.BlockingNamed = false
+	require.Equal(t, "a holder the server would not name", holderSide(unnamed))
+
+	// And a state when there is one, so this test cannot pass by ignoring it.
+	withState := named
+	withState.BlockingState = "idle in transaction"
+	require.Equal(t, "another session on this database, idle in transaction",
+		holderSide(withState))
+}
+
+// TestAPreparedTransactionHolderIsNotCalledASession.
+//
+// The fourth outcome, and the one that proved three were still too few.
+//
+// pg_locks carries a prepared transaction with a NULL pid, and pg_blocking_pids
+// does not omit it: it reports pid ZERO. Measured, with a backend blocked on one
+// answering "blockers {0}, cardinality 1", and the production query itself
+// returning blocker_pid 0 with an empty coalesced state. So the pid is PRESENT,
+// the holder is named, and nothing is in pg_stat_activity for it.
+//
+// Reported as a session, that is the same false attribution the unnamed case was
+// fixed for, one costume along: a two phase commit holder has no session at all.
+// It gets its own sentence rather than being folded into "not named", because
+// the remedy differs and a reader can act on it: there is nothing to cancel, and
+// the lock goes when somebody commits or rolls back the prepared transaction.
+func TestAPreparedTransactionHolderIsNotCalledASession(t *testing.T) {
+	prepared := sqlload.LockWait{
+		BlockedTransaction: "bump the counter", BlockedStatement: "take the row",
+		BlockingNamed: true, BlockingPrepared: true, BlockingInRun: false,
+		BlockingState: "", LockType: "transactionid", Mode: "ShareLock",
+		Waits: 1, WaitedMS: 200,
+	}
+	got := holderSide(prepared)
+	require.NotContains(t, got, "another session",
+		"a prepared transaction has no session and was reported as one, which is the "+
+			"false attribution this whole shape exists to prevent")
+	require.NotEqual(t, "a holder the server would not name", got,
+		"the server DID name it, as pid zero, so calling it unnamed discards a fact "+
+			"a reader can act on")
+	require.Contains(t, got, "prepared transaction")
+	require.Contains(t, got, "ROLLBACK PREPARED",
+		"the remedy is not the usual one and is the reason this case is worth its own "+
+			"sentence")
 }

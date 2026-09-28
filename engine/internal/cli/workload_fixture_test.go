@@ -154,7 +154,7 @@ func sqlWorkloadResult(t *testing.T) *workload.Result {
 					BlockedStatement:    "UPDATE orders SET status = $1 WHERE id = $2",
 					BlockingTransaction: "UPDATE orders SET status = $1 WHERE id = $2",
 					BlockingStatement:   "UPDATE orders SET status = $1 WHERE id = $2",
-					BlockingState:       "active", BlockingInRun: true,
+					BlockingState:       "active", BlockingNamed: true, BlockingInRun: true,
 					LockType: "transactionid", Mode: "ShareLock",
 					Waits: 9, WaitedMS: 4200,
 				}},

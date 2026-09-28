@@ -1111,7 +1111,7 @@ func TestLockContentionInsideTheRunIsSeenAndBothStatementsAreNamed(t *testing.T)
 	// The pair is the part a person acts on, so it is asserted by name rather
 	// than by count. A number that says contention happened and cannot say
 	// between what is a number nobody can do anything with.
-	var found bool
+	var found, rowConflict bool
 	for _, w := range res.LockWaitPairs {
 		if w.BlockedStatement != "take the row" {
 			continue
@@ -1127,6 +1127,9 @@ func TestLockContentionInsideTheRunIsSeenAndBothStatementsAreNamed(t *testing.T)
 		// reason this sampler does not filter on locktype the way the
 		// migration rehearsal's does.
 		require.Contains(t, []string{"transactionid", "tuple"}, w.LockType)
+		if w.LockType == "transactionid" {
+			rowConflict = true
+		}
 		if w.BlockingStatement != "" {
 			// Either label, and the second one is a finding rather than a
 			// looseness in this assertion. Three clients queue in a chain: the
@@ -1144,6 +1147,17 @@ func TestLockContentionInsideTheRunIsSeenAndBothStatementsAreNamed(t *testing.T)
 	require.True(t, found,
 		"no pair named the statement that was waiting, so the join to the mix's own "+
 			"labels did not happen")
+	// A ROW conflict has to show up as a transactionid wait, and this assertion
+	// exists because a predicate added to protect the pg_class join dropped
+	// exactly those. pg_locks leaves database NULL for a lock type that names
+	// no relation, so a database test written without allowing for NULL
+	// discarded every row level wait while tuple and relation waits kept
+	// arriving, which looks like a working instrument. Clients queueing for one
+	// row must produce one of these or the commonest kind of contention is
+	// invisible again.
+	require.True(t, rowConflict,
+		"three clients updating one row produced no transactionid wait, so row level "+
+			"contention is not being seen at all")
 
 	require.Contains(t, res.LockWaitNote, "pg_blocking_pids")
 	require.Contains(t, res.LockWaitNote, "floors rather than totals")
@@ -1195,6 +1209,9 @@ func TestARunBlockedFromOutsideItselfDoesNotReportItAsItsOwn(t *testing.T) {
 	url, outsider := database(t)
 	ctx := context.Background()
 
+	var outsiderPID int32
+	require.NoError(t, outsider.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&outsiderPID))
+
 	held, err := outsider.Begin(ctx)
 	require.NoError(t, err)
 	_, err = held.Exec(ctx, "UPDATE counters SET n = n + 1 WHERE id = 1")
@@ -1202,12 +1219,45 @@ func TestARunBlockedFromOutsideItselfDoesNotReportItAsItsOwn(t *testing.T) {
 
 	// Released part way through, so the run still commits something and this
 	// test is not silently measuring a run that did nothing at all.
+	//
+	// The trigger is an OBSERVATION rather than a sleep from t=0, and that is
+	// the correction this fixture needed. A fixed 1200ms assumed the run's
+	// clients would be connected and queued inside it, which on a machine at
+	// load 55 they were not: the hold expired before anybody reached the row,
+	// the run then saw one client waiting on another, and the test failed
+	// claiming the attribution was wrong when the fixture had simply never
+	// produced a foreign holder to attribute. So it waits until the server
+	// itself says one of this run's clients is queued behind THIS outsider,
+	// then holds a further margin so several 200ms samples land on it.
+	watch, err := pgx.Connect(ctx, url)
+	require.NoError(t, err)
+	defer func() { _ = watch.Close(context.WithoutCancel(ctx)) }()
+
 	var release sync.WaitGroup
 	release.Add(1)
 	go func() {
 		defer release.Done()
-		time.Sleep(1200 * time.Millisecond)
-		_ = held.Rollback(ctx)
+		blockedByOutsider := func() bool {
+			var n int
+			err := watch.QueryRow(context.WithoutCancel(ctx), `
+				SELECT count(*)
+				FROM pg_locks l
+				JOIN pg_stat_activity a ON a.pid = l.pid
+				WHERE NOT l.granted
+				  AND a.application_name = $1
+				  AND $2::int = ANY(pg_blocking_pids(l.pid))`,
+				sqlload.ClientApplicationName, outsiderPID).Scan(&n)
+			return err == nil && n > 0
+		}
+		deadline := time.Now().Add(20 * time.Second)
+		for !blockedByOutsider() && time.Now().Before(deadline) {
+			time.Sleep(50 * time.Millisecond)
+		}
+		// A margin measured in sample intervals rather than a round number, so
+		// it says what it is for: enough readings to be certain the observer
+		// saw the foreign holder at least once.
+		time.Sleep(5 * sqlload.LockWaitInterval)
+		_ = held.Rollback(context.WithoutCancel(ctx))
 	}()
 
 	res, err := sqlload.Run(ctx, sqlload.Options{
@@ -1220,27 +1270,73 @@ func TestARunBlockedFromOutsideItselfDoesNotReportItAsItsOwn(t *testing.T) {
 	require.NotNilf(t, res.LockWaits, "nothing read the wait queues: %s", res.LockWaitNote)
 	require.Positive(t, *res.LockWaits)
 
+	// The diagnostic BEFORE the assertions, because it was after them and the
+	// one CI run that ever failed here printed nothing about which pair or
+	// which holder. A log line that is unreachable on the only path that needs
+	// it is not a diagnostic.
+	t.Logf("%d waits while an outside session held the row", *res.LockWaits)
+	for _, w := range res.LockWaitPairs {
+		t.Logf("  %q waited on named=%v in-run=%v state=%q %s %s, %d times",
+			w.BlockedStatement, w.BlockingNamed, w.BlockingInRun, w.BlockingState,
+			w.LockType, w.Mode, w.Waits)
+	}
+
 	var stranger bool
 	for _, w := range res.LockWaitPairs {
 		if w.BlockingInRun {
 			continue
 		}
-		stranger = true
 		require.Empty(t, w.BlockingStatement,
 			"a backend outside the run was given one of this mix's statement labels")
-		require.NotEmpty(t, w.BlockingState,
-			"the holder was outside the run, so its state is the only thing that can "+
-				"say what it was doing")
+		// Two outcomes here, not one, and demanding a state for both is what
+		// made this test fail on another lane's CI run. A holder the server
+		// declined to name carries no state and must not be required to: the
+		// query coalesces a null state to empty on purpose, because
+		// pg_blocking_pids names nobody when the holder disconnected between
+		// the two reads. So the claim is the DISJUNCTION, which is what the
+		// result is entitled to say, and BlockingNamed is what keeps the two
+		// apart instead of leaving a reader to guess from an empty string.
+		if !w.BlockingNamed {
+			require.Emptyf(t, w.BlockingState,
+				"the server named no holder and a state was reported for it anyway: %+v", w)
+			continue
+		}
+		// NO ASSERTION THAT A NAMED HOLDER HAS A STATE, and the reason is
+		// measured rather than cautious. An earlier version of this test
+		// demanded one and would still have failed on a valid sample, because
+		// named-with-no-state is reachable and not only as a race: a prepared
+		// transaction is reported by pg_blocking_pids as pid ZERO, so the pid
+		// is present while the join to pg_stat_activity finds nothing.
+		// Separately, off superuser the state is withheld for every foreign
+		// holder by design. A check that forbids either is a check that fails
+		// on correct output, which is worse than no check.
+		//
+		// So what is asserted is the CLAIM instead of the field, below.
+		stranger = true
 	}
-	require.True(t, stranger,
-		"an outside session held the row for more than a second and every wait was "+
-			"attributed to the run's own clients")
-
-	t.Logf("%d waits while an outside session held the row", *res.LockWaits)
+	// THE CLAIM, which is what this test is really for. Whatever the server did
+	// or did not say about a holder, the report must never attribute a lock to
+	// a session that was not named as one. This is the invariant the whole
+	// BlockingNamed change exists to protect, and it survives every mechanism
+	// that empties a state, because it does not read the state at all.
 	for _, w := range res.LockWaitPairs {
-		t.Logf("  %q waited on in-run=%v state=%q %s %s, %d times",
-			w.BlockedStatement, w.BlockingInRun, w.BlockingState, w.LockType, w.Mode, w.Waits)
+		if !w.BlockingNamed || w.BlockingPrepared {
+			require.False(t, w.BlockingInRun,
+				"a holder that was not a named session was attributed to one of this "+
+					"run's own clients: %+v", w)
+			require.Emptyf(t, w.BlockingStatement,
+				"a holder that was not a named session was given a statement label, so "+
+					"the report names work it cannot know about: %+v", w)
+		}
+		require.Falsef(t, w.BlockingInRun && !w.BlockingNamed,
+			"a pair claims the holder was one of this run's clients while also saying "+
+				"the server named no holder: %+v", w)
 	}
+
+	require.True(t, stranger,
+		"an outside session held the row for more than a second and no wait named a "+
+			"holder outside this run, so either the attribution is wrong or every pair "+
+			"came back with no holder named at all")
 }
 
 // A REAL RUN KEEPS ITS SAMPLES, WHICH IS WHAT MAKES Merge USABLE AT ALL.

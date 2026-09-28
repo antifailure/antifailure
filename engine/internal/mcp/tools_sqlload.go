@@ -706,17 +706,28 @@ type sqlContentionDoc struct {
 // catalogue and are neutralised for the same reason: a relation can be named
 // anything a customer's migration called it.
 type sqlLockPairDoc struct {
-	BlockedTransaction  string  `json:"blocked_transaction,omitempty"`
-	BlockedStatement    string  `json:"blocked_statement,omitempty"`
-	BlockingTransaction string  `json:"blocking_transaction,omitempty"`
-	BlockingStatement   string  `json:"blocking_statement,omitempty"`
-	BlockingState       string  `json:"blocking_state,omitempty"`
-	BlockingInRun       bool    `json:"blocking_in_run"`
-	Relation            string  `json:"relation,omitempty"`
-	LockType            string  `json:"lock_type"`
-	Mode                string  `json:"mode"`
-	Waits               int     `json:"waits"`
-	WaitedMS            float64 `json:"waited_ms"`
+	BlockedTransaction  string `json:"blocked_transaction,omitempty"`
+	BlockedStatement    string `json:"blocked_statement,omitempty"`
+	BlockingTransaction string `json:"blocking_transaction,omitempty"`
+	BlockingStatement   string `json:"blocking_statement,omitempty"`
+	BlockingState       string `json:"blocking_state,omitempty"`
+	// BlockingNamed says whether the server named a holder at all. A model
+	// handed only blocking_in_run false would say another session held the
+	// lock, which is a claim about whose lock it was made by something that
+	// did not know: pg_blocking_pids names nobody when the holder disconnected
+	// between the two reads.
+	BlockingNamed bool `json:"blocking_named"`
+	// BlockingPrepared says the named holder is a prepared transaction and so
+	// has no session. Carried because a model told only that a holder was
+	// named and not in the run would describe it as another session, which is
+	// the false attribution these fields exist to prevent.
+	BlockingPrepared bool    `json:"blocking_prepared"`
+	BlockingInRun    bool    `json:"blocking_in_run"`
+	Relation         string  `json:"relation,omitempty"`
+	LockType         string  `json:"lock_type"`
+	Mode             string  `json:"mode"`
+	Waits            int     `json:"waits"`
+	WaitedMS         float64 `json:"waited_ms"`
 }
 
 type sqlThresholdsDoc struct {
@@ -1033,6 +1044,8 @@ func describeSQLContention(res *sqlload.Result) sqlContentionDoc {
 			BlockingTransaction: neutralize(w.BlockingTransaction, 128),
 			BlockingStatement:   neutralize(w.BlockingStatement, 128),
 			BlockingState:       neutralize(w.BlockingState, 64),
+			BlockingNamed:       w.BlockingNamed,
+			BlockingPrepared:    w.BlockingPrepared,
 			BlockingInRun:       w.BlockingInRun,
 			Relation:            neutralize(w.Relation, 128),
 			LockType:            neutralize(w.LockType, 64),
