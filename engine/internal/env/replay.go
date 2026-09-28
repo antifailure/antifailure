@@ -140,6 +140,9 @@ func (o *Orchestrator) SaveIncident(ctx context.Context, incident replay.Inciden
 	if gaps := incident.Missing(); len(gaps) > 0 {
 		return nil, fmt.Errorf("incident is not ready: %s", strings.Join(gaps, ", "))
 	}
+	if len(incident.Output) > 0 && !replay.Assert(incident.Output, assertion.Pointer, assertion.Baseline) {
+		return nil, fmt.Errorf("the original failure assertion does not match the retained outcome")
+	}
 	if incident.Project != o.opts.Manifest.Name {
 		return nil, fmt.Errorf("incident belongs to another project")
 	}
@@ -232,6 +235,9 @@ func (o *Orchestrator) replayScenario(id string) (*replay.Scenario, *replay.Inci
 	if gaps := incident.Missing(); len(gaps) > 0 {
 		return &scenario, &incident, fmt.Errorf("incident is incomplete: %s", strings.Join(gaps, ", "))
 	}
+	if len(incident.Output) > 0 && !replay.Assert(incident.Output, scenario.Assertion.Pointer, scenario.Assertion.Baseline) {
+		return &scenario, &incident, fmt.Errorf("the saved control contradicts the retained original outcome")
+	}
 	return &scenario, &incident, nil
 }
 
@@ -244,7 +250,9 @@ func (o *Orchestrator) Replay(ctx context.Context, id, candidate string) (report
 	}
 	report = &replay.Report{SchemaVersion: 1, ID: "rpl_" + hex.EncodeToString(random[:]), Scenario: id, Verdict: "INCONCLUSIVE", State: "preflight", Fidelity: "trace-only", StartedAt: o.opts.Clock.Now(), Issues: []string{}, Notes: []string{"Database state is a pinned masked golden, not the incident-time database.", "Clock control covers calls to the SDK clock only.", "Database comparison reports net writes to the declared tables."}}
 	store := o.ReplayStore()
+	releasePublication := func() {}
 	finish := func() {
+		defer func() { releasePublication() }()
 		if recovered := recover(); recovered != nil {
 			report.Verdict = "INCONCLUSIVE"
 			report.Issues = append(report.Issues, "replay_internal_failure")
@@ -269,7 +277,7 @@ func (o *Orchestrator) Replay(ctx context.Context, id, candidate string) (report
 	if publicationErr != nil {
 		return report, publicationErr
 	}
-	defer unlock()
+	releasePublication = unlock
 	if store.IsRetired(id) {
 		report.Issues = append(report.Issues, "scenario_retired")
 		return report, nil
@@ -284,6 +292,11 @@ func (o *Orchestrator) Replay(ctx context.Context, id, candidate string) (report
 	report.GoldenAt = scenario.GoldenAt
 	report.ObservedAt = incident.ObservedAt
 	report.TraceID = incident.TraceID
+	report.OriginalOutcome = incident.Output
+	report.Assertion = &scenario.Assertion
+	if len(incident.Output) == 0 {
+		report.Notes = append(report.Notes, "Original outcome was not retained; the control uses the reviewer-supplied failure assertion.")
+	}
 	report.TeardownManifest = &scenario.Manifest
 	report.Dependencies = map[string]string{"database": "pinned masked snapshot; historical state approximate", "clock": "SDK clock only", "identity": "synthetic", "external_network": "blocked"}
 	for _, exchange := range incident.Exchanges {
@@ -346,10 +359,19 @@ func (o *Orchestrator) Replay(ctx context.Context, id, candidate string) (report
 	unlock()
 	// Registered before Up, including failed creation and cancelled callers.
 	defer func() {
-		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
-		defer cancel()
-		report.Baseline.TornDown = baseline.replayDown(cleanup)
-		report.Candidate.TornDown = cand.replayDown(cleanup)
+		for _, item := range []struct {
+			name   string
+			engine *Orchestrator
+			side   *replay.Side
+		}{{"baseline", baseline, &report.Baseline}, {"candidate", cand, &report.Candidate}} {
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+			cleanErr := item.engine.replayDown(cleanup)
+			cancel()
+			item.side.TornDown = cleanErr == nil
+			if cleanErr != nil {
+				report.Issues = append(report.Issues, item.name+" cleanup: "+o.opts.Redactor.String(cleanErr.Error()))
+			}
+		}
 		if !report.Baseline.TornDown || !report.Candidate.TornDown {
 			report.Issues = append(report.Issues, "teardown_unconfirmed: run af replay recover "+report.ID)
 		}
@@ -464,15 +486,49 @@ func (o *Orchestrator) replaySide(ctx context.Context, side *Orchestrator, scena
 	if err = replay.Decode(data, &observed); err != nil {
 		return before, nil, err
 	}
+	if err = replay.SafePayload(data); err != nil {
+		return before, nil, fmt.Errorf("replay response contains unsafe evidence")
+	}
+	normalized, normalizeErr := json.Marshal(observed)
+	if normalizeErr != nil || !bytes.Equal(side.opts.Redactor.Bytes(normalized), normalized) {
+		return before, nil, fmt.Errorf("replay response was refused by the evidence redactor")
+	}
 	result.Response = &observed
 	if observed.SchemaVersion != 1 || len(observed.Issues) > 0 || len(observed.Operations) != len(incident.Exchanges) {
 		return before, nil, fmt.Errorf("incomplete SDK evidence: %s", strings.Join(observed.Issues, ", "))
 	}
+	expectedHits := 0
+	expectedEffects := 0
 	for n, op := range observed.Operations {
 		expected := incident.Exchanges[n]
 		if op.Seq != n || op.Key != expected.Key || op.Kind != expected.Kind || op.Name != expected.Name {
 			return before, nil, fmt.Errorf("boundary diverged at %d", n)
 		}
+		if expected.Kind == "database" {
+			if op.Source != "isolated_database" {
+				return before, nil, fmt.Errorf("database boundary source is unconfirmed at %d", n)
+			}
+		} else {
+			expectedHits++
+			if op.Source != "recorded" {
+				return before, nil, fmt.Errorf("boundary was not recorded at %d", n)
+			}
+		}
+		if expected.Kind == "effect" {
+			if expectedEffects >= len(observed.Effects) {
+				return before, nil, fmt.Errorf("effect ledger is incomplete")
+			}
+			var identity struct {
+				Input json.RawMessage `json:"input"`
+			}
+			if json.Unmarshal(expected.Request, &identity) != nil || observed.Effects[expectedEffects].Name != expected.Name || !replay.Equal(identity.Input, observed.Effects[expectedEffects].Request) {
+				return before, nil, fmt.Errorf("effect ledger differs at %d", n)
+			}
+			expectedEffects++
+		}
+	}
+	if observed.Hits != expectedHits || len(observed.Effects) != expectedEffects {
+		return before, nil, fmt.Errorf("replay counters or effect ledger are incomplete")
 	}
 	rt, err := side.newRuntime(ctx)
 	if err != nil {
@@ -556,35 +612,27 @@ func sameReplayDatabase(before, after *oracle.Snapshot) bool {
 	return true
 }
 
-func (o *Orchestrator) replayDown(ctx context.Context) bool {
+func (o *Orchestrator) replayDown(ctx context.Context) error {
 	td, err := o.Down(ctx)
-	if err != nil || td == nil || len(td.Pending) > 0 {
-		return false
-	}
-	s, err := o.openReading(ctx)
 	if err != nil {
-		return false
+		return err
 	}
-	defer s.close()
-	db, err := s.dbProv.Inventory(ctx)
-	if err != nil {
-		return false
+	if td == nil {
+		return fmt.Errorf("teardown returned no evidence")
+	}
+	if len(td.Pending) > 0 {
+		return fmt.Errorf("teardown left %d pending resources", len(td.Pending))
 	}
 	rt, err := o.newRuntime(ctx)
 	if err != nil {
-		return false
+		return err
 	}
 	defer func() { _ = rt.Close() }()
-	resources, err := rt.Inventory(ctx)
-	if err != nil {
-		return false
+	localRuntime, ok := rt.(*local.Runtime)
+	if !ok {
+		return fmt.Errorf("runtime cannot verify replay cleanup")
 	}
-	for _, resource := range append(db, resources...) {
-		if resource.EnvID == o.EnvID() {
-			return false
-		}
-	}
-	return true
+	return localRuntime.ReplayAbsent(ctx, o.EnvID())
 }
 
 // RecoverReplay reconciles both recorded environments without rerunning the agent.
@@ -620,7 +668,13 @@ func (o *Orchestrator) RecoverReplay(ctx context.Context, id string) (*replay.Re
 		if child.EnvID() != side.EnvID {
 			return nil, fmt.Errorf("recorded environment identity mismatch")
 		}
-		side.TornDown = child.replayDown(ctx)
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+		cleanErr := child.replayDown(cleanup)
+		cancel()
+		side.TornDown = cleanErr == nil
+		if cleanErr != nil {
+			report.Issues = append(report.Issues, "cleanup: "+o.opts.Redactor.String(cleanErr.Error()))
+		}
 	}
 	report.Verdict = "INCONCLUSIVE"
 	report.State = "recovered"

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,7 +24,7 @@ const MaxBytes = 4 << 20
 
 var namePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$`)
 var digestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
-var commitPattern = regexp.MustCompile(`^[a-f0-9]{40}$`)
+var commitPattern = regexp.MustCompile(`^(?:[a-f0-9]{40}|[a-f0-9]{64})$`)
 
 type Exchange struct {
 	Seq        int             `json:"seq"`
@@ -137,6 +138,8 @@ type Report struct {
 	DurationMs        int64             `json:"durationMs"`
 	TeardownManifest  *schema.Manifest  `json:"teardownManifest,omitempty"`
 	DatabaseUnchanged bool              `json:"databaseUnchanged"`
+	OriginalOutcome   json.RawMessage   `json:"originalOutcome,omitempty"`
+	Assertion         *Assertion        `json:"assertion,omitempty"`
 	Notes             []string          `json:"notes"`
 	Issues            []string          `json:"issues"`
 	StartedAt         time.Time         `json:"startedAt"`
@@ -162,14 +165,21 @@ func Decode(body []byte, out any) error {
 }
 
 func (i Incident) Validate() error {
+	if err := SafePayload(i.Input); err != nil {
+		return err
+	}
+	if err := SafePayload(i.Output); err != nil {
+		return err
+	}
 	encoded, err := json.Marshal(i)
 	if err != nil || len(livekey.Scan(string(encoded), "incident")) > 0 {
 		return fmt.Errorf("incident contains a credential or cannot be encoded")
 	}
-	if i.SchemaVersion != 1 || !namePattern.MatchString(i.RunID) || !namePattern.MatchString(i.Project) || !namePattern.MatchString(i.Service) || !commitPattern.MatchString(i.Commit) || !digestPattern.MatchString(i.InputHash) {
+	hashKnown := digestPattern.MatchString(i.InputHash) || (i.InputHash == "" && i.Status == "incomplete" && contains(i.Issues, "input_unhashable"))
+	if i.SchemaVersion != 1 || !namePattern.MatchString(i.RunID) || !namePattern.MatchString(i.Project) || !namePattern.MatchString(i.Service) || !namePattern.MatchString(i.PolicyVersion) || !commitPattern.MatchString(i.Commit) || !hashKnown {
 		return fmt.Errorf("incident identity or schema is invalid")
 	}
-	if len(i.TraceID) != 32 {
+	if len(i.TraceID) != 32 || i.TraceID == strings.Repeat("0", 32) {
 		return fmt.Errorf("incident trace ID must be W3C hexadecimal")
 	}
 	if _, err := hex.DecodeString(i.TraceID); err != nil {
@@ -185,6 +195,15 @@ func (i Incident) Validate() error {
 		return fmt.Errorf("incident contains too many exchanges")
 	}
 	for n, e := range i.Exchanges {
+		if err := SafePayload(e.Request); err != nil {
+			return fmt.Errorf("exchange %d: %w", n, err)
+		}
+		if err := SafePayload(e.Response); err != nil {
+			return fmt.Errorf("exchange %d: %w", n, err)
+		}
+		if e.Parent != nil && (*e.Parent < 0 || *e.Parent >= n) {
+			return fmt.Errorf("exchange %d parent is invalid", n)
+		}
 		if e.Seq != n || !digestPattern.MatchString(e.Key) || !namePattern.MatchString(e.Name) || !namePattern.MatchString(e.Version) || e.Provenance != "recorded" {
 			return fmt.Errorf("exchange %d identity is invalid", n)
 		}
@@ -239,7 +258,7 @@ func (s Scenario) Validate() error {
 	if len(s.Assertion.Baseline) == 0 || len(s.Assertion.Expected) == 0 || !json.Valid(s.Assertion.Baseline) || !json.Valid(s.Assertion.Expected) || Equal(s.Assertion.Baseline, s.Assertion.Expected) {
 		return fmt.Errorf("declare distinct original failure and expected outcomes")
 	}
-	if s.Assertion.Pointer != "" && !strings.HasPrefix(s.Assertion.Pointer, "/") {
+	if _, valid := pointerTokens(s.Assertion.Pointer); !valid {
 		return fmt.Errorf("assertion uses a JSON pointer")
 	}
 	if len(s.Tables) == 0 || len(s.Tables) > 32 {
@@ -272,21 +291,55 @@ func Assert(body json.RawMessage, pointer string, expected json.RawMessage) bool
 	if d.Decode(&value) != nil {
 		return false
 	}
-	if pointer != "" {
-		for _, part := range strings.Split(strings.TrimPrefix(pointer, "/"), "/") {
-			key := strings.ReplaceAll(strings.ReplaceAll(part, "~1", "/"), "~0", "~")
-			obj, ok := value.(map[string]any)
-			if !ok {
+	tokens, valid := pointerTokens(pointer)
+	if !valid {
+		return false
+	}
+	for _, key := range tokens {
+		switch node := value.(type) {
+		case map[string]any:
+			var found bool
+			value, found = node[key]
+			if !found {
 				return false
 			}
-			value, ok = obj[key]
-			if !ok {
+		case []any:
+			if key == "" || len(key) > 1 && key[0] == '0' || strings.IndexFunc(key, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
 				return false
 			}
+			index, err := strconv.Atoi(key)
+			if err != nil || index < 0 || index >= len(node) {
+				return false
+			}
+			value = node[index]
+		default:
+			return false
 		}
 	}
 	b, err := json.Marshal(value)
 	return err == nil && Equal(b, expected)
+}
+
+func pointerTokens(pointer string) ([]string, bool) {
+	if pointer == "" {
+		return nil, true
+	}
+	if !strings.HasPrefix(pointer, "/") {
+		return nil, false
+	}
+	parts := strings.Split(pointer[1:], "/")
+	for n, part := range parts {
+		for index := 0; index < len(part); index++ {
+			if part[index] == '~' {
+				if index+1 >= len(part) || (part[index+1] != '0' && part[index+1] != '1') {
+					return nil, false
+				}
+				index++
+			}
+		}
+		parts[n] = strings.ReplaceAll(strings.ReplaceAll(part, "~1", "/"), "~0", "~")
+	}
+	return parts, true
 }
 
 type Store struct {
@@ -334,6 +387,9 @@ func (s Store) Put(kind, id string, value any) error {
 	return s.write(kind, id, body, kind == "attempts")
 }
 func (s Store) write(kind, id string, body []byte, replace bool) error {
+	if err := safeArtifact(body); err != nil {
+		return err
+	}
 	if len(body) > MaxBytes {
 		return fmt.Errorf("artifact exceeds byte limit")
 	}

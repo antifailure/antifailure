@@ -165,12 +165,13 @@ func renderReplay(e *Env, report *replay.Report) error {
 	e.Out.Printf("%s  %s\n", report.Verdict, report.Scenario)
 	e.Out.Printf("  Attempt: %s\n  Fidelity: %s\n", report.ID, report.Fidelity)
 	e.Out.Printf("  Baseline reproduced: %t\n  Candidate assertion: %t\n", report.Baseline.Assertion, report.Candidate.Assertion)
+	e.Out.Printf("  Declared database tables unchanged: %t\n", report.DatabaseUnchanged)
 	e.Out.Printf("  Teardown: baseline %t, candidate %t\n", report.Baseline.TornDown, report.Candidate.TornDown)
 	for _, issue := range report.Issues {
-		e.Out.Printf("  %s\n", issue)
+		e.Out.Printf("  %s\n", e.Out.Wrap(issue, 2))
 	}
 	for _, note := range report.Notes {
-		e.Out.Printf("  %s\n", note)
+		e.Out.Printf("  %s\n", e.Out.Wrap(note, 2))
 	}
 	e.Out.Printf("  Evidence: af replay inspect %s --output json\n", report.ID)
 	return nil

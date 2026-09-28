@@ -98,7 +98,7 @@ The MCP tools `inspect_agent_incident`, `replay_agent_incident` and `recover_age
 
 ## Local data custody
 
-Artifacts are stored under `.antifailure/replay` with private file permissions. Payloads are content-addressed and published before scenarios. Incident and scenario names cannot traverse paths. Inspectable siblings remain visible when another artifact is malformed.
+Artifacts are stored under `.antifailure/replay` with private file permissions. Payloads are content-addressed and published before scenarios. Incident and scenario names cannot traverse paths. Valid records remain visible when another artifact is malformed.
 
 This first release has no hosted storage or tenant search. Anyone who controls the local project and its files controls its captures. Retain only opted-in content for which you have permission. A source merge installs neither a hosted collector nor a production capture policy.
 

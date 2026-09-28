@@ -66,6 +66,7 @@ export interface CaptureOptions {
   maxBytes?: number;
   maxExchanges?: number;
   maxConcurrentCaptures?: number;
+  flushTimeoutMs?: number;
   onDiagnostic?: (reason: string) => void;
   failClosed?: boolean;
   now?: () => Date;
@@ -81,6 +82,7 @@ export interface ReplayRequest {
   input: JSONValue;
   clock: string;
   exchanges: Exchange[];
+  commit?: string;
 }
 export interface ReplayResponse {
   schemaVersion: 1;
@@ -91,6 +93,7 @@ export interface ReplayResponse {
   hits: number;
 }
 interface Context {
+  owner: AgentReplay;
   incident?: Incident;
   replay?: ReplayRequest;
   result: ReplayResponse;
@@ -102,8 +105,11 @@ interface Context {
 const context = new AsyncLocalStorage<Context>();
 const parentContext = new AsyncLocalStorage<{root: Context; seq: number}>();
 const safeName = /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/;
-const credential = /(?:Bearer\s+\S+|-----BEGIN [A-Z ]*PRIVATE KEY-----|(?:sk_live_|sk-proj-|sk-ant-|ghp_|gho_|AKIA)[A-Za-z0-9_-]+|postgres(?:ql)?:\/\/[^\s]+|https?:\/\/[^\s/@]+:[^\s/@]+@[^\s]+)/gi;
-const denied = /^(authorization|proxy-authorization|cookie|set-cookie|password|passwd|secret|token|access_token|refresh_token|api[_-]?key|private[_-]?key)$/i;
+const credential = /(?:(?:Bearer|Basic)\s+\S+|-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}|(?:sk_live_|sk-proj-|sk-ant-|ghp_|gho_|AKIA)[A-Za-z0-9_-]+|postgres(?:ql)?:\/\/[^\s]+|https?:\/\/[^\s/@]+:[^\s/@]+@[^\s]+)/gi;
+const providerCredential = /\b(?:(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]{10,247}|whsec_[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,}|(?:AKIA|ASIA|ABIA|ACCA)[0-9A-Z]{16}|xox[abposr]-[A-Za-z0-9-]{10,}|SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}|sk-(?:proj-|svcacct-|ant-)?[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{35}|AC[0-9a-fA-F]{32}|sbp_[0-9a-f]{40,}|napi_[a-z0-9]{20,}|npm_[A-Za-z0-9]{36}|dp\.(?:pt|st|sa|ct)\.[A-Za-z0-9]{20,})\b/g;
+function deniedField(name: string): boolean {
+  return /(?:authorization|cookie|password(?:hash)?|passwd|secret(?:accesskey)?|token|apikey|privatekey|connectionstring|credentials)$/.test(name.toLowerCase().replace(/[-_.]/g, ''));
+}
 
 /** Stable JSON is part of the wire contract, not JSON.stringify's insertion order. */
 export function canonical(value: unknown): string {
@@ -127,10 +133,31 @@ export function canonical(value: unknown): string {
 export function requestKey(request: RequestIdentity): string {
   return createHash('sha256').update(canonical(request)).digest('hex');
 }
-function scrub(value: JSONValue): JSONValue {
-  if (typeof value === 'string') return value.replace(credential, '[redacted]');
-  if (Array.isArray(value)) return value.map(scrub);
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, denied.test(k) ? '[redacted]' : scrub(v)]));
+function scrub(value: JSONValue, depth = 0): JSONValue {
+  if (depth > 64) return '[redacted]';
+  if (typeof value === 'string') {
+    let clean = value.replace(providerCredential, '[redacted]').replace(credential, '[redacted]').replace(/https?:\/\/[^\s"'<>]+/g, text => {
+    try {
+      const url = new URL(text); let changed = false;
+      for (const key of [...url.searchParams.keys()]) {
+        if (deniedField(key) || /^(?:sig|signature|x-amz-signature)$/i.test(key)) { url.searchParams.set(key, '[redacted]'); changed = true; }
+      }
+      return changed ? url.href : text;
+    } catch { return text; }
+    });
+    clean = clean.replace(/"((?:\\.|[^"\\])*)"\s*:\s*"((?:\\.|[^"\\])*)"/g, (pair, key: string) => {
+      try { const decoded = JSON.parse('"' + key + '"') as string; return deniedField(decoded) ? JSON.stringify(decoded) + ':"[redacted]"' : pair; } catch { return pair; }
+    });
+    if (/^\s*[\[{"]/.test(clean)) {
+      let nested: JSONValue;
+      try { nested = JSON.parse(clean) as JSONValue; } catch { return clean; }
+      const protectedValue = scrub(nested, depth + 1);
+      try { if (canonical(protectedValue) !== canonical(nested)) return JSON.stringify(protectedValue); } catch { return '[redacted]'; }
+    }
+    return clean;
+  }
+  if (Array.isArray(value)) return value.map(item => scrub(item, depth + 1));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [scrub(k, depth + 1) as string, deniedField(k) ? '[redacted]' : scrub(v, depth + 1)]));
   return value;
 }
 function issue(c: Context, reason: string): void {
@@ -148,9 +175,11 @@ export class AgentReplay {
   readonly #options: CaptureOptions;
   readonly #key: Uint8Array;
   #active = 0;
+  readonly #writes = new Set<Promise<void>>();
   constructor(options: CaptureOptions) {
     for (const value of [options.project, options.service, options.policyVersion]) if (!safeName.test(value)) throw new Error('Use a bounded name for project, service and capture policy.');
-    if (!/^[a-f0-9]{40}$/.test(options.commit)) throw new Error('Pin capture to a full Git commit.');
+    if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(options.commit)) throw new Error('Pin capture to a full Git commit.');
+    for (const limit of [options.maxBytes, options.maxExchanges, options.maxConcurrentCaptures, options.flushTimeoutMs]) if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1)) throw new Error('Capture limits must be positive integers.');
     this.#options = options;
     this.#key = options.hashKey ?? randomBytes(32);
   }
@@ -180,22 +209,33 @@ export class AgentReplay {
   /** Uses the declared application clock. It does not intercept Date.now(). */
   now(): Date {
     const c = context.getStore();
+    if (c && c.owner !== this) { issue(c, 'sdk_instance_mismatch'); if (c.replay) throw new Error('Replay clock belongs to another SDK instance.'); }
     return c?.replay ? new Date(c.replay.clock) : (this.#options.now?.() ?? new Date());
   }
   /** Attach a checkpoint that became available after the run began. */
   checkpoint(golden: string): void {
     const c = context.getStore();
-    if (!c?.incident || c.closed || !safeName.test(golden)) { this.#diagnose('checkpoint_unavailable'); return; }
+    if (!c?.incident || c.owner !== this || c.closed || !safeName.test(golden)) { this.#diagnose('checkpoint_unavailable'); return; }
     if (c.incident.golden && c.incident.golden !== golden) { issue(c, 'checkpoint_changed'); return; }
     c.incident.golden = golden;
   }
   async run<T extends JSONValue>(input: JSONValue, agent: () => Promise<T>, opts: RunOptions = {}): Promise<T> {
-    if (this.#active >= Math.min(this.#options.maxConcurrentCaptures ?? 32, 64)) {
+    const active = context.getStore();
+    if (active?.replay) {
+      if (active.owner !== this || canonical(input) !== canonical(active.replay.input)) {
+        issue(active, 'nested_replay_identity_mismatch');
+        throw new Error('A replay entry point cannot replace its capture context.');
+      }
+      return agent();
+    }
+    if (active?.incident) issue(active, 'nested_agent_run');
+    const concurrencyLimit = Math.min(this.#options.maxConcurrentCaptures ?? 32, 64);
+    if (this.#active >= concurrencyLimit || this.#writes.size >= concurrencyLimit) {
       this.#diagnose('capture_concurrency_limit');
       if (this.#options.failClosed) throw new Error('Protected capture exceeded its concurrency limit.');
       return context.exit(agent);
     }
-    const validRunId = opts.runId === undefined || safeName.test(opts.runId);
+    const validRunId = opts.runId === undefined || (safeName.test(opts.runId) && !opts.runId.includes(':') && scrub(opts.runId) === opts.runId);
     const validTraceId = opts.traceId === undefined || (/^[a-f0-9]{32}$/.test(opts.traceId) && opts.traceId !== '0'.repeat(32));
     const runId = validRunId ? (opts.runId ?? randomUUID()) : randomUUID();
     const traceId = validTraceId ? (opts.traceId ?? randomBytes(16).toString('hex')) : randomBytes(16).toString('hex');
@@ -205,7 +245,7 @@ export class AgentReplay {
       commit: this.#options.commit, observedAt: this.now().toISOString(), policyVersion: this.#options.policyVersion,
       inputHash: '', status: 'complete', issues: [], exchanges: [], clock: 'sdk', identity: opts.identity ?? 'unmapped', golden: opts.golden ?? '', durationMs: 0,
     };
-    const c: Context = { incident, result: {schemaVersion:1, issues: [], operations: [], effects: [], hits:0}, cursor:0, bytes:0, pending:new Set(), closed:false };
+    const c: Context = { owner:this, incident, result: {schemaVersion:1, issues: [], operations: [], effects: [], hits:0}, cursor:0, bytes:0, pending:new Set(), closed:false };
     if (!validRunId) { issue(c, 'run_id_invalid'); this.#diagnose('run_id_invalid'); }
     if (!validTraceId) { issue(c, 'trace_id_invalid'); this.#diagnose('trace_id_invalid'); }
     try { incident.inputHash = createHmac('sha256', this.#key).update(canonical(input)).digest('hex'); } catch { issue(c, 'input_unhashable'); }
@@ -226,27 +266,50 @@ export class AgentReplay {
         if (c.pending.size) issue(c, 'unfinished_operations');
         incident.durationMs = performance.now() - started;
         if (incident.issues.length) incident.status = 'incomplete';
-        try { await this.#write(incident); } catch {
+        try { await this.#persist(incident); } catch {
           this.#diagnose(`capture_write_failed:${runId}`);
           if (this.#options.failClosed) throw new Error('Protected capture could not be persisted.');
         } finally { this.#active--; }
       }
     });
   }
+  async #persist(incident: Incident): Promise<void> {
+    const pending = this.#write(incident);
+    this.#writes.add(pending);
+    void pending.finally(() => this.#writes.delete(pending)).catch(() => {});
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([pending, new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('Capture flush exceeded its budget.')), Math.min(this.#options.flushTimeoutMs ?? 1000, 5000));
+      })]);
+    } finally { if (timer) clearTimeout(timer); }
+  }
   async #write(incident: Incident): Promise<void> {
-    const body = canonical(incident) + '\n';
+    const original = canonical(incident);
+    const safe = scrub(JSON.parse(original) as JSONValue) as unknown as Incident;
+    if (canonical(safe) !== original) { safe.status = 'incomplete'; safe.issues.push('writer_redacted_content'); }
+    const body = canonical(safe) + '\n';
     if (Buffer.byteLength(body) > 4 * 1048576) throw new Error('Capture exceeded its total byte limit.');
     await mkdir(this.#options.directory, {recursive:true, mode:0o700});
     const target = join(this.#options.directory, incident.runId + '.json');
     const temporary = target + '.' + randomUUID() + '.tmp';
     const file = await open(temporary, 'wx', 0o600);
     try { await file.writeFile(body); await file.sync(); } finally { await file.close(); }
-    try { await link(temporary, target); } finally { await unlink(temporary); }
+    try {
+      await link(temporary, target);
+      const directory = await open(this.#options.directory, 'r');
+      try { await directory.sync(); } finally { await directory.close(); }
+    } finally { await unlink(temporary); }
   }
   /** Database callbacks run against the isolated branch; other callbacks never run during replay. */
   async boundary<T extends JSONValue>(request: RequestIdentity, execute: () => Promise<T>, usage?: (response: T) => Usage): Promise<T> {
     const c = context.getStore();
     if (!c) return execute();
+    if (c.owner !== this) {
+      issue(c, 'sdk_instance_mismatch');
+      if (c.replay) throw new Error('Replay boundary belongs to another SDK instance.');
+      return execute();
+    }
     if (c.closed) {
       if (c.replay) throw new Error('The replay is closed.');
       this.#diagnose('operation_after_run');
@@ -311,7 +374,7 @@ export class AgentReplay {
   async replay(request: ReplayRequest, agent: (input: JSONValue) => Promise<JSONValue>): Promise<ReplayResponse> {
     if (request.schemaVersion !== 1 || !Array.isArray(request.exchanges) || request.exchanges.length > 10000 || !Number.isFinite(Date.parse(request.clock))) throw new Error('Unsupported replay request.');
     if (Buffer.byteLength(canonical(request)) > 4 * 1048576) throw new Error('Replay request exceeds its byte limit.');
-    const c: Context = {replay:structuredClone(request), result:{schemaVersion:1, issues:[], operations:[], effects:[], hits:0}, cursor:0, bytes:0, pending:new Set(), closed:false};
+    const c: Context = {owner:this, replay:structuredClone(request), result:{schemaVersion:1, issues:[], operations:[], effects:[], hits:0}, cursor:0, bytes:0, pending:new Set(), closed:false};
     return context.run(c, async () => {
       try { c.result.output = await agent(structuredClone(request.input)); } catch { issue(c, 'agent_error'); }
       c.closed = true;

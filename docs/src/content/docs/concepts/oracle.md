@@ -41,6 +41,10 @@ What is compared:
 | Database contents | Every table, row by row, matched on the primary key, with each column compared. |
 | Table structure | Columns added, dropped, or retyped between the two sides. |
 
+A table without a primary key is compared as a collection of whole rows,
+including repeated identical rows. Adding a second copy of a row is a database
+change. Every occurrence counts toward the snapshot's row limit.
+
 ## The baseline
 
 `oracle.baseline` decides which revision the comparison is against, and the two

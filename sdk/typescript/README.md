@@ -41,6 +41,8 @@ Use `replay.now()` for an application clock that should be frozen. Global clocks
 
 The `replay` method belongs behind an application endpoint enabled only for a contained test environment. The engine sets `AF_REPLAY_ENABLED=true` there. The [example application](example/app.mjs) checks that flag before accepting replay requests. Do not expose a replay endpoint in production.
 
+Capture defaults to at most 1,000 exchanges, 256 KiB per retained value, a 4 MiB artifact, 32 concurrent captures and a one-second flush budget. There is no unbounded upload queue. `onDiagnostic` receives failures; without a callback they become `AF_CAPTURE_INCOMPLETE` process warnings. `failClosed: true` makes a protected run fail when capture cannot be persisted. Supply token and cost metadata with the boundary method's optional usage callback; the SDK does not invent provider prices.
+
 The runnable demonstration uses a synthetic model response, a real local HTTP help response, and a real Postgres query. From the repository root:
 
 ```sh

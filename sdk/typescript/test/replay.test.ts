@@ -1,9 +1,10 @@
 import { test } from 'node:test';
+import { createServer } from 'node:http';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AgentReplay, requestKey, canonical } from '../src/index.ts';
+import { AgentReplay, requestKey, canonical, captureHTTP } from '../src/index.ts';
 import type { CaptureOptions, Incident, RequestIdentity } from '../src/index.ts';
 
 const request: RequestIdentity = {kind:'model',name:'answer',version:'1',input:{question:'billing'},provider:'fixture',model:'v1',instructions:'Read the account',tools:[],settings:{temperature:0}};
@@ -149,4 +150,60 @@ test('invalid per-run identifiers do not take down the host and protected captur
   assert.equal(incident.status,'incomplete');assert.ok(diagnostics.includes('trace_id_invalid'));
   const protectedCapture=new AgentReplay({project:'billing',service:'agent',commit:'a'.repeat(40),policyVersion:'1',directory:'/dev/null/unwritable',failClosed:true,onDiagnostic:()=>{}});
   await assert.rejects(protectedCapture.run({},async()=>true),/Protected capture/);
+});
+
+test('another SDK instance cannot broaden the active capture policy',async t=>{
+  const first=await fixture(t,{content:[]});const second=await fixture(t);
+  await first.sdk.run({},()=>second.sdk.boundary(request,async()=>'private-second-answer'),{runId:'one'});
+  const body=await readFile(join(first.directory,'one.json'),'utf8');
+  assert.ok(!body.includes('private-second-answer'));assert.ok((await first.read()).issues.includes('sdk_instance_mismatch'));
+  const result=await first.sdk.replay({schemaVersion:1,input:{},clock:'2026-09-27T00:00:00Z',exchanges:[]},async()=>{
+    try{await second.sdk.boundary(request,async()=>{throw Error('foreign callback reached');});}catch{}
+    return true;
+  });
+  assert.ok(result.issues.includes('sdk_instance_mismatch'));
+});
+
+test('an instrumented run inside replay preserves strict replay and cannot reach a live callback',async t=>{
+  const {sdk}=await fixture(t);let calls=0;
+  const result=await sdk.replay({schemaVersion:1,input:{id:1},clock:'2026-09-27T00:00:00Z',exchanges:[]},()=>sdk.run({id:1},async()=>{
+    try{await sdk.boundary(request,async()=>{calls++;return true;});}catch{}
+    return 'apparently correct';
+  }));
+  assert.equal(calls,0);assert.match(result.issues.join(),/cassette_miss/);
+});
+
+test('oversized bodies and a full capture budget preserve host behavior with explicit diagnostics',async t=>{
+  const diagnostics:string[]=[];const {sdk,read}=await fixture(t,{maxBytes:128,maxConcurrentCaptures:1,onDiagnostic:reason=>diagnostics.push(reason)});
+  let release!:()=>void;const blocked=new Promise<void>(resolve=>{release=resolve;});
+  const first=sdk.run('x'.repeat(1024),async()=>{await blocked;return 1;},{runId:'one'});
+  assert.equal(await sdk.run({},async()=>2,{runId:'two'}),2);
+  release();assert.equal(await first,1);
+  assert.ok(diagnostics.includes('capture_concurrency_limit'));assert.ok((await read()).issues.includes('content_unavailable:input'));
+});
+
+test('credential aliases and signed URL queries are removed before the writer sees them',async t=>{
+  const {sdk,directory}=await fixture(t);
+  await sdk.run({client_secret:'private-client-value',headers:{'x-api-key':'private-header-value'},url:'https://api.example.test/data?api_key=private-query-value&sig=private-signature'},async()=>true,{runId:'one'});
+  const body=await readFile(join(directory,'one.json'),'utf8');
+  for(const secret of ['private-client-value','private-header-value','private-query-value','private-signature'])assert.ok(!body.includes(secret));
+});
+
+test('a real HTTP JSON body cannot hide opaque credentials inside a string',async t=>{
+  const {sdk,read,directory}=await fixture(t,{content:['input','output','http:auth-response']});
+  const server=createServer((_request,response)=>{response.setHeader('content-type','application/json');response.end(JSON.stringify({access_token:'opaque-private-value',password:'short'}));});
+  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(()=>new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve())));
+  const address=server.address();assert.ok(address && typeof address==='object');
+  const live=await sdk.run({},()=>captureHTTP(sdk,'auth-response',`http://127.0.0.1:${address.port}/token`),{runId:'one'});
+  assert.ok(JSON.stringify(live).includes('opaque-private-value'),'the host still receives the real response');
+  const saved=await readFile(join(directory,'one.json'),'utf8');assert.ok(!saved.includes('opaque-private-value'));assert.ok(!saved.includes('short'));
+  assert.equal((await read()).status,'incomplete');
+});
+
+test('provider credential formats are removed from plain text before local persistence',async t=>{
+  const {sdk,directory}=await fixture(t);
+  const credentials=['github_pat_'+ 'a'.repeat(30),'whsec_'+'b'.repeat(24),'xoxb-'+'c'.repeat(24),'sk-svcacct-'+'d'.repeat(30),'SG.'+'e'.repeat(20)+'.'+'f'.repeat(20),'AIza'+'g'.repeat(35)];
+  await sdk.run({text:credentials.join(' ')},async()=>true,{runId:'one'});
+  const saved=await readFile(join(directory,'one.json'),'utf8');for(const credential of credentials)assert.ok(!saved.includes(credential));
 });

@@ -240,3 +240,71 @@ func TestRetirementRefusesActiveAttemptsThenDeletesOnlyUnreferencedContent(t *te
 	require.NoError(t, err)
 	require.NotContains(t, string(audit), "inputHash")
 }
+
+func TestUntrustedIncidentMetadataCannotImpersonateACompleteCapture(t *testing.T) {
+	cases := []func(*Incident){
+		func(i *Incident) { i.SchemaVersion = 2 }, func(i *Incident) { i.RunID = "../elsewhere" }, func(i *Incident) { i.PolicyVersion = "" },
+		func(i *Incident) { i.TraceID = strings.Repeat("z", 32) }, func(i *Incident) { i.TraceID = strings.Repeat("0", 32) },
+		func(i *Incident) { i.ObservedAt = "yesterday" }, func(i *Incident) { i.Status = "passed" }, func(i *Incident) { i.InputHash = "not-a-hash" },
+		func(i *Incident) { i.Exchanges = make([]Exchange, 10001) },
+		func(i *Incident) {
+			i.Exchanges = []Exchange{{Seq: 0, Name: "x", Version: "1", Kind: "unknown", Key: strings.Repeat("a", 64), Provenance: "recorded"}}
+		},
+		func(i *Incident) {
+			n := 1
+			i.Exchanges = []Exchange{{Seq: 0, Parent: &n, Name: "x", Version: "1", Kind: "tool", Key: strings.Repeat("a", 64), Provenance: "recorded"}}
+		},
+		func(i *Incident) { i.Exchanges = []Exchange{{Seq: 2}} },
+	}
+	for _, change := range cases {
+		i := validIncident()
+		change(&i)
+		require.Error(t, i.Validate())
+	}
+	i := validIncident()
+	i.InputHash = ""
+	i.Status = "incomplete"
+	i.Issues = []string{"input_unhashable"}
+	require.NoError(t, i.Validate())
+	require.NotEmpty(t, i.Missing())
+}
+
+func TestScenarioRefusesUnsafeRoutesUnknownVersionsAndAmbiguousAssertions(t *testing.T) {
+	base := Scenario{SchemaVersion: 1, ID: "one", IncidentRef: strings.Repeat("a", 64), Project: "billing", Golden: "gv-one", GoldenIdentity: "gp1-one", GoldenAt: time.Now(), Manifest: schema.Manifest{Name: "billing"}, Endpoint: "/af-replay", Assertion: Assertion{Baseline: json.RawMessage(`false`), Expected: json.RawMessage(`true`)}, Tables: []string{"subscriptions"}}
+	require.NoError(t, base.Validate())
+	cases := []func(*Scenario){func(s *Scenario) { s.SchemaVersion = 2 }, func(s *Scenario) { s.MaskingRef = "unknown" }, func(s *Scenario) { s.Endpoint = "//remote.example.test" }, func(s *Scenario) { s.Endpoint = "/path?override=true" }, func(s *Scenario) { s.Endpoint = "https://remote.example.test" }, func(s *Scenario) { s.Assertion.Expected = s.Assertion.Baseline }, func(s *Scenario) { s.Assertion.Pointer = "/bad~escape" }, func(s *Scenario) { s.Tables = nil }}
+	for _, change := range cases {
+		s := base
+		change(&s)
+		require.Error(t, s.Validate())
+	}
+}
+
+func TestJSONPointerReadsArraysAndRefusesInvalidIndexesWithoutGuessing(t *testing.T) {
+	body := json.RawMessage(`{"messages":[{"text":"correct"}],"~1":"escaped"}`)
+	require.True(t, Assert(body, "/messages/0/text", json.RawMessage(`"correct"`)))
+	require.True(t, Assert(body, "/~01", json.RawMessage(`"escaped"`)))
+	for _, pointer := range []string{"messages", "/messages/01/text", "/messages/-1", "/messages/+0", "/messages/1", "/messages/0/text/extra", "/messages/~2"} {
+		require.False(t, Assert(body, pointer, json.RawMessage(`"correct"`)))
+	}
+}
+
+func TestLateCaptureCannotRewriteEarlierFactsOrEraseAnUnresolvedFailure(t *testing.T) {
+	ctx := context.Background()
+	base := validIncident()
+	base.Status = "incomplete"
+	base.Issues = []string{"capture_pending", "identity_transformed:input"}
+	base.Golden = "gv-one"
+	for _, change := range []func(*Incident){func(i *Incident) { i.Commit = strings.Repeat("c", 40) }, func(i *Incident) { i.Golden = "gv-two" }, func(i *Incident) { i.Input = json.RawMessage(`{"id":2}`) }, func(i *Incident) { i.Issues = []string{"capture_pending"} }} {
+		s := Store{Root: t.TempDir()}
+		require.NoError(t, s.ImportIncident(ctx, base))
+		next := base
+		change(&next)
+		require.Error(t, s.ImportIncident(ctx, next))
+	}
+	s := Store{Root: t.TempDir(), Project: "other"}
+	require.Error(t, s.ImportIncident(ctx, base))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.Error(t, (Store{Root: t.TempDir()}).ImportIncident(ctx, base))
+}

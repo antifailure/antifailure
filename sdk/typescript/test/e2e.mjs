@@ -31,7 +31,7 @@ try {
   await writeFile(join(root,'.gitignore'),'.antifailure/\nevidence/\nrevision.txt\n');
   await writeFile(join(root,'.dockerignore'),'.git\n.antifailure\nevidence\n');
   await writeFile(join(root,'project.txt'),name);
-  await writeFile(join(root,'seed.sql'),"CREATE TABLE subscriptions (id integer PRIMARY KEY, status text NOT NULL); INSERT INTO subscriptions VALUES (1, 'cancelled');\n");
+  await writeFile(join(root,'seed.sql'),"CREATE TABLE subscriptions (id integer PRIMARY KEY, status text NOT NULL); INSERT INTO subscriptions VALUES (1, 'cancelled'); CREATE TABLE visits (id serial PRIMARY KEY);\n");
   await writeFile(join(root,'decision.mjs'),"export const shouldCharge = status => status !== 'active';\n");
   await writeFile(join(root,'antifailure.yaml'),`version: 1\nname: ${name}\nservices:\n  - name: agent\n    kind: web\n    path: .\n    port: 3000\n    health_path: /health\n    build:\n      strategy: dockerfile\n      dockerfile: Dockerfile\ndatabase:\n  provider: docker\n  version: 17\n  seed: 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f seed.sql'\negress:\n  default: block\n`);
   await git('add','.');await git('commit','-qm','Synthetic billing failure');
@@ -57,6 +57,7 @@ try {
   const fixed=await af(['replay','billing','--candidate',candidate]);await record('fixed',fixed);
   assert.equal(fixed.verdict,'PASS');assert.equal(fixed.baseline.assertion,true);assert.equal(fixed.candidate.assertion,true);
   assert.equal(fixed.baseline.tornDown,true);assert.equal(fixed.candidate.tornDown,true);assert.notEqual(fixed.baseline.envId,fixed.candidate.envId);
+  assert.equal(fixed.baseline.response.output.visitId,1);assert.equal(fixed.candidate.response.output.visitId,1);assert.equal(fixed.databaseUnchanged,true);
   const regressed=await af(['replay','billing','--candidate',baseline],[8]);await record('regressed',regressed);assert.equal(regressed.verdict,'FAIL');
   const missing=await af(['replay','absent','--candidate',candidate],[7]);await record('missing',missing);assert.equal(missing.verdict,'INCONCLUSIVE');
   const app=await readFile(join(root,'app.mjs'),'utf8');
@@ -66,9 +67,20 @@ try {
   await git('add','app.mjs');await git('commit','-qm','Negative control with a caught cassette miss');
   const divergent=await git('rev-parse','HEAD');
   const diverged=await af(['replay','billing','--candidate',divergent],[7]);await record('diverged',diverged);assert.equal(diverged.verdict,'INCONCLUSIVE');assert.match(diverged.issues.join(),/cassette_miss|incomplete SDK evidence/);
+  await writeFile(join(root,'app.mjs'),app.replace('  return {recommendation:',`  await exec('psql',[process.env.DATABASE_URL,'-At','-v','ON_ERROR_STOP=1','-c',"UPDATE subscriptions SET status='active'"]);
+  return {recommendation:`));
+  await git('add','app.mjs');await git('commit','-qm','Negative control with an unexpected database write');
+  const corrupt=await af(['replay','billing','--candidate',await git('rev-parse','HEAD')],[8]);await record('database-write',corrupt);assert.equal(corrupt.verdict,'FAIL');assert.equal(corrupt.candidate.assertion,true);assert.equal(corrupt.databaseUnchanged,false);
+  await writeFile(join(root,'app.mjs'),app.replace('  return {recommendation:',`  await fetch('https://payments.example.test/charge',{method:'POST',signal:AbortSignal.timeout(5000)}).catch(()=>{});
+  return {recommendation:`));
+  await git('add','app.mjs');await git('commit','-qm','Negative control with an unwrapped external call');
+  const escaped=await af(['replay','billing','--candidate',await git('rev-parse','HEAD')],[7]);await record('blocked-egress',escaped);assert.equal(escaped.verdict,'INCONCLUSIVE');assert.match(escaped.issues.join(),/unrecorded external request refused/);
   await writeFile(join(root,'app.mjs'),app);await git('add','app.mjs');await git('commit','-qm','Restore the recorded boundary contract');
   await writeFile(join(root,'suite.json'),JSON.stringify({schemaVersion:1,scenarios:['billing']}));
   const suite=await af(['eval','run','suite.json','--candidate',candidate]);assert.equal(suite[0].verdict,'PASS');await record('suite',suite);
+  const parallel=await Promise.all([af(['replay','billing','--candidate',candidate]),af(['replay','billing','--candidate',candidate])]);
+  const environments=new Set();for(const report of parallel){assert.equal(report.verdict,'PASS');assert.equal(report.baseline.response.output.visitId,1);assert.equal(report.candidate.response.output.visitId,1);environments.add(report.baseline.envId);environments.add(report.candidate.envId);}
+  assert.equal(environments.size,4);await record('concurrent',parallel);
   const blob=join(root,'.antifailure/replay/blobs',scenario.incidentRef+'.json');
   await rename(blob,blob+'.retained');
   try { const absent=await af(['replay','billing','--candidate',candidate],[7]);await record('missing-cassette',absent);assert.equal(absent.verdict,'INCONCLUSIVE'); }
@@ -100,6 +112,9 @@ try {
       assert.equal(recovered.verdict,'INCONCLUSIVE');assert.equal(recovered.baseline.tornDown,true);assert.equal(recovered.candidate.tornDown,true);
     } finally {await rename(blob+'.retained',blob);}
   }finally{if(child.exitCode===null && child.signalCode===null){child.kill('SIGTERM');await exited;}}
+  await af(['replay','retire','billing','--reason','Synthetic conformance run finished']);
+  await af(['replay','retire','billing','--reason','Synthetic conformance run finished']);
+  const retired=await af(['replay','billing','--candidate',candidate],[7]);assert.equal(retired.verdict,'INCONCLUSIVE');assert.ok(retired.issues.includes('scenario_retired'));await record('retired',retired);
   console.log(`Evidence: ${evidence}`);
 }finally{
   if(captureUp)await af(['down','--branch','capture']).catch(error=>console.error('Capture teardown failed:',error.message));

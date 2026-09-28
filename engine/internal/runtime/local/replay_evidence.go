@@ -126,3 +126,28 @@ func replayDecisions(body string) ([]Decision, error) {
 	}
 	return out, nil
 }
+
+// ReplayAbsent checks only the attempt's containers, networks and volumes,
+// including the Docker database provider's. Shared golden images are retained.
+func (r *Runtime) ReplayAbsent(ctx context.Context, envID string) error {
+	if envID == "" {
+		return fmt.Errorf("replay environment identity is absent")
+	}
+	filter := dockerutil.EnvFilter(envID)
+	containers, err := r.cli.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: filter})
+	if err != nil {
+		return fmt.Errorf("checking remaining containers: %w", err)
+	}
+	networks, err := r.cli.NetworkList(ctx, client.NetworkListOptions{Filters: filter})
+	if err != nil {
+		return fmt.Errorf("checking remaining networks: %w", err)
+	}
+	volumes, err := r.cli.VolumeList(ctx, client.VolumeListOptions{Filters: filter})
+	if err != nil {
+		return fmt.Errorf("checking remaining volumes: %w", err)
+	}
+	if len(containers.Items)+len(networks.Items)+len(volumes.Items) > 0 {
+		return fmt.Errorf("remaining resources: %d containers, %d networks, %d volumes", len(containers.Items), len(networks.Items), len(volumes.Items))
+	}
+	return nil
+}

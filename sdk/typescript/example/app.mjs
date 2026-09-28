@@ -9,19 +9,24 @@ const exec = promisify(execFile);
 const project = (await readFile(new URL('./project.txt', import.meta.url),'utf8')).trim();
 const createSDK = commit => new AgentReplay({
   project, service:'agent', commit, policyVersion:'demo-v1', directory:'/tmp/capture',
-  content:['input','output','database:subscription','http:help','model:recommendation'],
+  content:['input','output','database:subscription','database:visit','http:help','model:recommendation'],
   now:()=>new Date('2026-09-27T12:00:00Z'),
+  flushTimeoutMs:5000,
 });
 
 async function agent(sdk, input) {
   if (!Number.isSafeInteger(input.id) || input.id < 1) throw Error('Invalid synthetic subscription.');
   const subscription = await sdk.boundary({kind:'database',name:'subscription',version:'1',input:{id:input.id}},async()=>{
-    const {stdout}=await exec('psql',[process.env.DATABASE_URL,'-At','-v','ON_ERROR_STOP=1','-c',`SELECT row_to_json(s) FROM subscriptions s WHERE id = ${input.id}`]);
+    const {stdout}=await exec('psql',[process.env.DATABASE_URL,'-qAt','-v','ON_ERROR_STOP=1','-c',`SELECT row_to_json(s) FROM subscriptions s WHERE id = ${input.id}`]);
     return JSON.parse(stdout);
   });
   const help = await captureHTTP(sdk,'help','http://127.0.0.1:3000/help');
-  const guidance = await sdk.boundary({kind:'model',name:'recommendation',version:'1',provider:'synthetic',model:'recorded-demo-v1',instructions:'Use the subscription and help-center rule.',tools:[],settings:{temperature:0},input:{subscription,help}},async()=>({rule:'Charge active subscriptions only.'}));
-  return {recommendation:shouldCharge(subscription.status) ? 'charge' : 'review',rule:guidance.rule};
+  const visit = await sdk.boundary({kind:'database',name:'visit',version:'1',input:{operation:'record-visit'}},async()=>{
+    const {stdout}=await exec('psql',[process.env.DATABASE_URL,'-qAt','-v','ON_ERROR_STOP=1','-c',"INSERT INTO visits DEFAULT VALUES RETURNING json_build_object('id',id)"]);
+    return JSON.parse(stdout);
+  });
+  const guidance = await sdk.boundary({kind:'model',name:'recommendation',version:'1',provider:'synthetic',model:'recorded-demo-v1',instructions:'Use the subscription and help-center rule.',tools:[],settings:{temperature:0},input:{subscription,help,visit}},async()=>({rule:'Charge active subscriptions only.'}));
+  return {recommendation:shouldCharge(subscription.status) ? 'charge' : 'review',rule:guidance.rule,visitId:visit.id};
 }
 
 createServer(async(req,res)=>{

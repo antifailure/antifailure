@@ -283,6 +283,7 @@ func readTable(ctx context.Context, tx pgx.Tx, t *Table, maxRows int) error {
 	defer rows.Close()
 
 	held := map[string]map[string]any{}
+	occurrences := map[string]int{}
 	for rows.Next() {
 		var raw []byte
 		if err := rows.Scan(&raw); err != nil {
@@ -308,7 +309,16 @@ func readTable(ctx context.Context, tx pgx.Tx, t *Table, maxRows int) error {
 			return fmt.Errorf("a row of %s decoded as %s rather than an object",
 				t.Qualified(), typeName(value))
 		}
-		held[rowKey(row, key)] = row
+		identity := rowKey(row, key)
+		if len(key) == 0 {
+			occurrences[identity]++
+			if occurrences[identity] > 1 {
+				// A keyless table is a multiset. Whole-row keys begin with
+				// an object delimiter, so this prefix cannot collide with one.
+				identity = fmt.Sprintf("duplicate:%d:%s", occurrences[identity], identity)
+			}
+		}
+		held[identity] = row
 	}
 	if err := rows.Err(); err != nil {
 		return err
