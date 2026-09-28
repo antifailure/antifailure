@@ -17,7 +17,7 @@ const createSDK = commit => new AgentReplay({
 async function agent(sdk, input) {
   if (!Number.isSafeInteger(input.id) || input.id < 1) throw Error('Invalid synthetic subscription.');
   const subscription = await sdk.boundary({kind:'database',name:'subscription',version:'1',input:{id:input.id}},async()=>{
-    const {stdout}=await exec('psql',[process.env.DATABASE_URL,'-qAt','-v','ON_ERROR_STOP=1','-c',`SELECT row_to_json(s) FROM subscriptions s WHERE id = ${input.id}`]);
+    const {stdout}=await exec('psql',[process.env.DATABASE_URL,'-qAt','-v','ON_ERROR_STOP=1','-c',`SELECT json_build_object('id', id, 'status', status) FROM subscriptions WHERE id = ${input.id}`]);
     return JSON.parse(stdout);
   });
   const help = await captureHTTP(sdk,'help','http://127.0.0.1:3000/help');
