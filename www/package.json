@@ -17,10 +17,10 @@
   "dependencies": {
     "@antifailure/website": "file:../web/packages/website",
     "geist": "^1.7.2",
-    "motion": "^13.4.0",
-    "next": "^16.3.5",
+    "motion": "^13.4.4",
+    "next": "^16.3.6",
     "ogl": "^1.0.11",
-    "posthog-js": "^1.434.0",
+    "posthog-js": "^1.434.13",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },
