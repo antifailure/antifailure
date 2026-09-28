@@ -777,3 +777,9 @@ is set. The request with nothing set is the unauthenticated one, so that is a
 hole rather than a fix. Sessions, engine tokens, installations, and user
 upserts each declare the single value they already hold, and the policy
 returns that row and nothing else. Four separate bugs, one shape.
+
+## Agent failure replay
+
+| Component | State | Evidence and limits |
+| --- | --- | --- |
+| Customer-agent capture and replay | mixed | The local TypeScript capture, strict cassette matching, baseline-first replay, independent Postgres branches and confirmed cleanup are **proven** against a synthetic billing agent through the real SDK and CLI. The original wrong recommendation reproduces, the fix passes, restoring the bug fails, and missing evidence or a changed request is inconclusive. The demonstration uses a real HTTP response and Postgres, with a synthetic model response. The agent replay CI job runs the regression, isolation, interrupted-recovery and retirement controls. Hosted sharing, Python integration and historical database reconstruction are **planned**, outside this local contract. Customer demand and production capture overhead are not established by the synthetic demonstration. |
