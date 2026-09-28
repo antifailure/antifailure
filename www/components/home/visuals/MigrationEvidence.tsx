@@ -159,6 +159,13 @@ export function MigrationEvidence() {
       <figcaption className="px-5 py-3 text-sm leading-6 text-gray-new-40 sm:px-6">
         Original finding from a recorded demo rehearsal. The lock duration is a sampled lower bound; the revised plan is illustrative and has not been measured here.
       </figcaption>
+      <details className="border-t border-stroke px-5 text-sm sm:px-6">
+        <summary className="flex min-h-11 cursor-pointer items-center font-medium text-forest focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-forest">Compare both migration outcomes</summary>
+        <div className="grid gap-5 border-t border-stroke py-4 leading-6 text-gray-new-40 sm:grid-cols-2">
+          <div><h4 className="font-medium text-gray-new-10">Original migration</h4><p className="mt-1">The type change rewrites orders under an ACCESS EXCLUSIVE lock. Reads and writes wait while it is held. The recorded demo measured a lock on orders for at least 10.5 seconds.</p></div>
+          <div><h4 className="font-medium text-gray-new-10">Agent&apos;s proposed revision</h4><p className="mt-1">Add a new bigint column, backfill in batches, cut over reads and writes, and remove the old column later. This is a proposal, not a passing result. Rehearse the revision before merge.</p></div>
+        </div>
+      </details>
     </figure>
   );
 }

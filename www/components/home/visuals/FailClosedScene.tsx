@@ -117,6 +117,14 @@ export function FailClosedScene() {
       <figcaption className="border-t border-stroke px-5 py-3 text-sm leading-6 text-gray-new-40 sm:px-6">
         Illustrative policy decisions, not live customer telemetry. If the decision log cannot be read, Antifailure returns INCONCLUSIVE rather than claiming zero effects.
       </figcaption>
+      <details className="border-t border-stroke px-5 text-sm sm:px-6">
+        <summary className="flex min-h-11 cursor-pointer items-center font-medium text-forest focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-forest">Compare all three policy outcomes</summary>
+        <div className="grid gap-5 border-t border-stroke py-4 leading-6 text-gray-new-40 sm:grid-cols-3">
+          <div><h4 className="font-medium text-gray-new-10">Payment mocked</h4><p className="mt-1">A POST to api.stripe.com receives a local simulated response. The test checkout continues without a real processor charge.</p></div>
+          <div><h4 className="font-medium text-gray-new-10">Email captured</h4><p className="mt-1">A POST to api.sendgrid.com is retained in the test inbox. The message can be inspected without sending it to a customer.</p></div>
+          <div><h4 className="font-medium text-gray-new-10">Production API blocked</h4><p className="mt-1">A POST to the unlisted api.prod.internal host matches no rule. The default block policy refuses it before it can touch the live service.</p></div>
+        </div>
+      </details>
     </figure>
   );
 }
