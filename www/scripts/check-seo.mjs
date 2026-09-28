@@ -19,6 +19,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { twinCells } from "./twin-cells.mjs";
+import { extract } from "./twin.mjs";
 import { assessNavigation, cmsNavigationWasEdited } from "./cms-seo-policy.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -607,6 +608,30 @@ console.log("\nMarkdown twins carry the page's tables and definition lists");
     "every table cell and definition on a page is in its markdown twin",
     absent.slice(0, 8).join("; "),
   );
+}
+
+// Interactive examples must also be readable without JavaScript. The page's
+// Markdown twin is generated from initial HTML, so a tab whose alternate
+// content exists only after a click silently disappears from both surfaces.
+// Source-default builds keep a native disclosure with every outcome; a CMS
+// revision may intentionally replace either example and owns its own copy.
+if (JSON.parse(read("cms-version.json")).revision === 0) {
+  console.log("\nHomepage safety examples in static output");
+  const htmlText = extract(read("index.html")).join("\n");
+  const markdown = read("index.md");
+  for (const passage of [
+    "Agent's proposed revision",
+    "This is a proposal, not a passing result.",
+    "Email captured",
+    "The message can be inspected without sending it to a customer.",
+    "Production API blocked",
+    "before it can touch the live service.",
+  ]) {
+    assert(
+      htmlText.includes(passage) && markdown.includes(passage),
+      `interactive outcome is readable in HTML and Markdown: ${passage}`,
+    );
+  }
 }
 
 console.log("\nMachine-readable corpus");
