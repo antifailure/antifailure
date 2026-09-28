@@ -55,6 +55,35 @@ export const MCP_REGISTRATION_FILE = 'engine/internal/mcp/serve.go'
 
 export const MCP_TOOLS: readonly McpToolFact[] = [
   {
+    name: 'inspect_agent_incident',
+    does:
+      'Reads local incident metadata, missing dependencies and paginated boundary summaries. ' +
+      'Captured bodies remain on disk and are inspected through the CLI.',
+    refuses:
+      'It cannot change captured evidence or read another project. A trace does not establish ' +
+      'the historical database state.',
+    servedBy: 'engine/internal/mcp/tools_replay.go:newInspectAgentIncidentTool',
+  },
+  {
+    name: 'replay_agent_incident',
+    does:
+      'Reproduces a saved failure, then tests a candidate in an independent branch of the same ' +
+      'verified golden. Returns a run ID for get_rehearsal_run.',
+    refuses:
+      'It cannot change the saved evaluator, clock or strict cassette policy. Missing evidence ' +
+      'or unconfirmed cleanup is INCONCLUSIVE.',
+    servedBy: 'engine/internal/mcp/tools_replay.go:newReplayAgentIncidentTool',
+  },
+  {
+    name: 'recover_agent_replay',
+    does:
+      'Removes the environments recorded for an interrupted local replay and reports whether ' +
+      'both have been removed.',
+    refuses:
+      'It refuses active attempts and cannot upgrade an incomplete experiment to PASS.',
+    servedBy: 'engine/internal/mcp/tools_replay.go:newRecoverAgentReplayTool',
+  },
+  {
     name: 'rehearse_migration_safety',
     does:
       'Applies the branch\'s pending migrations to a throwaway branch of a sanitized copy of ' +

@@ -1806,6 +1806,44 @@ The candidate behaves differently from the baseline: {detail}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/oracle](/docs/concepts/oracle) |
 
+## Agent incident replay
+
+### AF-RPL-001
+
+Your replay evidence could not be prepared: {detail}
+
+**What to do.** Inspect the incident, supply the named prerequisite, and retry. No replay verdict was reached.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/agent-replay](/docs/guides/agent-replay) |
+
+### AF-RPL-002
+
+Your replay is inconclusive: {detail}
+
+**What to do.** Inspect the replay report and recover any pending environments before retrying.
+
+| | |
+| --- | --- |
+| Exit code | `7` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/agent-replay](/docs/guides/agent-replay) |
+
+### AF-RPL-003
+
+Your candidate did not satisfy the saved outcome assertion.
+
+**What to do.** Inspect the candidate outcome, fix the agent, and run the same scenario again.
+
+| | |
+| --- | --- |
+| Exit code | `8` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/agent-replay](/docs/guides/agent-replay) |
+
 ## Runtime
 
 ### AF-RUN-001

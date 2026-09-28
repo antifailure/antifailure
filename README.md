@@ -215,6 +215,7 @@ A run answers `PASS`, `FAIL` or `INCONCLUSIVE`. `INCONCLUSIVE` is not a weaker
 | --- | --- |
 | `engine` | The Go engine and the `af` command. Orchestration, masking, verification, egress policy, insights, the journal, and the MCP server. |
 | `runner` | The agent runner. TypeScript, because it drives Chromium, and installed beside `af` rather than downloaded. |
+| `sdk/typescript` | Explicit local capture and strict replay for a customer's agent. Optional, with content capture off by default. See [agent replay](docs/src/content/docs/guides/agent-replay.md). |
 | `schemas` | The JSON Schemas that are the source of truth. The Go types mirror `schemas/manifest.v1.json` and a test fails when they drift. |
 | `examples` | Three applications that run: a Next.js app, a Go API, a Django API. |
 | `web` | The optional control plane: organizations, policy, aggregated reports, billing. |

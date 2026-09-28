@@ -391,6 +391,23 @@ INSERT INTO events VALUES ('signup', '2026-01-01T00:00:00Z'), ('login', '2026-01
 	}
 }
 
+func TestKeylessDuplicatesRemainSeparateRowsAndRespectTheCaptureBound(t *testing.T) {
+	b, c := twoBranches(t, `CREATE TABLE repeated_events (kind text NOT NULL); INSERT INTO repeated_events VALUES ('same'),('same');`)
+	before := capture(t, b, oracle.DatabaseOptions{Include: []string{"repeated_events"}})
+	require.Len(t, before.Tables, 1)
+	require.Equal(t, 2, before.Tables[0].RowCount)
+	require.Len(t, before.Tables[0].Rows, 2)
+	exec(t, c, `INSERT INTO repeated_events VALUES ('same')`)
+	after := capture(t, c, oracle.DatabaseOptions{Include: []string{"repeated_events"}})
+	require.Equal(t, 3, after.Tables[0].RowCount)
+	result := oracle.Compare(oracle.Input{BaselineAfter: before, CandidateAfter: after})
+	require.Len(t, result.Findings, 1)
+	require.Equal(t, oracle.KindRowExtra, result.Findings[0].Kind)
+	bounded := capture(t, c, oracle.DatabaseOptions{Include: []string{"repeated_events"}, MaxRows: 2})
+	require.True(t, bounded.Tables[0].Truncated)
+	require.Empty(t, bounded.Tables[0].Rows)
+}
+
 // A composite primary key has to identify a row by both columns, or two rows
 // sharing a first column collapse into one and the comparison reports a change
 // that is really two different rows.

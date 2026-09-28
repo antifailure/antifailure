@@ -3501,6 +3501,10 @@ What is compared:
 | Database contents | Every table, row by row, matched on the primary key, with each column compared. |
 | Table structure | Columns added, dropped, or retyped between the two sides. |
 
+A table without a primary key is compared as a collection of whole rows,
+including repeated identical rows. Adding a second copy of a row is a database
+change. Every occurrence counts toward the snapshot's row limit.
+
 ## The baseline
 
 ` + "`" + `oracle.baseline` + "`" + ` decides which revision the comparison is against, and the two
@@ -8734,6 +8738,128 @@ the App must be granted, forks, and teardown.
 [The control plane](/docs/self-hosting/control-plane) is the optional hosted
 piece. Read it when you want environments that outlive a workflow run, a shared
 address for them, or a record across repositories.
+`,
+	"guides/agent-replay.md": `---
+title: Replay an agent incident
+description: Record explicit agent boundaries, reproduce a failure and test a fix against a pinned golden.
+sidebar:
+  order: 40
+---
+
+Agent replay tests one recorded failure against one candidate revision. It uses a local TypeScript SDK, an immutable scenario and two independent application environments. It does not restore a historical database from a trace.
+
+## Record the supported boundaries
+
+Build ` + "`" + `sdk/typescript` + "`" + ` and install its npm archive in the application. Wrap the agent entry point with ` + "`" + `AgentReplay.run` + "`" + ` and each model, tool, HTTP, database and effect boundary with ` + "`" + `boundary` + "`" + `. The package README contains the integration contract.
+
+Capture defaults to metadata and keyed hashes. Input, output and each boundary body require explicit content names in the capture policy. Configure redaction before enabling content. The writer denies credential fields and recognized credential strings before persistence. A redaction failure records incomplete evidence, while the application's result or exception is preserved. If the writer itself fails, ` + "`" + `onDiagnostic` + "`" + ` names the lost capture; a disk that cannot be written cannot retain its own warning.
+
+The first protocol supports sequential boundaries within each run and separate concurrent runs. An unfinished or concurrent boundary is incomplete evidence. Only application time read through the SDK clock is frozen. There is no claim to intercept arbitrary libraries, timers or background work.
+
+## Save the incident
+
+The capture carries a full source commit, W3C trace ID, policy version and per-boundary request identity. Import it into the application repository:
+
+` + "`" + "`" + "`" + `sh
+af incident import capture.json
+af incident list
+af incident inspect billing-failure --output json
+` + "`" + "`" + "`" + `
+
+Inspect the retained content before saving it. Metadata-only captures remain useful for diagnosis but cannot be replayed. The first release requires synthetic identities already consistent with the masked database; an unmapped production identifier blocks promotion.
+
+Pin a verified golden made for this project. The original wrong outcome and the expected outcome must be distinct JSON values:
+
+` + "`" + "`" + "`" + `sh
+af incident save billing-failure \
+  --scenario billing \
+  --golden gv_20260927000000_example \
+  --pointer /recommendation \
+  --original '"charge"' \
+  --expected '"review"' \
+  --table subscriptions
+` + "`" + "`" + "`" + `
+
+Use an actual version from ` + "`" + `af golden list` + "`" + ` in place of the illustrative golden above. ` + "`" + `--endpoint` + "`" + ` defaults to ` + "`" + `/af-replay` + "`" + `. This must be an application endpoint that enables the SDK replay handler only when ` + "`" + `AF_REPLAY_ENABLED=true` + "`" + `.
+
+The scenario freezes the input evidence, manifest, golden identity, relevant tables and outcome assertion. A changed evaluator or fixture belongs in a new scenario. The candidate revision belongs to a replay attempt and does not rewrite the scenario.
+
+## Reproduce and test
+
+` + "`" + "`" + "`" + `sh
+af replay billing --candidate HEAD
+af replay inspect rpl_example --output json
+` + "`" + "`" + "`" + `
+
+Use the attempt identifier printed by the first command in the second. The engine archives both revisions, starts the original revision first, and checks the specified failure. If it cannot reproduce that outcome, the candidate receives no fix verdict.
+
+The candidate starts from an independent branch of the same golden. Its initial selected database facts must agree with the baseline. Every recorded boundary request must match its complete identity, including system instructions and tool versions. Changed requests stop with a cassette miss. The first release has no live-network fallback or exploratory mode.
+
+Only local Docker Postgres and application services are supported. Replay refuses other datastores, remote runtime targets and external allow, sandbox, capture, mock, emulate or synth rules. Observations and effects are supplied by the SDK cassette; the runtime blocks all public egress. No process environment, dotenv file or credential store supplies application secrets. Explicit credential literals must be synthetic.
+
+The existing image builder still uses its documented build network behavior. Runtime containment does not claim to sandbox an arbitrary Dockerfile build. Review application source and build inputs as you would for an ordinary Antifailure environment.
+
+## Read the verdict
+
+| Verdict | Meaning | CLI exit |
+| --- | --- | --- |
+| PASS | The original failure reproduced, the candidate met the assertion without net writes to declared tables, evidence was complete and both environments were removed | 0 |
+| FAIL | The control reproduced and a valid candidate experiment missed the expected assertion | 8 |
+| INCONCLUSIVE | Required evidence, compatibility, containment, execution or cleanup could not be confirmed | 7 |
+
+Invalid command inputs and failures preparing a scenario exit 3. A missing blob, damaged digest, unavailable revision, missing golden, unsupported identity, cassette miss, incomplete database read or uncertain teardown cannot produce PASS.
+
+Reports describe a **state-backed** experiment against a pinned masked golden. They do not claim incident-time equivalence. Database evidence covers net differences in the selected tables, not an insert and delete between snapshots. Tables that cannot be read completely make the experiment inconclusive.
+
+The first evaluator requires the candidate to leave the selected database tables unchanged. A correct-looking recommendation that also changes one of those tables fails. Scenarios that intentionally change database contents need a different evaluator and are not supported by this first contract.
+
+Database findings retain the table, difference kind, severity and phase. Row values and primary keys are excluded from the report, even when the golden was masked.
+
+Both sides use unique attempt identifiers. Teardown checks pending journal resources and provider inventories. If execution was interrupted:
+
+` + "`" + "`" + "`" + `sh
+af replay recover rpl_example
+` + "`" + "`" + "`" + `
+
+Recovery operates on the recorded attempt's two environments, refuses an active attempt, and retains an inconclusive verdict. Run a new replay after recovery to obtain fresh evidence.
+
+## Keep the incident as a regression case
+
+A suite is a local JSON document:
+
+` + "`" + "`" + "`" + `json
+{"schemaVersion":1,"scenarios":["billing"]}
+` + "`" + "`" + "`" + `
+
+` + "`" + "`" + "`" + `sh
+af eval run suite.json --candidate HEAD --output json
+` + "`" + "`" + "`" + `
+
+Each case gets a separate attempt and verdict. Retain the scenario store and its referenced golden on the CI runner. Copying a trace alone does not copy its database. Reintroduce the original bug as a negative control: the case must fail. Remove required evidence: it must become inconclusive.
+
+Setup and execution are capped at 20 minutes per attempt and 30 minutes per
+suite. Cleanup has a separate five-minute budget for each environment. The
+local artifact store permits two reserved attempts at once; an interrupted
+attempt keeps its reservation until recovery proves its resources are gone.
+No new paid model call is permitted in strict replay.
+
+The MCP tools ` + "`" + `inspect_agent_incident` + "`" + `, ` + "`" + `replay_agent_incident` + "`" + ` and ` + "`" + `recover_agent_replay` + "`" + ` reach the same engine. Inspection pages boundary summaries; captured bodies remain available through the local CLI. Scenario approval is a CLI operation so candidate-driven tools cannot replace the evaluator or weaken replay policy.
+
+## Local data custody
+
+Artifacts are stored under ` + "`" + `.antifailure/replay` + "`" + ` with private file permissions. Payloads are content-addressed and published before scenarios. Incident and scenario names cannot traverse paths. Valid records remain visible when another artifact is malformed.
+
+This first release has no hosted storage or tenant search. Anyone who controls the local project and its files controls its captures. Retain only opted-in content for which you have permission. A source merge installs neither a hosted collector nor a production capture policy.
+
+Retire a case when its content should no longer be retained:
+
+` + "`" + "`" + "`" + `sh
+af replay retire billing --reason 'The billing workflow was removed'
+` + "`" + "`" + "`" + `
+
+Retirement refuses attempts with unconfirmed cleanup, removes their retained reports and unreferenced incident blobs, and keeps a small record of the case name, incident IDs, reference hashes, time and reason. Shared blobs remain until their last scenario is retired. The original capture file supplied to import remains yours to delete. Retrying an interrupted retirement completes the same deletion. A retired name cannot be reused, and a late import cannot restore a retired incident ID. Capture a new run instead.
+
+The local golden collector refuses versions referenced by this project's active scenarios. Another checkout or an external Docker administrator can still remove an image; a missing golden then makes replay inconclusive. There is no background retention daemon.
 `,
 	"guides/aws.md": `---
 title: AWS
@@ -18970,6 +19096,38 @@ af env reap --yes
 | ` + "`" + `--dry-run` + "`" + ` | ` + "`" + `false` + "`" + ` | List what would be removed and stop, which is also what running bare does. |
 | ` + "`" + `--yes` + "`" + ` | ` + "`" + `false` + "`" + ` | Remove what the plan lists. Without it nothing is removed. |
 
+### ` + "`" + `af eval` + "`" + `
+
+Run saved agent incidents as regression cases.
+
+` + "`" + "`" + "`" + `
+af eval
+` + "`" + "`" + "`" + `
+
+` + "`" + "`" + "`" + `
+af eval run suite.json
+` + "`" + "`" + "`" + `
+
+Subcommands:
+
+- [` + "`" + `af eval run` + "`" + `](#af-eval-run) Run every named scenario and retain each verdict.
+
+### ` + "`" + `af eval run` + "`" + `
+
+Run every named scenario and retain each verdict.
+
+` + "`" + "`" + "`" + `
+af eval run <suite.json> [flags]
+` + "`" + "`" + "`" + `
+
+` + "`" + "`" + "`" + `
+af eval run suite.json --candidate HEAD
+` + "`" + "`" + "`" + `
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| ` + "`" + `--candidate` + "`" + ` | ` + "`" + `HEAD` + "`" + ` | Candidate Git revision for every saved case. |
+
 ### ` + "`" + `af explain` + "`" + `
 
 Show the effective configuration, with every default filled in.
@@ -19370,6 +19528,85 @@ af inbox wait --subject 'Verify your email' --timeout 60s
 | ` + "`" + `--subject` + "`" + ` | - | Wait for a subject containing this text. |
 | ` + "`" + `--timeout` + "`" + ` | ` + "`" + `1m0s` + "`" + ` | How long to wait. |
 | ` + "`" + `--to` + "`" + ` | - | Wait for a message addressed to this recipient. |
+
+### ` + "`" + `af incident` + "`" + `
+
+Inspect captured agent evidence and save an immutable replay scenario.
+
+` + "`" + "`" + "`" + `
+af incident
+` + "`" + "`" + "`" + `
+
+` + "`" + "`" + "`" + `
+af incident list
+af incident inspect billing-failure
+` + "`" + "`" + "`" + `
+
+Subcommands:
+
+- [` + "`" + `af incident import` + "`" + `](#af-incident-import) Import an SDK capture into this project's local evidence store.
+- [` + "`" + `af incident inspect` + "`" + `](#af-incident-inspect) Read retained incident content and missing dependencies.
+- [` + "`" + `af incident list` + "`" + `](#af-incident-list) List incidents without hiding malformed records.
+- [` + "`" + `af incident save` + "`" + `](#af-incident-save) Freeze an incident, a verified golden and distinct failure/fix assertions.
+
+### ` + "`" + `af incident import` + "`" + `
+
+Import an SDK capture into this project's local evidence store.
+
+` + "`" + "`" + "`" + `
+af incident import <capture.json>
+` + "`" + "`" + "`" + `
+
+` + "`" + "`" + "`" + `
+af incident import capture.json
+` + "`" + "`" + "`" + `
+
+### ` + "`" + `af incident inspect` + "`" + `
+
+Read retained incident content and missing dependencies.
+
+` + "`" + "`" + "`" + `
+af incident inspect <id>
+` + "`" + "`" + "`" + `
+
+` + "`" + "`" + "`" + `
+af incident inspect billing-failure
+` + "`" + "`" + "`" + `
+
+### ` + "`" + `af incident list` + "`" + `
+
+List incidents without hiding malformed records.
+
+` + "`" + "`" + "`" + `
+af incident list
+` + "`" + "`" + "`" + `
+
+` + "`" + "`" + "`" + `
+af incident list
+` + "`" + "`" + "`" + `
+
+### ` + "`" + `af incident save` + "`" + `
+
+Freeze an incident, a verified golden and distinct failure/fix assertions.
+
+` + "`" + "`" + "`" + `
+af incident save <id> [flags]
+` + "`" + "`" + "`" + `
+
+` + "`" + "`" + "`" + `
+af incident save billing-failure --scenario billing --pointer /recommendation --original '"charge"' --expected '"review"' --table subscriptions
+` + "`" + "`" + "`" + `
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| ` + "`" + `--endpoint` + "`" + ` | ` + "`" + `/af-replay` + "`" + ` | Explicitly enabled application replay endpoint. |
+| ` + "`" + `--expected` + "`" + ` | - | JSON value the fix must produce. |
+| ` + "`" + `--golden` + "`" + ` | - | Pin a verified golden; defaults to the capture reference. |
+| ` + "`" + `--original` + "`" + ` | - | JSON value that identifies the original failure. |
+| ` + "`" + `--owner` + "`" + ` | ` + "`" + `local` + "`" + ` | Owner of the regression case. |
+| ` + "`" + `--pointer` + "`" + ` | - | JSON pointer into the agent outcome. |
+| ` + "`" + `--scenario` + "`" + ` | - | Name the immutable scenario. |
+| ` + "`" + `--table` + "`" + ` | - | Relevant database tables to compare. |
 
 ### ` + "`" + `af init` + "`" + `
 
@@ -20567,6 +20804,69 @@ af provider set anthropic --from-env ANTHROPIC_API_KEY
 | ` + "`" + `--control-plane` + "`" + ` | - | The control plane to use (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
 | ` + "`" + `--from-env` + "`" + ` | - | Read the key from this environment variable instead of asking. |
 | ` + "`" + `--stdin` + "`" + ` | ` + "`" + `false` + "`" + ` | Read the key from standard input, one line. |
+
+### ` + "`" + `af replay` + "`" + `
+
+Reproduce an agent failure, then test a candidate in an independent branch.
+
+` + "`" + "`" + "`" + `
+af replay <scenario> [flags]
+` + "`" + "`" + "`" + `
+
+` + "`" + "`" + "`" + `
+af replay billing --candidate HEAD
+` + "`" + "`" + "`" + `
+
+Subcommands:
+
+- [` + "`" + `af replay inspect` + "`" + `](#af-replay-inspect) Read a replay attempt and its retained evidence.
+- [` + "`" + `af replay recover` + "`" + `](#af-replay-recover) Reconcile an interrupted attempt's two environments.
+- [` + "`" + `af replay retire` + "`" + `](#af-replay-retire) Delete a scenario's unreferenced content and retain its retirement reason.
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| ` + "`" + `--candidate` + "`" + ` | ` + "`" + `HEAD` + "`" + ` | Candidate Git revision. |
+| ` + "`" + `--timeout` + "`" + ` | ` + "`" + `20m0s` + "`" + ` | Shorten the 20-minute setup/replay cap; cleanup has its own budget. |
+
+### ` + "`" + `af replay inspect` + "`" + `
+
+Read a replay attempt and its retained evidence.
+
+` + "`" + "`" + "`" + `
+af replay inspect <attempt>
+` + "`" + "`" + "`" + `
+
+` + "`" + "`" + "`" + `
+af replay inspect rpl_example
+` + "`" + "`" + "`" + `
+
+### ` + "`" + `af replay recover` + "`" + `
+
+Reconcile an interrupted attempt's two environments.
+
+` + "`" + "`" + "`" + `
+af replay recover <attempt>
+` + "`" + "`" + "`" + `
+
+` + "`" + "`" + "`" + `
+af replay recover rpl_example
+` + "`" + "`" + "`" + `
+
+### ` + "`" + `af replay retire` + "`" + `
+
+Delete a scenario's unreferenced content and retain its retirement reason.
+
+` + "`" + "`" + "`" + `
+af replay retire <scenario> [flags]
+` + "`" + "`" + "`" + `
+
+` + "`" + "`" + "`" + `
+af replay retire billing --reason 'The billing workflow was removed'
+` + "`" + "`" + "`" + `
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| ` + "`" + `--reason` + "`" + ` | - | Record why the regression case is retired. |
 
 ### ` + "`" + `af runner` + "`" + `
 
@@ -24130,6 +24430,44 @@ The candidate behaves differently from the baseline: {detail}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/oracle](/docs/concepts/oracle) |
 
+## Agent incident replay
+
+### AF-RPL-001
+
+Your replay evidence could not be prepared: {detail}
+
+**What to do.** Inspect the incident, supply the named prerequisite, and retry. No replay verdict was reached.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `3` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/agent-replay](/docs/guides/agent-replay) |
+
+### AF-RPL-002
+
+Your replay is inconclusive: {detail}
+
+**What to do.** Inspect the replay report and recover any pending environments before retrying.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `7` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/agent-replay](/docs/guides/agent-replay) |
+
+### AF-RPL-003
+
+Your candidate did not satisfy the saved outcome assertion.
+
+**What to do.** Inspect the candidate outcome, fix the agent, and run the same scenario again.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `8` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/agent-replay](/docs/guides/agent-replay) |
+
 ## Runtime
 
 ### AF-RUN-001
@@ -26336,6 +26674,27 @@ in the summary that nothing was judged.
 The two differing values are not returned. A JSON path is structure and survives;
 a row's primary key is a value and does not. The baseline environment is always
 torn down, and there is no argument that leaves it running.
+
+### Agent incident replay
+
+` + "`" + `inspect_agent_incident` + "`" + ` reads a local capture's metadata, missing dependencies
+and at most 50 boundary summaries. It takes ` + "`" + `project_id` + "`" + `, ` + "`" + `incident_id` + "`" + ` and an
+optional returned ` + "`" + `cursor` + "`" + `. Captured bodies remain in the local artifact store
+and are inspected with ` + "`" + `af incident inspect` + "`" + `.
+
+` + "`" + `replay_agent_incident` + "`" + ` takes ` + "`" + `project_id` + "`" + `, ` + "`" + `scenario_id` + "`" + `, ` + "`" + `candidate` + "`" + ` and an
+optional ` + "`" + `idempotency_key` + "`" + `. It returns a ` + "`" + `run_id` + "`" + ` for ` + "`" + `get_rehearsal_run` + "`" + `.
+The saved scenario owns the evaluator and strict boundary policy; tool
+arguments cannot replace either. It reproduces the original failure before
+testing the candidate and requires both environments to be removed.
+
+` + "`" + `recover_agent_replay` + "`" + ` takes ` + "`" + `project_id` + "`" + ` and ` + "`" + `attempt_id` + "`" + `. It removes the
+recorded environments after an interrupted replay and refuses an active
+attempt. Recovery uses a separate teardown record, so a missing incident blob
+does not prevent cleanup. Recovery leaves the verdict inconclusive.
+
+See [agent replay](/docs/guides/agent-replay) for the supported boundaries,
+synthetic identity requirement, pinned golden and local data retention.
 
 ### ` + "`" + `inspect_data_masking` + "`" + `
 

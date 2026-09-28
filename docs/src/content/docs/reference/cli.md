@@ -428,6 +428,38 @@ af env reap --yes
 | `--dry-run` | `false` | List what would be removed and stop, which is also what running bare does. |
 | `--yes` | `false` | Remove what the plan lists. Without it nothing is removed. |
 
+### `af eval`
+
+Run saved agent incidents as regression cases.
+
+```
+af eval
+```
+
+```
+af eval run suite.json
+```
+
+Subcommands:
+
+- [`af eval run`](#af-eval-run) Run every named scenario and retain each verdict.
+
+### `af eval run`
+
+Run every named scenario and retain each verdict.
+
+```
+af eval run <suite.json> [flags]
+```
+
+```
+af eval run suite.json --candidate HEAD
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--candidate` | `HEAD` | Candidate Git revision for every saved case. |
+
 ### `af explain`
 
 Show the effective configuration, with every default filled in.
@@ -828,6 +860,85 @@ af inbox wait --subject 'Verify your email' --timeout 60s
 | `--subject` | - | Wait for a subject containing this text. |
 | `--timeout` | `1m0s` | How long to wait. |
 | `--to` | - | Wait for a message addressed to this recipient. |
+
+### `af incident`
+
+Inspect captured agent evidence and save an immutable replay scenario.
+
+```
+af incident
+```
+
+```
+af incident list
+af incident inspect billing-failure
+```
+
+Subcommands:
+
+- [`af incident import`](#af-incident-import) Import an SDK capture into this project's local evidence store.
+- [`af incident inspect`](#af-incident-inspect) Read retained incident content and missing dependencies.
+- [`af incident list`](#af-incident-list) List incidents without hiding malformed records.
+- [`af incident save`](#af-incident-save) Freeze an incident, a verified golden and distinct failure/fix assertions.
+
+### `af incident import`
+
+Import an SDK capture into this project's local evidence store.
+
+```
+af incident import <capture.json>
+```
+
+```
+af incident import capture.json
+```
+
+### `af incident inspect`
+
+Read retained incident content and missing dependencies.
+
+```
+af incident inspect <id>
+```
+
+```
+af incident inspect billing-failure
+```
+
+### `af incident list`
+
+List incidents without hiding malformed records.
+
+```
+af incident list
+```
+
+```
+af incident list
+```
+
+### `af incident save`
+
+Freeze an incident, a verified golden and distinct failure/fix assertions.
+
+```
+af incident save <id> [flags]
+```
+
+```
+af incident save billing-failure --scenario billing --pointer /recommendation --original '"charge"' --expected '"review"' --table subscriptions
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--endpoint` | `/af-replay` | Explicitly enabled application replay endpoint. |
+| `--expected` | - | JSON value the fix must produce. |
+| `--golden` | - | Pin a verified golden; defaults to the capture reference. |
+| `--original` | - | JSON value that identifies the original failure. |
+| `--owner` | `local` | Owner of the regression case. |
+| `--pointer` | - | JSON pointer into the agent outcome. |
+| `--scenario` | - | Name the immutable scenario. |
+| `--table` | - | Relevant database tables to compare. |
 
 ### `af init`
 
@@ -2025,6 +2136,69 @@ af provider set anthropic --from-env ANTHROPIC_API_KEY
 | `--control-plane` | - | The control plane to use (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
 | `--from-env` | - | Read the key from this environment variable instead of asking. |
 | `--stdin` | `false` | Read the key from standard input, one line. |
+
+### `af replay`
+
+Reproduce an agent failure, then test a candidate in an independent branch.
+
+```
+af replay <scenario> [flags]
+```
+
+```
+af replay billing --candidate HEAD
+```
+
+Subcommands:
+
+- [`af replay inspect`](#af-replay-inspect) Read a replay attempt and its retained evidence.
+- [`af replay recover`](#af-replay-recover) Reconcile an interrupted attempt's two environments.
+- [`af replay retire`](#af-replay-retire) Delete a scenario's unreferenced content and retain its retirement reason.
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--candidate` | `HEAD` | Candidate Git revision. |
+| `--timeout` | `20m0s` | Shorten the 20-minute setup/replay cap; cleanup has its own budget. |
+
+### `af replay inspect`
+
+Read a replay attempt and its retained evidence.
+
+```
+af replay inspect <attempt>
+```
+
+```
+af replay inspect rpl_example
+```
+
+### `af replay recover`
+
+Reconcile an interrupted attempt's two environments.
+
+```
+af replay recover <attempt>
+```
+
+```
+af replay recover rpl_example
+```
+
+### `af replay retire`
+
+Delete a scenario's unreferenced content and retain its retirement reason.
+
+```
+af replay retire <scenario> [flags]
+```
+
+```
+af replay retire billing --reason 'The billing workflow was removed'
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--reason` | - | Record why the regression case is retired. |
 
 ### `af runner`
 

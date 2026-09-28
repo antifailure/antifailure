@@ -174,6 +174,9 @@ func Serve(ctx context.Context, cfg Config) error {
 	server.Register(newVerifyModelKeyTool(project, orch.probeModel))
 	server.Register(newReviewChangeTool(project, orch.reviewChange))
 	server.Register(newUpgradeTool(project, cfg.Upgrade))
+	server.Register(newInspectAgentIncidentTool(project))
+	server.Register(newReplayAgentIncidentTool(project, engine))
+	server.Register(newRecoverAgentReplayTool(project))
 
 	_, _ = fmt.Fprintf(cfg.Log, "af mcp: serving project %q from %s\n", project.ID, project.Root)
 

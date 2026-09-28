@@ -16,6 +16,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -27,7 +29,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/antifailure/antifailure/engine/internal/mockpack"
@@ -95,7 +96,14 @@ func main() {
 	forwardTo := flag.String("forward-to", "", "the host and port every connection accepted on -forward-listen is relayed to")
 	dialTarget := flag.String("dial", "", "connect once to this host and port on the environment's own network, and report whether anything is listening")
 	dialTimeout := flag.Duration("dial-timeout", dialDefaultTimeout, "how long the -dial attempt waits")
+	evidenceStatus := flag.Bool("evidence-status", false, "read the running sidecar evidence watermark over its private control socket")
 	flag.Parse()
+	if *evidenceStatus {
+		if err := evidenceStatusMode(os.Stdout); err != nil {
+			log.Fatalf("af-proxy evidence unavailable: %v", err)
+		}
+		return
+	}
 	if *networkGate {
 		if err := networkGateMode(*gateControl); err != nil {
 			log.Fatalf("AF-CONTAINMENT refused: %v", err)
@@ -164,6 +172,12 @@ func main() {
 	// belongs to. Every re-originated request goes through it, so the address
 	// guard applies to the inspected path as well as to the tunnelled one, and
 	// to every protocol rather than to the one that existed first.
+	control, err := p.startEvidenceControl(evidenceSocket)
+	if err != nil {
+		p.emit(record{Event: "evidence_unavailable", Reason: "private evidence control unavailable"})
+	} else {
+		defer func() { _ = control.Close() }()
+	}
 	p.transport.DialContext = p.dialGuarded
 	p.transportH2.DialContext = p.dialGuarded
 	p.transportH2C.DialContext = p.dialGuarded
@@ -201,6 +215,7 @@ func main() {
 		resolver = dockerResolver
 	}
 	dns := newDNSServer(self, cfg.Internal, resolver, p.emit)
+	dns.track = p.beginEvidenceWork
 
 	// Every listener is started before anything is announced as ready, so a
 	// service that begins its first outbound call the instant it starts finds
@@ -239,8 +254,9 @@ func main() {
 	// cannot, so a client that opts in gets a slightly better decision.
 	go func() {
 		srv := &http.Server{
-			Addr:    ":" + strconv.Itoa(3128),
-			Handler: p,
+			Addr:      ":" + strconv.Itoa(3128),
+			Handler:   p,
+			ConnState: p.evidenceConnections(),
 			// A request that is never finished must not hold a connection
 			// forever, and an environment under load will have thousands.
 			ReadHeaderTimeout: 20 * time.Second,
@@ -306,7 +322,8 @@ func (p *proxy) listen(addr string, handle func(net.Conn)) error {
 		if err != nil {
 			return err
 		}
-		go handle(conn)
+		done := p.beginEvidenceWork()
+		go func() { defer done(); handle(conn) }()
 	}
 }
 
@@ -450,8 +467,12 @@ type proxy struct {
 	databaseDial func(context.Context, string) (net.Conn, error)
 	// synth invents a response when a rule asks for one. Nil when no model
 	// key is available, in which case a synth rule refuses and says so.
-	synth *synthConfig
-	seq   atomic.Uint64
+	synth            *synthConfig
+	seq              uint64
+	logFailed        bool
+	evidenceInstance string
+	activeEvidence   uint64
+	evidenceWork     uint64
 	// mu serialises writes to the encoder. A JSON encoder is not safe for
 	// concurrent use, and every request writes a line, so without it a busy
 	// environment produces a decision log with interleaved bytes: the one
@@ -464,10 +485,13 @@ func (p *proxy) emit(r record) {
 	if r.At == "" {
 		r.At = time.Now().UTC().Format(time.RFC3339Nano)
 	}
-	r.Seq = p.seq.Add(1)
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	_ = p.out.Encode(r)
+	p.seq++
+	r.Seq = p.seq
+	if err := p.out.Encode(r); err != nil {
+		p.logFailed = true
+	}
 }
 
 // emitMessage writes a captured message to the log.
@@ -480,13 +504,18 @@ func (p *proxy) emitMessage(m message) {
 	if m.At == "" {
 		m.At = time.Now().UTC().Format(time.RFC3339Nano)
 	}
-	m.Seq = p.seq.Add(1)
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	_ = p.out.Encode(m)
+	p.seq++
+	m.Seq = p.seq
+	if err := p.out.Encode(m); err != nil {
+		p.logFailed = true
+	}
 }
 
 func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	done := p.beginEvidenceWork()
+	defer done()
 	if r.Method == http.MethodConnect {
 		p.serveConnect(w, r)
 		return
@@ -872,4 +901,104 @@ func splitHostPort(hostport string, fallback int) (string, int) {
 		return h, fallback
 	}
 	return hostport, fallback
+}
+
+// This socket is inside the sidecar filesystem, not its shared network namespace.
+// Application containers cannot ask it for evidence or alter its failure latch.
+const evidenceSocket = "/tmp/af-evidence.sock"
+
+type evidenceStatus struct {
+	Version  int    `json:"version"`
+	Env      string `json:"env"`
+	Instance string `json:"instance"`
+	Sequence uint64 `json:"sequence"`
+	Failed   bool   `json:"failed"`
+	Active   uint64 `json:"active"`
+	Work     uint64 `json:"work"`
+}
+
+func (p *proxy) evidenceSnapshot() evidenceStatus {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return evidenceStatus{Version: 1, Env: p.envID, Instance: p.evidenceInstance, Sequence: p.seq, Failed: p.logFailed, Active: p.activeEvidence, Work: p.evidenceWork}
+}
+
+func (p *proxy) startEvidenceControl(path string) (net.Listener, error) {
+	var instance [16]byte
+	if _, err := rand.Read(instance[:]); err != nil {
+		return nil, err
+	}
+	p.evidenceInstance = hex.EncodeToString(instance[:])
+	if err := os.MkdirAll("/tmp", 0o700); err != nil {
+		return nil, err
+	}
+	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSocket != 0 {
+		if err := os.Remove(path); err != nil {
+			return nil, err
+		}
+	}
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		_ = listener.Close()
+		return nil, err
+	}
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			// A bounded write keeps a broken observer from blocking later observers.
+			_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+			_ = json.NewEncoder(conn).Encode(p.evidenceSnapshot())
+			_ = conn.Close()
+		}
+	}()
+	return listener, nil
+}
+
+func evidenceStatusMode(out io.Writer) error {
+	conn, err := net.DialTimeout("unix", evidenceSocket, 5*time.Second)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = conn.Close() }()
+	if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		return err
+	}
+	var status evidenceStatus
+	if err := json.NewDecoder(io.LimitReader(conn, 4096)).Decode(&status); err != nil {
+		return err
+	}
+	if status.Version != 1 || status.Instance == "" {
+		return fmt.Errorf("invalid evidence watermark")
+	}
+	return json.NewEncoder(out).Encode(status)
+}
+
+// Work is registered before spawning a handler, so buffered accepted requests
+// cannot look like an idle writer merely because they have not emitted yet.
+func (p *proxy) beginEvidenceWork() func() {
+	p.mu.Lock()
+	p.activeEvidence++
+	p.evidenceWork++
+	p.mu.Unlock()
+	return func() { p.mu.Lock(); p.activeEvidence--; p.mu.Unlock() }
+}
+
+func (p *proxy) evidenceConnections() func(net.Conn, http.ConnState) {
+	var connections sync.Map
+	return func(conn net.Conn, state http.ConnState) {
+		switch state {
+		case http.StateNew:
+			connections.Store(conn, p.beginEvidenceWork())
+		case http.StateClosed, http.StateHijacked:
+			if done, ok := connections.LoadAndDelete(conn); ok {
+				done.(func())()
+			}
+		}
+	}
 }

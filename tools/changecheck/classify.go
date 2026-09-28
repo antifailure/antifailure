@@ -84,6 +84,7 @@ var surfaces = []surface{
 	{"console/", "the hosted control plane's console"},
 	{"ee/", "the enterprise edition"},
 	{"runner/", "the agent runner that drives the browser"},
+	{"sdk/", "the optional customer-agent capture and replay SDK"},
 	{"www/", "the public site"},
 	{"api/", "the site's own API"},
 	{"schemas/", "the manifest and event contracts a customer writes against"},

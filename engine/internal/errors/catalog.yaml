@@ -25,6 +25,27 @@
 # resources pending cleanup.
 
 errors:
+  - code: AF-RPL-001
+    area: RPL
+    message: "Your replay evidence could not be prepared: {detail}"
+    next_step: "Inspect the incident, supply the named prerequisite, and retry. No replay verdict was reached."
+    docs: guides/agent-replay
+    retryable: false
+    exit_code: 3
+  - code: AF-RPL-002
+    area: RPL
+    message: "Your replay is inconclusive: {detail}"
+    next_step: "Inspect the replay report and recover any pending environments before retrying."
+    docs: guides/agent-replay
+    retryable: false
+    exit_code: 7
+  - code: AF-RPL-003
+    area: RPL
+    message: "Your candidate did not satisfy the saved outcome assertion."
+    next_step: "Inspect the candidate outcome, fix the agent, and run the same scenario again."
+    docs: guides/agent-replay
+    retryable: false
+    exit_code: 8
   # Manifest
   - code: AF-MAN-001
     area: MAN

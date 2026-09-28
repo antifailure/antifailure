@@ -27,6 +27,17 @@ import (
 // not a comment is what a usage error offers as the thing to try, so put the
 // plainest invocation first.
 var commandExamples = map[string]string{
+	"af incident":         "af incident list\naf incident inspect billing-failure",
+	"af incident import":  "af incident import capture.json",
+	"af incident list":    "af incident list",
+	"af incident inspect": "af incident inspect billing-failure",
+	"af incident save":    "af incident save billing-failure --scenario billing --pointer /recommendation --original '\"charge\"' --expected '\"review\"' --table subscriptions",
+	"af replay":           "af replay billing --candidate HEAD",
+	"af replay inspect":   "af replay inspect rpl_example",
+	"af replay recover":   "af replay recover rpl_example",
+	"af replay retire":    "af replay retire billing --reason 'The billing workflow was removed'",
+	"af eval":             "af eval run suite.json",
+	"af eval run":         "af eval run suite.json --candidate HEAD",
 	"af change": "" +
 		"# Against the base branch this job names.\n" +
 		"af change\n" +

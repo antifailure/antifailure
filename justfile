@@ -131,6 +131,7 @@ gate: _reports
     run "the console"                    just test-console
     run "the site beacon"                just test-site-beacon
     run "runner"                         just test-runner
+    run "agent replay"                   just test-agent-replay
     run "edition boundary"               just edition
     run "enterprise"                     just test-ee
     run "builds are reproducible"        just reproducible
@@ -607,6 +608,15 @@ test-web:
 test-runner:
     go run ./tools/installcheck . runner || npm --prefix runner ci --no-audit --no-fund
     npm --prefix runner test
+
+# The optional SDK and a real agent replay, including negative controls.
+test-agent-replay:
+    npm --prefix sdk/typescript ci --no-audit --no-fund
+    npm --prefix sdk/typescript run typecheck
+    npm --prefix sdk/typescript test
+    npm --prefix sdk/typescript run build
+    just build
+    npm --prefix sdk/typescript run test:e2e
 
 # The marketing site's own backend: api/, one anonymous write endpoint and the
 # catch-all that answers everything else. Its own package rather than a

@@ -711,6 +711,27 @@ The two differing values are not returned. A JSON path is structure and survives
 a row's primary key is a value and does not. The baseline environment is always
 torn down, and there is no argument that leaves it running.
 
+### Agent incident replay
+
+`inspect_agent_incident` reads a local capture's metadata, missing dependencies
+and at most 50 boundary summaries. It takes `project_id`, `incident_id` and an
+optional returned `cursor`. Captured bodies remain in the local artifact store
+and are inspected with `af incident inspect`.
+
+`replay_agent_incident` takes `project_id`, `scenario_id`, `candidate` and an
+optional `idempotency_key`. It returns a `run_id` for `get_rehearsal_run`.
+The saved scenario owns the evaluator and strict boundary policy; tool
+arguments cannot replace either. It reproduces the original failure before
+testing the candidate and requires both environments to be removed.
+
+`recover_agent_replay` takes `project_id` and `attempt_id`. It removes the
+recorded environments after an interrupted replay and refuses an active
+attempt. Recovery uses a separate teardown record, so a missing incident blob
+does not prevent cleanup. Recovery leaves the verdict inconclusive.
+
+See [agent replay](/docs/guides/agent-replay) for the supported boundaries,
+synthetic identity requirement, pinned golden and local data retention.
+
 ### `inspect_data_masking`
 
 What masking does to this environment's data, without changing any of it. Four
