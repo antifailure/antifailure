@@ -8835,6 +8835,12 @@ af eval run suite.json --candidate HEAD --output json
 
 Each case gets a separate attempt and verdict. Retain the scenario store and its referenced golden on the CI runner. Copying a trace alone does not copy its database. Reintroduce the original bug as a negative control: the case must fail. Remove required evidence: it must become inconclusive.
 
+Setup and execution are capped at 20 minutes per attempt and 30 minutes per
+suite. Cleanup has a separate five-minute budget for each environment. The
+local artifact store permits two reserved attempts at once; an interrupted
+attempt keeps its reservation until recovery proves its resources are gone.
+No new paid model call is permitted in strict replay.
+
 The MCP tools ` + "`" + `inspect_agent_incident` + "`" + `, ` + "`" + `replay_agent_incident` + "`" + ` and ` + "`" + `recover_agent_replay` + "`" + ` reach the same engine. Inspection pages boundary summaries; captured bodies remain available through the local CLI. Scenario approval is a CLI operation so candidate-driven tools cannot replace the evaluator or weaken replay policy.
 
 ## Local data custody
@@ -20818,7 +20824,7 @@ Subcommands:
 | Flag | Default | What it does |
 | --- | --- | --- |
 | ` + "`" + `--candidate` + "`" + ` | ` + "`" + `HEAD` + "`" + ` | Candidate Git revision. |
-| ` + "`" + `--timeout` + "`" + ` | ` + "`" + `20m0s` + "`" + ` | Bound setup and replay, excluding required cleanup. |
+| ` + "`" + `--timeout` + "`" + ` | ` + "`" + `20m0s` + "`" + ` | Shorten the 20-minute setup/replay cap; cleanup has its own budget. |
 
 ### ` + "`" + `af replay inspect` + "`" + `
 

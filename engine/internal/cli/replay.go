@@ -194,12 +194,15 @@ func newReplayCommand(e *Env) *cobra.Command {
 			}
 		}
 		if err != nil {
+			if report != nil && e.Out.Format == FormatJSON {
+				return silent(replayError(err))
+			}
 			return replayError(err)
 		}
 		return replayExit(report)
 	}}
 	cmd.Flags().StringVar(&candidate, "candidate", "HEAD", "Candidate Git revision")
-	cmd.Flags().DurationVar(&timeout, "timeout", 20*time.Minute, "Bound setup and replay, excluding required cleanup")
+	cmd.Flags().DurationVar(&timeout, "timeout", 20*time.Minute, "Shorten the 20-minute setup/replay cap; cleanup has its own budget")
 	cmd.AddCommand(&cobra.Command{Use: "inspect <attempt>", Short: "Read a replay attempt and its retained evidence", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		o, err := replayEngine(e)
 		if err != nil {
@@ -276,14 +279,34 @@ func newEvalCommand(e *Env) *cobra.Command {
 		}
 		reports := []*replay.Report{}
 		var exit error
+		suiteContext, cancel := context.WithTimeout(cmd.Context(), 30*time.Minute)
+		defer cancel()
+		blockedCleanup := false
 		for _, id := range suite.Scenarios {
-			report, runErr := o.Replay(cmd.Context(), id, candidate)
+			if suiteContext.Err() != nil || blockedCleanup {
+				reason := "suite_budget_exhausted_or_cancelled"
+				if blockedCleanup {
+					reason = "recover the previous attempt before running more cases"
+				}
+				reports = append(reports, &replay.Report{SchemaVersion: 1, Scenario: id, Verdict: "INCONCLUSIVE", State: "not_started", Issues: []string{reason}})
+				exit = silent(aferrors.Coded(aferrors.AFRPL002, "detail", reason))
+				continue
+			}
+			report, runErr := o.Replay(suiteContext, id, candidate)
 			if runErr != nil {
-				return replayError(runErr)
+				exit = silent(aferrors.Coded(aferrors.AFRPL002, "detail", "a suite case could not complete"))
+				if report == nil {
+					report = &replay.Report{SchemaVersion: 1, Scenario: id, Verdict: "INCONCLUSIVE", Issues: []string{"case could not start"}}
+				}
 			}
 			reports = append(reports, report)
+			if report.Baseline.Branch != "" && (!report.Baseline.TornDown || !report.Candidate.TornDown) {
+				blockedCleanup = true
+			}
 			if report.Verdict != "PASS" {
-				exit = replayExit(report)
+				if exit == nil || report.Verdict == "INCONCLUSIVE" {
+					exit = replayExit(report)
+				}
 			}
 		}
 		if err = printReplayValue(e, reports); err != nil {

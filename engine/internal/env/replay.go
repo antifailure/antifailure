@@ -244,6 +244,8 @@ func (o *Orchestrator) replayScenario(id string) (*replay.Scenario, *replay.Inci
 // Replay proves the control before running the candidate. The report is durable
 // before creation and never says PASS until both inventories are empty.
 func (o *Orchestrator) Replay(ctx context.Context, id, candidate string) (report *replay.Report, err error) {
+	ctx, cancelRun := context.WithTimeout(ctx, 20*time.Minute)
+	defer cancelRun()
 	var random [12]byte
 	if _, err = rand.Read(random[:]); err != nil {
 		return nil, err
@@ -258,6 +260,10 @@ func (o *Orchestrator) Replay(ctx context.Context, id, candidate string) (report
 			report.Issues = append(report.Issues, "replay_internal_failure")
 			err = fmt.Errorf("replay stopped on an internal failure")
 		}
+		if err != nil {
+			report.Verdict = "INCONCLUSIVE"
+			report.Issues = append(report.Issues, "replay error: "+o.opts.Redactor.String(err.Error()))
+		}
 		now := o.opts.Clock.Now()
 		report.DurationMs = now.Sub(report.StartedAt).Milliseconds()
 		report.CompletedAt = &now
@@ -265,6 +271,7 @@ func (o *Orchestrator) Replay(ctx context.Context, id, candidate string) (report
 		if writeErr := store.Put("attempts", report.ID, report); writeErr != nil {
 			err = writeErr
 			report.Verdict = "INCONCLUSIVE"
+			report.Issues = append(report.Issues, "report_write_failed: restore access to the local artifact store and recover this attempt")
 		}
 	}
 	held, lockErr := lock.Acquire(filepath.Join(store.Root, "locks", report.ID), o.opts.Clock, "af replay")
@@ -273,6 +280,10 @@ func (o *Orchestrator) Replay(ctx context.Context, id, candidate string) (report
 	}
 	defer func() { _ = held.Release() }()
 	defer finish()
+	if ctx.Err() != nil {
+		report.Issues = append(report.Issues, "replay_cancelled_or_budget_exhausted")
+		return report, nil
+	}
 	unlock, publicationErr := store.LockPublication(ctx)
 	if publicationErr != nil {
 		return report, publicationErr
@@ -356,6 +367,21 @@ func (o *Orchestrator) Replay(ctx context.Context, id, candidate string) (report
 	if err = store.Put("attempts", report.ID, report); err != nil {
 		return report, err
 	}
+	reservations, reservationErr := store.List("reservations")
+	if reservationErr != nil {
+		return report, reservationErr
+	}
+	if len(reservations) >= 2 {
+		report.Baseline.TornDown = true
+		report.Candidate.TornDown = true
+		report.Issues = append(report.Issues, "project_replay_budget_exhausted: wait for or recover the two reserved attempts")
+		return report, nil
+	}
+	if err = store.Put("reservations", report.ID, map[string]string{"attemptId": report.ID}); err != nil {
+		report.Baseline.TornDown = true
+		report.Candidate.TornDown = true
+		return report, err
+	}
 	unlock()
 	// Registered before Up, including failed creation and cancelled callers.
 	defer func() {
@@ -374,6 +400,8 @@ func (o *Orchestrator) Replay(ctx context.Context, id, candidate string) (report
 		}
 		if !report.Baseline.TornDown || !report.Candidate.TornDown {
 			report.Issues = append(report.Issues, "teardown_unconfirmed: run af replay recover "+report.ID)
+		} else if releaseErr := store.ClearReservation(report.ID); releaseErr != nil {
+			report.Issues = append(report.Issues, "reservation_release_failed: recover this attempt after restoring artifact-store access")
 		}
 		if len(report.Issues) > 0 {
 			report.Verdict = "INCONCLUSIVE"
@@ -679,6 +707,11 @@ func (o *Orchestrator) RecoverReplay(ctx context.Context, id string) (*replay.Re
 	report.Verdict = "INCONCLUSIVE"
 	report.State = "recovered"
 	report.Issues = append(report.Issues, "recovered_after_interruption: rerun the scenario for a new verdict")
+	if report.Baseline.TornDown && report.Candidate.TornDown {
+		if releaseErr := store.ClearReservation(id); releaseErr != nil {
+			return &report, releaseErr
+		}
+	}
 	err = store.Put("attempts", id, report)
 	return &report, err
 }

@@ -2158,7 +2158,7 @@ Subcommands:
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--candidate` | `HEAD` | Candidate Git revision. |
-| `--timeout` | `20m0s` | Bound setup and replay, excluding required cleanup. |
+| `--timeout` | `20m0s` | Shorten the 20-minute setup/replay cap; cleanup has its own budget. |
 
 ### `af replay inspect`
 

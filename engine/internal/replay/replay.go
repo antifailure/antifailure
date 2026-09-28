@@ -358,7 +358,7 @@ func (s Store) path(kind, id string) (string, error) {
 		return "", fmt.Errorf("invalid artifact ID")
 	}
 	switch kind {
-	case "incidents", "scenarios", "attempts", "blobs", "retired":
+	case "incidents", "scenarios", "attempts", "blobs", "retired", "reservations":
 	default:
 		return "", fmt.Errorf("invalid artifact kind")
 	}

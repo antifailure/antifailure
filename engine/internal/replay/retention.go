@@ -134,6 +134,9 @@ func (s Store) Retire(ctx context.Context, id, reason string, at time.Time) erro
 		if err = remove("attempts", attempt); err != nil {
 			return err
 		}
+		if err = s.ClearReservation(attempt); err != nil {
+			return err
+		}
 	}
 	for _, blob := range record.Blobs {
 		if referenced[blob] {
@@ -171,3 +174,16 @@ func (s Store) IsRetired(id string) bool {
 
 // RetentionSummary withholds original bodies when listing retirement records.
 func (s Store) RetentionSummary(id string) (json.RawMessage, error) { return s.Read("retired", id) }
+
+// ClearReservation releases capacity only after the caller has proved cleanup.
+func (s Store) ClearReservation(id string) error {
+	path, err := s.path("reservations", id)
+	if err != nil {
+		return err
+	}
+	err = os.Remove(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
