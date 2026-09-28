@@ -126,6 +126,9 @@ func (o *Orchestrator) SaveIncident(ctx context.Context, incident replay.Inciden
 		return nil, err
 	}
 	store := o.ReplayStore()
+	if err := store.ImportIncident(ctx, incident); err != nil {
+		return nil, err
+	}
 	unlock, lockErr := store.LockPublication(ctx)
 	if lockErr != nil {
 		return nil, lockErr
@@ -134,7 +137,7 @@ func (o *Orchestrator) SaveIncident(ctx context.Context, incident replay.Inciden
 	if store.IsRetired(id) {
 		return nil, fmt.Errorf("scenario name was retired; use a new version name")
 	}
-	if err := store.ImportIncident(ctx, incident); err != nil {
+	if err := store.CheckIncidentActive(incident.RunID); err != nil {
 		return nil, err
 	}
 	if gaps := incident.Missing(); len(gaps) > 0 {
@@ -437,11 +440,28 @@ func (o *Orchestrator) Replay(ctx context.Context, id, candidate string) (report
 		report.Notes = append(report.Notes, "Candidate changed a declared database table; this scenario requires no net database writes.")
 	}
 	comparison := oracle.Compare(oracle.Input{BaselineBefore: baseBefore, BaselineAfter: baseAfter, CandidateBefore: candBefore, CandidateAfter: candAfter, Database: oracle.DatabaseOptions{Include: scenario.Tables}})
-	report.Database, err = json.Marshal(comparison)
+	report.Database, err = replayDatabaseEvidence(comparison)
 	if err != nil {
 		report.Issues = append(report.Issues, "database_comparator_failed")
 	}
 	return report, err
+}
+
+// The oracle's display strings contain row values, including primary keys.
+// Replay records only finding metadata; a masked golden is not permission to
+// copy a credential column into the attempt or its CLI response.
+func replayDatabaseEvidence(comparison *oracle.Result) (json.RawMessage, error) {
+	findings := make([]map[string]string, 0, len(comparison.Findings))
+	for _, finding := range comparison.Findings {
+		findings = append(findings, map[string]string{
+			"kind": string(finding.Kind), "severity": finding.SeverityName,
+			"table": finding.Where, "phase": string(finding.Phase),
+		})
+	}
+	return json.Marshal(struct {
+		Findings []map[string]string     `json:"findings"`
+		Database *oracle.DatabaseSummary `json:"database,omitempty"`
+	}{Findings: findings, Database: comparison.Database})
 }
 
 func (o *Orchestrator) replaySide(ctx context.Context, side *Orchestrator, scenario *replay.Scenario, incident *replay.Incident, result *replay.Side, expectedBefore *oracle.Snapshot) (before, after *oracle.Snapshot, err error) {

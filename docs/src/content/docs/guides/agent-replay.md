@@ -72,6 +72,8 @@ Reports describe a **state-backed** experiment against a pinned masked golden. T
 
 The first evaluator requires the candidate to leave the selected database tables unchanged. A correct-looking recommendation that also changes one of those tables fails. Scenarios that intentionally change database contents need a different evaluator and are not supported by this first contract.
 
+Database findings retain the table, difference kind, severity and phase. Row values and primary keys are excluded from the report, even when the golden was masked.
+
 Both sides use unique attempt identifiers. Teardown checks pending journal resources and provider inventories. If execution was interrupted:
 
 ```sh
@@ -114,6 +116,6 @@ Retire a case when its content should no longer be retained:
 af replay retire billing --reason 'The billing workflow was removed'
 ```
 
-Retirement refuses attempts with unconfirmed cleanup, removes their retained reports and unreferenced incident blobs, and keeps a small record of the case name, reference hashes, time and reason. Shared blobs remain until their last scenario is retired. The original capture file supplied to import remains yours to delete. Retrying an interrupted retirement completes the same deletion. A retired name cannot be reused.
+Retirement refuses attempts with unconfirmed cleanup, removes their retained reports and unreferenced incident blobs, and keeps a small record of the case name, incident IDs, reference hashes, time and reason. Shared blobs remain until their last scenario is retired. The original capture file supplied to import remains yours to delete. Retrying an interrupted retirement completes the same deletion. A retired name cannot be reused, and a late import cannot restore a retired incident ID. Capture a new run instead.
 
 The local golden collector refuses versions referenced by this project's active scenarios. Another checkout or an external Docker administrator can still remove an image; a missing golden then makes replay inconclusive. There is no background retention daemon.

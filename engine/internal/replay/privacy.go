@@ -115,7 +115,7 @@ func safeArtifact(body []byte) error {
 		if err := decoder.Decode(&value); err != nil {
 			return err
 		}
-		return safeValue(value, false)
+		return safeValue(value, true)
 	}
 	for _, line := range strings.Split(string(body), "\n") {
 		if err := safeValue(line, false); err != nil {

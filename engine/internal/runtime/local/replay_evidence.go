@@ -1,6 +1,7 @@
 package local
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
+	"github.com/antifailure/antifailure/engine/internal/proxyimage"
 	"github.com/moby/moby/client"
 )
 
@@ -66,6 +68,10 @@ func (r *Runtime) ReplayDecisions(ctx context.Context, envID string) ([]Decision
 	if _, err := r.cli.ContainerInspect(ctx, id, client.ContainerInspectOptions{}); err != nil {
 		return nil, fmt.Errorf("replay sidecar is unavailable: %w", err)
 	}
+	before, err := r.replayWatermark(ctx, id, envID)
+	if err != nil {
+		return nil, err
+	}
 	rc, err := r.cli.ContainerLogs(ctx, id, client.ContainerLogsOptions{ShowStdout: true, ShowStderr: true, Tail: "all"})
 	if err != nil {
 		return nil, err
@@ -79,10 +85,19 @@ func (r *Runtime) ReplayDecisions(ctx context.Context, envID string) ([]Decision
 	if len(body) > limit {
 		return nil, fmt.Errorf("replay egress evidence exceeds its byte limit")
 	}
-	return replayDecisions(stripDockerLogFraming(string(body)))
+	after, err := r.replayWatermark(ctx, id, envID)
+	if err != nil {
+		return nil, err
+	}
+	return verifiedReplayDecisions(stripDockerLogFraming(string(body)), before, after)
 }
 
 func replayDecisions(body string) ([]Decision, error) {
+	out, _, err := parseReplayEvidence(body)
+	return out, err
+}
+
+func parseReplayEvidence(body string) ([]Decision, uint64, error) {
 	out := []Decision{}
 	seen := map[uint64]bool{}
 	var maximum uint64
@@ -96,11 +111,11 @@ func replayDecisions(body string) ([]Decision, error) {
 			Seq   uint64 `json:"seq"`
 		}
 		if err := json.Unmarshal([]byte(line), &event); err != nil {
-			return out, fmt.Errorf("replay egress record is malformed")
+			return out, maximum, fmt.Errorf("replay egress record is malformed")
 		}
 		if event.Seq > 0 {
 			if seen[event.Seq] {
-				return out, fmt.Errorf("replay egress sequence was repeated")
+				return out, maximum, fmt.Errorf("replay egress sequence was repeated")
 			}
 			seen[event.Seq] = true
 			if event.Seq > maximum {
@@ -112,19 +127,19 @@ func replayDecisions(body string) ([]Decision, error) {
 		}
 		var d Decision
 		if err := json.Unmarshal([]byte(line), &d); err != nil {
-			return out, fmt.Errorf("replay decision is malformed")
+			return out, maximum, fmt.Errorf("replay decision is malformed")
 		}
 		var err error
 		d.At, err = time.Parse(time.RFC3339Nano, d.AtRaw)
 		if err != nil || d.Seq == 0 {
-			return out, fmt.Errorf("replay decision has no valid time or sequence")
+			return out, maximum, fmt.Errorf("replay decision has no valid time or sequence")
 		}
 		out = append(out, d)
 	}
 	if uint64(len(seen)) != maximum {
-		return out, fmt.Errorf("replay egress evidence has missing records")
+		return out, maximum, fmt.Errorf("replay egress evidence has missing records")
 	}
-	return out, nil
+	return out, maximum, nil
 }
 
 // ReplayAbsent checks only the attempt's containers, networks and volumes,
@@ -150,4 +165,85 @@ func (r *Runtime) ReplayAbsent(ctx context.Context, envID string) error {
 		return fmt.Errorf("remaining resources: %d containers, %d networks, %d volumes", len(containers.Items), len(networks.Items), len(volumes.Items))
 	}
 	return nil
+}
+
+// Obtained from the running proxy process, independently of Docker's log stream.
+// A final failed write produces no later sequence gap, so logs alone cannot prove
+// completeness. The sticky failure bit and attempted sequence close that gap.
+type replayWatermark struct {
+	Version  int    `json:"version"`
+	Env      string `json:"env"`
+	Instance string `json:"instance"`
+	Sequence uint64 `json:"sequence"`
+	Failed   bool   `json:"failed"`
+	Active   uint64 `json:"active"`
+	Work     uint64 `json:"work"`
+}
+
+func verifiedReplayDecisions(body string, before, after replayWatermark) ([]Decision, error) {
+	if before != after || before.Version != 1 || before.Env == "" || before.Instance == "" || before.Sequence == 0 || before.Active != 0 || before.Failed {
+		return nil, fmt.Errorf("replay evidence writer is incomplete or changed while reading")
+	}
+	decisions, maximum, err := parseReplayEvidence(body)
+	if err != nil {
+		return nil, err
+	}
+	if maximum != before.Sequence {
+		return nil, fmt.Errorf("replay evidence is missing its final records")
+	}
+	return decisions, nil
+}
+
+func (r *Runtime) replayWatermark(ctx context.Context, id, envID string) (replayWatermark, error) {
+	var status replayWatermark
+	created, err := r.cli.ExecCreate(ctx, id, client.ExecCreateOptions{
+		Cmd: []string{proxyimage.BinaryPath, "-evidence-status"}, AttachStdout: true, AttachStderr: true, TTY: true,
+	})
+	if err != nil {
+		return status, fmt.Errorf("reading replay evidence watermark: %w", err)
+	}
+	attached, err := r.cli.ExecAttach(ctx, created.ID, client.ExecAttachOptions{TTY: true})
+	if err != nil {
+		return status, err
+	}
+	body, readErr := io.ReadAll(io.LimitReader(attached.Reader, 4097))
+	attached.Close()
+	if readErr != nil {
+		return status, readErr
+	}
+	if len(body) > 4096 {
+		return status, fmt.Errorf("replay evidence watermark is oversized")
+	}
+	for attempt := 0; ; attempt++ {
+		inspection, err := r.cli.ExecInspect(ctx, created.ID, client.ExecInspectOptions{})
+		if err != nil {
+			return status, err
+		}
+		if !inspection.Running {
+			if inspection.ExitCode != 0 {
+				return status, fmt.Errorf("replay evidence watermark is unavailable")
+			}
+			break
+		}
+		if attempt >= probeReapAttempts {
+			return status, fmt.Errorf("replay evidence probe did not finish")
+		}
+		select {
+		case <-ctx.Done():
+			return status, ctx.Err()
+		case <-r.clock.After(probeReapPause):
+		}
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&status); err != nil {
+		return status, fmt.Errorf("invalid replay evidence watermark")
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return status, fmt.Errorf("invalid replay evidence watermark trailer")
+	}
+	if status.Version != 1 || status.Env != envID || len(status.Instance) != 32 || status.Sequence == 0 || status.Active != 0 || status.Failed {
+		return status, fmt.Errorf("replay evidence writer has failed or is unconfirmed")
+	}
+	return status, nil
 }

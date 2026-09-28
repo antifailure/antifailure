@@ -82,6 +82,7 @@ type dnsServer struct {
 	// own names.
 	upstream string
 	emit     func(record)
+	track    func() func()
 
 	mu     sync.Mutex
 	logged map[string]bool
@@ -104,7 +105,12 @@ func (d *dnsServer) serve(pc net.PacketConn) error {
 		}
 		query := make([]byte, n)
 		copy(query, buf[:n])
+		done := func() {}
+		if d.track != nil {
+			done = d.track()
+		}
 		go func() {
+			defer done()
 			resp := d.answer(query)
 			if resp != nil {
 				_, _ = pc.WriteTo(resp, addr)

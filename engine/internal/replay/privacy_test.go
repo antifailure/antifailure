@@ -46,3 +46,13 @@ func TestNestedJSONTextIsInspectedBeforeAnyArtifactIsWritten(t *testing.T) {
 		require.Error(t, err)
 	}
 }
+
+func TestFinalArtifactWriterRefusesShortCredentialFields(t *testing.T) {
+	for _, kind := range []string{"attempts", "incidents", "scenarios"} {
+		s := Store{Root: t.TempDir()}
+		err := s.Put(kind, "unsafe", map[string]any{"database": map[string]string{"password": "short"}})
+		require.ErrorContains(t, err, "credential field")
+		_, err = s.Read(kind, "unsafe")
+		require.Error(t, err)
+	}
+}

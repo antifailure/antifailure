@@ -36,3 +36,43 @@ func TestReplayEvidenceAllowsInterleavedMessageSequences(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, decisions, 1)
 }
+
+func TestReplayEvidenceRequiresIndependentFinalWatermark(t *testing.T) {
+	body := "{\"event\":\"ready\",\"seq\":1}\n"
+	clean := replayWatermark{Version: 1, Env: "test-env", Instance: strings.Repeat("a", 32), Sequence: 1}
+	decisions, err := verifiedReplayDecisions(body, clean, clean)
+	require.NoError(t, err)
+	require.Empty(t, decisions)
+	tests := []struct {
+		name          string
+		before, after replayWatermark
+	}{
+		{"final failed record", replayWatermark{Version: 1, Env: clean.Env, Instance: clean.Instance, Sequence: 2, Failed: true}, replayWatermark{Version: 1, Env: clean.Env, Instance: clean.Instance, Sequence: 2, Failed: true}},
+		{"final record lost by log collector", replayWatermark{Version: 1, Env: clean.Env, Instance: clean.Instance, Sequence: 2}, replayWatermark{Version: 1, Env: clean.Env, Instance: clean.Instance, Sequence: 2}},
+		{"writer changes during read", clean, replayWatermark{Version: 1, Env: clean.Env, Instance: clean.Instance, Sequence: 2}},
+		{"proxy restarts during read", clean, replayWatermark{Version: 1, Env: clean.Env, Instance: strings.Repeat("b", 32), Sequence: 1}},
+		{"absent control", replayWatermark{}, replayWatermark{}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := verifiedReplayDecisions(body, test.before, test.after)
+			require.Error(t, err)
+		})
+	}
+	_, err = verifiedReplayDecisions("", clean, clean)
+	require.Error(t, err, "an empty or rotated log cannot claim the known watermark")
+}
+
+func TestReplayEvidenceRefusesAcceptedButUnloggedWork(t *testing.T) {
+	body := "{\"event\":\"ready\",\"seq\":1}\n"
+	clean := replayWatermark{Version: 1, Env: "env", Instance: strings.Repeat("a", 32), Sequence: 1}
+	active := clean
+	active.Active = 1
+	active.Work = 1
+	_, err := verifiedReplayDecisions(body, active, active)
+	require.Error(t, err)
+	finished := clean
+	finished.Work = 1
+	_, err = verifiedReplayDecisions(body, clean, finished)
+	require.Error(t, err, "work admitted during the log read must invalidate the read even without a new log record")
+}

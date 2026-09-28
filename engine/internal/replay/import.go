@@ -5,11 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
-
-	"github.com/antifailure/antifailure/engine/internal/clock"
-	"github.com/antifailure/antifailure/engine/internal/lock"
 )
 
 // ImportIncident reconciles a later bounded capture without changing facts
@@ -21,12 +17,15 @@ func (s Store) ImportIncident(ctx context.Context, next Incident) error {
 	if err := next.Validate(); err != nil {
 		return err
 	}
-	held, err := lock.Acquire(filepath.Join(s.Root, "locks", "incident-"+next.RunID), clock.New(), "af incident import")
+	unlock, err := s.LockPublication(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = held.Release() }()
+	defer unlock()
 	if err = ctx.Err(); err != nil {
+		return err
+	}
+	if err = s.CheckIncidentActive(next.RunID); err != nil {
 		return err
 	}
 	path, err := s.path("incidents", next.RunID)
@@ -83,6 +82,26 @@ func (s Store) ImportIncident(ctx context.Context, next Incident) error {
 		return fmt.Errorf("capture policy is required")
 	}
 	return s.write("incidents", next.RunID, nextBytes, true)
+}
+
+// CheckIncidentActive refuses retired identities, including when their draft
+// index was absent at retirement. Writers hold LockPublication while checking
+// this and publishing so retirement cannot occur between those operations.
+func (s Store) CheckIncidentActive(id string) error {
+	retired, err := s.List("retired")
+	if err != nil {
+		return err
+	}
+	for _, entry := range retired {
+		var record retirement
+		if entry.Error != "" || Decode(entry.Value, &record) != nil {
+			return fmt.Errorf("repair retirement %s before importing evidence", entry.ID)
+		}
+		if contains(record.Incidents, id) {
+			return fmt.Errorf("incident is retired; capture a new run")
+		}
+	}
+	return nil
 }
 func fills(old, newer json.RawMessage) bool {
 	return len(old) == 0 || string(old) == "null" || Equal(old, newer)

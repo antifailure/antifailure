@@ -73,7 +73,9 @@ func (p *proxy) startDatabaseRelays(
 					return
 				}
 				relays.wg.Add(1)
+				done := p.beginEvidenceWork()
 				go func() {
+					defer done()
 					defer relays.wg.Done()
 					p.relayDatabase(ctx, client, route)
 				}()

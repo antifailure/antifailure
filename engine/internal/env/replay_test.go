@@ -2,7 +2,10 @@ package env
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/antifailure/antifailure/engine/internal/manifest"
 	"github.com/antifailure/antifailure/engine/internal/oracle"
@@ -10,6 +13,48 @@ import (
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 	"github.com/stretchr/testify/require"
 )
+
+func TestSaveIncidentDoesNotRelockPublicationOrRepublishRetiredIdentity(t *testing.T) {
+	o, err := New(Options{Root: t.TempDir(), Manifest: replayManifest()})
+	require.NoError(t, err)
+	incident := replay.Incident{SchemaVersion: 1, RunID: "one", TraceID: strings.Repeat("a", 32), Project: "billing", Service: "agent", Commit: strings.Repeat("b", 40), ObservedAt: "2026-09-27T00:00:00Z", PolicyVersion: "1", Input: json.RawMessage(`{"id":1}`), InputHash: strings.Repeat("c", 64), Status: "complete", Clock: "sdk", Identity: "synthetic"}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err = o.SaveIncident(ctx, incident, "case", "", "/af-replay", "local", replay.Assertion{Baseline: json.RawMessage(`false`), Expected: json.RawMessage(`true`)}, []string{"subscriptions"})
+	require.ErrorContains(t, err, "pin a verified golden", "the save passes import and publication locking before the expected validation error")
+	require.NoError(t, o.ReplayStore().Put("retired", "prior-case", map[string]any{"id": "prior-case", "incidents": []string{"one"}}))
+	_, err = o.SaveIncident(ctx, incident, "new-case", "gv-one", "/af-replay", "local", replay.Assertion{Baseline: json.RawMessage(`false`), Expected: json.RawMessage(`true`)}, []string{"subscriptions"})
+	require.ErrorContains(t, err, "incident is retired")
+	_, err = o.ReplayStore().Read("scenarios", "new-case")
+	require.Error(t, err)
+}
+
+func TestReplayDatabaseFindingsNeverCopyRowValuesIntoReports(t *testing.T) {
+	snapshot := func(password string) *oracle.Snapshot {
+		return &oracle.Snapshot{Tables: []oracle.Table{{Schema: "public", Name: "accounts", Key: []string{"id"},
+			Columns: []oracle.Column{{Name: "id", Type: "text"}, {Name: "password", Type: "text"}},
+			Rows:    map[string]map[string]any{`["private-row-key"]`: {"id": "private-row-key", "password": password}}, RowCount: 1,
+		}}}
+	}
+	before, after := snapshot("short-before"), snapshot("short-after")
+	comparison := oracle.Compare(oracle.Input{BaselineBefore: before, BaselineAfter: before, CandidateBefore: before, CandidateAfter: after, Database: oracle.DatabaseOptions{Include: []string{"accounts"}}})
+	raw, err := json.Marshal(comparison)
+	require.NoError(t, err)
+	require.Contains(t, string(raw), "short-after", "the real comparator must exercise the leaking display shape")
+	require.NotEmpty(t, comparison.Findings)
+	body, err := replayDatabaseEvidence(comparison)
+	require.NoError(t, err)
+	report := replay.Report{ID: "attempt", Verdict: "FAIL", Database: body}
+	s := replay.Store{Root: t.TempDir()}
+	require.NoError(t, s.Put("attempts", report.ID, report))
+	written, err := s.Read("attempts", report.ID)
+	require.NoError(t, err)
+	for _, value := range []string{"short-before", "short-after", "private-row-key"} {
+		require.NotContains(t, string(written), value)
+	}
+	require.Contains(t, string(written), "public.accounts")
+	require.Contains(t, string(written), `"verdict":"FAIL"`)
+}
 
 func replayManifest() *schema.Manifest {
 	return &schema.Manifest{Name: "billing", Version: 1, Database: &schema.Database{Provider: "docker", Version: 17}, Services: []schema.Service{{Name: "agent", Kind: "web"}}, Egress: &schema.Egress{Default: "block"}}

@@ -61,6 +61,17 @@ func (s Store) Retire(ctx context.Context, id, reason string, at time.Time) erro
 			return err
 		}
 		record = retirement{ID: id, Reason: reason, At: at, Blobs: []string{scenario.IncidentRef}, Attempts: []string{}, Incidents: []string{}}
+		// Remember the identity even if the draft index is already absent. The
+		// marker is the durable refusal for late imports, not only a GC list.
+		captured, blobErr := s.Blob(scenario.IncidentRef)
+		if blobErr != nil {
+			return blobErr
+		}
+		var incident Incident
+		if err = Decode(captured, &incident); err != nil {
+			return err
+		}
+		record.Incidents = append(record.Incidents, incident.RunID)
 		if scenario.MaskingRef != "" {
 			record.Blobs = append(record.Blobs, scenario.MaskingRef)
 		}
@@ -89,7 +100,7 @@ func (s Store) Retire(ctx context.Context, id, reason string, at time.Time) erro
 			return listErr
 		}
 		for _, entry := range incidents {
-			if entry.Error == "" && Digest(entry.Value) == scenario.IncidentRef {
+			if entry.Error == "" && Digest(entry.Value) == scenario.IncidentRef && !contains(record.Incidents, entry.ID) {
 				record.Incidents = append(record.Incidents, entry.ID)
 			}
 		}

@@ -337,3 +337,51 @@ func TestMalformedWritesAndUnreadableStoresNeverPublishAReference(t *testing.T) 
 	require.Error(t, err)
 	require.Error(t, s.Retire(context.Background(), "one", "", time.Date(2026, 9, 27, 0, 0, 0, 0, time.UTC)))
 }
+
+func TestImportAndRetirementOrderingsNeverRestoreRetiredContent(t *testing.T) {
+	for _, ordering := range []string{"import-first", "retire-first", "concurrent", "index-already-missing"} {
+		t.Run(ordering, func(t *testing.T) {
+			ctx := context.Background()
+			s := Store{Root: t.TempDir()}
+			incident := validIncident()
+			body, err := json.Marshal(incident)
+			require.NoError(t, err)
+			ref, err := s.PutBlob(body)
+			require.NoError(t, err)
+			require.NoError(t, s.ImportIncident(ctx, incident))
+			scenario := Scenario{SchemaVersion: 1, ID: "case", Project: "billing", IncidentRef: ref, Golden: "gv-one", GoldenIdentity: "gp1-one", GoldenAt: time.Date(2026, 9, 27, 0, 0, 0, 0, time.UTC), Manifest: schema.Manifest{Name: "billing"}, Endpoint: "/af-replay", Assertion: Assertion{Baseline: json.RawMessage(`false`), Expected: json.RawMessage(`true`)}, Tables: []string{"subscriptions"}}
+			require.NoError(t, s.Put("scenarios", scenario.ID, scenario))
+			retire := func() error { return s.Retire(ctx, scenario.ID, "removed", scenario.GoldenAt) }
+			switch ordering {
+			case "import-first":
+				require.NoError(t, s.ImportIncident(ctx, incident))
+				require.NoError(t, retire())
+			case "retire-first":
+				require.NoError(t, retire())
+				require.ErrorContains(t, s.ImportIncident(ctx, incident), "retired")
+			case "index-already-missing":
+				path, pathErr := s.path("incidents", incident.RunID)
+				require.NoError(t, pathErr)
+				require.NoError(t, os.Remove(path))
+				require.NoError(t, retire())
+				require.ErrorContains(t, s.ImportIncident(ctx, incident), "retired")
+			case "concurrent":
+				start := make(chan struct{})
+				imported, retired := make(chan error, 1), make(chan error, 1)
+				go func() { <-start; imported <- s.ImportIncident(ctx, incident) }()
+				go func() { <-start; retired <- retire() }()
+				close(start)
+				require.NoError(t, <-retired)
+				if importErr := <-imported; importErr != nil {
+					require.ErrorContains(t, importErr, "retired")
+				}
+			}
+			require.NoError(t, retire(), "retirement retry remains idempotent")
+			require.ErrorContains(t, s.ImportIncident(ctx, incident), "retired")
+			_, err = s.Read("incidents", incident.RunID)
+			require.Error(t, err)
+			_, err = s.Blob(ref)
+			require.Error(t, err)
+		})
+	}
+}
