@@ -37,6 +37,7 @@ func aDeployWorkflow() schema.TerminalWorkflow {
 		Args:        []string{"--plan"},
 		Input:       []string{"y", "<enter>"},
 		Expect:      []string{`"Applied 3 changes"`},
+		Never:       []string{"rollback started"},
 		Screen:      &schema.TerminalScreen{Rows: 30, Cols: 100},
 		Budget:      &schema.TerminalBudget{Duration: "45s"},
 	}
@@ -51,6 +52,7 @@ func TestTerminalDocs_TheManifestReachesTheRunnerWholeAndUnderTheNamesItReads(t 
 	require.Equal(t, []string{"--plan"}, docs[0].Args)
 	require.Equal(t, []string{"y", "<enter>"}, docs[0].Input)
 	require.Equal(t, []string{`"Applied 3 changes"`}, docs[0].Expect)
+	require.Equal(t, []string{"rollback started"}, docs[0].Never)
 	require.NotNil(t, docs[0].Screen)
 	require.Equal(t, 30, docs[0].Screen.Rows)
 	require.Equal(t, 100, docs[0].Screen.Cols)
@@ -64,6 +66,7 @@ func TestTerminalDocs_TheManifestReachesTheRunnerWholeAndUnderTheNamesItReads(t 
 	for _, key := range []string{
 		`"name":"deploy-plan"`, `"command":"./bin/deploy"`, `"args":["--plan"]`,
 		`"screen":{"rows":30,"cols":100}`, `"maxMs":45000`,
+		`"never":["rollback started"]`,
 	} {
 		require.Containsf(t, string(body), key, "the runner reads %s and the document does not carry it", key)
 	}
@@ -215,7 +218,7 @@ func TestTest_ARealFullScreenProgramIsDrivenAndCounted(t *testing.T) {
 	if _, statErr := os.Stat(tui); statErr != nil {
 		t.Fatal("the full screen fixture is missing, so this proved nothing: " + statErr.Error())
 	}
-	drive := func(expect string) TestReport {
+	drive := func(expect string, never ...string) TestReport {
 		t.Helper()
 		m := terminalManifest(schema.TerminalWorkflow{
 			Name:        "inbox",
@@ -224,6 +227,7 @@ func TestTest_ARealFullScreenProgramIsDrivenAndCounted(t *testing.T) {
 			Args:        []string{tui},
 			Input:       []string{"<down>", "<down>", "<enter>", "q"},
 			Expect:      []string{expect},
+			Never:       never,
 			Screen:      &schema.TerminalScreen{Rows: 12, Cols: 50},
 			Budget:      &schema.TerminalBudget{Duration: "30s"},
 		})
@@ -268,6 +272,14 @@ func TestTest_ARealFullScreenProgramIsDrivenAndCounted(t *testing.T) {
 	require.Equal(t, 1, failed.Failed)
 	require.True(t, failed.AnyFailed(),
 		"a terminal workflow that failed did not count against the application")
+
+	// The third arm differs from the first in one field, `never`, naming a row
+	// the menu really draws. Every expectation is still met, so only a `never`
+	// that crossed the JSON boundary and reached the driver can fail it.
+	contradicted := drive(`"Eleven posts are live."`, "Published")
+	require.Equal(t, "fail", contradicted.Results[0].Outcome.Verdict, contradicted.Results[0].Outcome.Detail)
+	require.Contains(t, contradicted.Results[0].Outcome.Detail, `"Published"`)
+	require.Equal(t, 1, contradicted.Failed)
 }
 
 // The environment's address reaches the program, which is how a command line

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  DeterministicPlanner, answerFor, failureSentence, freshIdentity, judge, judgeAll,
+  DeterministicPlanner, answerFor, failureSentence, firstShown, freshIdentity, judge, judgeAll,
   keywords, unmatchable,
   type Action, type Snapshot, type Workflow,
 } from '../src/workflow.ts';
@@ -435,4 +435,30 @@ test('a named control is pressed once, so the next name in the description gets 
   const pressed: Action[] = [{ kind: 'click', control: /^Preview Applicant$/i, why: 'y' }];
   const action = await next(review, page({ controls: ['Preview Applicant', 'Mark reviewed'] }), pressed);
   assert.match('Mark reviewed', (action as { control: RegExp }).control);
+});
+
+test('firstShown matches what must never show as a string, never by its sense', () => {
+  // The direction matters. A sense match errs towards finding things, which is
+  // safe for an expectation and is a false FAIL here, so the healthy screen
+  // below shares every meaningful word with the forbidden one and must not
+  // trip it.
+  const healthy = 'No deploy has failed, no error was raised.';
+  assert.equal(firstShown(['Error: deploy failed'], healthy), undefined);
+  assert.equal(judge('Error: deploy failed', healthy), 'met',
+    'the control: by sense this healthy screen does match, which is why sense is not used');
+
+  // Case and runs of whitespace are forgiven, exactly as for a quoted
+  // expectation, and the quotes are optional.
+  const broken = 'deployed\nERROR:   deploy failed\n';
+  assert.equal(firstShown(['Error: deploy failed'], broken), 'Error: deploy failed');
+  assert.equal(firstShown(['"error: DEPLOY failed"'], broken), '"error: DEPLOY failed"');
+
+  // The first one shown is the one named, and nothing declared finds nothing.
+  assert.equal(firstShown(['panic', 'deploy failed'], broken), 'deploy failed');
+  assert.equal(firstShown(undefined, broken), undefined);
+  assert.equal(firstShown([], broken), undefined);
+
+  // An entry of only whitespace would be found on every screen that has a
+  // space on it, failing a correct program; it finds nothing instead.
+  assert.equal(firstShown(['   '], broken), undefined);
 });

@@ -660,6 +660,28 @@ export function judgeAll(expectations: readonly string[], text: string): Judgeme
   return 'met';
 }
 
+/** firstShown returns the first of `never` that the text shows, or undefined.
+ *
+ * A thing a program must NEVER show is matched character for character, up to
+ * case and runs of whitespace, exactly as a quoted expectation is, and the
+ * quotes are optional because there is no other form to tell it apart from.
+ *
+ * WHY NEVER BY SENSE. `judge` meets an unquoted sentence on two thirds of its
+ * meaningful words, which is a low bar that errs towards finding things. That
+ * is the safe direction for an expectation, where a false find is caught by the
+ * next one, and the dangerous direction here, where a false find is a FAIL
+ * against a program that did nothing wrong: "Error: deploy failed" would be
+ * found on a healthy screen reading "No deploy has failed, no error". A string
+ * the program prints when it goes wrong is a string, and it is matched as one. */
+export function firstShown(never: readonly string[] | undefined, text: string): string | undefined {
+  if (!never || never.length === 0) return undefined;
+  const haystack = normalize(text);
+  return never.find((n) => {
+    const needle = normalize(verbatim(n) ?? n).trim();
+    return needle !== '' && haystack.includes(needle);
+  });
+}
+
 /** meetsAll reports whether every expectation is definitely satisfied. */
 export function meetsAll(expectations: readonly string[], text: string): boolean {
   return judgeAll(expectations, text) === 'met';

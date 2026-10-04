@@ -815,6 +815,11 @@ type TerminalWorkflow struct {
 	// bracket key names are listed in the schema and decoded by the runner.
 	Input  []string `json:"input,omitempty" yaml:"input,omitempty"`
 	Expect []string `json:"expect,omitempty" yaml:"expect,omitempty"`
+	// Never is what the program must not show at any point, matched as a
+	// string rather than by its sense. Declaring any is also what tells the
+	// runner to keep watching a program after its expectations are met,
+	// because a program can say the right thing and then contradict it.
+	Never []string `json:"never,omitempty" yaml:"never,omitempty"`
 	// Screen is the size of the screen the program draws, and its presence is
 	// what says the program draws one. A pointer rather than a value because
 	// absence is the decision: it selects the pipe rather than the pseudo

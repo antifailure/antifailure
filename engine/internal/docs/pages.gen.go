@@ -14587,6 +14587,47 @@ workflow. A terminal workflow with nothing to expect can only ever report that
 nothing confirmed or contradicted it, and that is blocked, so a workflow
 without one could never pass.
 
+## What must never show
+
+An expectation is met the moment its words are on screen, and a full screen
+program that goes quiet with them there is accepted without being waited on to
+exit. That is right for almost every workflow and wrong for one kind: a program
+that prints the right thing and then contradicts it.
+
+` + "`" + "`" + "`" + `yaml
+expect:
+  - '"Applied 3 changes"'
+never:
+  - "rollback started"
+  - "warning: rows dropped"
+` + "`" + "`" + "`" + `
+
+` + "`" + `never` + "`" + ` names what the program must not show at any point. One appearing fails
+the workflow even when every expectation was met. Each entry is matched as a
+string, ignoring case and runs of whitespace, with the quotes optional; never by
+its sense, because a sense match leans towards finding things and here a false
+find fails a correct program.
+
+Declaring ` + "`" + `never` + "`" + ` changes how long the program is watched. A met expectation is
+no longer the end, since the contradiction comes after it, so the program is
+watched until it exits or its budget is spent. A full screen program that never
+exits is therefore watched for its whole budget, and the pass says how long it
+was watched; set ` + "`" + `budget.duration` + "`" + ` to the window you mean. A forbidden string
+ends the watch as soon as it appears, because nothing printed afterwards could
+take it back.
+
+If the budget runs out before the watch is complete, with keys still to send or
+with output the screen had not finished drawing, the workflow is blocked rather
+than passed, even with every expectation met: that unseen part is exactly where
+a forbidden string could have been.
+
+Two entries are refused before anything runs, because each decides the verdict
+by itself. One that a quoted expectation contains, since meeting the
+expectation shows it. And on a screen, one the workflow types, since a terminal
+echoes typed text and the workflow would show it itself. Through a pipe nothing
+echoes, so forbidding what was typed is allowed and is how you say a program
+must not print a secret it was given back out.
+
 ## Where the program runs, and what it can reach
 
 ` + "`" + `cwd` + "`" + ` is where the program runs, relative to the directory holding the
@@ -14614,7 +14655,14 @@ anything.
 A full screen program is not expected to exit, and not exiting is not a spent
 budget. The workflow is over once its keys have been sent and the screen has
 settled; Antifailure judges what it sees and then stops the program. The budget
-is only spent when the clock runs out with keys still to send.
+is only spent when the clock runs out with keys still to send, or, for a
+workflow that declares [` + "`" + `never` + "`" + `](#what-must-never-show), as the window it is
+watched for.
+
+The budget also bounds the reading, not only the running. A program that exits
+having written more than its budget can draw is reported as blocked, with the
+bytes it wrote and how many of them were never drawn, rather than judged on the
+part that was.
 
 ## What the report shows
 
@@ -25298,6 +25346,7 @@ workflow needs a program and, when the program draws a screen, the size of it.
 | ` + "`" + `args` + "`" + ` | list | Its arguments, one per entry, passed as written. |
 | ` + "`" + `input` + "`" + ` | list | What a person types. Lines without ` + "`" + `screen` + "`" + `, keystrokes with it. |
 | ` + "`" + `expect` + "`" + ` | list | Required, at least one. What the terminal must show. |
+| ` + "`" + `never` + "`" + ` | list | What the terminal must never show, matched as a string. Declaring any keeps a program watched until it exits or its budget is spent. |
 | ` + "`" + `screen` + "`" + ` | block | ` + "`" + `rows` + "`" + ` and ` + "`" + `cols` + "`" + `. Its presence says the program draws a screen and gives it a pseudo terminal. |
 | ` + "`" + `cwd` + "`" + ` | string | Where to run it, relative to the manifest. |
 | ` + "`" + `budget` + "`" + ` | block | ` + "`" + `duration` + "`" + ` only. Thirty seconds by default. |
@@ -27832,6 +27881,7 @@ Names are unique across both lists, because a name is what ` + "`" + `--only` + 
 | ` + "`" + `expect` + "`" + ` | list of string | **yes** | What the terminal must show, written as sentences about what a person would read. Judged against every screen the program drew and the scrollback it left behind, not against the bytes it wrote.  At least one is required here, unlike a browser workflow. A terminal workflow with nothing to expect can only ever report that nothing confirmed or contradicted it, which is blocked, so a manifest that declares one has written a workflow that cannot pass.  A sentence in double quotes is required on the screen character for character. Prefer that form here: a screen is small and its words repeat, so the sense of a sentence is matched far more easily on eighty columns than on a page. Min items 1, max items 50. |
 | ` + "`" + `input` + "`" + ` | list of string | no | What a person types, in order.  Without ` + "`" + `screen` + "`" + ` each entry is a line written to standard input, followed by a newline.  With ` + "`" + `screen` + "`" + ` each entry is keystrokes sent to the program as a keyboard would send them. Text is typed as written, and a name in angle brackets becomes that key: ` + "`" + `<enter>` + "`" + `, ` + "`" + `<tab>` + "`" + `, ` + "`" + `<esc>` + "`" + `, ` + "`" + `<space>` + "`" + `, ` + "`" + `<backspace>` + "`" + `, ` + "`" + `<delete>` + "`" + `, ` + "`" + `<insert>` + "`" + `, ` + "`" + `<up>` + "`" + `, ` + "`" + `<down>` + "`" + `, ` + "`" + `<left>` + "`" + `, ` + "`" + `<right>` + "`" + `, ` + "`" + `<home>` + "`" + `, ` + "`" + `<end>` + "`" + `, ` + "`" + `<pageup>` + "`" + `, ` + "`" + `<pagedown>` + "`" + `, ` + "`" + `<f1>` + "`" + ` through ` + "`" + `<f12>` + "`" + `, ` + "`" + `<backtab>` + "`" + `, and ` + "`" + `<ctrl-a>` + "`" + ` through ` + "`" + `<ctrl-z>` + "`" + `. Anything else between angle brackets is typed literally, so a workflow that types ` + "`" + `<html>` + "`" + ` into a field gets ` + "`" + `<html>` + "`" + ` and there is no escape syntax to learn. After every entry the driver waits for the program to redraw and reads the screen, so an expectation may name something that was only on screen in the middle of the workflow. Max items 200. |
 | ` + "`" + `name` + "`" + ` | string | **yes** | What the report calls it and what the ` + "`" + `--only` + "`" + ` flag selects. Unique across this list and ` + "`" + `workflows` + "`" + ` together. Max length 64, matches ` + "`" + `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$` + "`" + `. |
+| ` + "`" + `never` + "`" + ` | list of string | no | What the terminal must never show, at any point while the program runs: the error it prints when it goes wrong, the warning that means data was lost. One appearing fails the workflow even when every expectation was met, because a program that printed the right thing and then contradicted it did not do what the workflow says.  Each entry is matched character for character, ignoring case and runs of whitespace, exactly as a quoted expectation is, and the double quotes are optional. It is never matched by its sense the way an unquoted expectation is. A sense match leans towards finding things, which is the safe direction for an expectation and the wrong one here: a healthy screen reading ` + "`" + `No deploy has failed` + "`" + ` shares every meaningful word with ` + "`" + `Error: deploy failed` + "`" + ` and would fail a correct program.  DECLARING ANY CHANGES HOW LONG A PROGRAM IS WATCHED, and the cost is yours to set. Without ` + "`" + `never` + "`" + `, a program whose expectations are met is accepted once it goes quiet, even if it has not exited, so a full screen program that never exits passes in well under a second. With ` + "`" + `never` + "`" + `, a met expectation is no longer the end, because the contradiction this exists to catch comes after it: a program is watched until it exits or until ` + "`" + `budget.duration` + "`" + ` is spent, so a program that never exits is watched for the whole of it. Set the duration to the window you mean. A forbidden string ends the watch the moment it appears, because nothing printed afterwards could take it back.  A watch the budget cut short is reported as blocked rather than passed, even with every expectation met: keys still unsent, or output the screen had not finished drawing, are exactly where a forbidden string could have been.  An entry is refused if a quoted expectation requires it, because the workflow could then never pass, and on a screen if the workflow types it, because a terminal echoes what is typed and the workflow would fail itself. Max items 50. |
 | ` + "`" + `screen` + "`" + ` | [Terminal screen](#terminal-screen) | no | The size of the screen the program draws, and its presence is what says the program draws one.  A program that takes over the screen is driven through a pseudo terminal: it is given a real terminal, it is sent raw keystrokes rather than lines, and it is judged on the grid of cells its cursor moves and erases leave behind rather than on the bytes it wrote. |
 
 ## Traffic

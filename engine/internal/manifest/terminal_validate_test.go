@@ -36,6 +36,7 @@ terminal_workflows:
     args: ["--plan"]
     input: ["y", "<enter>"]
     expect: ['"Applied 3 changes"']
+    never: ["rollback started"]
     screen:
       rows: 30
       cols: 100
@@ -54,6 +55,7 @@ func TestParse_AcceptsATerminalWorkflow(t *testing.T) {
 	require.Equal(t, []string{"--plan"}, w.Args)
 	require.Equal(t, []string{"y", "<enter>"}, w.Input)
 	require.Equal(t, []string{`"Applied 3 changes"`}, w.Expect)
+	require.Equal(t, []string{"rollback started"}, w.Never)
 	require.Equal(t, "tools", w.Cwd)
 	require.NotNil(t, w.Screen)
 	require.Equal(t, 30, w.Screen.Rows)
@@ -409,4 +411,108 @@ workflows:
     expect: ["The default currency is euros."]
 `)
 	require.Len(t, m.Workflows, 2)
+}
+
+// What a program must never show, and the entries that decide a verdict before
+// the program has run. Each refusal below is a workflow whose outcome is a fact
+// about the manifest, which is the shape the echo rule above refuses for an
+// expectation; each allowance is the nearest workflow that is NOT one, so the
+// rule cannot pass by refusing everything.
+
+// A run of spaces has characters and so passes the schema's minLength, and the
+// runner finds nothing for it, so it would be a guard that can never fire.
+func TestParse_RefusesABlankNever(t *testing.T) {
+	t.Parallel()
+	_, err := parse(t, minimal+`terminal_workflows:
+  - name: deploy
+    description: The deploy command applies the plan and reports what it did.
+    command: ./bin/deploy
+    expect: ['"Applied"']
+    never: ["   "]
+`)
+	msg := messages(problems(t, err))
+	require.Contains(t, msg, "declares a blank entry in never")
+	require.Contains(t, msg, "terminal_workflows[0].never[0]")
+}
+
+// A quoted expectation is required character for character, so one containing
+// a forbidden string shows it whenever it is met. Case and spacing differ here
+// on purpose, because the runner forgives both and so must the refusal.
+func TestParse_RefusesANeverAQuotedExpectationContains(t *testing.T) {
+	t.Parallel()
+	_, err := parse(t, minimal+`terminal_workflows:
+  - name: deploy
+    description: The deploy command applies the plan and reports what it did.
+    command: ./bin/deploy
+    expect: ['"Applied 3 changes, 1  WARNING"']
+    never: ['"1 warning"']
+`)
+	msg := messages(problems(t, err))
+	require.Contains(t, msg, "says it must never show")
+	require.Contains(t, msg, "fails exactly when the program does what it expects")
+}
+
+// An unquoted expectation is met by its sense and can be met without the
+// forbidden words, so sharing them is not a contradiction.
+func TestParse_AllowsANeverAnUnquotedExpectationShares(t *testing.T) {
+	t.Parallel()
+	m := mustParse(t, minimal+`terminal_workflows:
+  - name: deploy
+    description: The deploy command applies the plan and reports what it did.
+    command: ./bin/deploy
+    expect: ["The plan applied with no warning"]
+    never: ["warning"]
+`)
+	require.Equal(t, []string{"warning"}, m.TerminalWorkflows[0].Never)
+}
+
+// On a screen the workflow's own keystrokes are echoed, so a forbidden string
+// it types fails a program that did nothing wrong.
+func TestParse_RefusesANeverTheWorkflowTypesOnAScreen(t *testing.T) {
+	t.Parallel()
+	_, err := parse(t, minimal+`terminal_workflows:
+  - name: deploy
+    description: The deploy command applies the plan and reports what it did.
+    command: ./bin/deploy
+    input: ["force push<enter>"]
+    expect: ['"Applied"']
+    never: ["FORCE"]
+    screen: {}
+`)
+	msg := messages(problems(t, err))
+	require.Contains(t, msg, `types "force push<enter>" and says it must never show "FORCE"`)
+	require.Contains(t, msg, "Name something only the program prints")
+}
+
+// A key is not echoed as its name, so a workflow that presses the down arrow
+// may still forbid the word down, which a status screen prints when a service
+// is.
+func TestParse_AllowsANeverThatOnlyAKeyNameContains(t *testing.T) {
+	t.Parallel()
+	m := mustParse(t, minimal+`terminal_workflows:
+  - name: status
+    description: The status screen lists every service and opens the one selected.
+    command: ./bin/status
+    input: ["<down>", "<enter>"]
+    expect: ['"orders-api"']
+    never: ["down"]
+    screen: {}
+`)
+	require.Len(t, m.TerminalWorkflows, 1)
+}
+
+// And only on a screen. Through a pipe nothing echoes, and forbidding what the
+// workflow typed is an ordinary thing to want: the program must not print the
+// secret it was given back out.
+func TestParse_AllowsANeverTheWorkflowTypesWhenThereIsNoScreen(t *testing.T) {
+	t.Parallel()
+	m := mustParse(t, minimal+`terminal_workflows:
+  - name: login
+    description: The login command accepts the token and never prints it back.
+    command: ./bin/login
+    input: ["tok_live_example"]
+    expect: ['"Signed in"']
+    never: ["tok_live_example"]
+`)
+	require.Len(t, m.TerminalWorkflows, 1)
 }

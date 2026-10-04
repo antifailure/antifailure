@@ -1106,6 +1106,16 @@
           },
           "description": "What the terminal must show, written as sentences about what a person would read. Judged against every screen the program drew and the scrollback it left behind, not against the bytes it wrote.\n\nAt least one is required here, unlike a browser workflow. A terminal workflow with nothing to expect can only ever report that nothing confirmed or contradicted it, which is blocked, so a manifest that declares one has written a workflow that cannot pass.\n\nA sentence in double quotes is required on the screen character for character. Prefer that form here: a screen is small and its words repeat, so the sense of a sentence is matched far more easily on eighty columns than on a page."
         },
+        "never": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "description": "What the terminal must never show, at any point while the program runs: the error it prints when it goes wrong, the warning that means data was lost. One appearing fails the workflow even when every expectation was met, because a program that printed the right thing and then contradicted it did not do what the workflow says.\n\nEach entry is matched character for character, ignoring case and runs of whitespace, exactly as a quoted expectation is, and the double quotes are optional. It is never matched by its sense the way an unquoted expectation is. A sense match leans towards finding things, which is the safe direction for an expectation and the wrong one here: a healthy screen reading `No deploy has failed` shares every meaningful word with `Error: deploy failed` and would fail a correct program.\n\nDECLARING ANY CHANGES HOW LONG A PROGRAM IS WATCHED, and the cost is yours to set. Without `never`, a program whose expectations are met is accepted once it goes quiet, even if it has not exited, so a full screen program that never exits passes in well under a second. With `never`, a met expectation is no longer the end, because the contradiction this exists to catch comes after it: a program is watched until it exits or until `budget.duration` is spent, so a program that never exits is watched for the whole of it. Set the duration to the window you mean. A forbidden string ends the watch the moment it appears, because nothing printed afterwards could take it back.\n\nA watch the budget cut short is reported as blocked rather than passed, even with every expectation met: keys still unsent, or output the screen had not finished drawing, are exactly where a forbidden string could have been.\n\nAn entry is refused if a quoted expectation requires it, because the workflow could then never pass, and on a screen if the workflow types it, because a terminal echoes what is typed and the workflow would fail itself."
+        },
         "screen": {
           "$ref": "#/$defs/terminal_screen"
         },
