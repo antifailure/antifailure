@@ -1,6 +1,10 @@
 package manifest_test
 
 import (
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -486,16 +490,18 @@ func TestParse_RefusesANeverTheWorkflowTypesOnAScreen(t *testing.T) {
 
 // A key is not echoed as its name, so a workflow that presses the down arrow
 // may still forbid the word down, which a status screen prints when a service
-// is.
+// is. The same for a control key, which the runner names by pattern rather
+// than by list: a program that prints "ctrl-d" when it was sent one has
+// echoed something it should not have, and the workflow may say so.
 func TestParse_AllowsANeverThatOnlyAKeyNameContains(t *testing.T) {
 	t.Parallel()
 	m := mustParse(t, minimal+`terminal_workflows:
   - name: status
     description: The status screen lists every service and opens the one selected.
     command: ./bin/status
-    input: ["<down>", "<enter>"]
+    input: ["<down>", "<enter>", "<ctrl-d>"]
     expect: ['"orders-api"']
-    never: ["down"]
+    never: ["down", "ctrl-d"]
     screen: {}
 `)
 	require.Len(t, m.TerminalWorkflows, 1)
@@ -515,4 +521,47 @@ func TestParse_AllowsANeverTheWorkflowTypesWhenThereIsNoScreen(t *testing.T) {
     never: ["tok_live_example"]
 `)
 	require.Len(t, m.TerminalWorkflows, 1)
+}
+
+// A bracketed token the runner does NOT know as a key is typed as written, so
+// it is echoed as written, and forbidding its text is a workflow that fails
+// itself. Found in review: the first version set aside every bracketed token.
+func TestParse_RefusesANeverALiteralBracketedTokenTypes(t *testing.T) {
+	t.Parallel()
+	_, err := parse(t, minimal+`terminal_workflows:
+  - name: editor
+    description: The editor saves a page whose body is a block of markup.
+    command: ./bin/editor
+    input: ["<html><enter>"]
+    expect: ['"Saved"']
+    never: ["html"]
+    screen: {}
+`)
+	require.Contains(t, messages(problems(t, err)), `says it must never show "html"`)
+}
+
+// The validator decides what is echoed from a list of key names, and the
+// runner decides what is sent as a key from its own. They are two lists in two
+// languages, so this reads the runner's and requires the same set.
+func TestTerminalKeysMatchTheRunner(t *testing.T) {
+	t.Parallel()
+	body, err := os.ReadFile(filepath.Join("..", "..", "..", "runner", "src", "drivers", "keys.ts"))
+	require.NoError(t, err, "the runner's key table is missing, so this compared nothing")
+	src := string(body)
+	var runner []string
+	for _, table := range []string{"const FIXED", "const CURSOR"} {
+		start := strings.Index(src, table)
+		require.NotEqualf(t, -1, start, "keys.ts no longer declares %s", table)
+		end := strings.Index(src[start:], "};")
+		require.NotEqual(t, -1, end)
+		for _, m := range regexp.MustCompile(`(?m)^\s+(\w+):`).FindAllStringSubmatch(src[start:start+end], -1) {
+			runner = append(runner, m[1])
+		}
+	}
+	engine := manifest.TerminalKeysForTest()
+	sort.Strings(runner)
+	sort.Strings(engine)
+	require.Len(t, runner, 30, "the parse of keys.ts found a different number of keys than it did when this was written, so read it before trusting the comparison")
+	require.Equal(t, runner, engine)
+	require.Contains(t, src, "/^ctrl-([a-z])$/", "the runner no longer names ctrl keys the way the validator matches them")
 }

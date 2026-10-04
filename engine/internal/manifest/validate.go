@@ -1690,10 +1690,10 @@ func (v *validator) terminalNever(w *schema.TerminalWorkflow, base string) {
 		}
 		// On a screen the driver's own keystrokes are echoed, so a forbidden
 		// string the workflow types is shown by the workflow itself, and a
-		// program that did nothing wrong fails. Anything in angle brackets is
-		// set aside, since `<enter>` is a key and not the word enter; that
-		// misses a rare literal like `<html>` rather than refusing a workflow
-		// over a key it only sends.
+		// program that did nothing wrong fails. A key name in angle brackets
+		// is set aside, since `<enter>` is a key and not the word enter, and
+		// only a name the runner knows: anything else in angle brackets, like
+		// `<html>`, is typed as written and so echoed as written.
 		if w.Screen == nil {
 			continue
 		}
@@ -1727,13 +1727,37 @@ func neverText(n string) string {
 	return foldSpace(n)
 }
 
-// keyName matches anything written in angle brackets, which is how a key is
-// named in a terminal workflow's input.
-var keyName = regexp.MustCompile(`<[^<>\s]+>`)
+// bracketed matches a token in angle brackets, which is how a key is named in
+// a terminal workflow's input when it names one.
+var bracketed = regexp.MustCompile(`<([^<>]+)>`)
 
-// typedText is what a typed entry puts on an echoing screen, as text.
+// terminalKeys are the names runner/src/drivers/keys.ts sends as keys, besides
+// ctrl-a through ctrl-z. Anything else in angle brackets is typed literally.
+// TestTerminalKeysMatchTheRunner holds this list to that file, because a name
+// only one side knew would either refuse a workflow over a key it never echoes
+// or let one through that echoes its own forbidden text.
+var terminalKeys = map[string]bool{
+	"enter": true, "return": true, "tab": true, "backtab": true,
+	"esc": true, "escape": true, "space": true, "backspace": true,
+	"delete": true, "insert": true, "pageup": true, "pagedown": true,
+	"f1": true, "f2": true, "f3": true, "f4": true, "f5": true, "f6": true,
+	"f7": true, "f8": true, "f9": true, "f10": true, "f11": true, "f12": true,
+	"up": true, "down": true, "right": true, "left": true, "home": true, "end": true,
+}
+
+var ctrlKey = regexp.MustCompile(`^ctrl-[a-z]$`)
+
+// typedText is what a typed entry puts on an echoing screen, as text: every
+// key name the runner knows becomes a break between words, and every other
+// bracketed token stays, because the runner types it as it is written.
 func typedText(in string) string {
-	return foldSpace(keyName.ReplaceAllString(in, " "))
+	return foldSpace(bracketed.ReplaceAllStringFunc(in, func(tok string) string {
+		name := strings.ToLower(strings.TrimSpace(tok[1 : len(tok)-1]))
+		if terminalKeys[name] || ctrlKey.MatchString(name) {
+			return " "
+		}
+		return tok
+	}))
 }
 
 func foldSpace(s string) string {

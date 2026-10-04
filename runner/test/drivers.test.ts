@@ -16,7 +16,7 @@ import {
 import * as ios from '../src/drivers/ios.ts';
 import * as android from '../src/drivers/android.ts';
 import * as desktop from '../src/drivers/desktop.ts';
-import { runTerminal, EXIT_GRACE_MS, QUIET_MS } from '../src/drivers/terminal.ts';
+import { runTerminal, asText, EXIT_GRACE_MS, QUIET_MS } from '../src/drivers/terminal.ts';
 import { Screen } from '../src/drivers/screen.ts';
 import { socketSink, decode, type LiveEvent } from '../src/live.ts';
 import type { WorkflowResult } from '../src/execute.ts';
@@ -1037,13 +1037,13 @@ test('never 5: through a pipe a forbidden line fails the workflow, and so does o
   assert.match(killed!.outcome.detail, /^The output showed "row dropped"/);
 });
 
-test('never 6: a watch the parser could not keep up with is blocked, even with every expectation met', async (t) => {
-  // The other half of never 4. The keys were all sent and the expected words
-  // are on screen, but the emulator is behind when the budget runs out, and the
-  // bytes it never parsed are exactly where a forbidden string would be. Made
-  // with the same slowed parse the queued parse table uses, so it needs no slow
-  // host: every parse after the first takes 50 ms and the program writes a line
-  // a millisecond for as long as it lives.
+test('never 6: a forbidden line the screen never got to draw is still read, from the bytes', async (t) => {
+  // The emulator can fall behind the program, and the bytes it has not drawn
+  // are exactly where a late error would be. `never` reads the bytes as they
+  // arrive, so a backlog does not hide one. Made with the queued parse table's
+  // slowed parse, so it needs no slow host: every parse after the first takes
+  // 50 ms, and the forbidden line is written at the eight hundredth line, far
+  // behind anything the screen can have drawn inside a 1500 ms budget.
   const write = Screen.prototype.write;
   let parses = 0;
   const slowWrite = t.mock.method(Screen.prototype, 'write', async function (this: Screen, data: string) {
@@ -1051,7 +1051,8 @@ test('never 6: a watch the parser could not keep up with is blocked, even with e
     if (parses > 1) await new Promise<void>((resolve) => setTimeout(resolve, 50));
     await write.call(this, data);
   });
-  const program = 'process.stdout.write("ready\\n"); setTimeout(() => setInterval(() => process.stdout.write("still going\\n"), 1), 200);';
+  const program = 'process.stdout.write("ready\\n"); let n = 0; setTimeout(() => setInterval(() => { '
+    + 'n += 1; process.stdout.write(n === 800 ? "panic: lost rows\\n" : "still going\\n"); }, 1), 200);';
   const workflow = {
     name: 'parser-behind',
     command: execPath,
@@ -1062,13 +1063,82 @@ test('never 6: a watch the parser could not keep up with is blocked, even with e
   };
   try {
     const [declared] = await runTerminal({ workflows: [{ ...workflow, never: ['panic'] }] });
-    assert.equal(declared!.outcome.verdict, 'blocked', declared!.outcome.detail);
-    assert.match(declared!.outcome.detail, /ran out with the 10 by 40 screen \d+ of \d+ bytes behind, so whether the program went on to show what it must never show was not seen/);
+    assert.equal(declared!.outcome.verdict, 'fail', declared!.outcome.detail);
+    assert.match(declared!.outcome.detail, /showed "panic"/);
+    // Step 0 is the invocation, which carries this program's source.
+    assert.ok(!declared!.steps.slice(1).some((step) => step.includes('panic')),
+      'the screen drew the forbidden line, so this did not test reading it from the bytes');
+    // The control: the same run with nothing declared is the met-wins pass.
     const [undeclared] = await runTerminal({ workflows: [workflow] });
     assert.equal(undeclared!.outcome.verdict, 'pass', undeclared!.outcome.detail);
   } finally {
     slowWrite.mock.restore();
   }
+});
+
+test('never 7: a warning drawn and erased inside one redraw is still a warning it showed', async () => {
+  // A screen is a snapshot, and this warning is on none of them: the program
+  // enters the alternate screen, which keeps no scrollback, draws the warning,
+  // clears it and draws "ready", all in one write. Found in review; the
+  // snapshots alone passed this program.
+  const program = 'process.stdout.write("\\u001b[?1049h\\u001b[Hrollback started\\u001b[2J\\u001b[Hready\\r\\n");'
+    + keepsRunning;
+  const [result] = await runTerminal({
+    workflows: [{
+      name: 'erased',
+      command: execPath,
+      args: ['-e', program],
+      screen: { rows: 10, cols: 40 },
+      expect: ['"ready"'],
+      never: ['rollback started'],
+      maxMs: 2_000,
+    }],
+  });
+  // Step 0 is the invocation, which carries this program's source.
+  assert.ok(!result!.steps.slice(1).some((step) => step.includes('rollback started')),
+    'a screen snapshot caught the warning, so this did not test the erased case');
+  assert.equal(result!.outcome.verdict, 'fail', result!.outcome.detail);
+});
+
+test('never 8: two screens are not read as one phrase', async () => {
+  // The opposite mistake, also found in review. The first screen ends with
+  // "rollback" and the next, after a key and a clear, starts with "started".
+  // No screen ever showed "rollback started", so a workflow forbidding that
+  // phrase must pass; joining the screens with a newline, which matching folds
+  // into a space, failed it.
+  const program = 'process.stdin.setRawMode(true); process.stdout.write("\\u001b[?1049h\\u001b[Happlied\\r\\nrollback"); '
+    + 'process.stdin.once("data", () => process.stdout.write("\\u001b[2J\\u001b[Hstarted\\r\\nall clear\\r\\n"));'
+    + keepsRunning;
+  const [result] = await runTerminal({
+    workflows: [{
+      name: 'two-screens',
+      command: execPath,
+      args: ['-e', program],
+      screen: { rows: 10, cols: 40 },
+      input: ['x'],
+      expect: ['"all clear"'],
+      never: ['rollback started'],
+      maxMs: 3_000,
+    }],
+  });
+  assert.equal(result!.outcome.verdict, 'pass', result!.outcome.detail);
+});
+
+test('asText keeps the text a terminal shows and separates what the cursor moved apart', () => {
+  // Colour does not move the cursor, so a phrase with a bold word in it is
+  // still one phrase.
+  assert.match(asText('Error: \u001b[1mdeploy failed\u001b[0m'), /Error: deploy failed/);
+  // A clear, a cursor move and a bare carriage return all move it, so the text
+  // on either side is not one phrase.
+  for (const between of ['\u001b[2J', '\u001b[5;1H', '\r', '\u001b7']) {
+    assert.doesNotMatch(asText(`rollback${between}started`), /rollback ?started/,
+      `${JSON.stringify(between)} joined two phrases`);
+  }
+  // A newline is a line break, as it is on a screen, and CRLF is one newline.
+  assert.equal(asText('one\r\ntwo\n'), 'one\ntwo\n');
+  // A window title ends at a BEL. Stripping control characters before reading
+  // it would let the title swallow everything after it.
+  assert.match(asText('\u001b]0;deploy\u0007rollback started'), /rollback started/);
 });
 
 test('a queued parse respects the budget and preserves finished output', async (t) => {

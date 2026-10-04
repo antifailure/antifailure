@@ -431,6 +431,9 @@ async function driveOnAScreen(
 ): Promise<Outcome> {
   const budgetMs = workflow.maxMs ?? DEFAULT_MAX_MS;
   const deadline = Date.now() + budgetMs;
+  // Whether the workflow declared what must never show. See WHAT `never`
+  // CHANGES below for everything this decides.
+  const watching = (workflow.never?.length ?? 0) > 0;
 
   let screen: Screen;
   try {
@@ -475,11 +478,17 @@ async function driveOnAScreen(
   let lastDataAt = Date.now();
   let received = 0;
   let parsedBytes = 0;
+  // Every byte the program wrote, as written, for judging `never`. The screens
+  // are snapshots, and a snapshot cannot see what was drawn and erased between
+  // two of them; the bytes can, and they are complete the moment they arrive,
+  // however far behind the emulator is.
+  let raw = '';
   let closing = false;
   let exited: { code: number; signal: number | undefined } | undefined;
   child.onData((data: string) => {
     lastDataAt = Date.now();
     received += data.length;
+    if (watching) raw += data;
     parsed = parsed.then(async () => {
       // Nothing reaches the emulator once the driver has stopped reading it: a
       // disposed emulator throws, and the backlog behind a budget that has
@@ -706,7 +715,22 @@ async function driveOnAScreen(
   // program that never exits, with `never` declared, is watched for its whole
   // budget, because a window shorter than that would be the same silence as
   // evidence this function was rewritten to stop believing.
-  const watching = (workflow.never?.length ?? 0) > 0;
+  //
+  // WHAT IT IS JUDGED AGAINST is not the transcript the expectations read, and
+  // for two reasons a review found. Each screen is judged ON ITS OWN, because
+  // the transcript joins screens with a newline and matching folds a newline
+  // into a space, so a screen ending in "rollback" followed by one starting
+  // with "started" would have failed a program that never showed the phrase.
+  // And the BYTES are judged as well as the screens, because a screen is a
+  // snapshot: a warning drawn and erased inside one redraw is on no snapshot
+  // at all, and `never` promises "at any point".
+  const forbiddenIn = (): string | undefined => {
+    for (const text of [...shown, screen.everything(), asText(raw)]) {
+      const hit = firstShown(workflow.never, text);
+      if (hit !== undefined) return hit;
+    }
+    return undefined;
+  };
   let judgedFor = 0;
   const lastWord = async (): Promise<LastWord> => {
     for (;;) {
@@ -716,9 +740,8 @@ async function driveOnAScreen(
       if (silent && judgedFor !== lastDataAt) {
         judgedFor = lastDataAt;
         await drawn(deadline);
-        const seen = [...shown, screen.everything()].join('\n');
-        if (firstShown(workflow.never, seen) !== undefined) return 'quiet';
-        if (!watching && meetsAll(workflow.expect, seen)) return 'quiet';
+        if (forbiddenIn() !== undefined) return 'quiet';
+        if (!watching && meetsAll(workflow.expect, [...shown, screen.everything()].join('\n'))) return 'quiet';
       }
       await sleep(10);
     }
@@ -774,6 +797,7 @@ async function driveOnAScreen(
   const everything = screen.everything();
   const transcript = [...shown, everything].join('\n');
   capture();
+  const forbidden = forbiddenIn();
 
   // Every chunk still queued becomes a no-op from here, so awaiting the chain
   // waits only for the one already inside the emulator. That is what has to
@@ -784,23 +808,22 @@ async function driveOnAScreen(
   screen.dispose();
 
   const drew = size.rows + ' by ' + size.cols;
-  // A forbidden string on any screen the program drew is a failure whatever
-  // else is true, including a budget that ran out: what was seen was seen.
-  const forbidden = firstShown(workflow.never, transcript);
+  // A forbidden string on any screen the program drew, or in any byte it wrote,
+  // is a failure whatever else is true, including a budget that ran out: what
+  // was seen was seen.
   if (forbidden !== undefined) {
     return { cause: 'expectation-not-met', detail: shownDetail(forbidden, 'screen'), output: transcript };
   }
   const verdict = judgeAll(workflow.expect, transcript);
-  if (verdict === 'met' && watching && (ranOutOfTime || behind > 0)) {
+  if (verdict === 'met' && watching && ranOutOfTime) {
     // Met wins on its own because more output can only add to a transcript.
-    // That argument does not cover what must NEVER appear, which unsent keys or
-    // unparsed bytes could still hold, so a watch that did not finish says so.
-    const unseen = ranOutOfTime
-      ? 'with keys still to send'
-      : `with the ${drew} screen ${behind} of ${written} bytes behind`;
+    // That argument does not cover what must NEVER appear, which the keys
+    // nobody sent could still have produced, so a watch that did not finish
+    // says so. An emulator that fell behind is NOT this case: `never` reads the
+    // bytes as they arrive, so what the screen had not drawn was still read.
     return {
       cause: 'budget-exhausted',
-      detail: `Every expectation appeared, but the budget of ${budgetMs} ms ran out ${unseen}, so whether the program went on to show what it must never show was not seen.`,
+      detail: `Every expectation appeared, but the budget of ${budgetMs} ms ran out with keys still to send, so whether the program went on to show what it must never show was not seen.`,
       output: transcript,
     };
   }
@@ -885,6 +908,33 @@ function unmetDetail(
   return said
     ? `The ${where} showed a failure rather than what was expected. It says: "${said}" ${missing}`
     : `${missing} ${observed(last, 'end')}`;
+}
+
+/** asText turns what a program wrote to a terminal into the text it put on
+ *  the screen, for judging `never` against.
+ *
+ *  Colour and character set changes are dropped, because they do not move the
+ *  cursor and the text on either side of them is contiguous on screen: "Error:
+ *  " in bold followed by "deploy failed" is one phrase. Everything that MOVES
+ *  the cursor or erases becomes a separator no phrase can match across: a
+ *  screen clear between "rollback" and "started" puts them on two different
+ *  screens, which must not read as "rollback started". A carriage return on its
+ *  own moves to the start of the line to overwrite it, so it separates too; a
+ *  newline is kept as one, exactly as it is on a screen. */
+export function asText(raw: string): string {
+  const SEP = '\u0000';
+  // The order matters. An OSC, a window title, ends at a BEL, so the bare
+  // control characters are removed LAST: stripping the BEL first would let the
+  // title swallow every character after it.
+  return raw
+    .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)?/g, SEP)
+    .replace(/\u001b\[[0-?]*[ -\/]*m/g, '')
+    .replace(/\u001b[()*+][ -~]/g, '')
+    .replace(/\u001b\[[0-?]*[ -\/]*[@-~]/g, SEP)
+    .replace(/\u001b[\s\S]?/g, SEP)
+    .replace(/\r\n/g, '\n')
+    .replace(/[\r\b]/g, SEP)
+    .replace(/[\u0001-\u0007\u000b\u000c\u000e-\u001f\u007f]/g, '');
 }
 
 /** shownDetail names the thing a program showed and was declared never to,

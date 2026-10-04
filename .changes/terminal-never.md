@@ -18,8 +18,10 @@ was accepted on that screen, so a program that went on to print an error was
 passed on what it said first. That is still the default, because it is what
 keeps a passing workflow fast. Declaring `never` keeps the program watched until
 it exits or its budget is spent, ends the watch the moment a forbidden string
-appears, and reports a watch the budget cut short as blocked rather than
-passed. Set `budget.duration` to the window you mean. An entry that a quoted
+appears, and reports a watch the budget cut short with keys still to send as
+blocked rather than passed. Every byte the program wrote is read as well as
+every screen it drew, so a warning drawn and erased between two snapshots is
+still caught. Set `budget.duration` to the window you mean. An entry that a quoted
 expectation contains, or that a screen workflow types and so echoes, is refused
 before anything runs, because either one decides the verdict by itself.
 

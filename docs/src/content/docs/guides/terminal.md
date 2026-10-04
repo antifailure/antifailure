@@ -145,10 +145,15 @@ was watched; set `budget.duration` to the window you mean. A forbidden string
 ends the watch as soon as it appears, because nothing printed afterwards could
 take it back.
 
-If the budget runs out before the watch is complete, with keys still to send or
-with output the screen had not finished drawing, the workflow is blocked rather
-than passed, even with every expectation met: that unseen part is exactly where
-a forbidden string could have been.
+It is judged against every byte the program wrote as well as every screen it
+drew, so a warning drawn and erased between two snapshots is still caught, and
+so is one the screen had not finished drawing when the budget ran out. Each
+screen is judged on its own, so the end of one screen and the start of the next
+never read as one phrase.
+
+If the budget runs out with keys still to send, the workflow is blocked rather
+than passed, even with every expectation met: those keys are exactly where a
+forbidden string could have come from.
 
 Two entries are refused before anything runs, because each decides the verdict
 by itself. One that a quoted expectation contains, since meeting the
