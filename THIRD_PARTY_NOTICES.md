@@ -110,9 +110,9 @@ Platforms: darwin/amd64, darwin/arm64, linux/amd64, linux/arm64.
 - `gopkg.in/evanphx/json-patch.v4` v4.13.0, BSD-3-Clause
 - `gopkg.in/inf.v0` v0.9.1, BSD-3-Clause
 - `gopkg.in/yaml.v3` v3.0.1, MIT
-- `k8s.io/api` v0.37.0, Apache-2.0
-- `k8s.io/apimachinery` v0.37.0, Apache-2.0
-- `k8s.io/client-go` v0.37.0, Apache-2.0
+- `k8s.io/api` v0.37.1, Apache-2.0
+- `k8s.io/apimachinery` v0.37.1, Apache-2.0
+- `k8s.io/client-go` v0.37.1, Apache-2.0
 - `k8s.io/klog/v2` v2.140.0, Apache-2.0
 - `k8s.io/kube-openapi` v0.0.0-20260721132016-d427ff9ee9ad, Apache-2.0
 - `k8s.io/utils` v0.0.0-20260626114624-be93311217bd, Apache-2.0
@@ -714,9 +714,9 @@ says so.
 
 - `@hono/node-server` 2.1.1, MIT
 - `@hono/trpc-server` 0.4.2, MIT (declared, no licence file shipped)
-- `@modelcontextprotocol/sdk` 1.30.0, MIT
-- `@posthog/core` 1.54.5, Apache-2.0 AND MIT
-- `@posthog/types` 1.412.2, Apache-2.0 AND MIT
+- `@modelcontextprotocol/sdk` 1.30.1, MIT
+- `@posthog/core` 1.55.2, Apache-2.0 AND MIT
+- `@posthog/types` 1.412.4, Apache-2.0 AND MIT
 - `@trpc/server` 11.19.0, MIT
 - `accepts` 2.0.0, MIT
 - `ajv` 8.20.0, MIT
@@ -734,7 +734,7 @@ says so.
 - `cross-spawn` 7.0.6, MIT
 - `debug` 4.4.3, MIT
 - `depd` 2.0.0, MIT
-- `drizzle-orm` 0.45.2, Apache-2.0 (declared, no licence file shipped)
+- `drizzle-orm` 0.45.3, Apache-2.0 (declared, no licence file shipped)
 - `dunder-proto` 1.0.1, MIT
 - `ee-first` 1.1.1, MIT
 - `encodeurl` 2.0.0, MIT
@@ -748,7 +748,7 @@ says so.
 - `express` 5.2.1, MIT
 - `express-rate-limit` 8.7.0, MIT
 - `fast-deep-equal` 3.1.3, MIT
-- `fast-uri` 3.1.7, BSD-3-Clause
+- `fast-uri` 3.1.8, BSD-3-Clause
 - `finalhandler` 2.1.1, MIT
 - `forwarded` 0.2.0, MIT
 - `fresh` 2.0.0, MIT
@@ -758,11 +758,11 @@ says so.
 - `gopd` 1.2.0, MIT
 - `has-symbols` 1.1.0, MIT
 - `hasown` 2.0.4, MIT
-- `hono` 4.13.8, MIT
+- `hono` 4.13.9, MIT
 - `http-errors` 2.0.1, MIT
 - `iconv-lite` 0.7.3, MIT
 - `inherits` 2.0.4, ISC
-- `ip-address` 10.7.0, MIT
+- `ip-address` 10.7.3, MIT
 - `ipaddr.js` 1.9.1, MIT
 - `is-promise` 4.0.0, MIT
 - `isexe` 2.0.0, ISC
@@ -785,7 +785,7 @@ says so.
 - `path-to-regexp` 8.4.2, MIT
 - `pkce-challenge` 5.0.1, MIT
 - `postgres` 3.4.9, Unlicense (declared, no licence file shipped)
-- `posthog-node` 5.52.4, Apache-2.0 AND MIT
+- `posthog-node` 5.53.0, Apache-2.0 AND MIT
 - `proxy-addr` 2.0.7, MIT
 - `qs` 6.16.0, BSD-3-Clause
 - `range-parser` 1.3.0, MIT
@@ -837,12 +837,12 @@ says so.
 - `@tiptap/starter-kit` 3.31.3, MIT
 - `geist` 1.7.2, OFL-1.1
 - `linkifyjs` 4.3.3, MIT
-- `next` 16.3.5, MIT
-- `next/dist/compiled/process` vendored in next 16.3.5, MIT
-- `next/dist/compiled/react` vendored in next 16.3.5, MIT
-- `next/dist/compiled/react-dom` vendored in next 16.3.5, MIT
-- `next/dist/compiled/react-server-dom-turbopack` vendored in next 16.3.5, MIT
-- `next/dist/compiled/scheduler` vendored in next 16.3.5, MIT
+- `next` 16.3.6, MIT
+- `next/dist/compiled/process` vendored in next 16.3.6, MIT
+- `next/dist/compiled/react` vendored in next 16.3.6, MIT
+- `next/dist/compiled/react-dom` vendored in next 16.3.6, MIT
+- `next/dist/compiled/react-server-dom-turbopack` vendored in next 16.3.6, MIT
+- `next/dist/compiled/scheduler` vendored in next 16.3.6, MIT
 - `orderedmap` 2.1.1, MIT
 - `prosemirror-commands` 1.7.2, MIT
 - `prosemirror-dropcursor` 1.8.4, MIT
@@ -873,7 +873,7 @@ enterprise Go modules to attribute.
 - `@xmldom/is-dom-node` 1.0.1, MIT
 - `@xmldom/xmldom` 0.8.15, MIT
 - `@xmldom/xmldom` 0.9.12, MIT
-- `xml-crypto` 6.2.0, MIT
+- `xml-crypto` 6.3.2, MIT
 - `xpath` 0.0.33, MIT
 - `xpath` 0.0.34, MIT
 - `yaml` 2.9.1, ISC
