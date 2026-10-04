@@ -394,3 +394,54 @@ func TestRateLimitWait(t *testing.T) {
 	_, limited = f.rateLimitWait(http.StatusForbidden, "2")
 	require.False(t, limited, "a refusal of the content is never retried away")
 }
+
+func TestProbe_AProvenFindingAndAnUnmadeComparisonAreBothReported(t *testing.T) {
+	// One route is a real hole and another is behind a limit that never lifts.
+	// The hole is reported, and so is the fact that the rest was not reached:
+	// neither may hide the other.
+	vulnerable := nosqlServer()
+	defer vulnerable.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/limited" {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		resp, err := http.Get(vulnerable.URL + r.URL.RequestURI())
+		if err != nil {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		w.WriteHeader(resp.StatusCode)
+		_, _ = io.Copy(w, resp.Body)
+	}))
+	defer srv.Close()
+	f := newTestFamily()
+	in := inputWithRoutes(srv.URL, []security.Route{
+		{Method: http.MethodGet, Path: "/limited", Params: []string{"q"}},
+		{Method: http.MethodGet, Path: "/session", Params: []string{"token"}},
+	}, allFail())
+	findings, err := f.Probe(context.Background(), in)
+	require.Len(t, findings, 1, "the proven hole survives the unmade comparisons")
+	require.Equal(t, string(RuleNoSQL), findings[0].Rule)
+	require.Error(t, err, "the unmade comparisons are said, not dropped")
+	require.Contains(t, err.Error(), "rate limit refused 9")
+}
+
+func TestProbe_ADeadlineDuringAWaitIsIncompleteNeverClean(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+	f := newTestFamily()
+	f.retryUnit, f.maxRetryWait = time.Hour, time.Hour
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	findings, err := f.Probe(ctx, inputWithRoutes(srv.URL, rscRoutes(2), allFail()))
+	require.Nil(t, findings)
+	require.Error(t, err, "a run stopped while the prober waited reached no verdict")
+	require.Contains(t, err.Error(), "the run stopped")
+	require.Contains(t, err.Error(), "made 0 of 18")
+}

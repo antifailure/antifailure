@@ -20,3 +20,8 @@ tries again, and never hands one of those answers to a check. A difference
 counts only when it shows up a second time with the requests sent in the
 opposite order, so one caused by timing does not survive. If the limit never
 lifts, the check says it could not complete rather than reporting a pass.
+
+When the check is stopped partway, by the limit or by the run's deadline, the
+note says how many comparisons it made out of how many it planned. Anything it
+had already proved is still reported beside that note, so a partial check
+reads as unfinished, never as clean.

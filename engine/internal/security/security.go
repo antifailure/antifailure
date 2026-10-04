@@ -75,8 +75,11 @@ type Family interface {
 	// any field. Detail is bounded and neutralized; Where is a location (a
 	// route, a table, a header name), never a value. Level MUST come from
 	// in.Policy.Level(key) and is never hard-coded, so the manifest stays the
-	// one place a finding's severity is decided. An error is a blocked probe, a
-	// fact about our tooling, never a security verdict about the change.
+	// one place a finding's severity is decided. An error is a blocked or
+	// incomplete probe, a fact about our tooling, never a security verdict about
+	// the change. Findings returned BESIDE an error are ones the family proved
+	// before it was stopped, and the caller keeps them along with a note that
+	// the probe did not complete, so a partial probe never reads as a clean one.
 	Probe(ctx context.Context, in Input) ([]report.Finding, error)
 }
 

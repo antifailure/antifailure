@@ -420,22 +420,44 @@ func (f *family) Probe(ctx context.Context, in security.Input) ([]report.Finding
 	}
 	proven := map[key]*report.Finding{}
 	var order []key
-	// compared and limited count the comparisons attempted and the ones the
-	// application's rate limit would not let the prober make. A comparison it
-	// could not make is not a pass, so a probe that proved nothing while some
-	// comparisons went unmade says so rather than reading as clean.
+	// planned counts every comparison the catalog asks for, compared the ones
+	// started, and limited the ones the application's rate limit would not let
+	// the prober make. A comparison it could not make is not a pass, so whenever
+	// one went unmade, through the limit or through the run's deadline, the probe
+	// returns an error beside whatever it did prove, and the spine records that
+	// the family did not complete.
+	planned := 0
+	for _, route := range routes {
+		for range route.Params {
+			for _, v := range catalog {
+				if in.Policy.Level(v.class) != report.LevelIgnore {
+					planned++
+				}
+			}
+		}
+	}
 	compared, limited := 0, 0
 
+fuzz:
 	for _, route := range routes {
 		for _, param := range route.Params {
 			for _, v := range catalog {
 				if in.Policy.Level(v.class) == report.LevelIgnore {
 					continue
 				}
+				if ctx.Err() != nil {
+					break fuzz
+				}
 				compared++
 				ok, effect, err := f.compare(ctx, route, base, param, v)
 				if errors.Is(err, errRateLimited) {
 					limited++
+				}
+				if err != nil && ctx.Err() != nil {
+					// Stopped mid comparison, often while waiting out a limit.
+					// This one was not made either.
+					compared--
+					break fuzz
 				}
 				if err != nil || !ok {
 					continue
@@ -460,13 +482,9 @@ func (f *family) Probe(ctx context.Context, in security.Input) ([]report.Finding
 		}
 	}
 
+	incomplete := incompleteness(planned, compared, limited, ctx.Err())
 	if len(order) == 0 {
-		if limited > 0 {
-			return nil, fmt.Errorf(
-				"the application's rate limit refused %d of %d injection comparisons even after the prober waited as it was asked, so those endpoints were not fuzzed",
-				limited, compared)
-		}
-		return nil, nil
+		return nil, incomplete
 	}
 	sort.Slice(order, func(i, j int) bool {
 		if order[i].ref != order[j].ref {
@@ -478,7 +496,31 @@ func (f *family) Probe(ctx context.Context, in security.Input) ([]report.Finding
 	for _, k := range order {
 		out = append(out, *proven[k])
 	}
-	return out, nil
+	return out, incomplete
+}
+
+// incompleteness says which comparisons went unmade, or nil when every planned
+// comparison was made. It names both causes because they call for different
+// remedies: a rate limit is the application's pace, which a longer deadline
+// buys, and a stopped run is the deadline itself.
+func incompleteness(planned, compared, limited int, stopped error) error {
+	if limited == 0 && compared == planned {
+		return nil
+	}
+	var parts []string
+	if limited > 0 {
+		parts = append(parts, fmt.Sprintf(
+			"the application's rate limit refused %d even after the prober waited as it was asked", limited))
+	}
+	if unstarted := planned - compared; unstarted > 0 {
+		cause := "the run stopped"
+		if stopped != nil {
+			cause = "the run stopped (" + stopped.Error() + ")"
+		}
+		parts = append(parts, fmt.Sprintf("%s before the last %d were made", cause, unstarted))
+	}
+	return fmt.Errorf("the injection prober made %d of %d comparisons: %s, so those endpoints were not fuzzed",
+		compared-limited, planned, strings.Join(parts, ", and "))
 }
 
 // compare measures one vector on one parameter and reports whether it proved
