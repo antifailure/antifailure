@@ -868,17 +868,21 @@ func runMaskApply(
 
 	res, err := apply(ctx)
 	if err != nil {
-		// A refused plan and a failed connection both land here and both mean
-		// the same thing to a caller: the data was not rewritten as asked. The
-		// executor refuses a plan with problems before it writes anything, so
-		// this is not a half applied table.
+		// The executor commits chunks independently. A returned error can follow
+		// committed writes, so never promise that the branch is unchanged.
+		detail := ""
+		if res.Refused {
+			detail = "The masking plan was refused before any data was rewritten. Ask inspect_data_masking the plan question to see what could not be assigned."
+		} else if res.Rows > 0 || res.Tables > 0 {
+			detail = fmt.Sprintf("Masking stopped after %d committed rows across %d completed tables. ", res.Rows, res.Tables)
+			detail += "This branch was partly rewritten. Run inspect_data_masking to verify it before using it or retrying."
+		} else {
+			detail = "Masking did not complete. No committed rows were reported, but the branch must be verified before it is used; execution may have been interrupted during a chunk."
+		}
 		return "", nil, &Fault{
-			Code: FaultSafetyUnavailable,
-			Detail: "The data was not rewritten. A plan with unresolved problems is refused " +
-				"before anything is written rather than partly run, because a half masked " +
-				"table is neither real nor safe. Ask inspect_data_masking the plan question " +
-				"to see what could not be assigned.",
-			Retryable: true,
+			Code:      FaultSafetyUnavailable,
+			Detail:    detail,
+			Retryable: res.Refused,
 			wrapped:   err,
 		}
 	}

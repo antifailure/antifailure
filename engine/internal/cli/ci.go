@@ -155,6 +155,7 @@ change.`),
 			// everything else has measured an environment nothing broke on
 			// purpose, and are appended in finish in one line like the rest.
 			var chaosResults []report.Finding
+			var egressResults []report.Finding
 			// The security families' findings, run against the twin while it is
 			// up and appended in finish in one line, exactly as migration is.
 			var securityResults []report.Finding
@@ -242,6 +243,7 @@ change.`),
 				// for, what its data looked like, what it cost under load, and
 				// what we failed to clean up.
 				run.Findings = append(run.Findings, migration...)
+				run.Findings = append(run.Findings, egressResults...)
 				for _, f := range []*report.Finding{
 					workflowsUnverifiedFinding(run, gate),
 					egressFinding(run.Egress, gate),
@@ -327,17 +329,6 @@ change.`),
 				run.Invariants = append(run.Invariants, reportInvariants(test.Invariants)...)
 			}
 
-			// Captured in an outer variable so the security router reads the same
-			// egress log the report summarises, rather than asking the sidecar a
-			// second time for what it already answered.
-			var decisions []local.Decision
-			if ds, dErr := o.Decisions(ctx, 500); dErr == nil {
-				decisions = ds
-				if len(ds) > 0 {
-					run.Egress = summariseEgress(ds)
-				}
-			}
-
 			// After the workflows, because the query regression and the plan
 			// statements come from what this environment actually ran.
 			migration = readDatabase(ctx, e, o, gate,
@@ -364,6 +355,23 @@ change.`),
 					run.Load = loadReport(res, refused, p95, errorRate, &run)
 				}
 			}
+			// Read the complete decision stream after load, while the sidecar is
+			// still running. A bounded or early snapshot can report a clean run
+			// despite outbound behavior that occurred under load.
+			var decisions []local.Decision
+			if ds, dErr := o.Decisions(ctx, -1); dErr != nil {
+				egressResults = append(egressResults, report.Finding{
+					Rule: "egress_evidence_unverified", Level: gate.EgressSurprise,
+					Title:  "Egress evidence could not be inspected",
+					Detail: dErr.Error(),
+					Fix:    "Restore the sidecar decision log and rerun the check.",
+				})
+			} else {
+				decisions = ds
+				if len(ds) > 0 {
+					run.Egress = summariseEgress(ds)
+				}
+			}
 
 			// Security families run here, last of the run and while the twin is
 			// still up: the active families drive it and the readers read what
@@ -382,9 +390,24 @@ change.`),
 			if chaos, cErr := o.RunChaos(ctx, gate); cErr != nil {
 				e.Out.Printf("  %s %s\n", e.Out.S(StyleWarn, SymbolWarn), cErr.Error())
 				run.Notes = append(run.Notes, "the faults were not injected: "+cErr.Error())
+				chaosResults = append(chaosResults, recordChaosFailure(&run, chaos, cErr, gate)...)
 			} else if chaos != nil {
 				run.Chaos = &chaos.Report
 				chaosResults = chaos.Findings
+			}
+			// Active security checks and faults may also generate outbound
+			// decisions. The final summary must cover them before teardown.
+			if ds, dErr := o.Decisions(ctx, -1); dErr != nil {
+				if len(egressResults) == 0 {
+					egressResults = append(egressResults, report.Finding{
+						Rule: "egress_evidence_unverified", Level: gate.EgressSurprise,
+						Title:  "Egress evidence could not be inspected",
+						Detail: dErr.Error(),
+						Fix:    "Restore the sidecar decision log and rerun the check.",
+					})
+				}
+			} else if len(ds) > 0 {
+				run.Egress = summariseEgress(ds)
 			}
 
 			finish()
@@ -423,6 +446,22 @@ change.`),
 	cmd.Flags().StringVar(&saveBaseline, "save-baseline", "",
 		"Save this run's queries and plans, to compare a later branch against")
 	return cmd
+}
+
+func recordChaosFailure(run *report.Run, chaos *env.ChaosRun, err error, gate report.Policy) []report.Finding {
+	var findings []report.Finding
+	if chaos != nil {
+		run.Chaos = &chaos.Report
+		findings = append(findings, chaos.Findings...)
+	} else {
+		run.Chaos = &report.Chaos{Skipped: "Fault injection did not complete: " + err.Error()}
+	}
+	return append(findings, report.Finding{
+		Rule: env.RuleFaultRefused, Level: gate.ChaosUnverified,
+		Title:  "Fault injection did not complete",
+		Detail: err.Error(),
+		Fix:    "Resolve the fault setup error and rerun the check.",
+	})
 }
 
 // ciRunGrace is how long after a run's budget the environment is left before

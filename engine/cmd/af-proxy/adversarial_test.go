@@ -307,6 +307,35 @@ func TestAttack_LiveCredentialOnThePlainHTTPProxyPathIsRefused(t *testing.T) {
 	require.Equal(t, 1, o.count(), "the control request did not reach the origin")
 }
 
+func TestAttack_EncodedQueryAndFormCredentialNeverReachAllowedOrigin(t *testing.T) {
+	o := newOrigin(t)
+	host := hostOf(t, o.URL)
+	s := newSidecar(t, &schema.Egress{
+		Default: schema.ModeBlock,
+		Rules:   []schema.EgressRule{{Host: host, Mode: schema.ModeAllow}},
+	})
+	for _, tc := range []struct{ name, target, contentType, payload string }{
+		{"query", o.URL + "/charge?token=" + strings.ReplaceAll(url.QueryEscape(liveKey()), "_", "%5F"), "", ""},
+		{"form", o.URL + "/charge", "application/x-www-form-urlencoded", "token=" + strings.ReplaceAll(url.QueryEscape(liveKey()), "_", "%5F")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodPost, tc.target, strings.NewReader(tc.payload))
+			require.NoError(t, err)
+			if tc.contentType != "" {
+				req.Header.Set("Content-Type", tc.contentType)
+			}
+			resp := through(t, s, req)
+			require.Equal(t, http.StatusForbidden, resp.StatusCode)
+			require.Zero(t, o.count(), "credential reached the allowed origin")
+		})
+	}
+	control, err := http.NewRequest(http.MethodPost, o.URL+"/charge?token=ordinary", strings.NewReader("token=ordinary"))
+	require.NoError(t, err)
+	control.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	require.Equal(t, http.StatusOK, through(t, s, control).StatusCode)
+	require.Equal(t, 1, o.count(), "the allowed control must reach the origin")
+}
+
 // Sandbox mode's other half, on the same path.
 //
 // A tripwire that refuses a live key is worth nothing if a key that merely
