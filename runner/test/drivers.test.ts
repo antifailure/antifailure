@@ -16,7 +16,7 @@ import {
 import * as ios from '../src/drivers/ios.ts';
 import * as android from '../src/drivers/android.ts';
 import * as desktop from '../src/drivers/desktop.ts';
-import { runTerminal, EXIT_GRACE_MS, QUIET_MS } from '../src/drivers/terminal.ts';
+import { runTerminal, asText, EXIT_GRACE_MS, QUIET_MS } from '../src/drivers/terminal.ts';
 import { Screen } from '../src/drivers/screen.ts';
 import { socketSink, decode, type LiveEvent } from '../src/live.ts';
 import type { WorkflowResult } from '../src/execute.ts';
@@ -887,32 +887,305 @@ test('silence ordering 3: a program whose screen already shows the words is not 
   assert.equal(raced[0]!.outcome.verdict, 'pass', raced[0]!.outcome.detail);
 });
 
+// WHAT A PROGRAM MUST NEVER SHOW. The residual silence ordering 3 leaves is a
+// program that shows the expected words, goes quiet, and THEN contradicts them:
+// it is accepted on the earlier screen, deliberately, because an expectation is
+// all the author said to look for. `never` is the author saying more, and these
+// cells are the orderings it changes. Each is named by what it would catch.
+
+/** keepsRunning is a program that never exits on its own, which is the case
+ *  `never` costs the most on and the one its wait has to bound. */
+const keepsRunning = ' setInterval(() => {}, 1000);';
+
+test('never 1: a program that contradicts itself after a silence is failed, not passed on the earlier screen', async () => {
+  // The residual exactly: the expected words, a silence twice the grace, and
+  // then the thing the workflow says must never appear, from a program that is
+  // still running. Without `never` this passes on the first screen, and the
+  // second cell below holds that, so this one is about what declaring it buys.
+  const program = silenceProgram(
+    'process.stdout.write("deployed\\n");',
+    EXIT_GRACE_MS * 2,
+    'process.stdout.write("rollback started\\n");' + keepsRunning,
+  );
+  const workflow = {
+    name: 'contradicts-itself',
+    command: execPath,
+    args: ['-e', program],
+    screen: { rows: 10, cols: 40 },
+    expect: ['"deployed"'],
+    maxMs: 8_000,
+  };
+  const [declared] = await runTerminal({ workflows: [{ ...workflow, never: ['rollback started'] }] });
+  assert.equal(declared!.outcome.verdict, 'fail', declared!.outcome.detail);
+  assert.equal(declared!.outcome.cause, 'expectation-not-met', declared!.outcome.detail);
+  assert.match(declared!.outcome.detail, /showed "rollback started", which this workflow says the program must never show/);
+  assert.ok(declared!.outcome.reproduction.includes('Must never show: rollback started'),
+    `the reproduction does not say what must never show: ${declared!.outcome.reproduction.join(' | ')}`);
+
+  // The control: the same program with nothing declared is still accepted on
+  // the earlier screen. That is the documented default, and if it ever stopped
+  // being true the cost stated in the schema would be paid by every author.
+  const [undeclared] = await runTerminal({ workflows: [workflow] });
+  assert.equal(undeclared!.outcome.verdict, 'pass', undeclared!.outcome.detail);
+});
+
+test('never 2: a forbidden string ends the wait at once, because nothing can take it back', async () => {
+  // More output can only ADD a forbidden string, so the first one on screen is
+  // final. A driver that kept watching anyway would be correct and would spend
+  // a 30 s budget on a program it had already failed; the race is the assertion.
+  const program = 'process.stdout.write("deployed\\nrollback started\\n");' + keepsRunning;
+  const work = runTerminal({
+    workflows: [{
+      name: 'fails-fast',
+      command: execPath,
+      args: ['-e', program],
+      screen: { rows: 10, cols: 40 },
+      expect: ['"deployed"'],
+      never: ['"Rollback  STARTED"'],
+      maxMs: 30_000,
+    }],
+  });
+  let raced;
+  try {
+    raced = await withinReach(work, EXIT_GRACE_MS * 8);
+  } finally {
+    await work;
+  }
+  if (raced === NEVER_RETURNED) {
+    assert.fail(`${NEVER_RETURNED} within ${EXIT_GRACE_MS * 8} ms for a program already showing what it must never show`);
+  }
+  // Quoted, a different case and a doubled space: the quoted form's matching.
+  assert.equal(raced[0]!.outcome.verdict, 'fail', raced[0]!.outcome.detail);
+});
+
+test('never 3: a program that never exits is watched for its whole budget, and the pass says so', async () => {
+  // The cost, measured rather than described. With `never` declared a met
+  // expectation is not the end, so a program that never exits is watched until
+  // its budget is spent, and a pass that came back sooner would be a pass about
+  // a window nobody watched.
+  const budgetMs = 2_500;
+  const [result] = await runTerminal({
+    workflows: [{
+      name: 'watched',
+      command: execPath,
+      args: ['-e', 'process.stdout.write("ready\\n");' + keepsRunning],
+      screen: { rows: 10, cols: 40 },
+      expect: ['"ready"'],
+      never: ['panic'],
+      maxMs: budgetMs,
+    }],
+  });
+  assert.equal(result!.outcome.verdict, 'pass', result!.outcome.detail);
+  assert.match(result!.outcome.detail, new RegExp(`nothing it must never show did in the ${budgetMs} ms it was watched`));
+  assert.ok(result!.durationMs >= budgetMs,
+    `passed after ${result!.durationMs} ms of a ${budgetMs} ms watch, so it was not watched for its budget`);
+});
+
+test('never 4: a watch the budget cut short is blocked, even with every expectation met', async () => {
+  // Met wins on its own because a transcript only grows. That argument says
+  // nothing about what must never appear, which the keys nobody sent could have
+  // produced, so a watch that did not finish says so rather than passing. The
+  // program ignores every key, each one costs the driver its response window,
+  // and five of them do not fit in the budget.
+  const program = 'process.stdin.setRawMode(true); process.stdin.resume(); process.stdout.write("ready\\n");';
+  const workflow = {
+    name: 'cut-short',
+    command: execPath,
+    args: ['-e', program],
+    screen: { rows: 10, cols: 40 },
+    input: ['a', 'b', 'c', 'd', 'e'],
+    expect: ['"ready"'],
+    maxMs: 2_500,
+  };
+  const [declared] = await runTerminal({ workflows: [{ ...workflow, never: ['panic'] }] });
+  assert.equal(declared!.outcome.verdict, 'blocked', declared!.outcome.detail);
+  assert.match(declared!.outcome.detail, /ran out with keys still to send, so whether the program went on to show what it must never show was not seen/);
+  // Without `never` the same run is the met-wins pass it has always been.
+  const [undeclared] = await runTerminal({ workflows: [workflow] });
+  assert.equal(undeclared!.outcome.verdict, 'pass', undeclared!.outcome.detail);
+});
+
+test('never 5: through a pipe a forbidden line fails the workflow, and so does one printed before the budget', async () => {
+  // The pipe path always waits for the program to close, so the residual never
+  // reached it; what `never` adds there is the judgement. Both ways a pipe run
+  // ends: the program exiting, and the budget killing one that would not.
+  const [exited] = await runTerminal({
+    workflows: [{
+      name: 'pipe-exited',
+      command: execPath,
+      args: ['-e', 'console.log("migrated 3 tables"); console.log("warning: 1 row dropped");'],
+      expect: ['"migrated 3 tables"'],
+      never: ['row dropped'],
+    }],
+  });
+  assert.equal(exited!.outcome.verdict, 'fail', exited!.outcome.detail);
+  assert.match(exited!.outcome.detail, /^The output showed "row dropped"/);
+
+  const [killed] = await runTerminal({
+    workflows: [{
+      name: 'pipe-killed',
+      command: execPath,
+      args: ['-e', 'console.log("warning: 1 row dropped");' + keepsRunning],
+      expect: ['"migrated 3 tables"'],
+      never: ['row dropped'],
+      maxMs: 1_500,
+    }],
+  });
+  // fail rather than blocked: the budget ran out, and what was printed before it
+  // did is still a fact about the program.
+  assert.equal(killed!.outcome.verdict, 'fail', killed!.outcome.detail);
+  assert.match(killed!.outcome.detail, /^The output showed "row dropped"/);
+});
+
+test('never 6: a forbidden line the screen never got to draw is still read, from the bytes', async (t) => {
+  // The emulator can fall behind the program, and the bytes it has not drawn
+  // are exactly where a late error would be. `never` reads the bytes as they
+  // arrive, so a backlog does not hide one. Made with the queued parse table's
+  // slowed parse, so it needs no slow host: every parse after the first takes
+  // 50 ms, and the forbidden line is written at the eight hundredth line, far
+  // behind anything the screen can have drawn inside a 1500 ms budget.
+  const write = Screen.prototype.write;
+  let parses = 0;
+  const slowWrite = t.mock.method(Screen.prototype, 'write', async function (this: Screen, data: string) {
+    parses += 1;
+    if (parses > 1) await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    await write.call(this, data);
+  });
+  const program = 'process.stdout.write("ready\\n"); let n = 0; setTimeout(() => setInterval(() => { '
+    + 'n += 1; process.stdout.write(n === 800 ? "panic: lost rows\\n" : "still going\\n"); }, 1), 200);';
+  const workflow = {
+    name: 'parser-behind',
+    command: execPath,
+    args: ['-e', program],
+    screen: { rows: 10, cols: 40 },
+    expect: ['"ready"'],
+    maxMs: 1_500,
+  };
+  try {
+    const [declared] = await runTerminal({ workflows: [{ ...workflow, never: ['panic'] }] });
+    assert.equal(declared!.outcome.verdict, 'fail', declared!.outcome.detail);
+    assert.match(declared!.outcome.detail, /showed "panic"/);
+    // Step 0 is the invocation, which carries this program's source.
+    assert.ok(!declared!.steps.slice(1).some((step) => step.includes('panic')),
+      'the screen drew the forbidden line, so this did not test reading it from the bytes');
+    // The control: the same run with nothing declared is the met-wins pass.
+    const [undeclared] = await runTerminal({ workflows: [workflow] });
+    assert.equal(undeclared!.outcome.verdict, 'pass', undeclared!.outcome.detail);
+  } finally {
+    slowWrite.mock.restore();
+  }
+});
+
+test('never 7: a warning drawn and erased inside one redraw is still a warning it showed', async () => {
+  // A screen is a snapshot, and this warning is on none of them: the program
+  // enters the alternate screen, which keeps no scrollback, draws the warning,
+  // clears it and draws "ready", all in one write. Found in review; the
+  // snapshots alone passed this program.
+  const program = 'process.stdout.write("\\u001b[?1049h\\u001b[Hrollback started\\u001b[2J\\u001b[Hready\\r\\n");'
+    + keepsRunning;
+  const [result] = await runTerminal({
+    workflows: [{
+      name: 'erased',
+      command: execPath,
+      args: ['-e', program],
+      screen: { rows: 10, cols: 40 },
+      expect: ['"ready"'],
+      never: ['rollback started'],
+      maxMs: 2_000,
+    }],
+  });
+  // Step 0 is the invocation, which carries this program's source.
+  assert.ok(!result!.steps.slice(1).some((step) => step.includes('rollback started')),
+    'a screen snapshot caught the warning, so this did not test the erased case');
+  assert.equal(result!.outcome.verdict, 'fail', result!.outcome.detail);
+});
+
+test('never 8: two screens are not read as one phrase', async () => {
+  // The opposite mistake, also found in review. The first screen ends with
+  // "rollback" and the next, after a key and a clear, starts with "started".
+  // No screen ever showed "rollback started", so a workflow forbidding that
+  // phrase must pass; joining the screens with a newline, which matching folds
+  // into a space, failed it.
+  const program = 'process.stdin.setRawMode(true); process.stdout.write("\\u001b[?1049h\\u001b[Happlied\\r\\nrollback"); '
+    + 'process.stdin.once("data", () => process.stdout.write("\\u001b[2J\\u001b[Hstarted\\r\\nall clear\\r\\n"));'
+    + keepsRunning;
+  const [result] = await runTerminal({
+    workflows: [{
+      name: 'two-screens',
+      command: execPath,
+      args: ['-e', program],
+      screen: { rows: 10, cols: 40 },
+      input: ['x'],
+      expect: ['"all clear"'],
+      never: ['rollback started'],
+      maxMs: 3_000,
+    }],
+  });
+  assert.equal(result!.outcome.verdict, 'pass', result!.outcome.detail);
+});
+
+test('asText keeps the text a terminal shows and separates what the cursor moved apart', () => {
+  // Colour does not move the cursor, so a phrase with a bold word in it is
+  // still one phrase.
+  assert.match(asText('Error: \u001b[1mdeploy failed\u001b[0m'), /Error: deploy failed/);
+  // A clear, a cursor move and a bare carriage return all move it, so the text
+  // on either side is not one phrase.
+  for (const between of ['\u001b[2J', '\u001b[5;1H', '\r', '\u001b7']) {
+    assert.doesNotMatch(asText(`rollback${between}started`), /rollback ?started/,
+      `${JSON.stringify(between)} joined two phrases`);
+  }
+  // A newline is a line break, as it is on a screen, and CRLF is one newline.
+  assert.equal(asText('one\r\ntwo\n'), 'one\ntwo\n');
+  // A window title ends at a BEL. Stripping control characters before reading
+  // it would let the title swallow everything after it.
+  assert.match(asText('\u001b]0;deploy\u0007rollback started'), /rollback started/);
+});
+
 test('a queued parse respects the budget and preserves finished output', async (t) => {
   // Exercise the real pty and emulator, but make each parse take 50 ms while
   // the child emits a short line every millisecond. This creates the backlog
   // on purpose, without depending on CI being slower than this machine.
-  // Exercise each entry into the drain and both ways a producer can finish:
-  // staying alive quietly and exiting with a finite parse still pending.
-  for (const trigger of ['startup', 'keys-pending', 'after-key', 'quiet', 'exited'] as const) {
+  // Exercise each entry into the drain and every way a producer can finish:
+  // staying alive quietly, exiting with a parse that fits in the budget, and
+  // exiting with a backlog that does not.
+  //
+  // `exited-over-budget` is the residual the runnerdrain lane left in the code.
+  // An exited program's queue is finite, so the driver drained it with no
+  // ceiling at all, and a program that exited having written more than the
+  // budget could pay to parse held the driver for the whole parse. Here that is
+  // three hundred chunks at 50 ms each, fifteen seconds of parsing behind a
+  // 1500 ms budget, and the reach below is a third of that.
+  const triggers = ['startup', 'keys-pending', 'after-key', 'quiet', 'exited', 'exited-over-budget'] as const;
+  for (const trigger of triggers) {
     await t.test(trigger, { timeout: 15_000 }, async (t) => {
-      const budgetMs = 1_500;
+      const budgetMs = trigger === 'exited' ? 4_000 : 1_500;
       const write = Screen.prototype.write;
       let parses = 0;
       const slowWrite = t.mock.method(Screen.prototype, 'write', async function (this: Screen, data: string) {
         parses += 1;
-        // These two controls need a pending parse even if the pty coalesces
-        // all the finite output into one chunk. Hold that first parse across
-        // the deadline; an exited producer must still get its complete screen.
-        const delay = parses === 1 && (trigger === 'quiet' || trigger === 'exited') ? budgetMs + 500 : 50;
+        // These controls need a pending parse even if the pty coalesces all
+        // the finite output into one chunk. `quiet` holds that first parse
+        // across the deadline. `exited` holds it for longer than a settle's
+        // own ceiling and well inside its budget, which an exited program
+        // must be given in full: its complete screen is the drain.
+        const delay = parses === 1 && trigger === 'quiet' ? budgetMs + 500
+          : parses === 1 && trigger === 'exited' ? 3_200 : 50;
         await new Promise<void>((resolve) => setTimeout(resolve, delay));
         await write.call(this, data);
       });
       const writer = 'setInterval(() => process.stdout.write("still going\\n"), 1);';
       const finite = 'process.stdout.write("still going\\n".repeat(100) + "the burst ended\\n");';
+      // A line a millisecond, three hundred of them, then the expected words
+      // and a natural exit. Spread out so the pty delivers many chunks rather
+      // than one. A host that coalesced them into one chunk would parse it in
+      // 50 ms and PASS, which fails this cell loudly rather than vacuously.
+      const longExit = 'let n = 0; const t = setInterval(() => { process.stdout.write("still going\\n"); '
+        + 'if (++n === 300) { clearInterval(t); process.stdout.write("the burst ended\\n"); } }, 1);';
       const command = trigger === 'after-key'
         ? `process.stdin.setRawMode(true); process.stdout.write("ready\\n"); process.stdin.once("data", () => { ${writer} });`
         : trigger === 'quiet' ? `${finite} setInterval(() => {}, 1000);`
-        : trigger === 'exited' ? finite : writer;
+        : trigger === 'exited' ? finite
+        : trigger === 'exited-over-budget' ? longExit : writer;
       const work = runTerminal({
         workflows: [{
           name: trigger,
@@ -946,7 +1219,9 @@ test('a queued parse respects the budget and preserves finished output', async (
       assert.equal(outcome.verdict, 'blocked', outcome.detail);
       assert.equal(outcome.cause, 'budget-exhausted', outcome.detail);
       assert.match(outcome.detail, trigger === 'keys-pending' ? /keys still to send/
-        : trigger === 'quiet' ? /screen finished drawing/ : /program still writing/);
+        : trigger === 'quiet' ? /screen finished drawing/
+        : trigger === 'exited-over-budget' ? /exited with code 0, but the budget of 1500 ms ran out before the 10 by 40 screen finished drawing/
+        : /program still writing/);
     });
   }
 });

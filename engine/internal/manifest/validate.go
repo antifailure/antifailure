@@ -1647,7 +1647,121 @@ func (v *validator) terminalWorkflows(m *schema.Manifest) {
 				}
 			}
 		}
+
+		v.terminalNever(w, base)
 	}
+}
+
+// terminalNever refuses the entries in `never` that decide the verdict before
+// the program has run. Each one is a workflow whose outcome is a fact about
+// the manifest rather than about the program, which is the shape the echo
+// rule above refuses for an expectation.
+//
+// The matching here is the runner's own, `firstShown` in
+// runner/src/workflow.ts: case and runs of whitespace forgiven, surrounding
+// double quotes optional. A looser rule here would refuse manifests the runner
+// would have judged fine, and a stricter one would let through the very
+// workflows these refusals exist for.
+func (v *validator) terminalNever(w *schema.TerminalWorkflow, base string) {
+	for j, n := range w.Never {
+		path := fmt.Sprintf("%s.never[%d]", base, j)
+		needle := neverText(n)
+		// The schema's minLength counts characters and a run of spaces has
+		// some. The runner finds nothing for such an entry, so it is a
+		// declaration that can never fire, which reads as a guard and is not.
+		if needle == "" {
+			v.add(path,
+				fmt.Sprintf("Workflow %q declares a blank entry in never.", w.Name),
+				"Name the text the program must never show, such as the error it prints when it goes wrong.")
+			continue
+		}
+		// A quoted expectation is required on screen character for character,
+		// so one that contains a forbidden string shows it whenever it is met:
+		// the workflow fails if the program works and fails if it does not.
+		// Unquoted expectations are matched by their sense, which can be met
+		// without the forbidden words, so they are not a contradiction.
+		for _, e := range w.Expect {
+			if want, quoted := quotedText(e); quoted && strings.Contains(want, needle) {
+				v.add(path,
+					fmt.Sprintf("Workflow %q expects %q and says it must never show %q.", w.Name, e, n),
+					"The expectation contains what must never show, so the workflow fails exactly when the program does what it expects. Remove one of them.")
+				break
+			}
+		}
+		// On a screen the driver's own keystrokes are echoed, so a forbidden
+		// string the workflow types is shown by the workflow itself, and a
+		// program that did nothing wrong fails. A key name in angle brackets
+		// is set aside, since `<enter>` is a key and not the word enter, and
+		// only a name the runner knows: anything else in angle brackets, like
+		// `<html>`, is typed as written and so echoed as written.
+		if w.Screen == nil {
+			continue
+		}
+		for _, in := range w.Input {
+			if strings.Contains(typedText(in), needle) {
+				v.add(path,
+					fmt.Sprintf("Workflow %q types %q and says it must never show %q.", w.Name, in, n),
+					"A terminal echoes what is typed into it, so the workflow would show that text itself and fail a program that did nothing wrong. Name something only the program prints.")
+				break
+			}
+		}
+	}
+}
+
+// quotedText is an expectation's required text when it is the quoted form,
+// normalised the way the runner compares it.
+func quotedText(expect string) (string, bool) {
+	t := strings.TrimSpace(expect)
+	if len(t) < 3 || !strings.HasPrefix(t, `"`) || !strings.HasSuffix(t, `"`) {
+		return "", false
+	}
+	return foldSpace(t[1 : len(t)-1]), true
+}
+
+// neverText is an entry of `never` as the runner compares it: quotes
+// optional, case and runs of whitespace forgiven.
+func neverText(n string) string {
+	if q, ok := quotedText(n); ok {
+		return q
+	}
+	return foldSpace(n)
+}
+
+// bracketed matches a token in angle brackets, which is how a key is named in
+// a terminal workflow's input when it names one.
+var bracketed = regexp.MustCompile(`<([^<>]+)>`)
+
+// terminalKeys are the names runner/src/drivers/keys.ts sends as keys, besides
+// ctrl-a through ctrl-z. Anything else in angle brackets is typed literally.
+// TestTerminalKeysMatchTheRunner holds this list to that file, because a name
+// only one side knew would either refuse a workflow over a key it never echoes
+// or let one through that echoes its own forbidden text.
+var terminalKeys = map[string]bool{
+	"enter": true, "return": true, "tab": true, "backtab": true,
+	"esc": true, "escape": true, "space": true, "backspace": true,
+	"delete": true, "insert": true, "pageup": true, "pagedown": true,
+	"f1": true, "f2": true, "f3": true, "f4": true, "f5": true, "f6": true,
+	"f7": true, "f8": true, "f9": true, "f10": true, "f11": true, "f12": true,
+	"up": true, "down": true, "right": true, "left": true, "home": true, "end": true,
+}
+
+var ctrlKey = regexp.MustCompile(`^ctrl-[a-z]$`)
+
+// typedText is what a typed entry puts on an echoing screen, as text: every
+// key name the runner knows becomes a break between words, and every other
+// bracketed token stays, because the runner types it as it is written.
+func typedText(in string) string {
+	return foldSpace(bracketed.ReplaceAllStringFunc(in, func(tok string) string {
+		name := strings.ToLower(strings.TrimSpace(tok[1 : len(tok)-1]))
+		if terminalKeys[name] || ctrlKey.MatchString(name) {
+			return " "
+		}
+		return tok
+	}))
+}
+
+func foldSpace(s string) string {
+	return strings.Join(strings.Fields(strings.ToLower(s)), " ")
 }
 
 // desktop ties the surface a workflow names to the application it is driven

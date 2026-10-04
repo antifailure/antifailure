@@ -229,12 +229,16 @@ type workflowDoc struct {
 // the program prints rather than draws, and that selects a pipe over a pseudo
 // terminal.
 type terminalDoc struct {
-	Name    string             `json:"name"`
-	Command string             `json:"command"`
-	Args    []string           `json:"args,omitempty"`
-	Input   []string           `json:"input,omitempty"`
-	Expect  []string           `json:"expect"`
-	Screen  *terminalScreenDoc `json:"screen,omitempty"`
+	Name    string   `json:"name"`
+	Command string   `json:"command"`
+	Args    []string `json:"args,omitempty"`
+	Input   []string `json:"input,omitempty"`
+	Expect  []string `json:"expect"`
+	// Never is sent as written. The runner both matches it and decides how
+	// long to watch from whether it is empty, so a dropped field here would
+	// not only lose the check, it would end the watch early as well.
+	Never  []string           `json:"never,omitempty"`
+	Screen *terminalScreenDoc `json:"screen,omitempty"`
 	// Cwd is already absolute by the time it is sent. The runner has no idea
 	// where the manifest lives and resolving it there would be a second answer
 	// to a question the engine has already answered.
@@ -808,7 +812,7 @@ func (o *Orchestrator) terminalDocs(only []string) []terminalDoc {
 		}
 		doc := terminalDoc{
 			Name: w.Name, Command: w.Command, Args: w.Args,
-			Input: w.Input, Expect: w.Expect,
+			Input: w.Input, Expect: w.Expect, Never: w.Never,
 			Cwd: o.opts.Root,
 		}
 		if w.Cwd != "" {

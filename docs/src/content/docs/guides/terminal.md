@@ -116,6 +116,52 @@ workflow. A terminal workflow with nothing to expect can only ever report that
 nothing confirmed or contradicted it, and that is blocked, so a workflow
 without one could never pass.
 
+## What must never show
+
+An expectation is met the moment its words are on screen, and a full screen
+program that goes quiet with them there is accepted without being waited on to
+exit. That is right for almost every workflow and wrong for one kind: a program
+that prints the right thing and then contradicts it.
+
+```yaml
+expect:
+  - '"Applied 3 changes"'
+never:
+  - "rollback started"
+  - "warning: rows dropped"
+```
+
+`never` names what the program must not show at any point. One appearing fails
+the workflow even when every expectation was met. Each entry is matched as a
+string, ignoring case and runs of whitespace, with the quotes optional; never by
+its sense, because a sense match leans towards finding things and here a false
+find fails a correct program.
+
+Declaring `never` changes how long the program is watched. A met expectation is
+no longer the end, since the contradiction comes after it, so the program is
+watched until it exits or its budget is spent. A full screen program that never
+exits is therefore watched for its whole budget, and the pass says how long it
+was watched; set `budget.duration` to the window you mean. A forbidden string
+ends the watch as soon as it appears, because nothing printed afterwards could
+take it back.
+
+It is judged against every byte the program wrote as well as every screen it
+drew, so a warning drawn and erased between two snapshots is still caught, and
+so is one the screen had not finished drawing when the budget ran out. Each
+screen is judged on its own, so the end of one screen and the start of the next
+never read as one phrase.
+
+If the budget runs out with keys still to send, the workflow is blocked rather
+than passed, even with every expectation met: those keys are exactly where a
+forbidden string could have come from.
+
+Two entries are refused before anything runs, because each decides the verdict
+by itself. One that a quoted expectation contains, since meeting the
+expectation shows it. And on a screen, one the workflow types, since a terminal
+echoes typed text and the workflow would show it itself. Through a pipe nothing
+echoes, so forbidding what was typed is allowed and is how you say a program
+must not print a secret it was given back out.
+
 ## Where the program runs, and what it can reach
 
 `cwd` is where the program runs, relative to the directory holding the
@@ -143,7 +189,14 @@ anything.
 A full screen program is not expected to exit, and not exiting is not a spent
 budget. The workflow is over once its keys have been sent and the screen has
 settled; Antifailure judges what it sees and then stops the program. The budget
-is only spent when the clock runs out with keys still to send.
+is only spent when the clock runs out with keys still to send, or, for a
+workflow that declares [`never`](#what-must-never-show), as the window it is
+watched for.
+
+The budget also bounds the reading, not only the running. A program that exits
+having written more than its budget can draw is reported as blocked, with the
+bytes it wrote and how many of them were never drawn, rather than judged on the
+part that was.
 
 ## What the report shows
 

@@ -28,7 +28,7 @@
 // draw keeps their evidence the program's own output and nothing else.
 
 import { spawn } from 'node:child_process';
-import { failureSentence, judgeAll, meetsAll, notFound, observed } from '../workflow.ts';
+import { failureSentence, firstShown, judgeAll, meetsAll, notFound, observed } from '../workflow.ts';
 import { classify, type Attempt, type Cause } from '../verdict.ts';
 import { nullSink, type LiveSink } from '../live.ts';
 import { openScreen, type Screen } from './screen.ts';
@@ -55,6 +55,12 @@ export interface TerminalWorkflow {
   readonly input?: readonly string[];
   /** expect are the strings that must all appear in what the program showed. */
   readonly expect: readonly string[];
+  /** never are the strings the program must not show at any point, matched
+   *  character for character. Declaring any changes how long the driver
+   *  watches: a met expectation is no longer the end, because a program can
+   *  print what was expected and then contradict it, so a program that has not
+   *  exited is watched until it does or until its budget is spent. */
+  readonly never?: readonly string[];
   /** screen present means the program draws a full screen and is driven
    *  through a pseudo terminal of this size. Absent means it is line oriented
    *  and is driven through a pipe. */
@@ -263,6 +269,7 @@ function reproduction(
     `1. ${how}`,
     ...typed,
     `Expected: ${workflow.expect.join(' ')}`,
+    ...(workflow.never?.length ? [`Must never show: ${workflow.never.join(' ')}`] : []),
     `Got: ${outcome.detail}`,
   ];
 }
@@ -316,6 +323,13 @@ function driveThroughAPipe(
 
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
+      // A contradiction already printed is a fact however the run ends, and
+      // nothing the program could have printed afterwards would take it back.
+      const forbidden = firstShown(workflow.never, output);
+      if (forbidden !== undefined) {
+        resolve({ cause: 'expectation-not-met', detail: shownDetail(forbidden, 'output'), output });
+        return;
+      }
       resolve({
         cause: 'budget-exhausted',
         detail: `The program was still running after its budget of ${workflow.maxMs ?? DEFAULT_MAX_MS} ms and was stopped.`,
@@ -336,9 +350,24 @@ function driveThroughAPipe(
       // that failed, which outranks an unread expectation, exactly as a page
       // answering 500 does in finalJudgement. Met always wins: a program that
       // showed what was expected passed however it exited.
+      //
+      // Something the program must never show outranks all of it, met
+      // included: a program that printed what was expected and then the error
+      // it promised never to print did not do what the workflow says.
+      const forbidden = firstShown(workflow.never, output);
+      if (forbidden !== undefined) {
+        resolve({ cause: 'expectation-not-met', detail: shownDetail(forbidden, 'output'), output });
+        return;
+      }
       const verdict = judgeAll(workflow.expect, output);
       if (verdict === 'met') {
-        resolve({ cause: 'succeeded', detail: 'Every expectation appeared in the output.', output });
+        resolve({
+          cause: 'succeeded',
+          detail: workflow.never?.length
+            ? 'Every expectation appeared in the output, and nothing it must never show did.'
+            : 'Every expectation appeared in the output.',
+          output,
+        });
       } else if (code !== 0) {
         resolve({
           cause: 'application-error',
@@ -402,6 +431,9 @@ async function driveOnAScreen(
 ): Promise<Outcome> {
   const budgetMs = workflow.maxMs ?? DEFAULT_MAX_MS;
   const deadline = Date.now() + budgetMs;
+  // Whether the workflow declared what must never show. See WHAT `never`
+  // CHANGES below for everything this decides.
+  const watching = (workflow.never?.length ?? 0) > 0;
 
   let screen: Screen;
   try {
@@ -446,11 +478,17 @@ async function driveOnAScreen(
   let lastDataAt = Date.now();
   let received = 0;
   let parsedBytes = 0;
+  // Every byte the program wrote, as written, for judging `never`. The screens
+  // are snapshots, and a snapshot cannot see what was drawn and erased between
+  // two of them; the bytes can, and they are complete the moment they arrive,
+  // however far behind the emulator is.
+  let raw = '';
   let closing = false;
   let exited: { code: number; signal: number | undefined } | undefined;
   child.onData((data: string) => {
     lastDataAt = Date.now();
     received += data.length;
+    if (watching) raw += data;
     parsed = parsed.then(async () => {
       // Nothing reaches the emulator once the driver has stopped reading it: a
       // disposed emulator throws, and the backlog behind a budget that has
@@ -515,29 +553,27 @@ async function driveOnAScreen(
   // fast writer can already have queued more than twenty seconds of parsing
   // inside a 1500 ms budget. Checking the clock only after that chain finishes
   // lets the backlog defeat the budget before the next poll is reached.
-  // Exited programs still get their complete drain: no more bytes can arrive,
-  // and discarding that finite tail would judge a partial last redraw again.
+  // AN EXITED PROGRAM IS DRAINED TO THE WORKFLOW'S BUDGET, NOT TO THE CALLER'S
+  // CEILING, AND NOT WITHOUT ONE. No more bytes can arrive once it has gone, so
+  // its queue is finite and finishing it is the drain, which is why a settle's
+  // three second ceiling does not cut it short: discarding that tail would
+  // judge a partial last redraw again.
   //
-  // SO THE CEILING IS NOT TOTAL, AND THE RESIDUAL IS HERE RATHER THAN ONLY IN A
-  // HANDOVER. The exited path takes `await parsed` with no ceiling at all, in both
-  // of the two places above, so a program that EXITS having written more than its
-  // budget can pay to parse holds the driver for the whole parse. Measured
-  // emulator parse rate on a loaded 16GB Mac: 46 to 150 KB/s, so a program that
-  // exits having written 20 MB would hold it for minutes. It is deliberate: the
-  // queue is then finite, finishing it IS the drain, and cutting it would judge a
-  // transcript on a screen nobody waited for, which is the defect this whole file
-  // was rewritten for. No test reaches it, because every exiting program in the
-  // suite writes at most 129 KB. Closing it would mean reporting `blocked` with
-  // the two byte counts rather than a verdict about the program, which is a
-  // decision about what a customer is told and not a refactor.
+  // But finite is not small. This used to take `await parsed` with no bound at
+  // all, so a program that EXITED having written more than the budget could pay
+  // to parse held the driver for the whole parse, at a measured 46 to 150 KB/s
+  // on a loaded 16GB Mac: a 20 MB exit held a 30 second workflow for minutes,
+  // past the budget its author declared. The budget now bounds it like every
+  // other wait in this file, and reaching the budget with the queue unfinished
+  // is reported as exactly that, `blocked` with the two byte counts, by the
+  // `behind` branch below. Never as a verdict about the program, because the
+  // bytes nobody parsed are precisely the ones the verdict would be about.
   const drawn = async (by: number): Promise<void> => {
     for (;;) {
-      if (exited) {
-        await parsed;
-        return;
-      }
-      const remaining = by - Date.now();
+      const until = exited ? deadline : by;
+      const remaining = until - Date.now();
       if (remaining <= 0) return;
+      const wasExited = exited !== undefined;
       const chain = parsed;
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
@@ -549,12 +585,10 @@ async function driveOnAScreen(
         clearTimeout(timer);
       }
       // Exit can arrive while the captured chain is being parsed. Its final
-      // data may have extended the tail, so drain the current one on that path.
-      if (exited) {
-        await parsed;
-        return;
-      }
-      if (parsed === chain || Date.now() >= by) return;
+      // data may have extended the tail, so go round again against the budget
+      // rather than the caller's ceiling.
+      if (exited && !wasExited) continue;
+      if (parsed === chain || Date.now() >= until) return;
     }
   };
   const settle = async (since: number, responseMs: number) => {
@@ -637,10 +671,11 @@ async function driveOnAScreen(
   // oversight: the expectation is what the author said to look for, the
   // transcript only ever grows, and waiting for a program to take something back
   // would mean never accepting any screen from a program that has not exited.
-  // Closing it would need the author to say what must NOT appear, which is a
-  // manifest change and a different feature. What is no longer possible is the
-  // defect this fix is for: reporting that a program did not print something when
-  // the driver had stopped listening while it was descheduled.
+  // Closing it needs the author to say what must NOT appear, and `never` is that,
+  // for the author who declares it, as WHAT `never` CHANGES below says. What is
+  // no longer possible for anyone is the defect this fix is for: reporting that a
+  // program did not print something when the driver had stopped listening while
+  // it was descheduled.
   //
   // The screen is judged at most once per silence. `drawn` first, because a grid
   // the emulator has not caught up with would answer for output that has already
@@ -668,6 +703,34 @@ async function driveOnAScreen(
   // which is blocked, so a manifest that declares one has written a workflow that
   // cannot pass". A branch for it here would be one nothing can reach, and the
   // outcome without it is the one the schema describes, reached a budget later.
+  //
+  // WHAT `never` CHANGES, and it is the residual above, closed for the author who
+  // asks. Declaring what must NOT appear is a declaration that the program can
+  // contradict itself after saying the right thing, so a met expectation stops
+  // being the end of the looking: the driver keeps watching until the program
+  // exits or the budget is spent. The asymmetry runs the other way for these and
+  // it is just as sound. More output can only ever ADD a forbidden string, never
+  // remove one, so the first time one is on screen the answer is final and the
+  // wait ends there. The cost is the author's and it is stated in the schema: a
+  // program that never exits, with `never` declared, is watched for its whole
+  // budget, because a window shorter than that would be the same silence as
+  // evidence this function was rewritten to stop believing.
+  //
+  // WHAT IT IS JUDGED AGAINST is not the transcript the expectations read, and
+  // for two reasons a review found. Each screen is judged ON ITS OWN, because
+  // the transcript joins screens with a newline and matching folds a newline
+  // into a space, so a screen ending in "rollback" followed by one starting
+  // with "started" would have failed a program that never showed the phrase.
+  // And the BYTES are judged as well as the screens, because a screen is a
+  // snapshot: a warning drawn and erased inside one redraw is on no snapshot
+  // at all, and `never` promises "at any point".
+  const forbiddenIn = (): string | undefined => {
+    for (const text of [...shown, screen.everything(), asText(raw)]) {
+      const hit = firstShown(workflow.never, text);
+      if (hit !== undefined) return hit;
+    }
+    return undefined;
+  };
   let judgedFor = 0;
   const lastWord = async (): Promise<LastWord> => {
     for (;;) {
@@ -677,7 +740,8 @@ async function driveOnAScreen(
       if (silent && judgedFor !== lastDataAt) {
         judgedFor = lastDataAt;
         await drawn(deadline);
-        if (meetsAll(workflow.expect, [...shown, screen.everything()].join('\n'))) return 'quiet';
+        if (forbiddenIn() !== undefined) return 'quiet';
+        if (!watching && meetsAll(workflow.expect, [...shown, screen.everything()].join('\n'))) return 'quiet';
       }
       await sleep(10);
     }
@@ -733,6 +797,7 @@ async function driveOnAScreen(
   const everything = screen.everything();
   const transcript = [...shown, everything].join('\n');
   capture();
+  const forbidden = forbiddenIn();
 
   // Every chunk still queued becomes a no-op from here, so awaiting the chain
   // waits only for the one already inside the emulator. That is what has to
@@ -742,12 +807,32 @@ async function driveOnAScreen(
   if (!exited) child.kill();
   screen.dispose();
 
-  const verdict = judgeAll(workflow.expect, transcript);
   const drew = size.rows + ' by ' + size.cols;
+  // A forbidden string on any screen the program drew, or in any byte it wrote,
+  // is a failure whatever else is true, including a budget that ran out: what
+  // was seen was seen.
+  if (forbidden !== undefined) {
+    return { cause: 'expectation-not-met', detail: shownDetail(forbidden, 'screen'), output: transcript };
+  }
+  const verdict = judgeAll(workflow.expect, transcript);
+  if (verdict === 'met' && watching && ranOutOfTime) {
+    // Met wins on its own because more output can only add to a transcript.
+    // That argument does not cover what must NEVER appear, which the keys
+    // nobody sent could still have produced, so a watch that did not finish
+    // says so. An emulator that fell behind is NOT this case: `never` reads the
+    // bytes as they arrive, so what the screen had not drawn was still read.
+    return {
+      cause: 'budget-exhausted',
+      detail: `Every expectation appeared, but the budget of ${budgetMs} ms ran out with keys still to send, so whether the program went on to show what it must never show was not seen.`,
+      output: transcript,
+    };
+  }
   if (verdict === 'met') {
     return {
       cause: 'succeeded',
-      detail: `Every expectation appeared on the ${drew} screen the program drew.`,
+      detail: watching
+        ? `Every expectation appeared on the ${drew} screen the program drew, and nothing it must never show did${exited ? '' : ` in the ${budgetMs} ms it was watched`}.`
+        : `Every expectation appeared on the ${drew} screen the program drew.`,
       output: transcript,
     };
   }
@@ -773,10 +858,12 @@ async function driveOnAScreen(
   }
   if (behind > 0) {
     // A quiet producer may still have a parser backlog at the deadline. Its
-    // silence is not proof that the screen was fully drawn.
+    // silence is not proof that the screen was fully drawn, and neither is its
+    // exit: an exited program's queue is finite, not short.
+    const gone = exited ? `The program exited with code ${exited.code}, but the` : 'The';
     return {
       cause: 'budget-exhausted',
-      detail: `The budget of ${budgetMs} ms ran out before the ${drew} screen finished drawing. It had written ${written} bytes and the screen was ${behind} of them behind.`,
+      detail: `${gone} budget of ${budgetMs} ms ran out before the ${drew} screen finished drawing. It had written ${written} bytes and the screen was ${behind} of them behind.`,
       output: transcript,
     };
   }
@@ -821,6 +908,41 @@ function unmetDetail(
   return said
     ? `The ${where} showed a failure rather than what was expected. It says: "${said}" ${missing}`
     : `${missing} ${observed(last, 'end')}`;
+}
+
+/** asText turns what a program wrote to a terminal into the text it put on
+ *  the screen, for judging `never` against.
+ *
+ *  Colour and character set changes are dropped, because they do not move the
+ *  cursor and the text on either side of them is contiguous on screen: "Error:
+ *  " in bold followed by "deploy failed" is one phrase. Everything that MOVES
+ *  the cursor or erases becomes a separator no phrase can match across: a
+ *  screen clear between "rollback" and "started" puts them on two different
+ *  screens, which must not read as "rollback started". A carriage return on its
+ *  own moves to the start of the line to overwrite it, so it separates too; a
+ *  newline is kept as one, exactly as it is on a screen. */
+export function asText(raw: string): string {
+  const SEP = '\u0000';
+  // The order matters. An OSC, a window title, ends at a BEL, so the bare
+  // control characters are removed LAST: stripping the BEL first would let the
+  // title swallow every character after it.
+  return raw
+    .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)?/g, SEP)
+    .replace(/\u001b\[[0-?]*[ -\/]*m/g, '')
+    .replace(/\u001b[()*+][ -~]/g, '')
+    .replace(/\u001b\[[0-?]*[ -\/]*[@-~]/g, SEP)
+    .replace(/\u001b[\s\S]?/g, SEP)
+    .replace(/\r\n/g, '\n')
+    .replace(/[\r\b]/g, SEP)
+    .replace(/[\u0001-\u0007\u000b\u000c\u000e-\u001f\u007f]/g, '');
+}
+
+/** shownDetail names the thing a program showed and was declared never to,
+ *  in the author's own words, which is the whole of the evidence: it is a
+ *  string they wrote down and the program printed. */
+function shownDetail(forbidden: string, where: 'output' | 'screen'): string {
+  const said = /^\s*"[\s\S]+"\s*$/.test(forbidden) ? forbidden.trim() : JSON.stringify(forbidden);
+  return `The ${where} showed ${said}, which this workflow says the program must never show.`;
 }
 
 /** notOurs is the driver's own failure, which is blocked rather than failed:

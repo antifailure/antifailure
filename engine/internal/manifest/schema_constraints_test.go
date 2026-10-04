@@ -707,6 +707,7 @@ const defaultTuning = `{
         "workflows[].surface": "desktop",
         "terminal_workflows[].expect[]": "\"Applied 3 changes\"",
         "terminal_workflows[].input[]": "y",
+        "terminal_workflows[].never[]": "rollback started",
         "security.access.objects[].route": "/api/orders/{id}",
         "services[].build.strategy": "image",
         "services[].depends_on": [
@@ -777,6 +778,7 @@ const defaultTuning = `{
         "workflows[].surface": "desktop",
         "terminal_workflows[].expect[]": "\"Applied 3 changes\"",
         "terminal_workflows[].input[]": "y",
+        "terminal_workflows[].never[]": "rollback started",
         "security.access.objects[].route": "/api/orders/{id}",
         "services[].kind": "cron",
         "services[].schedule": "0 3 * * *",
@@ -838,6 +840,7 @@ const defaultTuning = `{
         "workflows[].surface": "desktop",
         "terminal_workflows[].expect[]": "\"Applied 3 changes\"",
         "terminal_workflows[].input[]": "y",
+        "terminal_workflows[].never[]": "rollback started",
         "security.access.objects[].route": "/api/orders/{id}",
         "services[].build.strategy": "image",
         "services[].depends_on": [
@@ -909,6 +912,7 @@ const defaultTuning = `{
         "workflows[].surface": "ios",
         "terminal_workflows[].expect[]": "\"Applied 3 changes\"",
         "terminal_workflows[].input[]": "y",
+        "terminal_workflows[].never[]": "rollback started",
         "security.access.objects[].route": "/api/orders/{id}",
         "services[].build.strategy": "image",
         "services[].depends_on": [
@@ -1617,7 +1621,15 @@ func TestSchemaConstraintReport(t *testing.T) {
 // block is measured in a base that drives it. Desktop is still measured in the
 // source base, where it always was. Read from this gate's own failure message
 // on this tree, not added to 888.
-const wantConstraints = 906
+//
+// Then 911. A terminal workflow's `never`: what the program must not show at
+// any point. The array's type and maxItems, and the type and both lengths on
+// each entry. The tuning names an entry in every base, "rollback started",
+// because the fixture's own filler could collide with the base's expectation
+// or its typed input, and either collision is a manifest the cross field rules
+// refuse, which would make every cell under it measure nothing. Read from this
+// gate's own failure message on this tree, not added to 906.
+const wantConstraints = 911
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and
