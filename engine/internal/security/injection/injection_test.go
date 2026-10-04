@@ -3,9 +3,11 @@ package injection
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -129,9 +131,11 @@ func safeServer() *httptest.Server {
 
 func newTestFamily() *family {
 	return &family{
-		client:  &http.Client{Timeout: 5 * time.Second},
-		sleep:   50 * time.Millisecond,
-		maxBody: 64 << 10,
+		client:       &http.Client{Timeout: 5 * time.Second},
+		sleep:        50 * time.Millisecond,
+		maxBody:      64 << 10,
+		retryUnit:    10 * time.Millisecond,
+		maxRetryWait: 50 * time.Millisecond,
 	}
 }
 
@@ -208,4 +212,185 @@ func TestFamily_ShapeIsRegisterable(t *testing.T) {
 	require.Len(t, f.Keys(), 6, "one key per payload class")
 	reg := security.NewRegistry()
 	require.NotPanics(t, func() { reg.Register(f) })
+}
+
+// limitedStaticServer is the console as the dogfood run met it: a static file
+// that ignores its query string entirely, behind a per address token bucket.
+// Once the burst is spent, a request is refused 429 with a Retry-After unless a
+// token has trickled back in, which the trickle models deterministically as
+// every fifth request. A client that waits as it was told finds the bucket
+// refilled. Nothing about the parameter's VALUE changes any answer, so every
+// finding against it is false.
+func limitedStaticServer(burst int) *httptest.Server {
+	var mu sync.Mutex
+	tokens := burst
+	n := 0
+	var refusedAt time.Time
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		n++
+		if tokens == 0 && !refusedAt.IsZero() && time.Since(refusedAt) >= 5*time.Millisecond {
+			tokens = burst
+		}
+		allowed := tokens > 0 || n%5 == 0
+		if tokens > 0 {
+			tokens--
+		}
+		if !allowed {
+			refusedAt = time.Now()
+		}
+		mu.Unlock()
+		if !allowed {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			fmt.Fprint(w, `{"error":"Too many requests.","retryAfterSeconds":1}`)
+			return
+		}
+		fmt.Fprint(w, `1:"$Sreact.fragment"`+"\n"+`0:{"b":"build","f":[["",{"children":["network"]}]]}`)
+	}))
+}
+
+// rscRoutes is the shape the dogfood run fuzzed: twenty seven Next.js page
+// payload routes, each reached with the framework's own _rsc cache key.
+func rscRoutes(n int) []security.Route {
+	routes := make([]security.Route, 0, n)
+	for i := 0; i < n; i++ {
+		routes = append(routes, security.Route{Method: http.MethodGet, Path: fmt.Sprintf("/page%d.txt", i), Params: []string{"_rsc"}})
+	}
+	return routes
+}
+
+func TestProbe_ARateLimitIsNotARefusalOfTheValue(t *testing.T) {
+	// The false finding the dogfood run reported on three nights out of five on
+	// one unchanged commit: a control refused 429 because the prober itself had
+	// spent the bucket, then a payload let through by the token that arrived in
+	// between, read as "an operator turned a refusal into an answer".
+	srv := limitedStaticServer(20)
+	defer srv.Close()
+	f := newTestFamily()
+	findings, err := f.Probe(context.Background(), inputWithRoutes(srv.URL, rscRoutes(27), allFail()))
+	require.NoError(t, err, "a client that waits as asked measures every comparison")
+	require.Empty(t, findings, "a static file behind a rate limiter proves no injection")
+}
+
+// flappingNoSQLServer refuses every other request, whatever it carries. Its
+// denials are a property of time, never of the value.
+func flappingNoSQLServer() *httptest.Server {
+	var mu sync.Mutex
+	n := 0
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		n++
+		odd := n%2 == 1
+		mu.Unlock()
+		if odd {
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprint(w, "forbidden")
+			return
+		}
+		fmt.Fprint(w, "ok")
+	}))
+}
+
+func TestProbe_ADenialThatDoesNotReproduceIsNotAFinding(t *testing.T) {
+	srv := flappingNoSQLServer()
+	defer srv.Close()
+	f := newTestFamily()
+	findings, err := f.Probe(context.Background(), inputWithRoutes(srv.URL, rscRoutes(3), allFail()))
+	require.NoError(t, err)
+	require.Empty(t, findings, "a denial that flips with time, not with the value, proves nothing")
+}
+
+// nosqlServer is a real operator smuggling hole: the value is decoded as JSON
+// and an object reaches the filter, so {"$ne":null} matches every row.
+func nosqlServer() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Query().Get("token"), `{"$ne"`) {
+			fmt.Fprint(w, `{"user":"admin","orders":[1,2,3]}`)
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, "no such token")
+	}))
+}
+
+func TestProbe_ProvesARealNoSQLOperatorSmuggling(t *testing.T) {
+	srv := nosqlServer()
+	defer srv.Close()
+	f := newTestFamily()
+	in := inputWithRoutes(srv.URL, []security.Route{{Method: http.MethodGet, Path: "/session", Params: []string{"token"}}}, allFail())
+	findings, err := f.Probe(context.Background(), in)
+	require.NoError(t, err)
+	require.Len(t, findings, 1)
+	require.Equal(t, string(RuleNoSQL), findings[0].Rule)
+}
+
+func TestProbe_ProvesNoSQLBehindARateLimiter(t *testing.T) {
+	// Waiting must not cost the check its ability to say yes.
+	inner := nosqlServer()
+	defer inner.Close()
+	var mu sync.Mutex
+	n := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		n++
+		refuse := n%3 == 0
+		mu.Unlock()
+		if refuse {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		resp, err := http.Get(inner.URL + r.URL.RequestURI())
+		if err != nil {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		w.WriteHeader(resp.StatusCode)
+		_, _ = io.Copy(w, resp.Body)
+	}))
+	defer srv.Close()
+	f := newTestFamily()
+	in := inputWithRoutes(srv.URL, []security.Route{{Method: http.MethodGet, Path: "/session", Params: []string{"token"}}}, allFail())
+	findings, err := f.Probe(context.Background(), in)
+	require.NoError(t, err)
+	require.Len(t, findings, 1)
+	require.Equal(t, string(RuleNoSQL), findings[0].Rule)
+}
+
+func TestProbe_ARateLimitThatNeverLiftsIsBlockedNeverAPass(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+	f := newTestFamily()
+	findings, err := f.Probe(context.Background(), inputWithRoutes(srv.URL, rscRoutes(1), allFail()))
+	require.Error(t, err, "a prober refused every time measured nothing and must say so")
+	require.Contains(t, err.Error(), "rate limit")
+	require.Nil(t, findings)
+}
+
+func TestRateLimitWait(t *testing.T) {
+	f := newTestFamily()
+	wait, limited := f.rateLimitWait(http.StatusTooManyRequests, "3")
+	require.True(t, limited, "a 429 refuses the rate")
+	require.Equal(t, 30*time.Millisecond, wait, "the header's seconds, in the family's unit")
+
+	wait, limited = f.rateLimitWait(http.StatusTooManyRequests, "")
+	require.True(t, limited, "a 429 with no header still refuses the rate")
+	require.Equal(t, f.retryUnit, wait, "one unit when the header is absent")
+
+	wait, _ = f.rateLimitWait(http.StatusTooManyRequests, "3600")
+	require.Equal(t, f.maxRetryWait, wait, "a wait is capped")
+
+	_, limited = f.rateLimitWait(http.StatusServiceUnavailable, "2")
+	require.True(t, limited, "a 503 that says when to return is a request to slow down")
+
+	_, limited = f.rateLimitWait(http.StatusServiceUnavailable, "")
+	require.False(t, limited, "a bare 503 is the application failing, which is its answer")
+
+	_, limited = f.rateLimitWait(http.StatusForbidden, "2")
+	require.False(t, limited, "a refusal of the content is never retried away")
 }
