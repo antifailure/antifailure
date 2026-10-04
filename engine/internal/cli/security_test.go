@@ -80,6 +80,9 @@ type spyFamily struct {
 	gotInput security.Input
 	finding  *report.Finding
 	probeErr error
+	// partial returns the finding beside probeErr, a family that proved
+	// something before it was stopped.
+	partial bool
 }
 
 func (f *spyFamily) Name() string               { return f.name }
@@ -91,6 +94,9 @@ func (f *spyFamily) Probe(_ context.Context, in security.Input) ([]report.Findin
 	f.probed = true
 	f.gotInput = in
 	if f.probeErr != nil {
+		if f.partial && f.finding != nil {
+			return []report.Finding{*f.finding}, f.probeErr
+		}
 		return nil, f.probeErr
 	}
 	if f.finding != nil {
@@ -353,6 +359,22 @@ func TestSecurityFindings_ABlockedProbeIsANoteNotAFinding(t *testing.T) {
 	require.Empty(t, got, "a probe that could not complete reaches no verdict")
 	require.Len(t, run.Notes, 1)
 	require.Contains(t, run.Notes[0], "could not complete")
+}
+
+func TestSecurityFindings_AFindingProvenBeforeTheProbeStoppedIsKept(t *testing.T) {
+	fam := authzSpy()
+	fam.probeErr = errors.New("the deadline passed before the last routes were reached")
+	fam.partial = true
+	reg := security.NewRegistry()
+	reg.Register(fam)
+	run := report.Run{URL: "http://twin.local"}
+
+	got := securityFindings(context.Background(), testEnv(), &fakeReader{profile: codeProfile()},
+		reg, report.Configure(nil), &run, nil, nil, "", "", 0)
+
+	require.Len(t, got, 1, "a hole the family exercised is not unproven by what it missed afterwards")
+	require.Len(t, run.Notes, 1, "and what it missed is said")
+	require.Contains(t, run.Notes[0], "unjudged rather than clean")
 }
 
 func TestResolveSecurityPolicy_FamilyDefaultAppliesAndManifestOverrideWins(t *testing.T) {
