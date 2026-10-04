@@ -7,8 +7,8 @@
 # is what keeps the file honest: an exception left behind after the dependency
 # moves reads like protection that is not there.
 #
-# It holds one entry, for an advisory with no fixed version published. Every
-# other lockfile here audits clean, dev dependencies included, so this gate
+# It is empty, and that is the current state rather than a placeholder. Every
+# lockfile here audits clean today, dev dependencies included, so this gate
 # fires on drift rather than on a backlog.
 #
 # npm audit has no reachability analysis, unlike govulncheck. It cannot tell you
@@ -30,17 +30,3 @@
 #         Why this cannot reach anything we ship, and what would change it.
 
 allow:
-  - id: GHSA-ch52-4w7c-c8xp
-    package: http-cache-semantics
-    expires: 2026-12-31
-    reason: >
-      No fixed version exists: the advisory covers every release through
-      4.2.0, which is the latest, and names no patched version. The only
-      copy is in docs, pulled in by astro, whose single import of it is
-      astro/dist/assets/build/remote.js, the cache for remote images fetched
-      while `astro build` runs. The docs site has no adapter and no output
-      setting, so it is built to static files and nothing serves a request
-      through astro, which means there is no shared cache entry for another
-      user to read with a large max-stale. Revisit when a patched release
-      ships, or the moment docs gains a server adapter, either of which ends
-      this argument.
