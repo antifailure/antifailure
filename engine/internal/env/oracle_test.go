@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -161,6 +162,26 @@ func TestUntarRefusesAPathOutsideTheCheckout(t *testing.T) {
 		{"a directory outside", tar.Header{Name: "../escaped/", Typeflag: tar.TypeDir, Mode: 0o755}},
 		{"a symlink outside", tar.Header{Name: "link", Typeflag: tar.TypeSymlink, Linkname: "../../secrets"}},
 	}
+	// The ways a name leaves a directory on Windows that it cannot on Linux,
+	// where each of these is an ordinary file name and correctly accepted.
+	if runtime.GOOS == "windows" {
+		cases = append(cases, []struct {
+			name  string
+			entry tar.Header
+		}{
+			{"a drive absolute path", tar.Header{Name: "C:/Windows/escaped", Typeflag: tar.TypeReg, Mode: 0o644}},
+			{"a drive relative path", tar.Header{Name: "C:escaped", Typeflag: tar.TypeReg, Mode: 0o644}},
+			{"a UNC path", tar.Header{Name: "//server/share/escaped", Typeflag: tar.TypeReg, Mode: 0o644}},
+			{"backslash parent segments", tar.Header{Name: "a\\..\\..\\escaped.go", Typeflag: tar.TypeReg, Mode: 0o644}},
+			{"a device name", tar.Header{Name: "NUL", Typeflag: tar.TypeReg, Mode: 0o644}},
+			// Not COM1.txt: Windows 11 stopped treating a device name with an
+			// extension as the device, and Go followed it, so that one is an
+			// ordinary file there. Measured on windows-latest, where it was
+			// accepted, rather than assumed from older documentation.
+			{"a device name in a directory", tar.Header{Name: "sub/NUL", Typeflag: tar.TypeReg, Mode: 0o644}},
+			{"a symlink to a drive", tar.Header{Name: "link", Typeflag: tar.TypeSymlink, Linkname: "C:/Windows"}},
+		}...)
+	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			dir := filepath.Join(victim, "checkout-"+c.name)
@@ -237,6 +258,55 @@ func TestTheBaselineCheckoutIsTheManifestsOwnSubtree(t *testing.T) {
 	require.True(t, os.IsNotExist(err), "the checkout outlived the comparison")
 }
 
+// The baseline is built from an archive and the change from the working tree,
+// so the two must hold the same bytes for the same commit or every comparison
+// differs by something nobody changed. On Windows the difference is line
+// endings: Git for Windows installs with core.autocrlf true, so a working tree
+// holds CRLF while the repository holds LF. git archive applies the same
+// conversion a checkout does, which is what keeps the two sides equal, so the
+// conversion is followed rather than forced off. Forcing LF would make a
+// Windows baseline differ from its own working tree in every text file.
+func TestTheBaselineHasTheBytesACheckoutWouldHave(t *testing.T) {
+	for _, autocrlf := range []string{"false", "true"} {
+		t.Run("core.autocrlf="+autocrlf, func(t *testing.T) {
+			root, base, _ := gitRepoWithSubdirectory(t)
+			git := func(args ...string) {
+				t.Helper()
+				out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput()
+				require.NoErrorf(t, err, "git %v: %s", args, out)
+			}
+			git("config", "core.autocrlf", autocrlf)
+
+			// What a checkout of that commit writes on this configuration.
+			dockerfile := filepath.Join(root, "services", "api", "Dockerfile")
+			require.NoError(t, os.Remove(dockerfile))
+			git("checkout", base, "--", "services/api/Dockerfile")
+			want, err := os.ReadFile(dockerfile)
+			require.NoError(t, err)
+
+			o, err := env.New(env.Options{
+				Root:     filepath.Join(root, "services", "api"),
+				Manifest: &schema.Manifest{Name: "api"},
+				Branch:   "feature",
+				Progress: func(string) {},
+			})
+			require.NoError(t, err)
+			dir, clean, err := o.BaselineTreeForTest(t.Context(), base)
+			require.NoError(t, err)
+			t.Cleanup(clean)
+
+			got, err := os.ReadFile(filepath.Join(dir, "Dockerfile"))
+			require.NoError(t, err)
+			require.Equal(t, string(want), string(got))
+			if autocrlf == "true" {
+				// The arm that proves the conversion is live at all, so the
+				// equality above is not two LF files agreeing by default.
+				require.Equal(t, "FROM scratch\r\n", string(got))
+			}
+		})
+	}
+}
+
 func gitRepoWithSubdirectory(t *testing.T) (root, base, head string) {
 	t.Helper()
 	root = t.TempDir()
@@ -258,6 +328,11 @@ func gitRepoWithSubdirectory(t *testing.T) (root, base, head string) {
 		filepath.Join(root, "services", "api", "Dockerfile"), []byte("FROM scratch\n"), 0o644))
 
 	run("init", "--initial-branch=main", "-q")
+	// Pinned, so the bytes below do not depend on the machine. Git for Windows
+	// installs with core.autocrlf true, which turns this LF into CRLF on the
+	// way out of the archive. That conversion is deliberate and has its own
+	// test, TestTheBaselineHasTheBytesACheckoutWouldHave.
+	run("config", "core.autocrlf", "false")
 	run("add", ".")
 	run("commit", "-q", "-m", "first")
 	base = run("rev-parse", "HEAD")

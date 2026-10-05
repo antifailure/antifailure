@@ -5,10 +5,10 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
+	"github.com/antifailure/antifailure/engine/internal/hostshell"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
@@ -104,7 +104,10 @@ func (s *SeedAdapter) Provision(
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "sh", "-c", s.command)
+	cmd, err := hostshell.Command(ctx, s.command)
+	if err != nil {
+		return nil, fmt.Errorf("the seed command for persona %q cannot run: %w", p.Name, err)
+	}
 	cmd.Dir = s.dir
 	cmd.Env = append(append([]string{}, s.environ...), s.environment(p, want)...)
 

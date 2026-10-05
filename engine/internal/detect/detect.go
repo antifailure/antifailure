@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -228,6 +229,18 @@ func (r *Repo) Truncated() bool { return r.truncated }
 
 // Root returns the repository root as given.
 func (r *Repo) Root() string { return r.root }
+
+// RootName is the last element of the repository root, which is what a
+// service at the root is named after.
+//
+// The root is an operating system path, unlike every path in the index, which
+// io/fs always spells with forward slashes. path.Base on a Windows root found
+// no slash in C:\Users\me\shop and returned all of it, so the service at the
+// root of a Windows checkout was named cusersmeshop and every question about it
+// carried that name.
+func (r *Repo) RootName() string { return rootName(r.root) }
+
+func rootName(root string) string { return filepath.Base(filepath.Clean(root)) }
 
 // Read returns a file's contents, cached, or false when it is absent, too
 // large, or the total read budget is exhausted.

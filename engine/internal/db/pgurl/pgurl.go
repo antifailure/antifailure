@@ -51,6 +51,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the pgx driver
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
@@ -739,7 +740,31 @@ type row struct {
 }
 
 // list returns the databases with a prefix that carry this provider's marker.
+//
+// A database that somebody drops while this reads is the one case that turns a
+// correct listing into an error, and it is not rare: every golden refresh and
+// every teardown drops one, and a second client on the same server is the
+// normal state of a shared database. It surfaced on a Windows runner, where
+// every package's tests share one server, and it is the same race anywhere.
+// The query below narrows it as far as SQL can, and what is left of it, a
+// database gone between two catalog reads in one statement, is retried.
 func (p *Provider) list(ctx context.Context, prefix string) ([]row, error) {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		out, err := p.listOnce(ctx, prefix)
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "3D000" {
+			return out, err
+		}
+		// undefined_database: a database the snapshot still listed was gone
+		// by the time a function looked it up. Asking again sees the
+		// catalog without it.
+		lastErr = err
+	}
+	return nil, lastErr
+}
+
+func (p *Provider) listOnce(ctx context.Context, prefix string) ([]row, error) {
 	db, err := p.open()
 	if err != nil {
 		return nil, err
@@ -750,10 +775,19 @@ func (p *Provider) list(ctx context.Context, prefix string) ([]row, error) {
 	// cannot connect to. One such database on the server would otherwise turn
 	// every listing into an error, and the database causing it need not be
 	// ours at all.
+	//
+	// By oid rather than by name, because the name is looked up again in the
+	// current catalog, and a database dropped after this statement's snapshot
+	// raised "does not exist" from the middle of the listing; the oid form of
+	// has_database_privilege answers NULL instead, which the CASE treats as no.
+	// And coalesced, because pg_database_size answers NULL rather than raising
+	// for a database whose files are already gone, which is one being dropped
+	// right now, and a NULL in an int64 was a Scan error that failed the whole
+	// listing.
 	rows, err := db.QueryContext(ctx, `
 		SELECT d.datname,
-		       CASE WHEN pg_catalog.has_database_privilege(d.datname, 'CONNECT')
-		            THEN pg_catalog.pg_database_size(d.datname) ELSE 0 END,
+		       coalesce(CASE WHEN pg_catalog.has_database_privilege(d.oid, 'CONNECT')
+		            THEN pg_catalog.pg_database_size(d.oid) ELSE 0 END, 0),
 		       coalesce(pg_catalog.shobj_description(d.oid, 'pg_database'), '')
 		FROM pg_catalog.pg_database d
 		WHERE d.datname LIKE $1 || '%'`, prefix)

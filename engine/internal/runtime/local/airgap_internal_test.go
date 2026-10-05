@@ -15,6 +15,7 @@ package local
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 
@@ -30,6 +31,13 @@ import (
 func TestAirGapped_TheSidecarImageIsRequiredRatherThanBuiltOnDemand(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipped: -short")
+	}
+	// The same opt out the package's other daemon tests honour. Without it a
+	// machine that had said out loud it has no usable daemon still ran this,
+	// and the precondition below refused, correctly, as "NOT run rather than
+	// passed", which then read as a failure of the product.
+	if os.Getenv("AF_SKIP_DOCKER") != "" {
+		t.Skip("skipped: AF_SKIP_DOCKER is set")
 	}
 	r, err := New(Options{Clock: clock.New()})
 	if err != nil {

@@ -29,7 +29,7 @@ func TestTheSeedCommandIsToldEverythingItNeedsToCreateTheAccount(t *testing.T) {
 	// A script that records its environment, which is exactly what a real
 	// seed script reads to do its work.
 	a := personas.NewSeedAdapter(personas.SeedOptions{
-		Command:     "env | grep -E '^(AF_PERSONA_|AF_DATABASE_URL|DATABASE_URL)' | sort > " + out,
+		Command:     "env | grep -E '^(AF_PERSONA_|AF_DATABASE_URL|DATABASE_URL)' | sort > " + filepath.Base(out),
 		Dir:         dir,
 		DatabaseURL: secrets.New("postgres://u:p@localhost:5432/branch"),
 		Environ:     []string{"PATH=" + os.Getenv("PATH")},
@@ -63,7 +63,7 @@ func TestASecondFactorIsOnlyOfferedToAPersonaThatAskedForOne(t *testing.T) {
 	run := func(p schema.Persona) string {
 		out := filepath.Join(dir, strings.ReplaceAll(p.Name, " ", "")+".txt")
 		a := personas.NewSeedAdapter(personas.SeedOptions{
-			Command: "env | grep '^AF_PERSONA_' | sort > " + out,
+			Command: "env | grep '^AF_PERSONA_' | sort > " + filepath.Base(out),
 			Dir:     dir, Environ: []string{"PATH=" + os.Getenv("PATH")},
 		})
 		d := personas.NewDeriver("env-abc", personas.PasswordPolicy{})
@@ -98,7 +98,7 @@ func TestTheCredentialsGoThroughTheEnvironmentAndNotTheCommandLine(t *testing.T)
 	a := personas.NewSeedAdapter(personas.SeedOptions{
 		// "$0 $@" is how the shell was invoked, which is what would show in
 		// the process table.
-		Command: "echo \"$0 $*\" > " + out,
+		Command: "echo \"$0 $*\" > " + filepath.Base(out),
 		Dir:     dir, Environ: []string{"PATH=" + os.Getenv("PATH")},
 	})
 	d := personas.NewDeriver("env-abc", personas.PasswordPolicy{})
@@ -138,7 +138,7 @@ func TestAPersonaThatNeverSignsInIsNeverHandedToTheSeedCommand(t *testing.T) {
 	calls := filepath.Join(dir, "calls.txt")
 	a := personas.NewSeedAdapter(personas.SeedOptions{
 		Command: `[ -n "$AF_PERSONA_EMAIL" ] || { echo "AF_PERSONA_EMAIL is required" >&2; exit 1; }; ` +
-			`echo "$AF_PERSONA_NAME" >> ` + calls,
+			`echo "$AF_PERSONA_NAME" >> ` + filepath.Base(calls),
 		Dir: dir, Environ: []string{"PATH=" + os.Getenv("PATH")},
 	})
 	d := personas.NewDeriver("env-abc", personas.PasswordPolicy{})

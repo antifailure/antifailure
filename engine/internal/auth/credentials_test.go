@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
@@ -14,6 +13,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/internal/privatefs/privatefstest"
 )
 
 // fakeRing is an in-memory keyring, so these tests never touch a real one.
@@ -102,10 +102,11 @@ func TestFallsBackToAFileWhenThereIsNoKeyring(t *testing.T) {
 }
 
 func TestTheFallbackFileIsNotReadableByAnybodyElse(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("file modes do not mean the same thing on Windows")
-	}
-	dir := t.TempDir()
+	// In a folder everybody can read, so the file and its directory are
+	// private because they were made private and not because of where they
+	// landed. On Windows this was skipped, which left "nobody else can read
+	// it" untested on the platform where it was not true.
+	dir := privatefstest.OpenFolder(t)
 	store := &auth.Store{Ring: nil, Dir: dir}
 	require.NoError(t, store.Save(auth.Credential{
 		ControlPlane: "https://app.dev.antifailure.dev",
@@ -123,8 +124,7 @@ func TestTheFallbackFileIsNotReadableByAnybodyElse(t *testing.T) {
 			// every platform without a keyring, so group or world readable
 			// here is the credential being readable by every other account on
 			// the machine.
-			require.Equal(t, os.FileMode(0o600), info.Mode().Perm(),
-				"the credential file is readable by somebody other than its owner")
+			privatefstest.RequirePrivate(t, p, 0o600)
 		}
 		return nil
 	}))
@@ -132,9 +132,27 @@ func TestTheFallbackFileIsNotReadableByAnybodyElse(t *testing.T) {
 
 	// The directory too. A world-readable directory does not expose the file's
 	// contents, but it does expose which control planes somebody uses.
-	info, err := os.Stat(filepath.Dir(found))
+	privatefstest.RequirePrivate(t, filepath.Dir(found), 0o700)
+}
+
+// The credentials directory may already exist, made by an older release or by
+// hand, and readable by everybody. Making it private is not this command's
+// decision, so it is left alone, and the file has to be private by itself
+// rather than by inheriting from a directory that is not. Without this case
+// the file's own protection was invisible: a directory this run created is
+// private, and everything inside it would be private whatever the file did.
+func TestTheFallbackFileIsPrivateInADirectoryThatAlreadyExisted(t *testing.T) {
+	dir := privatefstest.OpenFolder(t)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "credentials"), 0o755))
+	store := &auth.Store{Ring: nil, Dir: dir}
+	require.NoError(t, store.Save(auth.Credential{
+		ControlPlane: "https://app.dev.antifailure.dev",
+		Token:        "afu_private",
+	}))
+	entries, err := os.ReadDir(filepath.Join(dir, "credentials"))
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o700), info.Mode().Perm())
+	require.Len(t, entries, 1)
+	privatefstest.RequirePrivate(t, filepath.Join(dir, "credentials", entries[0].Name()), 0o600)
 }
 
 // A keyring that exists and refuses is a real state: a locked keychain, a

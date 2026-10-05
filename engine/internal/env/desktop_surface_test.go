@@ -46,10 +46,28 @@ func aDesktopWorkflow(name string) schema.Workflow {
 	}
 }
 
+// hostAbs is an absolute path on the machine the test runs on. "/opt/x" is
+// absolute on Unix and relative to the current drive on Windows, so a fixture
+// written as a Unix path was resolved against the root there and the
+// assertion compared a Windows path with a Unix one.
+func hostAbs(parts ...string) string {
+	return filepath.Join(append([]string{filepath.VolumeName(os.TempDir()) + string(filepath.Separator)}, parts...)...)
+}
+
+// jsonField is "key":value with the value encoded the way the document encodes
+// it, which escapes every backslash in a Windows path.
+func jsonField(key, value string) string {
+	b, err := json.Marshal(value)
+	if err != nil {
+		panic(err)
+	}
+	return `"` + key + `":` + string(b)
+}
+
 func anElectronApp() *schema.DesktopApplication {
 	return &schema.DesktopApplication{
 		Kind:        schema.DesktopElectron,
-		Application: "/opt/electron/Electron",
+		Application: hostAbs("opt", "electron", "Electron"),
 		Args:        []string{"./app"},
 	}
 }
@@ -65,7 +83,7 @@ func TestDesktopApp_TheApplicationReachesTheRunnerUnderTheNamesItReads(t *testin
 	body, err := json.Marshal(app)
 	require.NoError(t, err)
 	for _, key := range []string{
-		`"kind":"electron"`, `"executablePath":"/opt/electron/Electron"`, `"args":["./app"]`,
+		`"kind":"electron"`, jsonField("executablePath", hostAbs("opt", "electron", "Electron")), `"args":["./app"]`,
 	} {
 		require.Containsf(t, string(body), key,
 			"the runner reads %s and the document does not carry it", key)
@@ -81,12 +99,12 @@ func TestDesktopApp_TheApplicationReachesTheRunnerUnderTheNamesItReads(t *testin
 func TestDesktopApp_ANativeApplicationIsSentAsABundleAndAName(t *testing.T) {
 	m := desktopManifest(&schema.DesktopApplication{
 		Kind:        schema.DesktopMacOS,
-		Application: "/Applications/Ledger.app",
+		Application: hostAbs("Applications", "Ledger.app"),
 		Process:     "Ledger",
 	}, aDesktopWorkflow("sign-in"))
 	app := orchestratorFor(t, t.TempDir(), m).desktopApp(orchestratorFor(t, t.TempDir(), m).workflowDocs(nil))
 	require.NotNil(t, app)
-	require.Equal(t, "/Applications/Ledger.app", app.BundlePath)
+	require.Equal(t, hostAbs("Applications", "Ledger.app"), app.BundlePath)
 	require.Equal(t, "Ledger", app.Name)
 	// An Electron binary is not what a native run is given, and sending one
 	// would be a second answer to which of the two readers opens this.
@@ -94,7 +112,7 @@ func TestDesktopApp_ANativeApplicationIsSentAsABundleAndAName(t *testing.T) {
 
 	body, err := json.Marshal(app)
 	require.NoError(t, err)
-	require.Contains(t, string(body), `"bundlePath":"/Applications/Ledger.app"`)
+	require.Contains(t, string(body), jsonField("bundlePath", hostAbs("Applications", "Ledger.app")))
 	require.Contains(t, string(body), `"name":"Ledger"`)
 }
 

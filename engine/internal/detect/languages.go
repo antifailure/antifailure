@@ -392,7 +392,7 @@ func joinDir(dir, name string) string {
 // when it is at the root.
 func baseNameFor(dir string, r *Repo) string {
 	if dir == "" {
-		return path.Base(r.Root())
+		return r.RootName()
 	}
 	return path.Base(dir)
 }

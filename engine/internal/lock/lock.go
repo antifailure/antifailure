@@ -25,6 +25,7 @@ import (
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/internal/privatefs"
 )
 
 // Owner describes who holds a lock.
@@ -49,7 +50,7 @@ type Lock struct {
 // exists, the stale file is reclaimed and Reclaimed reports it so that the
 // caller can emit an event rather than reclaim silently.
 func Acquire(path string, c clock.Clock, command string) (*Lock, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err := privatefs.MkdirAll(filepath.Dir(path)); err != nil {
 		return nil, fmt.Errorf("lock: create %s: %w", filepath.Dir(path), err)
 	}
 	host, _ := os.Hostname()
@@ -59,7 +60,7 @@ func Acquire(path string, c clock.Clock, command string) (*Lock, error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		// O_EXCL is the atomic part. Two processes racing here, on the same
 		// machine or on a shared filesystem that honours it, cannot both win.
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		f, err := privatefs.CreateExclusive(path)
 		if err == nil {
 			if wErr := writeOwner(f, path, me); wErr != nil {
 				return nil, wErr

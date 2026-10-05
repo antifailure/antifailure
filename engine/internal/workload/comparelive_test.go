@@ -131,26 +131,56 @@ func routeRow(t *testing.T, c *workload.Comparison, name string) workload.RouteD
 func TestARealBuildThatGotSlowerFailsTheBaseBranchLatencyThreshold(t *testing.T) {
 	// A real sleep on one route of a real server, which is the regression a
 	// person would introduce by adding a query inside a loop.
-	base := buildServer(t, nil)
-	cand := buildServer(t, map[string]time.Duration{"/orders": 40 * time.Millisecond})
+	//
+	// Both sides take 5ms to answer /health. Answered immediately, its p95 was
+	// a fraction of a millisecond and on windows-latest it moved by more than
+	// the declared doubling in 5 runs of 20 with nothing changed, 0.3ms to
+	// 1.4ms at worst, so "exactly one route breached" failed on a neighbour
+	// that only jittered. A floor of 5ms puts that jitter at a fifth of the
+	// limit rather than past it, and is the same on both sides, so it is not
+	// a regression of its own.
+	neighbour := 5 * time.Millisecond
+	base := buildServer(t, map[string]time.Duration{"/health": neighbour})
+	// A hundred milliseconds, sized against the slowest floor measured rather
+	// than the fastest. The base side's p95 is almost all scheduling: 7ms to
+	// 26ms on a contended Mac, and 28.9ms on windows-latest, where a 40ms
+	// sleep moved p95 to 42.8ms, +48 per cent, under the declared doubling.
+	// Against 29ms this is more than four times the floor.
+	cand := buildServer(t, map[string]time.Duration{"/orders": 100 * time.Millisecond, "/health": neighbour})
 
-	baseRes := sendMix(t, base.URL, 20)
-	candRes := sendMix(t, cand.URL, 20)
+	// Fifty in flight rather than twenty. A hundred requests a second to a
+	// route that takes a tenth of a second keeps about ten in flight, and
+	// under a ceiling of twenty its bursts queued /health behind it: on
+	// windows-latest /health went from 0.5ms to 1.8ms and breached on its own,
+	// which made "exactly one route breached" a question about the generator's
+	// ceiling rather than about attribution.
+	baseRes := sendMix(t, base.URL, 50)
+	candRes := sendMix(t, cand.URL, 50)
 	c := compareSides(t, baseRes, candRes)
 
 	// The regression is attributed to the route that actually slowed down, and
 	// the route beside it is not dragged along with it.
 	orders := routeRow(t, c, "GET /orders")
+	health := routeRow(t, c, "GET /health")
+	// Logged before the assertions rather than after them, so the numbers are
+	// there on the run that fails, which is the only run anybody reads them on.
+	for _, r := range []workload.RouteDifference{orders, health} {
+		if r.P95Ratio != nil {
+			t.Logf("%s: base p95 %.1fms, candidate p95 %.1fms, ratio %+.1f%%",
+				r.Route, *r.P95Baseline, *r.P95Candidate, *r.P95Ratio*100)
+		}
+	}
 	require.Equal(t, workload.DirectionWorse, orders.Direction)
 	require.NotNil(t, orders.P95Ratio)
 	// Against the DECLARED limit rather than against a tighter number of its
 	// own. This assertion read "more than fourfold" and flaked on a contended
 	// machine: the base side is a server that answers immediately, so its p95
 	// is almost all scheduling, and it was measured anywhere between 7ms and
-	// 26ms for identical work. A 40ms sleep is a sixfold regression against
-	// the low reading and barely a doubling against the high one. Asserting a
-	// ratio the machine controls, rather than the verdict this code decides,
-	// is testing the laptop.
+	// 26ms for identical work. The sleep that was 40ms then was a sixfold
+	// regression against the low reading and barely a doubling against the
+	// high one, and fell under it once on Windows, which is why it is now
+	// 100ms. Asserting a ratio the machine controls, rather than the verdict
+	// this code decides, is testing the laptop.
 	require.Greater(t, *orders.P95Ratio, proofThresholds().P95Increase,
 		"the regression must clear the limit the test declares, whatever the host noise")
 
@@ -164,7 +194,6 @@ func TestARealBuildThatGotSlowerFailsTheBaseBranchLatencyThreshold(t *testing.T)
 	// So the claim worth asserting is attribution, not innocence: the route
 	// that changed carries the breach, and it moved by an order of magnitude
 	// more than the one that did not.
-	health := routeRow(t, c, "GET /health")
 	require.NotNil(t, health.P95Ratio)
 	require.Greater(t, *orders.P95Ratio, *health.P95Ratio*3,
 		"the route that actually slowed down must move far more than the "+
@@ -180,8 +209,6 @@ func TestARealBuildThatGotSlowerFailsTheBaseBranchLatencyThreshold(t *testing.T)
 	require.Equal(t, "GET /orders", breaches[0].Scope)
 	require.Contains(t, breaches[0].Detail, "slower against a limit")
 
-	t.Logf("base p95 %.1fms, candidate p95 %.1fms, ratio %+.1f%%",
-		*orders.P95Baseline, *orders.P95Candidate, *orders.P95Ratio*100)
 }
 
 func TestARealBuildThatGotSlowerFailsTheThroughputThreshold(t *testing.T) {

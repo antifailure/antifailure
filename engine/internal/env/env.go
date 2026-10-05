@@ -20,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -40,6 +39,7 @@ import (
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/events"
 	"github.com/antifailure/antifailure/engine/internal/golden"
+	"github.com/antifailure/antifailure/engine/internal/hostshell"
 	"github.com/antifailure/antifailure/engine/internal/journal"
 	"github.com/antifailure/antifailure/engine/internal/lock"
 	"github.com/antifailure/antifailure/engine/internal/manifest"
@@ -3512,7 +3512,10 @@ func (o *Orchestrator) runSeed(
 	o.progress("seeding the golden with the manifest's command")
 	o.event(s, events.MaskProgress, "seeding the golden", events.F("phase", "seed"))
 
-	cmd := exec.CommandContext(ctx, "sh", "-c", seed)
+	cmd, err := hostshell.Command(ctx, seed)
+	if err != nil {
+		return aferrors.Coded(aferrors.AFDB013, "command", seed, "detail", err.Error())
+	}
 	cmd.Dir = o.opts.Root
 	cmd.Env = append(os.Environ(), "DATABASE_URL="+candidate.Reveal())
 	out, err := cmd.CombinedOutput()

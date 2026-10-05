@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/antifailure/antifailure/engine/internal/privatefs/privatefstest"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
@@ -346,13 +347,13 @@ func TestFileStore_TheValuesAreNotOnDiskInTheClear(t *testing.T) {
 
 func TestFileStore_IsOnlyReadableByItsOwner(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "secrets.enc")
+	// In a folder everybody can read, because a secret store readable by
+	// anybody else on the machine is not a fallback, it is a leak, and on
+	// Windows a file is exactly as readable as its folder unless it says
+	// otherwise.
+	path := filepath.Join(privatefstest.OpenFolder(t), "secrets.enc")
 	require.NoError(t, secrets.NewFileStore(path, "p").Set("TOKEN", "v"))
-
-	info, err := os.Stat(path)
-	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o600), info.Mode().Perm(),
-		"a secret store readable by anybody else on the machine is not a fallback, it is a leak")
+	privatefstest.RequirePrivate(t, path, 0o600)
 }
 
 func TestFileStore_TheWrongPassphraseFails(t *testing.T) {

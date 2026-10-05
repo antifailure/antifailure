@@ -2101,6 +2101,16 @@ generate:
 keyring:
     cd engine && go test ./internal/secrets/ -count=1
 
+# The engine's tests on native Windows, which is what windows-tests.yml runs.
+#
+# Out of `gate` because it needs a Windows machine: on any other one it would
+# be `just test` again under another name. On Windows it is the whole check,
+# including the decision about Docker that tools/wintest makes from the daemon
+# and the floor below which it refuses to call a run green.
+windows:
+    cd engine && go vet ./...
+    go run ./tools/wintest .
+
 # The same linter set, pointed at the module that decides what ships.
 #
 # tools/ holds prosecheck, gatecheck, changecheck, routecheck, wirecheck,

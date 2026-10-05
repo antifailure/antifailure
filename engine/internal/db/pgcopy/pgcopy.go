@@ -219,8 +219,8 @@ func toolsFound(name string) ([]toolCandidate, error) {
 	if p, lookErr := exec.LookPath(name); lookErr == nil {
 		found = append(found, toolCandidate{p, toolMajor(p)})
 	}
-	for _, pattern := range searchDirs {
-		matches, _ := filepath.Glob(filepath.Join(pattern, name))
+	for _, pattern := range append(searchDirs, platformSearchDirs()...) {
+		matches, _ := filepath.Glob(filepath.Join(pattern, name+exeSuffix))
 		for _, m := range matches {
 			found = append(found, toolCandidate{m, toolMajor(m)})
 		}
@@ -299,8 +299,9 @@ func tooOld(name string, have, want int) error {
 		"pgcopy: the source database is Postgres %d and the newest %s on this machine is %d. "+
 			"pg_dump refuses to read a server newer than itself, so this cannot be worked around. "+
 			"Install the matching client tools: on Debian or Ubuntu, "+
-			"apt-get install postgresql-client-%d; on macOS, brew install libpq or postgresql@%d",
-		want, name, have, want, want)
+			"apt-get install postgresql-client-%d; on macOS, brew install libpq or postgresql@%d; "+
+			"on Windows, winget install --id PostgreSQL.PostgreSQL.%d -e",
+		want, name, have, want, want, want)
 }
 
 // CopyWith copies a source database into a target, narrowed by opts.

@@ -3,10 +3,44 @@
 package termimg
 
 import (
+	"errors"
 	"os"
 	"syscall"
 	"time"
+
+	"golang.org/x/term"
 )
+
+// Query writes the capability questions to out and reads whatever comes back
+// on in.
+//
+// The terminal is put in raw mode for the duration and restored afterwards,
+// because a cooked terminal echoes the reply onto the screen and hands it over
+// only at a newline that a device attributes reply does not contain.
+//
+// A short or empty answer is not an error. Every terminal answers the device
+// attributes request, so reading nothing means the reply went somewhere else,
+// and Interpret reports that as an unknown capability rather than as a terminal
+// that draws nothing.
+func Query(in, out *os.File) (string, error) {
+	fd := int(in.Fd())
+	if !term.IsTerminal(fd) {
+		return "", errors.New("the input is not a terminal")
+	}
+	state, err := term.MakeRaw(fd)
+	if err != nil {
+		return "", err
+	}
+	// Restored on every path. A command that left the terminal raw would leave
+	// the shell after it with no echo and no line editing, which reads to
+	// whoever is sitting there as a hung machine.
+	defer func() { _ = term.Restore(fd, state) }()
+
+	if _, err := out.WriteString(kittyQuery + cellQuery + bgQuery + daQuery); err != nil {
+		return "", err
+	}
+	return readReply(in, fd, time.Now().Add(queryDeadline))
+}
 
 // readReply reads until the device attributes answer is complete or the
 // deadline passes.

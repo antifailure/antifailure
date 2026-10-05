@@ -723,6 +723,9 @@ func uncalledByGate(recipes []recipe, reachable map[string]bool) []string {
 	// untrue in the direction that matters. It is a gate; it runs in a workflow;
 	// it is out of `gate` for the reason recorded in exemptFromGate.
 	exemptRecipes := map[string]bool{
+		// The engine suite on Windows, out of `gate` because it needs a
+		// Windows machine. See exemptFromGate.
+		"windows": true,
 		// A dedicated-cluster proof, run by k8s-conformance.yml. A workstation
 		// gate cannot safely create a cluster while other local work runs.
 		// The result validator refuses missing or skipped behaviors; its tests
@@ -945,6 +948,14 @@ func fail(format string, args ...any) {
 // An exemption naming a gate no workflow runs fails the build. See the loop
 // that fills `stale`.
 var exemptFromGate = map[string]string{
+	"tool wintest": "" +
+		"It needs a Windows machine, and `just gate` runs on whatever machine " +
+		"the contributor has. On macOS or Linux it would be the engine suite " +
+		"again under another name, which `just test` already is; the point of " +
+		"it is the platform, and no other machine can supply that. It runs on " +
+		"every pull request in windows-tests.yml, as a required check. On a Windows " +
+		"machine run it with `just windows`.",
+
 	"tool prmerge": "" +
 		"Its answer does not come from this repository. tools/prmerge asks the " +
 		"GitHub API whether the field names it reads still exist, against a real " +

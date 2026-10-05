@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
@@ -109,13 +110,21 @@ func baseForkPolicy(e *Env) (schema.ForkPolicy, string, []string) {
 			[]string{"there is no manifest here (" + err.Error() + "), so the fork policy is the default, `label`"}
 	}
 	root := repoRoot(path)
-	rel := strings.TrimPrefix(strings.TrimPrefix(path, root), "/")
-	if rel == "" {
-		rel = "antifailure.yaml"
+	// The manifest's name relative to the directory git runs in, spelled the
+	// way git spells a path: forward slashes, and "./" so it is resolved from
+	// that directory rather than from the top of the repository. Trimming the
+	// root off the path by hand left "\antifailure.yaml" on Windows, which git
+	// does not find, and without "./" a manifest in a subdirectory was looked
+	// for at the top. Either way the base branch's policy went unread and the
+	// gate fell back to label, so a base branch that said never or always was
+	// not the one deciding.
+	rel := "antifailure.yaml"
+	if r, relErr := filepath.Rel(root, path); relErr == nil && r != "." {
+		rel = filepath.ToSlash(r)
 	}
 
 	for _, ref := range baseRefs(e, root) {
-		body, gitErr := exec.Command("git", "-C", root, "show", ref.rev+":"+rel).Output()
+		body, gitErr := exec.Command("git", "-C", root, "show", ref.rev+":./"+rel).Output()
 		if gitErr != nil {
 			continue
 		}

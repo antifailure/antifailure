@@ -27,6 +27,7 @@ import (
 	_ "modernc.org/sqlite" // pure Go driver, no cgo
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/internal/privatefs"
 )
 
 // DirName is the per repository state directory.
@@ -252,8 +253,18 @@ func SchemaVersion() int { return migrations[len(migrations)-1].Version }
 // rebuilt rather than refused, because refusing to start leaves the user with
 // resources they cannot tear down.
 func Open(ctx context.Context, dir string) (*DB, error) {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := privatefs.MkdirAll(dir); err != nil {
 		return nil, aferrors.Wrap(err, aferrors.AFRUN010, "path", dir, "needed", "the state directory")
+	}
+	// The directory itself, every time, and not only when this call made it.
+	// It is af's own directory, so narrowing one an older release left open is
+	// this function's decision in a way it is not for a folder somebody else
+	// owns. It is also the only thing that covers the database's -wal and
+	// -shm files: SQLite makes and remakes them as it pleases, and on Windows a
+	// file takes its access from its directory, so the journal sat beside a
+	// private database readable by every user the folder allowed.
+	if err := privatefs.Restrict(dir); err != nil {
+		return nil, aferrors.Wrap(err, aferrors.AFRUN010, "path", dir, "needed", "the state directory, private")
 	}
 	path := filepath.Join(dir, FileName)
 
@@ -359,10 +370,15 @@ func open(ctx context.Context, path string) (*DB, error) {
 		}
 		return nil, err
 	}
-	// Restrict permissions after creation; the file holds the journal.
-	if err := os.Chmod(path, 0o600); err != nil && !os.IsNotExist(err) {
-		_ = sqldb.Close()
-		return nil, fmt.Errorf("state: secure %s: %w", path, err)
+	// Restrict permissions after creation; the file holds the journal, and so
+	// do its sidecars. On Unix SQLite gives a new -wal the database's own
+	// mode, which was the umask's until this line, so the first ones are
+	// narrowed here too.
+	for _, f := range []string{path, path + "-wal", path + "-shm"} {
+		if err := privatefs.Restrict(f); err != nil && !os.IsNotExist(err) {
+			_ = sqldb.Close()
+			return nil, fmt.Errorf("state: secure %s: %w", f, err)
+		}
 	}
 	return db, nil
 }

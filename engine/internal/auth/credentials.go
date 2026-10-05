@@ -25,6 +25,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/internal/privatefs"
 )
 
 // service namespaces entries so two tools on one machine cannot collide.
@@ -125,14 +126,14 @@ func (s *Store) Save(c Credential) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err := privatefs.MkdirAll(filepath.Dir(path)); err != nil {
 		return fmt.Errorf("create %s: %w", filepath.Dir(path), err)
 	}
 	// Written to a temporary file and renamed, so that an interrupted write
-	// cannot leave a truncated credential that reads as corruption. 0600 on
+	// cannot leave a truncated credential that reads as corruption. Private on
 	// both, because the temporary file holds the same secret.
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(body, '\n'), 0o600); err != nil {
+	if err := privatefs.WriteFile(tmp, append(body, '\n')); err != nil {
 		return fmt.Errorf("write %s: %w", tmp, err)
 	}
 	if err := os.Rename(tmp, path); err != nil {

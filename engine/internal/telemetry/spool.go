@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/antifailure/antifailure/engine/internal/controlplane"
 )
@@ -81,11 +82,29 @@ type SpoolOptions struct {
 const spoolSuffix = ".ndjson"
 
 // claimSuffix marks a file some process is currently sending.
-//
-// The claim is the rename itself. Rename is atomic and fails if the source is
-// already gone, so two processes racing for the same file produce exactly one
-// winner without a lock file, a lease, or a clock.
 const claimSuffix = ".claimed"
+
+// lockSuffix marks a file some process is in the middle of claiming.
+//
+// The claim used to be the rename alone, on the reasoning that a rename fails
+// once its source is gone, so two racers produce one winner. That holds on
+// POSIX and not on Windows. There a rename opens the file and then renames
+// the handle, and a second racer that opened the file before the first
+// renamed it holds a handle to the same file under its new name, so its own
+// rename succeeds too and both send the batch. Its open handle can also refuse
+// the winner's read, which the drain took as an unreadable file and deleted.
+// Measured on windows-latest: eight drains over 24 batches sent one of them
+// three times, another twice, and lost three.
+//
+// Creating a file with O_EXCL is exclusive on both, so it is the claim, and
+// only its creator renames. The lock lasts for the rename alone.
+const lockSuffix = ".lock"
+
+// staleLock is how old a lock must be before a new process may take it for a
+// dead claim. A live one is held for a single rename, so a minute is many
+// orders of magnitude past any live claim and still short beside the minutes a
+// command runs, which is how often the spool is opened.
+const staleLock = time.Minute
 
 // NewSpool opens a spool directory.
 func NewSpool(opts SpoolOptions) (*Spool, error) {
@@ -179,6 +198,21 @@ func (s *Spool) recoverStaleClaims() {
 	}
 	for _, e := range entries {
 		name := e.Name()
+		if strings.HasSuffix(name, lockSuffix) {
+			// A claim that died between the lock and the rename. The file it
+			// was claiming was never renamed, so removing the lock is all that
+			// puts it back.
+			//
+			// Only an old one. A lock lives for one rename, microseconds, so
+			// one younger than staleLock may be a live drain in another
+			// process mid claim, and removing it would let a second drain
+			// claim the same batch, which is the race the lock exists to end.
+			info, err := e.Info()
+			if err == nil && time.Since(info.ModTime()) > staleLock {
+				_ = os.Remove(filepath.Join(s.dir, name))
+			}
+			continue
+		}
 		if !strings.HasSuffix(name, claimSuffix) {
 			continue
 		}
@@ -267,9 +301,18 @@ func (s *Spool) Take(_ context.Context) ([]controlplane.Event, func(error) error
 	for _, name := range names {
 		from := filepath.Join(s.dir, name)
 		to := from + claimSuffix
-		if err := os.Rename(from, to); err != nil {
-			// Another process claimed it between the listing and now. Not an
-			// error: it is being sent, by somebody.
+		lock, err := os.OpenFile(from+lockSuffix, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err != nil {
+			// Another process is claiming it right now. Not an error: it is
+			// being sent, by somebody.
+			continue
+		}
+		_ = lock.Close()
+		err = os.Rename(from, to)
+		_ = os.Remove(from + lockSuffix)
+		if err != nil {
+			// Claimed and renamed by somebody between the listing and the
+			// lock, so the source is gone.
 			continue
 		}
 		batch, err := readBatch(to)

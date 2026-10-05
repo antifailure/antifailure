@@ -467,3 +467,39 @@ func TestComment_IsSilentOnAWorkstation(t *testing.T) {
 	_, err := os.Stat(report)
 	require.NoError(t, err)
 }
+
+// A manifest that is not at the top of the repository. git resolves the path in
+// "<rev>:<path>" from the top, not from the directory it runs in, so the base
+// branch's manifest was looked for in the wrong place, never found, and the
+// gate fell back to label. A base branch that said always was then refusing
+// every fork, and one that said never was only saying so by luck.
+func TestForkGate_ReadsTheBasePolicyOfAManifestInASubdirectory(t *testing.T) {
+	top := t.TempDir()
+	dir := filepath.Join(top, "services", "api")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	write := func(name, body string) {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644))
+	}
+	git := func(args ...string) {
+		cmd := exec.Command("git", append([]string{"-C", top}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.test",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.test")
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "git %s: %s", strings.Join(args, " "), out)
+	}
+	write("Dockerfile", "FROM alpine\n")
+	write("antifailure.yaml", forkManifest("always"))
+	git("init", "-q", "-b", "main")
+	git("add", "-A")
+	git("commit", "-qm", "base")
+	// The fork's working tree says never, so a decision of always can only
+	// have come from the base branch.
+	write("antifailure.yaml", forkManifest("never"))
+
+	d := forkGate(&Env{WorkDir: dir, Getenv: func(k string) string {
+		return prEnv(forkEvent(t, dir, "stranger/shop"))[k]
+	}})
+	require.Equal(t, schema.ForkAlways, d.Policy, "notes: %v", d.Notes)
+	require.False(t, d.Refused)
+}

@@ -118,6 +118,7 @@ func TestConcurrentDrainsClaimEachBatchExactlyOnce(t *testing.T) {
 
 	var mu sync.Mutex
 	seen := map[string]int{}
+	var takeErrs []error
 	var wg sync.WaitGroup
 	for range 8 {
 		wg.Add(1)
@@ -125,7 +126,17 @@ func TestConcurrentDrainsClaimEachBatchExactlyOnce(t *testing.T) {
 			defer wg.Done()
 			for {
 				batch, ack, err := s.Take(ctx)
-				if err != nil || batch == nil {
+				if err != nil {
+					// Kept rather than read as "the spool is empty". On
+					// Windows every drain stopped here, and treating the
+					// error as an empty spool is what made 0 of 24 look
+					// like a counting bug rather than a failure to read.
+					mu.Lock()
+					takeErrs = append(takeErrs, err)
+					mu.Unlock()
+					return
+				}
+				if batch == nil {
 					return
 				}
 				mu.Lock()
@@ -139,6 +150,7 @@ func TestConcurrentDrainsClaimEachBatchExactlyOnce(t *testing.T) {
 	}
 	wg.Wait()
 
+	require.Empty(t, takeErrs, "a drain failed rather than finding the spool empty")
 	require.Len(t, seen, batches, "every batch was taken")
 	for k, n := range seen {
 		require.Equalf(t, 1, n, "batch %s was taken %d times", k, n)
@@ -167,6 +179,43 @@ func TestAClaimLeftByADeadProcessIsRecovered(t *testing.T) {
 	again, ack, err := recovered.Take(ctx)
 	require.NoError(t, err)
 	require.Len(t, again, 1)
+	require.NoError(t, ack(nil))
+}
+
+// A process that died between taking the lock on a batch and renaming it left
+// the lock behind. Nothing else removes it, so without the next process doing
+// so the batch is pending forever and never claimable: every Take skips it as
+// somebody else's claim in progress.
+func TestALockLeftByADeadProcessIsRecovered(t *testing.T) {
+	s, dir := newTestSpool(t)
+	ctx := context.Background()
+	require.NoError(t, s.Put(ctx, []controlplane.Event{evt("a", 1, time.Unix(1700000000, 0).UTC())}))
+	names, err := s.pending()
+	require.NoError(t, err)
+	require.Len(t, names, 1)
+	lock := filepath.Join(dir, names[0]+lockSuffix)
+	require.NoError(t, os.WriteFile(lock, nil, 0o600))
+
+	stuck, _, err := s.Take(ctx)
+	require.NoError(t, err)
+	require.Nil(t, stuck, "the precondition: a held lock is somebody else's claim")
+
+	// A lock as young as a live claim is left alone by a process opening the
+	// spool, because it may be a drain in another process mid rename.
+	young, err := NewSpool(SpoolOptions{Dir: dir, Redactor: redact.New()})
+	require.NoError(t, err)
+	none, _, err := young.Take(ctx)
+	require.NoError(t, err)
+	require.Nil(t, none, "a lock that may be live was taken for a dead one")
+
+	// Older than any live claim, it is a dead one, and it is cleared.
+	old := time.Now().Add(-2 * staleLock)
+	require.NoError(t, os.Chtimes(lock, old, old))
+	recovered, err := NewSpool(SpoolOptions{Dir: dir, Redactor: redact.New()})
+	require.NoError(t, err)
+	batch, ack, err := recovered.Take(ctx)
+	require.NoError(t, err)
+	require.Len(t, batch, 1, "the next process can claim it")
 	require.NoError(t, ack(nil))
 }
 

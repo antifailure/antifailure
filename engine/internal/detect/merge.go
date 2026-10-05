@@ -24,7 +24,7 @@ import (
 func Merge(findings []Finding, root string) (*schema.Manifest, []Question, Proposals) {
 	m := &schema.Manifest{
 		Version: schema.ManifestVersion,
-		Name:    sanitizeServiceName(path.Base(root)),
+		Name:    sanitizeServiceName(rootName(root)),
 	}
 	var questions []Question
 

@@ -20,6 +20,7 @@ import (
 // the instant it happened, so the next occurrence is a bug with data attached
 // rather than a third guess.
 func TestBranchingAMissingGoldenNamesTheOnesThatExist(t *testing.T) {
+	requireDocker(t)
 	p, err := dockerdb.New(dockerdb.Options{Version: 17, Clock: clock.New(), PortFrom: 47300})
 	if err != nil {
 		t.Skipf("skipped: no Docker daemon is reachable: %v", err)
@@ -50,6 +51,7 @@ func TestBranchingAMissingGoldenNamesTheOnesThatExist(t *testing.T) {
 // Found by running `af mask plan` in a fresh checkout: the first thing anybody
 // does with masking, and it could not be done.
 func TestConnectingToABranchThatWasNeverMadeSaysToBringItUp(t *testing.T) {
+	requireDocker(t)
 	p, err := dockerdb.New(dockerdb.Options{Version: 17, Clock: clock.New(), PortFrom: 47400})
 	if err != nil {
 		t.Skipf("skipped: no Docker daemon is reachable: %v", err)

@@ -1,0 +1,106 @@
+name: Windows tests
+
+# The engine's tests, run on Windows.
+#
+# Until this existed, nothing about Windows was ever executed except the
+# Credential Manager tests in keyring.yml. The cross platform lint compiles the
+# engine for Windows and that is all it can do: it found an unchecked return,
+# and it could not have found that every replay write failed with "Access is
+# denied", that `af init` named a service after the whole temporary path, or
+# that a Windows checkout gave an archive a way out of the directory it was
+# unpacked into. One run of the suite on a Windows machine found all of those.
+#
+# Not path filtered, because it is a required check and a filtered workflow
+# that does not start reports nothing, which reads as a missing context and
+# blocks the pull request. A Windows break also arrives in whatever file the
+# author touched, which is the lesson crosslint.yml records.
+#
+# GitHub's Windows machines run Docker in Windows containers mode, which cannot
+# run the Linux images the Docker tests need. tools/wintest decides that from
+# the daemon rather than from the platform, prints the decision and every skip
+# with its reason, and refuses a run whose passing count falls below its floor.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # As in keyring.yml: a run on main is never cancelled, a superseded one on a
+  # branch is, and nothing reads a per commit conclusion from this workflow.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  engine:
+    name: engine on Windows
+    runs-on: windows-latest
+    # A full run measured 40 minutes with Docker out of the picture. The margin
+    # is for a slow runner, and a job that hits it reports cancelled, which
+    # CLAUDE.md's list of false reds explains how to tell from concurrency.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      # The runner document test starts the runner with node, and setup-go
+      # leaves whatever node the image has. Pinned to the version the runner
+      # job uses, so the two jobs agree about what they tested.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+
+      # CGO_ENABLED=0 because that is how af.exe ships, and GOTOOLCHAIN=local so
+      # the toolchain is the one setup-go installed rather than one fetched
+      # behind its back.
+      - name: Vet every package on Windows
+        working-directory: engine
+        shell: bash
+        env:
+          CGO_ENABLED: '0'
+          GOTOOLCHAIN: local
+        run: go vet ./...
+
+      # A real Postgres on the Windows host, because the copy, masking and
+      # subset code runs pg_dump and talks to a database from the host, not
+      # from a container, and without one about three hundred tests skip. The
+      # image ships PostgreSQL 17 with its service stopped; this is a cluster
+      # of its own, on the port and with the password every engine test reads
+      # by default, and with the statistics module ci.yml's container loads.
+      - name: Start a Postgres on the Windows host
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $data = Join-Path $env:RUNNER_TEMP 'afpg'
+          $pw = Join-Path $env:RUNNER_TEMP 'afpg-pw'
+          Set-Content -Path $pw -Value 'test' -NoNewline
+          & "$env:PGBIN\initdb.exe" -D $data -U postgres --pwfile=$pw -A scram-sha-256 -E UTF8
+          if ($LASTEXITCODE -ne 0) { throw 'initdb failed' }
+          & "$env:PGBIN\pg_ctl.exe" -D $data -l (Join-Path $env:RUNNER_TEMP 'afpg.log') -w `
+            -o '-p 55432 -c shared_preload_libraries=pg_stat_statements -c pg_stat_statements.track=all' start
+          if ($LASTEXITCODE -ne 0) { Get-Content (Join-Path $env:RUNNER_TEMP 'afpg.log'); throw 'Postgres did not start' }
+          $env:PGPASSWORD = 'test'
+          & "$env:PGBIN\createdb.exe" -h 127.0.0.1 -p 55432 -U postgres antifailure
+          if ($LASTEXITCODE -ne 0) { throw 'createdb failed' }
+          # A real query against the database the tests use, so the step
+          # proves the thing the tests depend on rather than that a process
+          # started.
+          $one = & "$env:PGBIN\psql.exe" -h 127.0.0.1 -p 55432 -U postgres -d antifailure -tAc 'select 1'
+          if ($one -ne '1') { throw "Postgres answered '$one'" }
+          Add-Content $env:GITHUB_PATH $env:PGBIN
+
+      - name: Run the engine's tests on Windows
+        shell: bash
+        env:
+          CGO_ENABLED: '0'
+          GOTOOLCHAIN: local
+          AF_TEST_DATABASE_URL: postgres://postgres:test@127.0.0.1:55432/antifailure
+        run: go run ./tools/wintest .

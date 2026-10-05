@@ -13,6 +13,7 @@ import (
 
 	_ "modernc.org/sqlite" // the test seeds a database directly
 
+	"github.com/antifailure/antifailure/engine/internal/privatefs/privatefstest"
 	"github.com/antifailure/antifailure/engine/internal/state"
 )
 
@@ -31,7 +32,12 @@ func openTemp(t *testing.T) (*state.DB, string) {
 
 func TestOpen_CreatesTheDirectoryAndSchema(t *testing.T) {
 	t.Parallel()
-	db, dir := openTemp(t)
+	// Under a folder everybody can read, so a private result is the state
+	// directory being made private and not the temporary folder being so.
+	dir := filepath.Join(privatefstest.OpenFolder(t), state.DirName)
+	db, err := state.Open(context.Background(), dir)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
 
 	v, err := db.Version(context.Background())
 	require.NoError(t, err)
@@ -43,11 +49,27 @@ func TestOpen_CreatesTheDirectoryAndSchema(t *testing.T) {
 	require.True(t, info.IsDir())
 	// The directory holds the journal and local handles, so it is not world
 	// readable.
-	require.Equal(t, os.FileMode(0o700), info.Mode().Perm())
+	privatefstest.RequirePrivate(t, dir, 0o700)
+	privatefstest.RequirePrivate(t, filepath.Join(dir, state.FileName), 0o600)
 
-	fi, err := os.Stat(filepath.Join(dir, state.FileName))
+	// And in a state directory that already existed, readable by everybody,
+	// the database is narrowed by itself rather than by inheriting from a
+	// directory this run made private.
+	existing := filepath.Join(privatefstest.OpenFolder(t), state.DirName)
+	require.NoError(t, os.Mkdir(existing, 0o755))
+	db2, err := state.Open(context.Background(), existing)
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o600), fi.Mode().Perm())
+	t.Cleanup(func() { require.NoError(t, db2.Close()) })
+	privatefstest.RequirePrivate(t, filepath.Join(existing, state.FileName), 0o600)
+	// The journal beside it too, which is where the rows live until a
+	// checkpoint, and the directory, which is what decides the journal's
+	// access on Windows when SQLite makes it again later.
+	require.NoError(t, db2.SetMeta(context.Background(), "probe", "x"))
+	wal := filepath.Join(existing, state.FileName+"-wal")
+	_, statErr := os.Stat(wal)
+	require.NoError(t, statErr, "the precondition: the database is in WAL mode and has written a journal")
+	privatefstest.RequirePrivate(t, wal, 0o600)
+	privatefstest.RequirePrivate(t, existing, 0o700)
 }
 
 func TestOpen_IsIdempotentAcrossRuns(t *testing.T) {
