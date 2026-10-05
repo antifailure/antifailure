@@ -93,8 +93,12 @@ program is waiting for.
 
 On Windows the program's terminal is ConPTY, which keeps that request to itself.
 There Antifailure sends an arrow as a key press and release, the way a Windows
-terminal does, and the console turns it into the encoding the program asked
-for.
+terminal does, and the console chooses the bytes the program receives. It
+usually chooses the encoding the program asked for, but not always: measured on
+a heavily loaded Windows machine, it sent the normal encoding to a program that
+had asked for the other, every time. So on Windows Antifailure promises that the
+arrow arrives, not which encoding it arrives in. A program that accepts arrows
+in both encodings, as most libraries do, is unaffected.
 
 After every entry, Antifailure waits for the program to redraw and then reads
 the screen. Expectations are judged against every screen the program showed,
