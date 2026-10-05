@@ -269,16 +269,28 @@ func TestInCIThePathIsHandedToTheNextStepOnce(t *testing.T) {
 	})
 }
 
-// A refusal stops the process that ran it, which is what makes a CI job that
-// installs with `powershell -Command "irm ... | iex"` fail rather than go on
-// to run an af that is not there.
-func TestEveryRefusalExitsNonZero(t *testing.T) {
+// A refusal stops the script where it is refused, and stops the process that
+// ran it, which is what makes a CI job that installs with
+// `powershell -Command "irm ... | iex"` fail rather than go on to run an af
+// that is not there.
+//
+// A non zero exit alone does not prove that. A refusal that only printed and
+// returned was measured to exit 1 anyway, by crashing three steps later on the
+// checksums file it never downloaded, after printing three refusals for one
+// cause. So this asserts the shape of a real stop: one refusal, then the
+// installer's own closing sentence, then nothing.
+func TestARefusalStopsTheScriptAndTheProcess(t *testing.T) {
 	eachHost(t, func(t *testing.T, host string) {
 		s := newSession(t, host)
 		s.github.set(func(g *githubStandIn) { g.status = 500 })
-		r := s.refuses("answered 500")
-		if !strings.Contains(r.out, "antifailure: ") {
-			t.Errorf("the refusal is not in the installer's own words:\n%s", r.out)
+		r := s.refuses("answered 500", "Antifailure was not installed")
+		if n := strings.Count(r.out, "antifailure: "); n != 1 {
+			t.Errorf("one cause produced %d refusals, so the first one did not stop the script:\n%s", n, r.out)
+		}
+		for _, later := range []string{"Downloading", "checksums.txt"} {
+			if strings.Contains(r.out, later) {
+				t.Errorf("the script went on to %q after refusing:\n%s", later, r.out)
+			}
 		}
 	})
 }
