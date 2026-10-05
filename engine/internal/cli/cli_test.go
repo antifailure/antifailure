@@ -21,7 +21,19 @@ import (
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
-func TestMain(m *testing.M) { goleak.VerifyTestMain(m) }
+// TestMain fails the package on a goroutine a test left running, with one
+// named exception.
+//
+// go-winio starts ioCompletionProcessor the first time anything in the process
+// opens a named pipe, once, and it runs until the process exits by design: it
+// is the completion port every later pipe shares. On Windows the watch view
+// listens on a pipe through it and the Docker client dials one, so whether it
+// exists at the end depended on which tests happened to reach a pipe, and
+// main went red on 55ef3fcd6 with every test passing. Ignoring that one
+// function by name keeps every other leak a failure.
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, goleak.IgnoreAnyFunction("github.com/Microsoft/go-winio.ioCompletionProcessor"))
+}
 
 var epoch = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
