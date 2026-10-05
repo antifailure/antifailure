@@ -132,7 +132,12 @@ func TestARealBuildThatGotSlowerFailsTheBaseBranchLatencyThreshold(t *testing.T)
 	// A real sleep on one route of a real server, which is the regression a
 	// person would introduce by adding a query inside a loop.
 	base := buildServer(t, nil)
-	cand := buildServer(t, map[string]time.Duration{"/orders": 40 * time.Millisecond})
+	// A hundred milliseconds, sized against the slowest floor measured rather
+	// than the fastest. The base side's p95 is almost all scheduling: 7ms to
+	// 26ms on a contended Mac, and 28.9ms on windows-latest, where a 40ms
+	// sleep moved p95 to 42.8ms, +48 per cent, under the declared doubling.
+	// Against 29ms this is more than four times the floor.
+	cand := buildServer(t, map[string]time.Duration{"/orders": 100 * time.Millisecond})
 
 	baseRes := sendMix(t, base.URL, 20)
 	candRes := sendMix(t, cand.URL, 20)
@@ -151,8 +156,9 @@ func TestARealBuildThatGotSlowerFailsTheBaseBranchLatencyThreshold(t *testing.T)
 	// own. This assertion read "more than fourfold" and flaked on a contended
 	// machine: the base side is a server that answers immediately, so its p95
 	// is almost all scheduling, and it was measured anywhere between 7ms and
-	// 26ms for identical work. A 40ms sleep is a sixfold regression against
-	// the low reading and barely a doubling against the high one. Asserting a
+	// 26ms for identical work. The sleep that was 40ms then was a sixfold
+	// regression against the low reading and barely a doubling against the
+	// high one, and under it on Windows, which is why it is now 100ms. Asserting a
 	// ratio the machine controls, rather than the verdict this code decides,
 	// is testing the laptop.
 	require.Greater(t, *orders.P95Ratio, proofThresholds().P95Increase,

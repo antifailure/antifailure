@@ -174,7 +174,11 @@ func TestUntarRefusesAPathOutsideTheCheckout(t *testing.T) {
 			{"a UNC path", tar.Header{Name: "//server/share/escaped", Typeflag: tar.TypeReg, Mode: 0o644}},
 			{"backslash parent segments", tar.Header{Name: "a\\..\\..\\escaped.go", Typeflag: tar.TypeReg, Mode: 0o644}},
 			{"a device name", tar.Header{Name: "NUL", Typeflag: tar.TypeReg, Mode: 0o644}},
-			{"a device name in a directory", tar.Header{Name: "sub/COM1.txt", Typeflag: tar.TypeReg, Mode: 0o644}},
+			// Not COM1.txt: Windows 11 stopped treating a device name with an
+			// extension as the device, and Go followed it, so that one is an
+			// ordinary file there. Measured on windows-latest, where it was
+			// accepted, rather than assumed from older documentation.
+			{"a device name in a directory", tar.Header{Name: "sub/NUL", Typeflag: tar.TypeReg, Mode: 0o644}},
 			{"a symlink to a drive", tar.Header{Name: "link", Typeflag: tar.TypeSymlink, Linkname: "C:/Windows"}},
 		}...)
 	}
