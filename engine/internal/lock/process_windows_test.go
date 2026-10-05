@@ -35,3 +35,21 @@ func TestAnExitedProcessIsNotAliveWhileAHandleKeepsItsObject(t *testing.T) {
 	require.True(t, processExists(int(windows.GetCurrentProcessId())), "this process read as not alive")
 	require.False(t, processExists(0), "pid 0 read as a live lock holder")
 }
+
+// 259 is STILL_ACTIVE, the exit code Windows reports for a process that has not
+// ended. A check that read the exit code would call a holder that exited with
+// 259 alive for ever, and the lock it held would never be reclaimed.
+func TestAProcessThatExitedWith259IsNotAlive(t *testing.T) {
+	cmd := exec.Command("cmd", "/c", "exit 259")
+	require.NoError(t, cmd.Start())
+	pid := cmd.Process.Pid
+	held, err := windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = windows.CloseHandle(held) })
+	err = cmd.Wait()
+	var exit *exec.ExitError
+	require.ErrorAs(t, err, &exit)
+	require.Equal(t, 259, exit.ExitCode(), "the child did not exit with 259, so this is not the case it names")
+
+	require.False(t, processExists(pid), "a process that exited with 259 read as alive")
+}
