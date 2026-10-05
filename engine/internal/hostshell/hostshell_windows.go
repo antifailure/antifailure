@@ -28,7 +28,7 @@ func Find() (string, error) {
 	}
 	out, err := exec.Command(git, "--exec-path").Output()
 	if err != nil {
-		return "", fmt.Errorf("%w (git --exec-path: %v)", ErrNoShell, err)
+		return "", fmt.Errorf("%w (git --exec-path: %w)", ErrNoShell, err)
 	}
 	return findFrom(strings.TrimSpace(string(out)))
 }

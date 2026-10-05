@@ -318,7 +318,7 @@ func run(root string) error {
 	if waitErr != nil {
 		// go test failing with nothing the summary could attribute it to is
 		// still a failure, and the one most worth not swallowing.
-		return fmt.Errorf("go test exited with %v and the summary found no failure to blame", waitErr)
+		return fmt.Errorf("go test exited with %w and the summary found no failure to blame", waitErr)
 	}
 	return nil
 }
