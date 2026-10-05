@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -194,7 +195,11 @@ func testSelfUpdateVerifiedArchive(t *testing.T, goos, defect string) {
 		executable = customPath
 	}
 	archiveName, archive := updateArchiveFor(t, goos, defect)
+	var archiveRequests atomic.Int32
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, ".zip") || strings.HasSuffix(r.URL.Path, ".tar.gz") {
+			archiveRequests.Add(1)
+		}
 		switch r.URL.Path {
 		case "/latest":
 			_, _ = fmt.Fprint(w, `{"tag_name":"v1.1.1"}`)
@@ -314,6 +319,12 @@ func testSelfUpdateVerifiedArchive(t *testing.T, goos, defect string) {
 		if (defect == "missing-checksum" || defect == "other-platforms-only") &&
 			!strings.Contains(err.Error(), "release v1.1.1 publishes no build for "+goos+"/amd64") {
 			t.Fatalf("an unnamed archive was refused by something other than its missing checksum: %v", err)
+		}
+		// The refusal says nothing was downloaded, so that is checked as a
+		// fact about the server rather than taken from the message. A guard
+		// moved below the fetch would still produce the same words.
+		if (defect == "missing-checksum" || defect == "other-platforms-only") && archiveRequests.Load() != 0 {
+			t.Fatalf("an archive no checksum names was requested %d times before it was refused", archiveRequests.Load())
 		}
 		// A checksum that is named and is not a checksum is a damaged
 		// release, not a missing build, and says so in its own words.
