@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -284,7 +285,7 @@ func installState(e *Env, p startProbe) stage {
 			short(e.WorkDir, found), short(e.WorkDir, self))
 		s.prose = "Two copies of af are installed and the shell picks the other one, so every " +
 			"command below would run a different build from this one."
-		s.command = "which -a af"
+		s.command = shellCommands(runtime.GOOS).listAll
 		return s
 	}
 
@@ -300,12 +301,44 @@ func installState(e *Env, p startProbe) stage {
 	s.detail = "not on your PATH, although " + short(e.WorkDir, installed) + " is installed"
 	s.prose = "The terminal you installed in started before the installer wrote its line, so it " +
 		"does not know about af yet. Paste this, or open a new terminal."
-	s.command = fmt.Sprintf(`export PATH="%s:$PATH"`, filepath.Dir(installed))
+	s.command = shellCommands(runtime.GOOS).addToPath(filepath.Dir(installed))
 	return s
 }
 
-// installedBinary is where install.sh puts af, honouring the same two variables
-// it reads so that a prefix somebody chose is the prefix this looks in.
+// startShell is what the start rungs tell a person to paste, in the shell the
+// platform's installer leaves them in. On Windows that is PowerShell, which
+// install.ps1 runs in, where export and which do not exist and the binary is
+// af.exe; these rungs told a Windows user to paste bash.
+type startShell struct {
+	binary    string
+	listAll   string
+	addToPath func(dir string) string
+}
+
+func shellCommands(goos string) startShell {
+	if goos == "windows" {
+		return startShell{
+			binary:  "af.exe",
+			listAll: "where.exe af",
+			addToPath: func(dir string) string {
+				return fmt.Sprintf(`$env:Path = "%s;" + $env:Path`, dir)
+			},
+		}
+	}
+	return startShell{
+		binary:  "af",
+		listAll: "which -a af",
+		addToPath: func(dir string) string {
+			return fmt.Sprintf(`export PATH="%s:$PATH"`, dir)
+		},
+	}
+}
+
+// installedBinary is where install.sh and install.ps1 put af, honouring the same
+// two variables they read so that a prefix somebody chose is the prefix this
+// looks in. Both default to ~/.antifailure/bin; on Windows the file is af.exe,
+// and looking for af there found nothing, so the rung reported a build rather
+// than an install that only needed PATH.
 func installedBinary(e *Env, p startProbe) (string, bool) {
 	dir := e.Getenv("AF_BIN_DIR")
 	if dir == "" {
@@ -319,7 +352,7 @@ func installedBinary(e *Env, p startProbe) (string, bool) {
 		}
 		dir = filepath.Join(prefix, "bin")
 	}
-	path := filepath.Join(dir, "af")
+	path := filepath.Join(dir, shellCommands(runtime.GOOS).binary)
 	if _, err := p.Stat(path); err != nil {
 		return "", false
 	}

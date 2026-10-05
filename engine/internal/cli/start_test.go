@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -689,7 +690,8 @@ func TestTheInstallRungReadsTheShellRatherThanTheRunningBinary(t *testing.T) {
 		if err := os.MkdirAll(bin, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(bin, "af"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		// af.exe on Windows, which is the name install.ps1 writes.
+		if err := os.WriteFile(filepath.Join(bin, shellCommands(runtime.GOOS).binary), []byte("#!/bin/sh\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 		s := installState(e, startProbeFor(t, home))
