@@ -6,7 +6,7 @@ import { createServer as createNetServer } from 'node:net';
 import { mkdtempSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { Session, artifactPath } from '../src/browser.ts';
 import { run, type WorkflowResult } from '../src/execute.ts';
 import { explore, type Goal } from '../src/explore.ts';
@@ -102,6 +102,15 @@ test('it drives a real sign up form and passes', { timeout: 120_000 }, async () 
     // one that is hardest to reproduce and nobody knows in advance.
     assert.ok(result!.evidence.screenshot, 'a screenshot is captured');
     assert.ok(result!.evidence.trace, 'a trace is captured');
+    // The paths a session hands back are the ones printed to the person who
+    // ran it, so they must be the artifacts directory joined in this
+    // platform's own separator. On Windows a forward slash glued onto the
+    // native directory is a mismatch here; elsewhere the separator is
+    // already a slash, and the Windows job is the arm that can say no.
+    for (const evidencePath of [result!.evidence.screenshot!, result!.evidence.trace!]) {
+      assert.equal(evidencePath, join(artifacts, basename(evidencePath)),
+        `evidence path ${evidencePath} is not ${artifacts} joined in the platform separator`);
+    }
   } finally {
     server.close();
   }
