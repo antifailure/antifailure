@@ -32,6 +32,8 @@ import (
 	"sort"
 
 	"golang.org/x/crypto/argon2"
+
+	"github.com/antifailure/antifailure/engine/internal/privatefs"
 )
 
 const (
@@ -168,14 +170,15 @@ func (f *FileStore) Save(values map[string]string) error {
 	blob = append(blob, nonce...)
 	blob = append(blob, ciphertext...)
 
-	if err := os.MkdirAll(filepath.Dir(f.path), 0o700); err != nil {
+	if err := privatefs.MkdirAll(filepath.Dir(f.path)); err != nil {
 		return err
 	}
 	tmp := f.path + ".tmp"
-	// 0600 before anything is written to it, not after. Creating a file
+	// Private before anything is written to it, not after. Creating a file
 	// readable and then narrowing it is a window, and it is the only window
-	// that matters here.
-	if err := os.WriteFile(tmp, blob, 0o600); err != nil {
+	// that matters here. A mode on Unix and an access list on Windows, where
+	// the mode alone left the file as readable as its folder.
+	if err := privatefs.WriteFile(tmp, blob); err != nil {
 		return err
 	}
 	if err := os.Rename(tmp, f.path); err != nil {

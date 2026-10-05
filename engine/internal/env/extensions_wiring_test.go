@@ -23,10 +23,12 @@ package env
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/moby/moby/client"
 	"github.com/stretchr/testify/require"
 
 	dockerdb "github.com/antifailure/antifailure/engine/internal/db/docker"
@@ -41,11 +43,24 @@ func requireDaemon(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipped in short mode: this needs a Docker daemon")
 	}
+	if os.Getenv("AF_SKIP_DOCKER") != "" {
+		t.Skip("skipped: AF_SKIP_DOCKER is set")
+	}
 	cli, err := dockerutil.Client()
 	if err != nil {
 		t.Skipf("skipped: no Docker daemon is reachable: %v", err)
 	}
-	_ = cli.Close()
+	defer func() { _ = cli.Close() }()
+	// Asked, not assumed. Building a client connects to nothing, so this
+	// helper let both tests run against a daemon that was not there and fail
+	// on the first container rather than skip, which is how a machine with
+	// Docker stopped, or a Windows runner whose daemon runs Windows containers,
+	// reported a wiring defect that did not exist.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := cli.Ping(ctx, client.PingOptions{}); err != nil {
+		t.Skipf("skipped: the Docker daemon did not respond: %v", err)
+	}
 }
 
 // TestTheManifestsImageAndItsExtensionsReachTheGolden.

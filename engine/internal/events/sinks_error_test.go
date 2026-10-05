@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -65,6 +66,13 @@ func TestFileSink_FiltersBelowTheMinimumLevel(t *testing.T) {
 // the bus counts one at a time, and it must never take the engine down.
 func TestFileSink_DisablesItselfWhenTheLogDirectoryDisappears(t *testing.T) {
 	t.Parallel()
+	if runtime.GOOS == "windows" {
+		// Not a gap in the sink: the condition cannot be made here. Windows
+		// refuses to delete a directory while a file in it is open, which the
+		// sink's log always is, so the RemoveAll below is the step that fails
+		// and the directory never disappears out from under the sink.
+		t.Skip("Windows will not delete a directory holding an open file, so the log directory cannot disappear under the sink")
+	}
 	parent := t.TempDir()
 	dir := filepath.Join(parent, "events")
 	s, err := events.NewFileSink(dir, "env_gone", redact.New(), events.FileSinkOptions{

@@ -17,6 +17,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/lock"
+	"github.com/antifailure/antifailure/engine/internal/privatefs/privatefstest"
 )
 
 func TestMain(m *testing.M) { goleak.VerifyTestMain(m) }
@@ -30,7 +31,7 @@ func lockPath(t *testing.T) string {
 
 func TestAcquire_CreatesTheLockWithOwnerMetadata(t *testing.T) {
 	t.Parallel()
-	path := lockPath(t)
+	path := filepath.Join(privatefstest.OpenFolder(t), ".antifailure", "lock")
 	l, err := lock.Acquire(path, clock.NewFake(epoch), "af up")
 	require.NoError(t, err)
 	defer func() { require.NoError(t, l.Release()) }()
@@ -41,9 +42,7 @@ func TestAcquire_CreatesTheLockWithOwnerMetadata(t *testing.T) {
 	require.False(t, l.Reclaimed())
 	require.Equal(t, path, l.Path())
 
-	fi, err := os.Stat(path)
-	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o600), fi.Mode().Perm())
+	privatefstest.RequirePrivate(t, path, 0o600)
 }
 
 // The whole point: two af up invocations on one branch must not both proceed.

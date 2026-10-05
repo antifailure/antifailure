@@ -143,6 +143,10 @@ func TestARealBuildThatGotSlowerFailsTheBaseBranchLatencyThreshold(t *testing.T)
 	orders := routeRow(t, c, "GET /orders")
 	require.Equal(t, workload.DirectionWorse, orders.Direction)
 	require.NotNil(t, orders.P95Ratio)
+	// Logged before the assertions rather than after them, so the numbers are
+	// there on the run that fails, which is the only run anybody reads them on.
+	t.Logf("base p95 %.1fms, candidate p95 %.1fms, ratio %+.1f%%",
+		*orders.P95Baseline, *orders.P95Candidate, *orders.P95Ratio*100)
 	// Against the DECLARED limit rather than against a tighter number of its
 	// own. This assertion read "more than fourfold" and flaked on a contended
 	// machine: the base side is a server that answers immediately, so its p95
@@ -180,8 +184,6 @@ func TestARealBuildThatGotSlowerFailsTheBaseBranchLatencyThreshold(t *testing.T)
 	require.Equal(t, "GET /orders", breaches[0].Scope)
 	require.Contains(t, breaches[0].Detail, "slower against a limit")
 
-	t.Logf("base p95 %.1fms, candidate p95 %.1fms, ratio %+.1f%%",
-		*orders.P95Baseline, *orders.P95Candidate, *orders.P95Ratio*100)
 }
 
 func TestARealBuildThatGotSlowerFailsTheThroughputThreshold(t *testing.T) {

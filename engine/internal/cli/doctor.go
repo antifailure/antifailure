@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -19,7 +20,9 @@ import (
 
 	"github.com/antifailure/antifailure/engine/internal/db/pgcopy"
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
+	"github.com/antifailure/antifailure/engine/internal/hostshell"
 	"github.com/antifailure/antifailure/engine/internal/model"
+	"github.com/antifailure/antifailure/engine/internal/privatefs"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
 	"github.com/antifailure/antifailure/engine/internal/state"
 
@@ -83,6 +86,12 @@ type Prober interface {
 	Getenv(key string) string
 	// Stat reports whether a path exists.
 	Stat(path string) (os.FileInfo, error)
+	// Private reports whether only the current user can read a path,
+	// wrapping privatefs.ErrExposed when somebody else can. A mode on Unix,
+	// an access list on Windows, where every mode reads as 0777.
+	Private(path string) error
+	// HostShell returns the sh a manifest's seed commands run in.
+	HostShell() (string, error)
 }
 
 type systemProber struct{ getenv func(string) string }
@@ -148,6 +157,10 @@ func (p systemProber) ListenTCP(port int) error {
 func (p systemProber) Getenv(key string) string { return p.getenv(key) }
 
 func (p systemProber) Stat(path string) (os.FileInfo, error) { return os.Stat(path) }
+
+func (p systemProber) Private(path string) error { return privatefs.Check(path) }
+
+func (p systemProber) HostShell() (string, error) { return hostshell.Find() }
 
 func newDoctorCommand(env *Env) *cobra.Command {
 	return &cobra.Command{
@@ -315,6 +328,7 @@ var doctorChecks = []doctorCheck{
 	checkKernelIsolation,
 	checkProxyEnvironment,
 	checkGit,
+	checkHostShell,
 	checkPostgresClient,
 	checkModelKey,
 	checkWebhookDelivery,
@@ -514,6 +528,8 @@ func dockerInstallHint() string {
 		return "Install Docker Desktop from https://docker.com/products/docker-desktop, or run 'brew install --cask docker'."
 	case "linux":
 		return "Install Docker Engine following https://docs.docker.com/engine/install, then add yourself to the docker group and log in again."
+	case "windows":
+		return "Install Docker Desktop with 'winget install --id Docker.DockerDesktop -e' or from https://docker.com/products/docker-desktop, and keep it on Linux containers."
 	default:
 		return "Install Docker for your platform from https://docs.docker.com/get-docker."
 	}
@@ -525,6 +541,8 @@ func dockerStartHint() string {
 		return "Start Docker Desktop and wait for its status to read Running, then run 'af doctor' again."
 	case "linux":
 		return "Run 'sudo systemctl start docker'. If 'docker info' works with sudo but not without, add yourself to the docker group with 'sudo usermod -aG docker $USER' and log in again."
+	case "windows":
+		return "Start Docker Desktop and wait for it to say the engine is running, then run 'af doctor' again."
 	default:
 		return "Start the Docker daemon, then run 'af doctor' again."
 	}
@@ -606,10 +624,19 @@ func checkStateDirectory(_ context.Context, env *Env, p Prober) CheckResult {
 		r.Detail = dir + " exists and is not a directory"
 		return r
 	}
-	if perm := info.Mode().Perm(); perm&0o077 != 0 {
+	// Asked of the operating system's own notion of who can read it rather
+	// than of the mode bits. On Windows every directory reports 0777, so the
+	// mode check warned on every Windows machine and told the person to run
+	// chmod, which Windows does not have.
+	if err := p.Private(dir); err != nil {
 		r.Status = CheckWarn
-		r.Detail = fmt.Sprintf("mode %04o is readable by other users", perm)
-		r.Remediation = fmt.Sprintf("Run 'chmod 700 %s'. It holds the journal and local handles.", dir)
+		if errors.Is(err, privatefs.ErrExposed) {
+			r.Detail = err.Error()
+		} else {
+			r.Detail = "who can read it could not be determined: " + err.Error()
+		}
+		r.Remediation = fmt.Sprintf("Run %s. It holds the journal and local handles.",
+			privatefs.RestrictCommand(dir, true))
 		return r
 	}
 	r.Status = CheckPass
@@ -840,7 +867,8 @@ func checkPostgresClient(_ context.Context, _ *Env, _ Prober) CheckResult {
 	r := CheckResult{Name: "Postgres client"}
 	r.Remediation = "Install the client tools if this machine copies a production database: " +
 		"on macOS 'brew install libpq' or 'brew install postgresql@18', on Debian or Ubuntu " +
-		"'apt-get install postgresql-client-18'. A project that fills its golden with " +
+		"'apt-get install postgresql-client-18', on Windows " +
+		"'winget install --id PostgreSQL.PostgreSQL.18 -e'. A project that fills its golden with " +
 		"database.seed instead of copying a source needs neither."
 
 	path, major, err := pgcopy.ClientTools()
@@ -883,6 +911,34 @@ func checkGit(_ context.Context, env *Env, p Prober) CheckResult {
 	r.Status = CheckWarn
 	r.Detail = "no repository was found above the working directory"
 	return r
+}
+
+// checkHostShell reports the sh that database.seed and persona seed commands run
+// in. On Unix that is never in doubt. On Windows it is Git for Windows' sh,
+// found through git, and a machine without it would otherwise learn so at the
+// seed step, after the images are built.
+func checkHostShell(_ context.Context, _ *Env, p Prober) CheckResult {
+	r := CheckResult{Name: "Shell for manifest commands"}
+	sh, err := p.HostShell()
+	if err != nil {
+		// A warning: a project with no seed command never needs it.
+		r.Status = CheckWarn
+		r.Detail = "no sh was found, so database.seed and persona seed commands cannot run"
+		r.Remediation = shellInstallHint(err)
+		return r
+	}
+	r.Status = CheckPass
+	r.Detail = "seed commands run in " + sh
+	r.Remediation = "No action needed."
+	return r
+}
+
+func shellInstallHint(err error) string {
+	if runtime.GOOS == "windows" {
+		return "Install Git for Windows with 'winget install --id Git.Git -e' or from " +
+			"https://git-scm.com/download/win, then open a new terminal. Seed commands run in the sh it ships."
+	}
+	return "Install a POSIX sh and put it on the path (" + err.Error() + ")."
 }
 
 func humanBytes(n uint64) string {

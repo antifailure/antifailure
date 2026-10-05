@@ -205,6 +205,7 @@ runner/artifacts/
 /varcheck
 /vulncheck
 /walkthrough
+/wintest
 /wirecheck
 /worktreegc
 engine/af-proxy

@@ -37,6 +37,14 @@ func NonEmptyForTest(kv ...string) []events.Field { return nonEmpty(kv...) }
 // no reason to be part of the package's surface.
 func UntarForTest(dir string, r io.Reader) error { return untar(dir, r) }
 
+// SymlinkForTest replaces how untar creates a link, so a test can stand in for
+// a Windows machine without Developer Mode, and returns the restore.
+func SymlinkForTest(fn func(oldname, newname string) error) func() {
+	saved := symlink
+	symlink = fn
+	return func() { symlink = saved }
+}
+
 // ResolveBaselineForTest exposes resolveBaseline to the package's external
 // tests, so the git resolution can be exercised against a real repository.
 func ResolveBaselineForTest(root string, source schema.BaselineSource, ref string) (string, string, error) {

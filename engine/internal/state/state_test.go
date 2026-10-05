@@ -13,6 +13,7 @@ import (
 
 	_ "modernc.org/sqlite" // the test seeds a database directly
 
+	"github.com/antifailure/antifailure/engine/internal/privatefs/privatefstest"
 	"github.com/antifailure/antifailure/engine/internal/state"
 )
 
@@ -31,7 +32,12 @@ func openTemp(t *testing.T) (*state.DB, string) {
 
 func TestOpen_CreatesTheDirectoryAndSchema(t *testing.T) {
 	t.Parallel()
-	db, dir := openTemp(t)
+	// Under a folder everybody can read, so a private result is the state
+	// directory being made private and not the temporary folder being so.
+	dir := filepath.Join(privatefstest.OpenFolder(t), state.DirName)
+	db, err := state.Open(context.Background(), dir)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
 
 	v, err := db.Version(context.Background())
 	require.NoError(t, err)
@@ -43,11 +49,8 @@ func TestOpen_CreatesTheDirectoryAndSchema(t *testing.T) {
 	require.True(t, info.IsDir())
 	// The directory holds the journal and local handles, so it is not world
 	// readable.
-	require.Equal(t, os.FileMode(0o700), info.Mode().Perm())
-
-	fi, err := os.Stat(filepath.Join(dir, state.FileName))
-	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o600), fi.Mode().Perm())
+	privatefstest.RequirePrivate(t, dir, 0o700)
+	privatefstest.RequirePrivate(t, filepath.Join(dir, state.FileName), 0o600)
 }
 
 func TestOpen_IsIdempotentAcrossRuns(t *testing.T) {

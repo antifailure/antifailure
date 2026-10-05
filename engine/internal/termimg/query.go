@@ -1,11 +1,10 @@
+//go:build !windows
+
 package termimg
 
 import (
-	"errors"
 	"os"
 	"time"
-
-	"golang.org/x/term"
 )
 
 // The three questions, written as one burst and answered in order.
@@ -44,44 +43,14 @@ const (
 	pollInterval  = 2 * time.Millisecond
 )
 
-// Query writes the capability questions to out and reads whatever comes back
-// on in.
-//
-// The terminal is put in raw mode for the duration and restored afterwards,
-// because a cooked terminal echoes the reply onto the screen and hands it over
-// only at a newline that a device attributes reply does not contain.
-//
-// A short or empty answer is not an error. Every terminal answers the device
-// attributes request, so reading nothing means the reply went somewhere else,
-// and Interpret reports that as an unknown capability rather than as a terminal
-// that draws nothing.
-func Query(in, out *os.File) (string, error) {
-	fd := int(in.Fd())
-	if !term.IsTerminal(fd) {
-		return "", errors.New("the input is not a terminal")
-	}
-	state, err := term.MakeRaw(fd)
-	if err != nil {
-		return "", err
-	}
-	// Restored on every path. A command that left the terminal raw would leave
-	// the shell after it with no echo and no line editing, which reads to
-	// whoever is sitting there as a hung machine.
-	defer func() { _ = term.Restore(fd, state) }()
-
-	if _, err := out.WriteString(kittyQuery + cellQuery + bgQuery + daQuery); err != nil {
-		return "", err
-	}
-	return readReply(in, fd, time.Now().Add(queryDeadline))
-}
-
 // readWithDeadline reads until the device attributes answer is complete or the
 // deadline passes, using the deadline the runtime poller provides.
 //
-// This is what Windows uses outright and what a unix falls back to when the
-// terminal cannot be made non-blocking. Shared rather than duplicated per
-// platform, so the arm that only Windows runs is exercised by every test run on
-// every machine.
+// It is what a unix falls back to when the terminal cannot be made
+// non-blocking. It was also what Windows used outright, on the belief that
+// Windows takes a read deadline where macOS does not. It does not, for a
+// console or for a pipe, so every query there failed after it had already been
+// written, and this whole file is now unix only. See query_windows.go.
 func readWithDeadline(in *os.File, deadline time.Time) (string, error) {
 	if err := in.SetReadDeadline(deadline); err != nil {
 		return "", err

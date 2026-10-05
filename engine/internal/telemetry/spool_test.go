@@ -118,6 +118,7 @@ func TestConcurrentDrainsClaimEachBatchExactlyOnce(t *testing.T) {
 
 	var mu sync.Mutex
 	seen := map[string]int{}
+	var takeErrs []error
 	var wg sync.WaitGroup
 	for range 8 {
 		wg.Add(1)
@@ -125,7 +126,17 @@ func TestConcurrentDrainsClaimEachBatchExactlyOnce(t *testing.T) {
 			defer wg.Done()
 			for {
 				batch, ack, err := s.Take(ctx)
-				if err != nil || batch == nil {
+				if err != nil {
+					// Kept rather than read as "the spool is empty". On
+					// Windows every drain stopped here, and treating the
+					// error as an empty spool is what made 0 of 24 look
+					// like a counting bug rather than a failure to read.
+					mu.Lock()
+					takeErrs = append(takeErrs, err)
+					mu.Unlock()
+					return
+				}
+				if batch == nil {
 					return
 				}
 				mu.Lock()
@@ -139,6 +150,7 @@ func TestConcurrentDrainsClaimEachBatchExactlyOnce(t *testing.T) {
 	}
 	wg.Wait()
 
+	require.Empty(t, takeErrs, "a drain failed rather than finding the spool empty")
 	require.Len(t, seen, batches, "every batch was taken")
 	for k, n := range seen {
 		require.Equalf(t, 1, n, "batch %s was taken %d times", k, n)

@@ -457,6 +457,10 @@ func (o *Orchestrator) baselineTree(ctx context.Context, rev string) (string, fu
 	return dir, clean, nil
 }
 
+// symlink is os.Symlink, held in a variable so a test can stand in for a
+// Windows machine that refuses an unprivileged link.
+var symlink = os.Symlink
+
 // untar writes an archive into a directory, refusing anything that would land
 // outside it.
 func untar(dir string, r io.Reader) error {
@@ -508,7 +512,16 @@ func untar(dir string, r io.Reader) error {
 				return err
 			}
 			_ = os.Remove(target)
-			if err := os.Symlink(header.Linkname, target); err != nil {
+			err := symlink(header.Linkname, target)
+			if err != nil && symlinkNotPermitted(err) {
+				// What Git for Windows itself does with core.symlinks off,
+				// which is its default for the same reason: the link becomes
+				// a small file holding its target. The working tree this
+				// baseline is compared with was checked out the same way, so
+				// a real link here would make the two sides differ.
+				err = os.WriteFile(target, []byte(header.Linkname), 0o644)
+			}
+			if err != nil {
 				return err
 			}
 		default:
@@ -520,9 +533,18 @@ func untar(dir string, r io.Reader) error {
 }
 
 // confined resolves a path inside a directory, or reports that it escapes.
+//
+// filepath.IsLocal rather than a hand check for ".." and IsAbs, because on
+// Windows those two questions do not cover the ground. "/etc/x" becomes the
+// rooted "\etc\x", which IsAbs calls relative, so an archive Linux refuses was
+// accepted there; "C:x" names a path relative to drive C's current directory
+// rather than to anything here; and NUL, CON or COM1 are devices in every
+// directory, so an entry with one of those names opens a device rather than a
+// file in the checkout. IsLocal refuses all of them on Windows and is the old
+// check everywhere else.
 func confined(dir, name string) (string, bool) {
 	clean := filepath.Clean(filepath.FromSlash(name))
-	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+	if !filepath.IsLocal(clean) {
 		return "", false
 	}
 	target := filepath.Join(dir, clean)

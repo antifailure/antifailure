@@ -433,12 +433,7 @@ func (s Store) write(kind, id string, body []byte, replace bool) error {
 	if err != nil {
 		return err
 	}
-	dir, err := os.Open(filepath.Dir(path))
-	if err != nil {
-		return err
-	}
-	defer func() { _ = dir.Close() }()
-	return dir.Sync()
+	return syncDir(filepath.Dir(path))
 }
 func (s Store) Read(kind, id string) ([]byte, error) {
 	path, err := s.path(kind, id)
@@ -468,8 +463,15 @@ func (s Store) List(kind string) ([]Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	files, err := os.ReadDir(filepath.Dir(path))
+	dir := filepath.Dir(path)
+	files, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
+		// Windows answers a listing of a FILE with "path not found", which
+		// reads as an empty store; Unix says "not a directory". A file where
+		// the store's directory belongs is damage, not absence, on both.
+		if info, statErr := os.Lstat(dir); statErr == nil && !info.IsDir() {
+			return nil, fmt.Errorf("%s is not a directory", dir)
+		}
 		return []Entry{}, nil
 	}
 	if err != nil {

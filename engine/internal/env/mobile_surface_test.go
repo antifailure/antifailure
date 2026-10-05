@@ -39,7 +39,7 @@ func aPhoneWorkflow(name string) schema.Workflow {
 func TestMobileApp_TheApplicationReachesTheRunnerUnderTheNamesItReads(t *testing.T) {
 	root := t.TempDir()
 	o := orchestratorFor(t, root, mobileManifest(&schema.MobileApplication{
-		ID: "com.example.ledger", App: "/builds/Ledger.app", Device: "A1B2-C3D4",
+		ID: "com.example.ledger", App: hostAbs("builds", "Ledger.app"), Device: "A1B2-C3D4",
 	}, aPhoneWorkflow("read")))
 	app := o.mobileApp(o.workflowDocs(nil))
 	require.NotNil(t, app, "a manifest whose workflow drives a phone sent no application")
@@ -47,7 +47,7 @@ func TestMobileApp_TheApplicationReachesTheRunnerUnderTheNamesItReads(t *testing
 	body, err := json.Marshal(app)
 	require.NoError(t, err)
 	for _, key := range []string{
-		`"id":"com.example.ledger"`, `"app":"/builds/Ledger.app"`, `"device":"A1B2-C3D4"`,
+		`"id":"com.example.ledger"`, jsonField("app", hostAbs("builds", "Ledger.app")), `"device":"A1B2-C3D4"`,
 	} {
 		require.Containsf(t, string(body), key, "the runner reads %s and the document does not carry it", key)
 	}

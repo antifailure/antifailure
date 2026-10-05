@@ -85,7 +85,10 @@ func TestEveryCopyOnWriteDeclarationHasARecordedVerdict(t *testing.T) {
 				"not there: %v", name, e.Evidence, err)
 			continue
 		}
-		dir := filepath.Dir(e.Evidence)
+		// Slashes, because the sweep below spells what it found that way and
+		// filepath.Dir would answer with backslashes on Windows, where every
+		// entry then looked stale and every declaration unrecorded.
+		dir := filepath.ToSlash(filepath.Dir(e.Evidence))
 		if other, dup := byDir[dir]; dup {
 			t.Errorf("%q and %q both name evidence in %s, so the sweep cannot tell which "+
 				"entry records the verdict for that provider", name, other, dir)

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -68,8 +69,16 @@ func TestTheRunnerDocumentNeverCarriesANullList(t *testing.T) {
 	// over the bytes the subprocess actually received rather than over a
 	// struct that has not been marshalled yet.
 	bin := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(bin, "node"),
-		[]byte("#!/bin/sh\ncat\n"), 0o755))
+	if runtime.GOOS == "windows" {
+		// Windows runs a program by its extension rather than its first
+		// line, so the stand-in is a batch file, and findstr "^" is the
+		// cat it has: every line of stdin, unchanged.
+		require.NoError(t, os.WriteFile(filepath.Join(bin, "node.cmd"),
+			[]byte("@findstr \"^\"\r\n"), 0o755))
+	} else {
+		require.NoError(t, os.WriteFile(filepath.Join(bin, "node"),
+			[]byte("#!/bin/sh\ncat\n"), 0o755))
+	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	sent, out, err := o.InvokeRunnerCapturingDocument(

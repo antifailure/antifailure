@@ -428,7 +428,7 @@ func serviceNameFor(pkgName, dir string, r *Repo) (string, string) {
 		if dir != "" {
 			candidate = path.Base(dir)
 		} else {
-			candidate = path.Base(r.Root())
+			candidate = r.RootName()
 		}
 	}
 	if dir != "" && (candidate == "src" || candidate == "app" || candidate == "server") {

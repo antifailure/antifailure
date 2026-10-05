@@ -65,6 +65,8 @@ type fakeProber struct {
 	dockerAPI     string
 	dockerAPIErr  error
 	stat          func(string) (os.FileInfo, error)
+	hostShellErr  error
+	privateErr    error
 }
 
 func (f fakeProber) LookPath(name string) (string, error) {
@@ -99,6 +101,15 @@ func (fakeProber) LookupHost(string) ([]string, error)             { return []st
 func (fakeProber) FreeDiskBytes(string) (uint64, error)            { return 200 << 30, nil }
 func (fakeProber) ListenTCP(int) error                             { return nil }
 func (fakeProber) Getenv(string) string                            { return "" }
+
+func (f fakeProber) Private(string) error { return f.privateErr }
+
+func (f fakeProber) HostShell() (string, error) {
+	if f.hostShellErr != nil {
+		return "", f.hostShellErr
+	}
+	return "/bin/sh", nil
+}
 
 func (f fakeProber) Stat(path string) (os.FileInfo, error) {
 	if f.stat != nil {

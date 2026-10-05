@@ -37,11 +37,14 @@ services:
       image: nginx:alpine
 database:
   provider: docker
-  seed: 'printf "%s" "$DATABASE_URL" > `+marker+`'
+  seed: 'printf "%s" "$DATABASE_URL" > seeded.txt'
 `)
 	o := orchestratorFor(t, root)
 
-	err := env.RunSeedForTest(context.Background(), o, "printf '%s' \"$DATABASE_URL\" > "+marker,
+	// Relative to the manifest's directory, which is where the command runs.
+	// A Windows path spliced into the command would lose its backslashes to
+	// sh, so the test writes the command the way a person would.
+	err := env.RunSeedForTest(context.Background(), o, "printf '%s' \"$DATABASE_URL\" > seeded.txt",
 		"postgres://someone:secret@127.0.0.1:5432/candidate")
 	require.NoError(t, err)
 
