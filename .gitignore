@@ -338,6 +338,11 @@ web/apps/api/zzserve.ts
 # tools/preview.
 /preview
 
+# The same rule for tools/ci, which holds the shell scripts CI runs before it
+# touches apt. Anchored for the same reason: it ignores an artefact at the
+# root, not the scripts.
+/ci
+
 # The receipt `go run ./tools/gendrift -generate .` leaves to say that it ran,
 # read by the comparison that follows it and by nothing else. It names the
 # commit and a hash of the generator ledger, so the comparison can tell a tree
