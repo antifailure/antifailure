@@ -6,39 +6,11 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer, type Server } from 'node:net';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { collector, liveAddress } from './live_collector.ts';
 import {
   encode, decode, nullSink, socketSink, FramePump, PROTOCOL,
   type LiveEvent,
 } from '../src/live.ts';
-
-/** A socket server that collects every NDJSON line a sink writes to it, so a
- *  test can assert on what actually crossed the wire. */
-function collector(): Promise<{
-  path: string; lines: () => LiveEvent[]; raw: () => string; close: () => void; server: Server;
-}> {
-  const dir = mkdtempSync(join(tmpdir(), 'af-live-'));
-  const path = join(dir, 'live.sock');
-  let buffer = '';
-  const server = createServer((socket) => {
-    socket.setEncoding('utf8');
-    socket.on('data', (chunk) => { buffer += chunk; });
-  });
-  return new Promise((resolve) => {
-    server.listen(path, () => {
-      resolve({
-        path,
-        raw: () => buffer,
-        lines: () => buffer.split('\n').map(decode).filter((e): e is LiveEvent => !!e),
-        close: () => server.close(),
-        server,
-      });
-    });
-  });
-}
 
 /** Waits until `predicate` holds or the budget runs out, polling. A socket is
  *  asynchronous and a test that read once would race the flush. */
@@ -88,7 +60,7 @@ test('nullSink does nothing and never throws', async () => {
 });
 
 test('socketSink writes events in order over a real socket', async () => {
-  const c = await collector();
+  const c = await collector('af-live');
   const sink = socketSink(c.path);
   sink.hello('run-1');
   sink.agent({ id: 'a', surface: 'web', persona: 'owner', workflow: 'signup' }, 'live');
@@ -108,7 +80,7 @@ test('socketSink writes events in order over a real socket', async () => {
 });
 
 test('socketSink numbers steps and frames monotonically per agent', async () => {
-  const c = await collector();
+  const c = await collector('af-live');
   const sink = socketSink(c.path);
   sink.step('a', { text: 'one' });
   sink.frame('a', { mime: 'image/jpeg', w: 1, h: 1, b64: 'AA' });
@@ -130,7 +102,7 @@ test('socketSink numbers steps and frames monotonically per agent', async () => 
 });
 
 test('socketSink buffers events sent before the connection is up and flushes them', async () => {
-  const c = await collector();
+  const c = await collector('af-live');
   // These are sent synchronously, in the same tick socketSink is created, so
   // the socket cannot possibly be connected yet. They must still arrive.
   const sink = socketSink(c.path);
@@ -144,7 +116,7 @@ test('socketSink buffers events sent before the connection is up and flushes the
 });
 
 test('socketSink flushes what a run emitted when the run finished before the socket connected', async () => {
-  const c = await collector();
+  const c = await collector('af-live');
   const sink = socketSink(c.path);
   sink.hello('fast');
   sink.agent({ id: 'a', surface: 'desktop' }, 'ended', 'pass');
@@ -175,8 +147,7 @@ test('socketSink flushes what a run emitted when the run finished before the soc
 test('socketSink degrades to a no-op when the socket cannot connect', async () => {
   // A path nobody is listening on. Every call must return and close must
   // resolve: a watcher that never arrives cannot be allowed to fail the run.
-  const dir = mkdtempSync(join(tmpdir(), 'af-live-'));
-  const sink = socketSink(join(dir, 'nobody.sock'));
+  const sink = socketSink(liveAddress('af-live-nobody'));
   sink.hello('run');
   sink.agent({ id: 'a', surface: 'web' }, 'live');
   sink.step('a', { text: 'x' });
@@ -187,7 +158,7 @@ test('socketSink degrades to a no-op when the socket cannot connect', async () =
 });
 
 test('FramePump emits a frame per tick with a rising sequence', async () => {
-  const c = await collector();
+  const c = await collector('af-live');
   const sink = socketSink(c.path);
   let n = 0;
   const pump = new FramePump(
@@ -229,7 +200,7 @@ test('FramePump never lets two captures overlap', async () => {
 });
 
 test('FramePump swallows a capture that throws and keeps going', async () => {
-  const c = await collector();
+  const c = await collector('af-live');
   const sink = socketSink(c.path);
   let n = 0;
   const pump = new FramePump(
@@ -253,7 +224,7 @@ test('FramePump swallows a capture that throws and keeps going', async () => {
 });
 
 test('FramePump stop halts further frames', async () => {
-  const c = await collector();
+  const c = await collector('af-live');
   const sink = socketSink(c.path);
   const pump = new FramePump(
     async () => ({ w: 1, h: 1, b64: 'AA' }),

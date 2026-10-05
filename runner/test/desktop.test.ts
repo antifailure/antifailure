@@ -21,21 +21,21 @@
 
 import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer, type Server } from 'node:net';
-import { mkdtempSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { createServer } from 'node:net';
+import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   locate, normalizeRole, snapshotFrom, walk, filledOf, chosen, type AxNode,
 } from '../src/drivers/ax.ts';
+import { collector } from './live_collector.ts';
 import { treeFrom } from '../src/drivers/electron.ts';
 import { runDesktop, desktop, withEnvironmentAddress, type DesktopApp } from '../src/drivers/desktop.ts';
 import {
   AxError, trusted, screenIsLocked, GRANT_INSTRUCTION, LOCKED_SCREEN,
 } from '../src/drivers/macax.ts';
 import { driverFor } from '../src/drivers/driver.ts';
-import { socketSink, decode, type LiveEvent } from '../src/live.ts';
+import { socketSink } from '../src/live.ts';
 import type { AxSurface } from '../src/drivers/surface.ts';
 import type { Snapshot } from '../src/workflow.ts';
 
@@ -698,23 +698,8 @@ test('runDesktop refuses a plan that asks to open a url rather than doing nothin
   assert.match(results[0]!.outcome.detail, /no address bar/);
 });
 
-function collector(): Promise<{ path: string; lines: () => LiveEvent[]; close: () => void; server: Server }> {
-  const dir = mkdtempSync(join(tmpdir(), 'af-desk-'));
-  const path = join(dir, 'l.sock');
-  let buffer = '';
-  const server = createServer((s) => { s.setEncoding('utf8'); s.on('data', (c) => { buffer += c; }); });
-  return new Promise((resolve) => {
-    server.listen(path, () => resolve({
-      path,
-      lines: () => buffer.split('\n').map(decode).filter((e): e is LiveEvent => !!e),
-      close: () => server.close(),
-      server,
-    }));
-  });
-}
-
 test('runDesktop streams the agent lifecycle and its steps to a watcher', async () => {
-  const c = await collector();
+  const c = await collector('af-desk');
   try {
     const sink = socketSink(c.path);
     await runDesktop({

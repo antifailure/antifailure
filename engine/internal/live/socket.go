@@ -2,35 +2,42 @@ package live
 
 import (
 	"bufio"
+	"fmt"
 	"net"
-	"os"
 )
 
-// Server listens on a local unix socket for the runner's live stream. The
-// runner connects to the path and writes NDJSON events; each is decoded and
+// Server listens on a local endpoint for the runner's live stream. The runner
+// connects to the address and writes NDJSON events; each is decoded and
 // published to the Hub. Local only, by design: the frames it carries are
 // ephemeral and never leave the machine for the control plane.
+//
+// The endpoint is a unix socket inside a private directory everywhere except
+// Windows, where it is a named pipe whose security descriptor admits only the
+// user running the engine. Both are reachable only from this machine, need no
+// port allocation or firewall reasoning, and are one string the runner hands
+// unchanged to Node's net.connect, which speaks both. Address chooses which.
 type Server struct {
 	ln   net.Listener
 	path string
 }
 
-// Listen opens the socket at path. The caller passes the path to the runner in
-// the job document; the runner connects and streams. A unix socket rather than
-// a port so it is reachable only from this machine and needs no allocation or
-// firewall reasoning.
-func Listen(path string) (*Server, error) {
-	// A stale socket file from a crashed run would refuse the bind. Removing it
-	// first is safe: the path is run scoped and nobody else owns it.
-	_ = os.Remove(path)
-	ln, err := net.Listen("unix", path)
+// Listen opens the endpoint at addr, which comes from Address. The caller
+// passes it to the runner in the job document; the runner connects and
+// streams.
+//
+// A failure is returned at once and names the endpoint. Nothing waits on a
+// listener that never came up: the runner treats an unreachable watcher as
+// nobody watching, so a silent failure here would read as a live view with no
+// frames in it rather than as the error it is.
+func Listen(addr string) (*Server, error) {
+	ln, err := listen(addr)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("the live view could not listen at %s: %w", addr, err)
 	}
-	return &Server{ln: ln, path: path}, nil
+	return &Server{ln: ln, path: addr}, nil
 }
 
-// Path is the socket path, to hand to the runner.
+// Path is the endpoint's address, to hand to the runner.
 func (s *Server) Path() string { return s.path }
 
 // Serve accepts connections and feeds their events to the hub until the
@@ -47,10 +54,10 @@ func (s *Server) Serve(hub *Hub) {
 	}
 }
 
-// Close stops accepting and removes the socket file.
+// Close stops accepting and removes whatever the endpoint left on disk.
 func (s *Server) Close() error {
 	err := s.ln.Close()
-	_ = os.Remove(s.path)
+	release(s.path)
 	return err
 }
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -76,9 +75,11 @@ The verdict is the same one a plain run produces, printed when it finishes.`),
 	return cmd
 }
 
-// watchRun wires the live socket to a hub, drives the run against it, and
-// renders. The socket lives in a short-named temp directory because a unix
-// socket path has a hard length limit that a deep artifacts path can exceed.
+// watchRun wires the live endpoint to a hub, drives the run against it, and
+// renders. The endpoint is a unix socket in a short-named private temp
+// directory, short because a unix socket path has a hard length limit that a
+// deep artifacts path can exceed, or a named pipe on Windows; live.Address
+// chooses.
 func watchRun(
 	ctx context.Context, e *Env, o *env.Orchestrator, noImages bool, opts env.TestOptions,
 ) error {
@@ -87,7 +88,11 @@ func watchRun(
 		return err
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
-	srv, err := live.Listen(filepath.Join(dir, "l.sock"))
+	addr, err := live.Address(dir)
+	if err != nil {
+		return err
+	}
+	srv, err := live.Listen(addr)
 	if err != nil {
 		return err
 	}
