@@ -3,7 +3,7 @@
 // here we prove the registry, the loud refusal of the surface that is still
 // scaffolded, and the terminal driver against a real process.
 
-import { test } from 'node:test';
+import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -333,6 +333,30 @@ test('an arrow reaches a program in the cursor key mode it asked for', async () 
     'the driver sent the encoding the program had turned off');
 });
 
+test('a terminal that was asked for win32-input-mode is sent arrows as key events', {
+  // On Windows ConPTY makes this request itself and consumes the events, so
+  // the program never sees them; the test above covers Windows end to end.
+  skip: process.platform === 'win32' ? 'ConPTY consumes the request and the events; covered by the cursor key test' : false,
+}, async () => {
+  // The wiring, everywhere else. A program stands in for ConPTY by making the
+  // request on its own output, and draws exactly what reached it. If the
+  // driver did not read the protocol from the screen it would send ESC [ A.
+  const program = 'process.stdin.setRawMode(true); process.stdout.write("\\u001b[?9001hready\\r\\n"); '
+    + 'process.stdin.on("data", (b) => { process.stdout.write("got " + b.toString().split(String.fromCharCode(27)).join("ESC") + "\\r\\n"); });';
+  const [result] = await runTerminal({
+    workflows: [{
+      name: 'win32-input',
+      command: execPath,
+      args: ['-e', program],
+      screen: { rows: 8, cols: 80 },
+      input: ['<up>'],
+      expect: ['"got ESC[38;72;0;1;256;1_ESC[38;72;0;0;256;1_"'],
+      maxMs: 5_000,
+    }],
+  });
+  assert.equal(result!.outcome.verdict, 'pass', result!.outcome.detail);
+});
+
 test('a program that draws forever is judged and stopped, not reported blocked', async () => {
   // A full screen program is not supposed to exit. The workflow is over when
   // its keys have been sent and the screen has settled, and calling that an
@@ -392,6 +416,14 @@ test('without a screen a program is driven through a pipe, so what is typed is n
   assert.equal(results[0]!.outcome.cause, 'expectation-not-met');
 });
 
+/** verbatim wraps text as a quoted expectation. Not JSON.stringify, which
+ *  escapes a backslash: a quoted expectation is taken character for character,
+ *  so a Windows path written as JSON asked for doubled backslashes the program
+ *  never printed. */
+function verbatim(text: string): string {
+  return `"${text}"`;
+}
+
 test('a workflow runs where it says, and the job directory is the default', async () => {
   // Two UNRELATED directories, neither a prefix of the other. An earlier
   // version used the job directory and its own parent, and a verbatim
@@ -404,8 +436,8 @@ test('a workflow runs where it says, and the job directory is the default', asyn
   const results = await runTerminal({
     cwd: jobDir,
     workflows: [
-      { name: 'job-directory', command: execPath, args: printCwd, expect: [JSON.stringify(jobDir)] },
-      { name: 'its-own-directory', command: execPath, args: printCwd, cwd: ownDir, expect: [JSON.stringify(ownDir)] },
+      { name: 'job-directory', command: execPath, args: printCwd, expect: [verbatim(jobDir)] },
+      { name: 'its-own-directory', command: execPath, args: printCwd, cwd: ownDir, expect: [verbatim(ownDir)] },
     ],
   });
   assert.equal(results[0]!.outcome.verdict, 'pass', results[0]!.outcome.detail);
@@ -650,6 +682,10 @@ process.stdin.once("data", () => {
  *  there at all. Racing the call against a timer is what converts that into a
  *  counted assertion naming the cause. */
 const NEVER_RETURNED = 'the driver never returned';
+
+/** Windows, where every pseudo terminal is ConPTY and hands over a rendering
+ *  of the screen rather than the program's bytes. */
+const onWindows = process.platform === 'win32';
 
 /** withinReach runs a driver call against a timer, so a driver that never comes
  *  back is a failed assertion rather than a run with no verdict in it. The
@@ -960,8 +996,14 @@ test('never 3: a program that never exits is watched for its whole budget, and t
       maxMs: budgetMs,
     }],
   });
-  assert.equal(result!.outcome.verdict, 'pass', result!.outcome.detail);
-  assert.match(result!.outcome.detail, new RegExp(`nothing it must never show did in the ${budgetMs} ms it was watched`));
+  if (onWindows) {
+    // Watched just as long, and then not called a pass: see never 9.
+    assert.equal(result!.outcome.verdict, 'blocked', result!.outcome.detail);
+    assert.match(result!.outcome.detail, /could not be observed/);
+  } else {
+    assert.equal(result!.outcome.verdict, 'pass', result!.outcome.detail);
+    assert.match(result!.outcome.detail, new RegExp(`nothing it must never show did in the ${budgetMs} ms it was watched`));
+  }
   assert.ok(result!.durationMs >= budgetMs,
     `passed after ${result!.durationMs} ms of a ${budgetMs} ms watch, so it was not watched for its budget`);
 });
@@ -1022,22 +1064,52 @@ test('never 5: through a pipe a forbidden line fails the workflow, and so does o
   assert.match(killed!.outcome.detail, /^The output showed "row dropped"/);
 });
 
+/** PARSE_MS_PER_KB is the rate `slowParse` charges, chosen so a backlog of a
+ *  few dozen kilobytes outlives a 1500 ms budget while the largest single batch
+ *  the driver hands over, MAX_BATCH, still parses in well under a second. */
+const PARSE_MS_PER_KB = 25;
+
+/** slowParse makes the emulator slow ON PURPOSE, so a backlog exists without
+ *  depending on CI being slower than this machine.
+ *
+ *  It charges BY THE CHARACTER and not by the call, and that is the point of
+ *  it. A charge per call made these tests about how the pseudo terminal
+ *  happened to CHUNK the output: a host that delivered three hundred chunks
+ *  built a fifteen second backlog, and one that delivered them in a few
+ *  batches built none. Real parsing costs what it parses. `first`, when given,
+ *  replaces the charge for the first parse, for a test that needs one parse
+ *  held across a deadline whatever its size, and `msPerKb` a slower rate for a
+ *  test whose program has to finish writing quickly. */
+function slowParse(t: TestContext, first?: number, msPerKb = PARSE_MS_PER_KB) {
+  const write = Screen.prototype.write;
+  let parses = 0;
+  const mock = t.mock.method(Screen.prototype, 'write', async function (this: Screen, data: string) {
+    parses += 1;
+    const delay = parses === 1 && first !== undefined ? first : (data.length / 1024) * msPerKb;
+    await new Promise<void>((resolve) => setTimeout(resolve, delay));
+    await write.call(this, data);
+  });
+  return { restore: () => mock.mock.restore(), parses: () => parses };
+}
+
 test('never 6: a forbidden line the screen never got to draw is still read, from the bytes', async (t) => {
   // The emulator can fall behind the program, and the bytes it has not drawn
   // are exactly where a late error would be. `never` reads the bytes as they
-  // arrive, so a backlog does not hide one. Made with the queued parse table's
-  // slowed parse, so it needs no slow host: every parse after the first takes
-  // 50 ms, and the forbidden line is written at the eight hundredth line, far
-  // behind anything the screen can have drawn inside a 1500 ms budget.
-  const write = Screen.prototype.write;
-  let parses = 0;
-  const slowWrite = t.mock.method(Screen.prototype, 'write', async function (this: Screen, data: string) {
-    parses += 1;
-    if (parses > 1) await new Promise<void>((resolve) => setTimeout(resolve, 50));
-    await write.call(this, data);
-  });
-  const program = 'process.stdout.write("ready\\n"); let n = 0; setTimeout(() => setInterval(() => { '
-    + 'n += 1; process.stdout.write(n === 800 ? "panic: lost rows\\n" : "still going\\n"); }, 1), 200);';
+  // arrive, so a backlog does not hide one. Made with `slowParse`, so it needs
+  // no slow host: the forbidden line is the ten thousandth of twenty thousand,
+  // written in one tight loop, so it sits about 120 KB into a backlog that
+  // parses at 25 ms a kilobyte, far behind anything the screen can have drawn
+  // inside a 1500 ms budget.
+  //
+  // A tight loop and not a timer. This was a line a millisecond on
+  // setInterval, which is a line every 15.6 ms on Windows, where the timer
+  // ticks at that rate: the eight hundredth line was due twelve seconds into a
+  // 1500 ms budget, so the program never wrote it, the run passed, and the test
+  // reported that `never` could not see what was never there.
+  const slow = slowParse(t);
+  const program = 'process.stdout.write("ready\\n"); setTimeout(() => { '
+    + 'for (let n = 1; n <= 20000; n++) process.stdout.write(n === 10000 ? "panic: lost rows\\n" : "still going\\n"); '
+    + 'setInterval(() => {}, 1000); }, 200);';
   const workflow = {
     name: 'parser-behind',
     command: execPath,
@@ -1057,7 +1129,7 @@ test('never 6: a forbidden line the screen never got to draw is still read, from
     const [undeclared] = await runTerminal({ workflows: [workflow] });
     assert.equal(undeclared!.outcome.verdict, 'pass', undeclared!.outcome.detail);
   } finally {
-    slowWrite.mock.restore();
+    slow.restore();
   }
 });
 
@@ -1106,7 +1178,40 @@ test('never 8: two screens are not read as one phrase', async () => {
       maxMs: 3_000,
     }],
   });
-  assert.equal(result!.outcome.verdict, 'pass', result!.outcome.detail);
+  // On Windows a `never` that saw nothing is blocked, never passed (never 9),
+  // so what this test can say there is the half that matters here: the two
+  // screens were not read as the forbidden phrase.
+  assert.equal(result!.outcome.verdict, onWindows ? 'blocked' : 'pass', result!.outcome.detail);
+});
+
+test('never 9: on Windows a never that saw nothing is blocked, and elsewhere asking for its key protocol changes nothing', async () => {
+  // Measured on a Windows runner, fifteen trials each: ConPTY hands over the
+  // screen as drawn, so a warning overwritten on its own line reached the bytes
+  // 0 times in 15. A `never` that saw nothing there has not shown that nothing
+  // was shown, and a pass would say it had.
+  //
+  // The program asks for win32-input-mode, the request ConPTY makes, because
+  // that request must NOT be what decides this. A Unix pseudo terminal relays
+  // a program's bytes whatever it asks for, so there the same program passes;
+  // reading the request as the signal blocked correct Unix workflows, which a
+  // review caught.
+  const [result] = await runTerminal({
+    workflows: [{
+      name: 'never-on-this-platform',
+      command: execPath,
+      args: ['-e', 'process.stdout.write("\\u001b[?9001hready\\r\\n");' + keepsRunning],
+      screen: { rows: 10, cols: 40 },
+      expect: ['"ready"'],
+      never: ['panic'],
+      maxMs: 1_500,
+    }],
+  });
+  if (onWindows) {
+    assert.equal(result!.outcome.verdict, 'blocked', result!.outcome.detail);
+    assert.match(result!.outcome.detail, /could not be observed/);
+  } else {
+    assert.equal(result!.outcome.verdict, 'pass', result!.outcome.detail);
+  }
 });
 
 test('asText keeps the text a terminal shows and separates what the cursor moved apart', () => {
@@ -1127,45 +1232,44 @@ test('asText keeps the text a terminal shows and separates what the cursor moved
 });
 
 test('a queued parse respects the budget and preserves finished output', async (t) => {
-  // Exercise the real pty and emulator, but make each parse take 50 ms while
-  // the child emits a short line every millisecond. This creates the backlog
-  // on purpose, without depending on CI being slower than this machine.
-  // Exercise each entry into the drain and every way a producer can finish:
-  // staying alive quietly, exiting with a parse that fits in the budget, and
-  // exiting with a backlog that does not.
+  // Exercise the real pty and emulator with `slowParse`, so a backlog exists
+  // on purpose rather than because CI is slower than this machine. Exercise
+  // each entry into the drain and every way a producer can finish: staying
+  // alive quietly, exiting with a parse that fits in the budget, and exiting
+  // with a backlog that does not.
   //
   // `exited-over-budget` is the residual the runnerdrain lane left in the code.
   // An exited program's queue is finite, so the driver drained it with no
   // ceiling at all, and a program that exited having written more than the
   // budget could pay to parse held the driver for the whole parse. Here that is
-  // three hundred chunks at 50 ms each, fifteen seconds of parsing behind a
-  // 1500 ms budget, and the reach below is a third of that.
+  // six thousand lines, about 72 KB written in ONE write and then an exit,
+  // parsed at 100 ms a kilobyte: seven seconds of parsing behind a 1500 ms
+  // budget, where a bounded drain returns after the budget plus the one batch
+  // already in the emulator, at most MAX_BATCH or 1.6 s at this rate.
+  //
+  // It was three hundred lines on a one millisecond timer, and that was two
+  // assumptions about the host. Windows ticks its timer every 15.6 ms, so the
+  // program took nearly five seconds to WRITE its lines, was still writing when
+  // the budget ran out, and the cell read "still writing" where it asserts an
+  // exit. And the parse was charged per call, so once the driver handed the
+  // emulator a batch rather than a chunk the backlog vanished and the cell
+  // passed in half a second. One write rather than a loop because writing is
+  // not free either: ConPTY renders as it goes, and twenty thousand separate
+  // writes took longer than the budget there.
   const triggers = ['startup', 'keys-pending', 'after-key', 'quiet', 'exited', 'exited-over-budget'] as const;
   for (const trigger of triggers) {
     await t.test(trigger, { timeout: 15_000 }, async (t) => {
       const budgetMs = trigger === 'exited' ? 4_000 : 1_500;
-      const write = Screen.prototype.write;
-      let parses = 0;
-      const slowWrite = t.mock.method(Screen.prototype, 'write', async function (this: Screen, data: string) {
-        parses += 1;
-        // These controls need a pending parse even if the pty coalesces all
-        // the finite output into one chunk. `quiet` holds that first parse
-        // across the deadline. `exited` holds it for longer than a settle's
-        // own ceiling and well inside its budget, which an exited program
-        // must be given in full: its complete screen is the drain.
-        const delay = parses === 1 && trigger === 'quiet' ? budgetMs + 500
-          : parses === 1 && trigger === 'exited' ? 3_200 : 50;
-        await new Promise<void>((resolve) => setTimeout(resolve, delay));
-        await write.call(this, data);
-      });
+      // These controls need a pending parse even if the pty coalesces all the
+      // finite output into one chunk. `quiet` holds that first parse across
+      // the deadline. `exited` holds it for longer than a settle's own ceiling
+      // and well inside its budget, which an exited program must be given in
+      // full: its complete screen is the drain.
+      const slow = slowParse(t, trigger === 'quiet' ? budgetMs + 500 : trigger === 'exited' ? 3_200 : undefined,
+        trigger === 'exited-over-budget' ? 100 : PARSE_MS_PER_KB);
       const writer = 'setInterval(() => process.stdout.write("still going\\n"), 1);';
       const finite = 'process.stdout.write("still going\\n".repeat(100) + "the burst ended\\n");';
-      // A line a millisecond, three hundred of them, then the expected words
-      // and a natural exit. Spread out so the pty delivers many chunks rather
-      // than one. A host that coalesced them into one chunk would parse it in
-      // 50 ms and PASS, which fails this cell loudly rather than vacuously.
-      const longExit = 'let n = 0; const t = setInterval(() => { process.stdout.write("still going\\n"); '
-        + 'if (++n === 300) { clearInterval(t); process.stdout.write("the burst ended\\n"); } }, 1);';
+      const longExit = 'process.stdout.write("still going\\n".repeat(6000) + "the burst ended\\n");';
       const command = trigger === 'after-key'
         ? `process.stdin.setRawMode(true); process.stdout.write("ready\\n"); process.stdin.once("data", () => { ${writer} });`
         : trigger === 'quiet' ? `${finite} setInterval(() => {}, 1000);`
@@ -1188,13 +1292,13 @@ test('a queued parse respects the budget and preserves finished output', async (
       } finally {
         // Even a broken drain must release its real child after the assertion
         // timer wins. Removing the delay lets that finite captured tail finish.
-        slowWrite.mock.restore();
+        slow.restore();
         await work;
       }
       assert.notEqual(raced, NEVER_RETURNED,
         `${trigger}: the driver waited for the queued parse after its budget expired`);
       if (raced === NEVER_RETURNED) return;
-      assert.ok(parses > 0, `${trigger}: no parse backlog was exercised`);
+      assert.ok(slow.parses() > 0, `${trigger}: no parse backlog was exercised`);
       const outcome = raced[0]!.outcome;
       if (trigger === 'exited') {
         assert.equal(outcome.verdict, 'pass', outcome.detail);
@@ -1209,6 +1313,26 @@ test('a queued parse respects the budget and preserves finished output', async (
         : /program still writing/);
     });
   }
+});
+
+test('a finished terminal workflow leaves no handle open behind it', async () => {
+  // On Windows node-pty kept its pipes to ConPTY open after the program had
+  // gone, killed or exited, so a file of these tests passed every test and
+  // never exited: CI killed it at its timeout. Counted as handles rather than
+  // inferred from a hang, one workflow that exits and one that is stopped.
+  const pipes = () => process.getActiveResourcesInfo().filter((r) => r === 'PipeWrap' || r === 'TTYWrap').length;
+  const before = pipes();
+  await runTerminal({
+    workflows: [
+      { name: 'exits', command: execPath, args: ['-e', 'process.stdout.write("bye\\n")'],
+        screen: { rows: 5, cols: 20 }, expect: ['"bye"'], maxMs: 5_000 },
+      { name: 'stopped', command: execPath, args: ['-e', 'process.stdout.write("ready\\n");' + keepsRunning],
+        screen: { rows: 5, cols: 20 }, expect: ['"ready"'], maxMs: 5_000 },
+    ],
+  });
+  // Closing is asynchronous everywhere, so give it the moment it takes.
+  for (let i = 0; i < 50 && pipes() > before; i++) await new Promise((r) => setTimeout(r, 100));
+  assert.equal(pipes(), before, `still open: ${JSON.stringify(process.getActiveResourcesInfo())}`);
 });
 
 test('the job environment reaches the program on both paths', async () => {

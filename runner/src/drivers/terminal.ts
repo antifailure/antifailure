@@ -465,38 +465,30 @@ async function driveOnAScreen(
     return notOurs('a pseudo terminal could not be opened', err);
   }
 
-  // The emulator parses asynchronously, so the writes are chained rather than
+  // The emulator parses asynchronously, so its writes are queued rather than
   // fired: two chunks parsed out of order would render a screen the program
-  // never drew. Awaiting the chain is what makes a snapshot mean "everything
-  // received so far has been drawn".
+  // never drew. Awaiting the queue is what makes a snapshot mean "everything
+  // received so far has been drawn". See ParseQueue for why the queue hands the
+  // emulator whatever has accumulated rather than one write per chunk.
   //
-  // `received` and `parsedBytes` are what let the driver say HOW FAR BEHIND the
-  // emulator was when it had to stop reading. A driver that cannot measure that
-  // has no way to report "I did not see all of it" and reports "it was not
-  // there" instead.
-  let parsed: Promise<void> = Promise.resolve();
+  // `received` and the queue's `parsedBytes` are what let the driver say HOW FAR
+  // BEHIND the emulator was when it had to stop reading. A driver that cannot
+  // measure that has no way to report "I did not see all of it" and reports "it
+  // was not there" instead.
+  const queue = new ParseQueue((data) => screen.write(data));
   let lastDataAt = Date.now();
   let received = 0;
-  let parsedBytes = 0;
   // Every byte the program wrote, as written, for judging `never`. The screens
   // are snapshots, and a snapshot cannot see what was drawn and erased between
   // two of them; the bytes can, and they are complete the moment they arrive,
   // however far behind the emulator is.
   let raw = '';
-  let closing = false;
   let exited: { code: number; signal: number | undefined } | undefined;
   child.onData((data: string) => {
     lastDataAt = Date.now();
     received += data.length;
     if (watching) raw += data;
-    parsed = parsed.then(async () => {
-      // Nothing reaches the emulator once the driver has stopped reading it: a
-      // disposed emulator throws, and the backlog behind a budget that has
-      // already run out is precisely what must not be parsed.
-      if (closing) return;
-      await screen.write(data);
-      parsedBytes += data.length;
-    });
+    queue.push(data);
   });
   child.onExit((e: { exitCode: number; signal?: number }) => {
     exited = { code: e.exitCode, signal: e.signal };
@@ -523,12 +515,13 @@ async function driveOnAScreen(
   // yet has not started; a keystroke is given far less, because a key a
   // program ignores must not cost the ceiling.
   // `drawn` waits until everything RECEIVED so far has been parsed, which is
-  // not what awaiting the chain once does. The chain grows while it is
-  // awaited, because the program keeps writing during the await and every
-  // chunk appends another link, so a single `await parsed` proves only that
-  // the chunks queued at the instant of the call are on the grid. Awaiting
-  // until the chain stops changing is the fixed point that makes a snapshot
-  // mean what the comment above claims it means.
+  // not what awaiting the queue once does. The queue grows while it is
+  // awaited, because the program keeps writing during the await, and a write
+  // that arrives after the queue went idle starts a new round with a new
+  // `settled`, so a single await proves only that what had arrived by the
+  // time that round began is on the grid. Awaiting until `settled` stops
+  // changing is the fixed point that makes a snapshot mean what the comment
+  // above claims it means.
   //
   // AND THE FIXED POINT IS NOT A DRAIN, which is the distinction this lost. The
   // chain holds what has been DELIVERED, so its fixed point says the emulator
@@ -574,7 +567,7 @@ async function driveOnAScreen(
       const remaining = until - Date.now();
       if (remaining <= 0) return;
       const wasExited = exited !== undefined;
-      const chain = parsed;
+      const chain = queue.settled;
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         await Promise.race([
@@ -588,7 +581,7 @@ async function driveOnAScreen(
       // data may have extended the tail, so go round again against the budget
       // rather than the caller's ceiling.
       if (exited && !wasExited) continue;
-      if (parsed === chain || Date.now() >= until) return;
+      if (queue.settled === chain || Date.now() >= until) return;
     }
   };
   const settle = async (since: number, responseMs: number) => {
@@ -768,8 +761,10 @@ async function driveOnAScreen(
     // The cursor key encoding is read again for every key, because the program
     // decides it and decides it while it is starting: reading it once before
     // the first redraw would send the wrong bytes for every arrow afterwards.
+    // On Windows the protocol decides instead, because ConPTY hides the mode
+    // and encodes a key event for the program itself; see win32KeyPress.
     const sentAt = Date.now();
-    child.write(encodeKeys(entry, screen.cursorKeys()));
+    child.write(encodeKeys(entry, screen.cursorKeys(), screen.keyProtocol()));
     await settle(sentAt, KEY_RESPONSE_MS);
     capture();
   }
@@ -792,19 +787,25 @@ async function driveOnAScreen(
   // it, so parsing the backlog would cost the budget again and still not buy the
   // program's last word. What it bought instead is the measurement below.
   if (!stillWriting && !ranOutOfTime) await drawn(deadline);
-  const behind = received - parsedBytes;
+  const behind = received - queue.parsedBytes;
   const written = received;
   const everything = screen.everything();
   const transcript = [...shown, everything].join('\n');
   capture();
   const forbidden = forbiddenIn();
 
-  // Every chunk still queued becomes a no-op from here, so awaiting the chain
-  // waits only for the one already inside the emulator. That is what has to
-  // land before the emulator is disposed under it.
-  closing = true;
-  await parsed;
-  if (!exited) child.kill();
+  // Everything still queued is dropped from here, so awaiting the queue waits
+  // only for the one batch already inside the emulator, which MAX_BATCH keeps
+  // small. That is what has to land before the emulator is disposed under it.
+  queue.close();
+  await queue.settled;
+  // What the program did is settled here, before letting go of it. Releasing
+  // kills a program still running, and on Windows it waits a moment after, so
+  // the exit that kill causes would otherwise arrive in time to be read as the
+  // program's own, and a program the driver stopped would be reported as one
+  // that failed.
+  const ended = exited;
+  await release(child, ended !== undefined);
   screen.dispose();
 
   const drew = size.rows + ' by ' + size.cols;
@@ -827,11 +828,20 @@ async function driveOnAScreen(
       output: transcript,
     };
   }
+  if (verdict === 'met' && watching && rendered()) {
+    // Nothing forbidden was seen, and on this terminal that is not the same
+    // as nothing forbidden was shown. See `rendered` for the measurement.
+    return {
+      cause: 'runner-failure',
+      detail: `Every expectation appeared and nothing it must never show was seen, but this terminal reports the screen as drawn rather than every byte the program wrote, so text drawn and then overwritten on the same line never reaches the driver and whether the program showed what it must never show could not be observed.`,
+      output: transcript,
+    };
+  }
   if (verdict === 'met') {
     return {
       cause: 'succeeded',
       detail: watching
-        ? `Every expectation appeared on the ${drew} screen the program drew, and nothing it must never show did${exited ? '' : ` in the ${budgetMs} ms it was watched`}.`
+        ? `Every expectation appeared on the ${drew} screen the program drew, and nothing it must never show did${ended ? '' : ` in the ${budgetMs} ms it was watched`}.`
         : `Every expectation appeared on the ${drew} screen the program drew.`,
       output: transcript,
     };
@@ -860,17 +870,17 @@ async function driveOnAScreen(
     // A quiet producer may still have a parser backlog at the deadline. Its
     // silence is not proof that the screen was fully drawn, and neither is its
     // exit: an exited program's queue is finite, not short.
-    const gone = exited ? `The program exited with code ${exited.code}, but the` : 'The';
+    const gone = ended ? `The program exited with code ${ended.code}, but the` : 'The';
     return {
       cause: 'budget-exhausted',
       detail: `${gone} budget of ${budgetMs} ms ran out before the ${drew} screen finished drawing. It had written ${written} bytes and the screen was ${behind} of them behind.`,
       output: transcript,
     };
   }
-  if (exited && exited.code !== 0) {
+  if (ended && ended.code !== 0) {
     return {
       cause: 'application-error',
-      detail: `The program exited ${exited.code} and the screen did not show what was expected.`,
+      detail: `The program exited ${ended.code} and the screen did not show what was expected.`,
       output: transcript,
     };
   }
@@ -890,6 +900,124 @@ async function driveOnAScreen(
     detail: 'Nothing on the screen confirmed or contradicted what was expected.',
     output: transcript,
   };
+}
+
+/** The most a single write hands the emulator. It bounds the one parse the
+ *  driver still waits for after it has stopped reading, so a program that
+ *  wrote megabytes cannot hold the driver past its budget through one batch.
+ *  Sixteen thousand characters parse in a few milliseconds, and it is four
+ *  times the most a Unix pseudo terminal delivers in one read. */
+export const MAX_BATCH = 16_384;
+
+/** ParseQueue feeds a program's output to the emulator in order, handing it
+ *  everything that has accumulated rather than one write per chunk.
+ *
+ *  ONE WRITE PER CHUNK WAS A WINDOWS DEFECT, measured rather than guessed. The
+ *  emulator resolves a write on a later timer tick, and a write that finds the
+ *  emulator idle is scheduled with setTimeout. Chaining one write per chunk
+ *  therefore costs one timer tick per chunk however small the chunk is. On
+ *  Linux and macOS a tick is about a millisecond and a pseudo terminal hands
+ *  over kilobytes at a time, so nobody noticed. On Windows a tick is the
+ *  system timer's 15.6 ms and ConPTY hands over a few dozen bytes at a time,
+ *  so the emulator drew about 1.8 KB a second: a ten thousand line burst that
+ *  Linux draws in a second was 72723 of 108989 bytes behind after twenty, and
+ *  the driver correctly reported that it could not see the program's last
+ *  word. The cost of a tick is paid per batch now, and a batch is whatever
+ *  arrived while the previous one was being parsed. */
+export class ParseQueue {
+  /** What the emulator has finished parsing, for the "how far behind" report. */
+  parsedBytes = 0;
+  /** Resolves once everything pushed before the current round went idle has
+   *  been parsed. A push after that starts a new round with a new promise, which
+   *  is how a caller tells "drained" from "drained what was there when I
+   *  looked". */
+  settled: Promise<void> = Promise.resolve();
+  /** Chunks not yet handed over, kept as a list so taking a batch off the
+   *  front of a large backlog does not copy the whole backlog each time. */
+  private pending: string[] = [];
+  private running = false;
+  private closed = false;
+  private readonly write: (data: string) => Promise<void>;
+
+  constructor(write: (data: string) => Promise<void>) {
+    this.write = write;
+  }
+
+  push(data: string): void {
+    if (this.closed || data === '') return;
+    this.pending.push(data);
+    if (!this.running) {
+      this.running = true;
+      this.settled = this.pump();
+    }
+  }
+
+  /** close drops everything not yet handed to the emulator. Nothing reaches
+   *  the emulator once the driver has stopped reading it: a disposed emulator
+   *  throws, and the backlog behind a budget that has already run out is
+   *  precisely what must not be parsed. */
+  close(): void {
+    this.closed = true;
+    this.pending = [];
+  }
+
+  private async pump(): Promise<void> {
+    try {
+      while (this.pending.length > 0) {
+        const batch = this.take();
+        await this.write(batch);
+        this.parsedBytes += batch.length;
+      }
+    } finally {
+      this.running = false;
+    }
+  }
+
+  /** take removes up to MAX_BATCH characters from the front, splitting a chunk
+   *  larger than that. A split can fall inside an escape sequence or between
+   *  the two halves of a surrogate pair, and both are safe: the emulator is a
+   *  stream parser and carries either across writes. */
+  private take(): string {
+    const parts: string[] = [];
+    let size = 0;
+    while (this.pending.length > 0 && size < MAX_BATCH) {
+      const head = this.pending[0]!;
+      const room = MAX_BATCH - size;
+      if (head.length <= room) {
+        parts.push(head);
+        size += head.length;
+        this.pending.shift();
+      } else {
+        parts.push(head.slice(0, room));
+        size += room;
+        this.pending[0] = head.slice(room);
+      }
+    }
+    return parts.join('');
+  }
+}
+
+/** rendered says the bytes the driver reads are a RENDERING of the screen
+ *  rather than what the program wrote, which is what a terminal under Windows
+ *  hands over.
+ *
+ *  `never` promises "at any point", and on Unix the bytes keep that promise:
+ *  they are the program's own output, so a warning drawn and erased is still
+ *  in them. ConPTY parses the program's output into a console buffer and sends
+ *  the terminal what that buffer looks like, frame by frame. Measured on a
+ *  Windows runner, fifteen trials each: a warning cleared with an erase of the
+ *  screen reached the bytes 15 times in 15, and one overwritten on its own
+ *  line, by a carriage return or an erase of the line, reached them 0 times in
+ *  15, including when the overwrite came 300 ms after "ready". So on Windows a
+ *  `never` that saw nothing has not shown that nothing was there.
+ *
+ *  It is the platform that decides this and not anything on the screen. Every
+ *  pseudo terminal on Windows is ConPTY, and none anywhere else is: a Unix
+ *  program that asks for win32-input-mode, the request ConPTY makes, still has
+ *  its own bytes relayed by its pseudo terminal, so the request is evidence
+ *  about which keys to send and not about what the driver can see. */
+function rendered(): boolean {
+  return process.platform === 'win32';
 }
 
 /** unmetDetail explains an unmet expectation without inventing an error.
@@ -943,6 +1071,48 @@ export function asText(raw: string): string {
 function shownDetail(forbidden: string, where: 'output' | 'screen'): string {
   const said = /^\s*"[\s\S]+"\s*$/.test(forbidden) ? forbidden.trim() : JSON.stringify(forbidden);
   return `The ${where} showed ${said}, which this workflow says the program must never show.`;
+}
+
+/** The part of node-pty's Windows terminal that `release` reaches into. It is
+ *  not public API; the dependency is pinned to an exact version, and the
+ *  Windows test job is what notices if the shape moves, because a test file
+ *  whose pseudo terminals leak never exits. */
+interface WindowsAgent {
+  readonly _inSocket?: { destroy(): void };
+  readonly _outSocket?: { destroy(): void };
+}
+
+/** release lets go of a program's pseudo terminal once the workflow is over.
+ *
+ *  On Unix that is a kill for a program still running, and nothing for one
+ *  that has exited, whose pid may already belong to somebody else.
+ *
+ *  On Windows it is more, measured on a Windows runner because nothing else
+ *  here could show it. node-pty keeps both of its pipes to ConPTY open after
+ *  the program has gone, killed or exited, and an open pipe keeps Node's event
+ *  loop alive: three handles stayed open after a kill, and after a natural
+ *  exit the console host behind it stayed running as well. A test file of
+ *  terminal workflows therefore never exited and was killed at its timeout,
+ *  having passed every test, and a run of many terminal workflows held one
+ *  console host per workflow until the runner itself exited. Killing tells
+ *  ConPTY to close the console, which is safe after an exit on Windows because
+ *  it names the console rather than a pid, and closing the pipes after it lets
+ *  go of what node-pty keeps. The pause between them gives the close a moment
+ *  to reach ConPTY over the pipe it is about to lose. */
+async function release(child: { kill(): void }, exited: boolean): Promise<void> {
+  if (process.platform !== 'win32') {
+    if (!exited) child.kill();
+    return;
+  }
+  try {
+    child.kill();
+  } catch {
+    // Already closed, which is the state this is trying to reach.
+  }
+  await sleep(300);
+  const agent = (child as unknown as { _agent?: WindowsAgent })._agent;
+  agent?._inSocket?.destroy();
+  agent?._outSocket?.destroy();
 }
 
 /** notOurs is the driver's own failure, which is blocked rather than failed:

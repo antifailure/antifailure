@@ -12,7 +12,7 @@
     "af-runner": "./src/main.ts"
   },
   "scripts": {
-    "test": "ls test/*.test.ts > /dev/null && node --experimental-strip-types --test test/*.test.ts",
+    "test": "node scripts/requiretests.mjs test/*.test.ts && node --experimental-strip-types --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

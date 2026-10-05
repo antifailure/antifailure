@@ -403,8 +403,14 @@ test('the address is merged over the runner environment, not substituted for it'
   // HOME and fail in a way that reads as the application's fault.
   const app = withEnvironmentAddress({ kind: 'electron', executablePath: 'unused' }, 'http://127.0.0.1:39000');
   assert.ok(app.kind === 'electron');
-  assert.equal(app.env?.['PATH'], process.env['PATH']);
-  assert.equal(app.env?.['HOME'], process.env['HOME']);
+  // Read by name without regard to case, because that is how Windows reads an
+  // environment: its PATH is spelled Path, process.env answers for either
+  // spelling, and a copy of it keeps only the one it was given.
+  const read = (env: Readonly<Record<string, string | undefined>> | undefined, name: string) =>
+    Object.entries(env ?? {}).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1];
+  assert.ok(read(app.env, 'PATH'), 'the merged environment carries no PATH at all');
+  assert.equal(read(app.env, 'PATH'), process.env['PATH']);
+  assert.equal(read(app.env, 'HOME'), process.env['HOME']);
 });
 
 test('the environment address wins over one the developer shell exported', () => {

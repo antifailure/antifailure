@@ -145,6 +145,25 @@ test('a desktop run that names no application is refused, not reported as a clea
   assert.match(stderr, /names no application to drive/);
 });
 
+/** addressRecorder is a stand-in for an Electron binary that writes the
+ *  AF_BASE_URL it was started with to `seen` and exits. Playwright starts it
+ *  with Electron's own flags in front of whatever arguments it is given, so it
+ *  has to be something that ignores those.
+ *
+ *  On Unix that is a shell script. Windows will not start a script as an
+ *  executable, so there it is cmd.exe running a batch file: cmd reads its
+ *  command line for /c and runs what follows. */
+function addressRecorder(dir: string, seen: string): { executablePath: string; args?: string[] } {
+  if (process.platform !== 'win32') {
+    const fake = join(dir, 'electron');
+    writeFileSync(fake, `#!/bin/sh\nprintf '%s' "$AF_BASE_URL" > '${seen}'\n`, { mode: 0o755 });
+    return { executablePath: fake };
+  }
+  const batch = join(dir, 'electron.cmd');
+  writeFileSync(batch, `@<nul set /p ="%AF_BASE_URL%" > "${seen}"\r\n`);
+  return { executablePath: process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe', args: ['/d', '/c', batch] };
+}
+
 test('a desktop run launches the application with the environment address', async () => {
   // Proved at the entry point, through the job document the engine sends,
   // because the defect this guards lived in the wiring and not in a helper:
@@ -158,19 +177,47 @@ test('a desktop run launches the application with the environment address', asyn
   // was given, and nothing else in this test could have written it.
   const dir = mkdtempSync(join(tmpdir(), 'af-runner-desktop-address-'));
   const seen = join(dir, 'seen');
-  const fake = join(dir, 'electron');
-  writeFileSync(fake, `#!/bin/sh\nprintf '%s' "$AF_BASE_URL" > '${seen}'\n`, { mode: 0o755 });
-  const { stdout } = await runMain({
+  const { executablePath, args } = addressRecorder(dir, seen);
+  const { stdout, stderr } = await runMain({
     base_url: 'http://127.0.0.1:39000',
     surface: 'desktop',
-    desktop: { kind: 'electron', executablePath: fake, timeoutMs: 5000 },
+    desktop: { kind: 'electron', executablePath, args, timeoutMs: 5000 },
     workflows: [{ name: 'reads the address', description: 'Do something.', expect: ['anything'] }],
     personas: [],
   }, { ...process.env, AF_BASE_URL: 'https://ledger.example.com' });
-  assert.ok(existsSync(seen), `the application was never started, so this proved nothing: ${stdout}`);
+  assert.ok(existsSync(seen), `the application was never started, so this proved nothing: ${stdout}\n${stderr}`);
   // The environment's address, and NOT the one the runner's own environment
   // carried, which stands in for a stale export in a developer's shell.
   assert.equal(readFileSync(seen, 'utf8'), 'http://127.0.0.1:39000');
+});
+
+test('a desktop application that dies while starting is a blocked run, not a crashed runner', async () => {
+  // Playwright waits on several lines of the child's output at once and awaits
+  // only one, so a child that exits first rejects the others with nobody
+  // listening, and an unhandled rejection ends the runner. It then wrote no
+  // document at all. Reproduced on macOS with this exact program, and on
+  // Windows with a path that does not exist.
+  const dir = mkdtempSync(join(tmpdir(), 'af-runner-desktop-dies-'));
+  let executablePath: string;
+  let args: string[] | undefined;
+  if (process.platform === 'win32') {
+    executablePath = process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe';
+    args = ['/d', '/c', 'exit 1'];
+  } else {
+    executablePath = join(dir, 'electron');
+    writeFileSync(executablePath, '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  }
+  const { stdout, stderr } = await runMain({
+    base_url: 'http://127.0.0.1:1',
+    surface: 'desktop',
+    desktop: { kind: 'electron', executablePath, ...(args ? { args } : {}), timeoutMs: 5000 },
+    workflows: [{ name: 'dies at startup', description: 'Do something.', expect: ['anything'] }],
+    personas: [],
+  });
+  assert.notEqual(stdout.trim(), '', `the runner crashed and wrote no document. It said: ${stderr}`);
+  const parsed = JSON.parse(stdout) as { results: { outcome: { verdict: string; detail: string } }[] };
+  assert.equal(parsed.results[0]!.outcome.verdict, 'blocked', parsed.results[0]!.outcome.detail);
+  assert.match(parsed.results[0]!.outcome.detail, /did not start/);
 });
 
 test('a desktop run reaches the desktop driver rather than returning nothing', async () => {
@@ -178,13 +225,14 @@ test('a desktop run reaches the desktop driver rather than returning nothing', a
   // that the run REACHED a driver: the failure has to come from the desktop
   // driver saying it could not start that application, which is a blocked
   // result with a reason, and not from an empty result list with a zero exit.
-  const { code, stdout } = await runMain({
+  const { code, stdout, stderr } = await runMain({
     base_url: 'http://127.0.0.1:1',
     surface: 'desktop',
-    desktop: { kind: 'electron', executablePath: '/nonexistent/not/an/electron', timeoutMs: 5000 },
+    desktop: { kind: 'electron', executablePath: join(tmpdir(), 'nonexistent', 'not-an-electron'), timeoutMs: 5000 },
     workflows: [{ name: 'reaches the driver', description: 'Do something.', expect: ['anything'] }],
     personas: [],
   });
+  assert.notEqual(stdout.trim(), '', `the runner wrote no document at all. It said: ${stderr}`);
   const parsed = JSON.parse(stdout) as {
     results: { workflow: string; outcome: { verdict: string; cause: string; detail: string } }[];
     blocked: number; passed: number; failed: number;
