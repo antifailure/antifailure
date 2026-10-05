@@ -148,8 +148,9 @@ than installing something else.
 `AF_PREFIX`, `AF_BIN_DIR` and `AF_NO_MODIFY_PATH` work as they do above, and in
 GitHub Actions the bin directory goes to `GITHUB_PATH` instead. To upgrade, run
 the same line again: Windows will not overwrite a running program, so an
-`af.exe` that an editor holds open as its MCP server is moved aside to
-`af.exe.old` and the new one takes its name.
+`af.exe` that an editor holds open as its MCP server is moved aside and the
+new one takes its name. The next `af` to start removes the old one once nothing
+is running it, as it does after `af update`.
 
 Environments run in Linux containers, so Docker Desktop has to be in its Linux
 containers mode, which is its default. `af doctor` says so when it is not.

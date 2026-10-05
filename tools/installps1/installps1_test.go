@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -233,8 +234,13 @@ func TestReinstallingOverARunningAFSucceeds(t *testing.T) {
 		if err != nil || !strings.Contains(string(out), "9.9.9 (fixture)") {
 			t.Fatalf("after reinstalling, af.exe does not run: %v: %s", err, out)
 		}
-		if _, err := os.Stat(s.installed() + ".old"); err != nil {
-			t.Errorf("the running af.exe was not moved aside to af.exe.old: %v", err)
+		// Moved aside under the exact name af update writes, af.exe.old-
+		// and twelve hex digits, because that is the only shape the next af
+		// to start sweeps away (sweepReplacedExecutable). Any other name would
+		// stay in the bin directory for ever.
+		aside, _ := filepath.Glob(s.installed() + ".old-*")
+		if len(aside) != 1 || !regexp.MustCompile(`\.old-[0-9a-f]{12}$`).MatchString(aside[0]) {
+			t.Errorf("the running af.exe was not moved aside as af.exe.old-<12 hex>, so af will never sweep it: %v", aside)
 		}
 	})
 }

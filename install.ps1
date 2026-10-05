@@ -390,14 +390,13 @@
     # will let one be renamed. So an af.exe already in place is moved aside
     # first, which is what makes reinstalling over an af that is serving the
     # MCP server in an editor work at all, and the new one is copied into the
-    # name it left. af.exe.old is what af update leaves too, and the next run
-    # of af removes it.
+    # name it left. The name moved aside is af.exe.old- and twelve hex
+    # digits, exactly the shape `af update` writes, because that is the only
+    # shape the next af to start sweeps away; anything else would be left in
+    # the bin directory for ever.
     $aside = $null
     if (Test-Path -LiteralPath $target) {
-      $aside = "$target.old"
-      if (Test-Path -LiteralPath $aside) {
-        try { Remove-Item -LiteralPath $aside -Force } catch { $aside = "$target.$suffix.old" }
-      }
+      $aside = "$target.old-" + $suffix.Substring(0, 12)
       try {
         [System.IO.File]::Move($target, $aside)
       } catch {
