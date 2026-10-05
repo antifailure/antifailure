@@ -511,8 +511,14 @@ func (r *Runtime) Decisions(ctx context.Context, envID string, limit int) ([]Dec
 	return parseDecisions(body, limit)
 }
 
+// parseDecisions reads a decision log the sidecar was found and read for. Its
+// answer is never nil: a log that was read and holds no decision is an empty,
+// non-nil list, because every reader of it treats nil as a log that could not be
+// read at all. The ssrf and side_effect families refuse to reach a verdict on
+// nil, and MCP reports it as unavailable, so an application that made no
+// outbound call was reported as one nobody could observe.
 func parseDecisions(body []byte, limit int) ([]Decision, error) {
-	var out []Decision
+	out := []Decision{}
 	for _, line := range strings.Split(stripDockerLogFraming(string(body)), "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "{") {
@@ -588,7 +594,17 @@ func (r *Runtime) Messages(ctx context.Context, envID string, limit int) ([]Mess
 	if err != nil {
 		return nil, err
 	}
-	var out []Message
+	return parseMessages(lines, limit), nil
+}
+
+// parseMessages keeps the two answers apart that its readers depend on: nil
+// lines, meaning no sidecar was there to read, stay nil, and lines that were
+// read but carry no message become an empty, non-nil list.
+func parseMessages(lines []string, limit int) []Message {
+	if lines == nil {
+		return nil
+	}
+	out := []Message{}
 	for _, line := range lines {
 		var m Message
 		if err := json.Unmarshal([]byte(line), &m); err != nil || m.Event != "message" {
@@ -596,10 +612,10 @@ func (r *Runtime) Messages(ctx context.Context, envID string, limit int) ([]Mess
 		}
 		out = append(out, m)
 	}
-	if len(out) > limit {
+	if limit > 0 && len(out) > limit {
 		out = out[len(out)-limit:]
 	}
-	return out, nil
+	return out
 }
 
 // sidecarLines reads the tail of the sidecar's output.
@@ -626,13 +642,20 @@ func (r *Runtime) sidecarLines(ctx context.Context, envID string, tail int) ([]s
 	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
 	}
-	var out []string
+	return sidecarLinesFrom(body), nil
+}
+
+// sidecarLinesFrom picks the JSON lines out of a sidecar log that was read. It
+// answers an empty, non-nil list for a log with none, so a sidecar that was
+// there and said nothing is never mistaken for one that was not there.
+func sidecarLinesFrom(body []byte) []string {
+	out := []string{}
 	for _, line := range strings.Split(stripDockerLogFraming(string(body)), "\n") {
 		if line = strings.TrimSpace(line); strings.HasPrefix(line, "{") {
 			out = append(out, line)
 		}
 	}
-	return out, nil
+	return out
 }
 
 // WaitForMessage blocks until a message arrives that matches, or the deadline
