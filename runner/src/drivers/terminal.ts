@@ -586,13 +586,30 @@ async function driveOnAScreen(
       if (queue.settled === chain || Date.now() >= until) return;
     }
   };
-  const settle = async (since: number, responseMs: number) => {
+  // `opening` is the settle before the first key, where on Windows output alone
+  // is not an answer. ConPTY writes its own setup the moment the session
+  // opens: it hides the cursor, clears the screen and sets the title, and not
+  // one of those bytes is a character on the grid or the program's. Counted as
+  // the program's answer, they let the driver capture a blank grid and send
+  // the first key while the program was still starting, and the screen it
+  // opened on was never recorded because the key had already moved it. So on
+  // Windows, before the first key, the program has answered only once
+  // something is on the screen.
+  //
+  // Only on Windows, because only there does the terminal speak first. On
+  // every other platform each byte is the program's own, so a program that
+  // opens on a deliberately blank screen and waits for a key has answered, and
+  // making it wait for a character it will never draw would spend three
+  // seconds of its budget, or all of a shorter one, before its first key. On
+  // Windows that program pays the same three seconds a silent one always has,
+  // because there its blank screen and ConPTY's cannot be told apart.
+  const settle = async (since: number, responseMs: number, opening = false) => {
     const ceiling = Date.now() + SETTLE_CEILING_MS;
     for (;;) {
       await drawn(Math.min(ceiling, deadline));
       if (exited) return;
       if (Date.now() >= ceiling || Date.now() >= deadline) return;
-      const answered = lastDataAt > since;
+      const answered = lastDataAt > since && (!opening || !terminalSpeaksFirst() || screen.screen().trim() !== '');
       if (!answered) {
         if (Date.now() - since >= responseMs) return;
       } else if (Date.now() - lastDataAt >= QUIET_MS) {
@@ -742,7 +759,7 @@ async function driveOnAScreen(
     }
   };
 
-  await settle(Date.now(), SETTLE_CEILING_MS);
+  await settle(Date.now(), SETTLE_CEILING_MS, true);
   capture();
 
   let ranOutOfTime = false;
@@ -1020,6 +1037,12 @@ export class ParseQueue {
  *  its own bytes relayed by its pseudo terminal, so the request is evidence
  *  about which keys to send and not about what the driver can see. */
 function rendered(): boolean {
+  return process.platform === 'win32';
+}
+
+/** Whether the pseudo terminal writes bytes of its own before the program has
+ *  written any. ConPTY does, on every session; no Unix pseudo terminal does. */
+function terminalSpeaksFirst(): boolean {
   return process.platform === 'win32';
 }
 
