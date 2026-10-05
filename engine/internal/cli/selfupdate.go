@@ -187,15 +187,24 @@ func performUpdate(ctx context.Context, executable, installPrefix, current, goos
 	if err := fetchUpdate(ctx, client, base+"/checksums.txt", &sums, 1<<20); err != nil {
 		return r, fmt.Errorf("read published checksums: %w", err)
 	}
-	expected := ""
+	expected, named := "", false
 	for _, line := range strings.Split(sums.String(), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) == 2 && fields[1] == archiveName {
-			if expected != "" {
+			if named {
 				return r, errors.New("duplicate checksum entry for this archive")
 			}
-			expected = fields[0]
+			expected, named = fields[0], true
 		}
+	}
+	// A release that names no archive for this platform has not published a
+	// build for it, and that is what to say. Folded into the line below it read
+	// "no valid SHA256 checksum names this archive", which sends a Windows user
+	// on a release with no Windows build looking for tampering. Either way it is
+	// refused here, before anything is downloaded, by the absence of a checksum.
+	if !named {
+		return r, fmt.Errorf("release %s publishes no build for %s/%s: its checksums.txt names no %s, "+
+			"so nothing was downloaded and this installation is unchanged", release.Tag, goos, goarch, archiveName)
 	}
 	decoded, err := hex.DecodeString(expected)
 	if err != nil || len(decoded) != sha256.Size {
