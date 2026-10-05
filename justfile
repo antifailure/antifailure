@@ -2101,7 +2101,7 @@ generate:
 keyring:
     cd engine && go test ./internal/secrets/ -count=1
 
-# The engine's tests on native Windows, which is what windows.yml runs.
+# The engine's tests on native Windows, which is what windows-tests.yml runs.
 #
 # Out of `gate` because it needs a Windows machine: on any other one it would
 # be `just test` again under another name. On Windows it is the whole check,

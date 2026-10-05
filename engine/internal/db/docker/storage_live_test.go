@@ -300,6 +300,7 @@ func TestADatabaseThatDoesNotFitIsRefusedByName(t *testing.T) {
 // machine's disk. One larger than the machine would move the same problem to
 // the memory, and a daemon killed for memory takes every environment on it.
 func TestASizeLargerThanTheDaemonsMemoryIsRefused(t *testing.T) {
+	requireDocker(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 

@@ -42,6 +42,9 @@ func TestSummariseCountsWhatRanAndWhatDidNot(t *testing.T) {
 	if len(res.brokenPackages) != 1 || res.brokenPackages[0] != "p/b" {
 		t.Fatalf("broken packages %v, want p/b", res.brokenPackages)
 	}
+	if !strings.Contains(res.failureOutput["p/a TestBroken"], "boom") {
+		t.Fatalf("the failing subtest's assertion is not in the report: %q", res.failureOutput["p/a TestBroken"])
+	}
 	if res.skipReasons["skipped: AF_SKIP_DOCKER is set"] != 1 {
 		t.Fatalf("skip reasons %v", res.skipReasons)
 	}

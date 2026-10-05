@@ -953,7 +953,7 @@ var exemptFromGate = map[string]string{
 		"the contributor has. On macOS or Linux it would be the engine suite " +
 		"again under another name, which `just test` already is; the point of " +
 		"it is the platform, and no other machine can supply that. It runs on " +
-		"every pull request in windows.yml, as a required check. On a Windows " +
+		"every pull request in windows-tests.yml, as a required check. On a Windows " +
 		"machine run it with `just windows`.",
 
 	"tool prmerge": "" +

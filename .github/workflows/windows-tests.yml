@@ -1,4 +1,4 @@
-name: Windows
+name: Windows tests
 
 # The engine's tests, run on Windows.
 #
@@ -69,9 +69,38 @@ jobs:
           GOTOOLCHAIN: local
         run: go vet ./...
 
+      # A real Postgres on the Windows host, because the copy, masking and
+      # subset code runs pg_dump and talks to a database from the host, not
+      # from a container, and without one about three hundred tests skip. The
+      # image ships PostgreSQL 17 with its service stopped; this is a cluster
+      # of its own, on the port and with the password every engine test reads
+      # by default, and with the statistics module ci.yml's container loads.
+      - name: Start a Postgres on the Windows host
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $data = Join-Path $env:RUNNER_TEMP 'afpg'
+          $pw = Join-Path $env:RUNNER_TEMP 'afpg-pw'
+          Set-Content -Path $pw -Value 'test' -NoNewline
+          & "$env:PGBIN\initdb.exe" -D $data -U postgres --pwfile=$pw -A scram-sha-256 -E UTF8
+          if ($LASTEXITCODE -ne 0) { throw 'initdb failed' }
+          & "$env:PGBIN\pg_ctl.exe" -D $data -l (Join-Path $env:RUNNER_TEMP 'afpg.log') -w `
+            -o '-p 55432 -c shared_preload_libraries=pg_stat_statements -c pg_stat_statements.track=all' start
+          if ($LASTEXITCODE -ne 0) { Get-Content (Join-Path $env:RUNNER_TEMP 'afpg.log'); throw 'Postgres did not start' }
+          $env:PGPASSWORD = 'test'
+          & "$env:PGBIN\createdb.exe" -h 127.0.0.1 -p 55432 -U postgres antifailure
+          if ($LASTEXITCODE -ne 0) { throw 'createdb failed' }
+          # A real query against the database the tests use, so the step
+          # proves the thing the tests depend on rather than that a process
+          # started.
+          $one = & "$env:PGBIN\psql.exe" -h 127.0.0.1 -p 55432 -U postgres -d antifailure -tAc 'select 1'
+          if ($one -ne '1') { throw "Postgres answered '$one'" }
+          Add-Content $env:GITHUB_PATH $env:PGBIN
+
       - name: Run the engine's tests on Windows
         shell: bash
         env:
           CGO_ENABLED: '0'
           GOTOOLCHAIN: local
+          AF_TEST_DATABASE_URL: postgres://postgres:test@127.0.0.1:55432/antifailure
         run: go run ./tools/wintest .

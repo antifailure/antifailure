@@ -31,10 +31,17 @@ import (
 )
 
 // minimumPassed is the fewest passing tests a run may report and still be
-// green. Measured on windows-latest with Docker out of the picture; a run
-// below it has lost whole packages to something, and a green summary of a run
-// that lost them would be the failure this command exists to prevent.
-const minimumPassed = 5000
+// green, counting top level tests and not their subtests.
+//
+// Measured on windows-latest on 2026-10-05 with Docker out of the picture and
+// no Postgres: 4692 passed, 470 skipped and 13 failed, the 13 being the defects
+// and Unix shaped tests this change fixes. The floor sits about 3 per cent
+// under the passing count after those fixes, which is the room for a few tests
+// to move between packages or be retired, and well inside what losing one
+// mid sized package costs: internal/cli alone passes more than 600. A run
+// below it has lost something whole, and a green summary of that run would be
+// the failure this command exists to prevent.
+const minimumPassed = 4550
 
 // excludedPackages are not run at all, with the reason. Each is code that
 // never executes on a Windows host, so its tests describe another platform.
@@ -132,6 +139,7 @@ func summarise(r io.Reader) (result, error) {
 	res := result{skipReasons: map[string]int{}, failureOutput: map[string]string{}}
 	output := map[string][]string{}
 	failedTests := map[string]bool{}
+	subOutput := map[string]string{}
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 1<<20), 16<<20)
 	for sc.Scan() {
@@ -165,10 +173,16 @@ func summarise(r io.Reader) (result, error) {
 				continue
 			}
 			failedTests[key] = true
-			if !strings.Contains(e.Test, "/") {
-				res.failed = append(res.failed, key)
-				res.failureOutput[key] = tail(output[key], 30)
+			if parent, _, sub := strings.Cut(e.Test, "/"); sub {
+				// A subtest's assertion is printed under the subtest, so the
+				// parent's own output says only that it failed. Carried up, or
+				// the report names the test and hides why.
+				pk := e.Package + " " + parent
+				subOutput[pk] += tail(output[key], 30)
+				continue
 			}
+			res.failed = append(res.failed, key)
+			res.failureOutput[key] = subOutput[key] + tail(output[key], 30)
 		}
 	}
 	return res, sc.Err()

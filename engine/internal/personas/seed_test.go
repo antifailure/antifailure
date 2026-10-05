@@ -138,7 +138,7 @@ func TestAPersonaThatNeverSignsInIsNeverHandedToTheSeedCommand(t *testing.T) {
 	calls := filepath.Join(dir, "calls.txt")
 	a := personas.NewSeedAdapter(personas.SeedOptions{
 		Command: `[ -n "$AF_PERSONA_EMAIL" ] || { echo "AF_PERSONA_EMAIL is required" >&2; exit 1; }; ` +
-			`echo "$AF_PERSONA_NAME" >> ` + calls,
+			`echo "$AF_PERSONA_NAME" >> ` + filepath.Base(calls),
 		Dir: dir, Environ: []string{"PATH=" + os.Getenv("PATH")},
 	})
 	d := personas.NewDeriver("env-abc", personas.PasswordPolicy{})

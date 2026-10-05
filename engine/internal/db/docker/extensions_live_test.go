@@ -265,6 +265,12 @@ type extensionProvider struct {
 
 func newExtensionProvider(t *testing.T, opts dockerdb.Options) *extensionProvider {
 	t.Helper()
+	// Through the package's gate, because building a provider asks the daemon
+	// nothing. Without it every caller ran against a daemon that was not there
+	// and failed on its first container instead of skipping, which is how a
+	// machine with Docker stopped reported four storage defects that did not
+	// exist.
+	requireDocker(t)
 	opts.Clock = clock.New()
 	p, err := dockerdb.New(opts)
 	require.NoError(t, err)

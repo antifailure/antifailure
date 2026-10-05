@@ -28,6 +28,7 @@ import (
 // on, and neither of those checks would have failed a test that only exercised
 // a refresh.
 func TestGoldenMetadata_SurvivesARoundTrip(t *testing.T) {
+	requireDocker(t)
 	if testing.Short() {
 		t.Skip("skipped in short mode: this needs a Docker daemon")
 	}
@@ -110,6 +111,7 @@ func freePort(t *testing.T) int {
 // reads the listing, so the recorded false was discarded by the read and af up
 // branched an unverified golden without a word.
 func TestAGoldenRefreshedWithoutAVerifierIsNotListedAsVerified(t *testing.T) {
+	requireDocker(t)
 	if testing.Short() {
 		t.Skip("skipped in short mode: this needs a Docker daemon")
 	}
