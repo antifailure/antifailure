@@ -170,7 +170,7 @@ func updateInstallationFor(t *testing.T, goos string) (string, string) {
 
 func TestSelfUpdateVerifiedArchive(t *testing.T) {
 	for _, goos := range []string{"linux", "windows"} {
-		for _, defect := range []string{"none", "custom", "check", "checksum", "missing-checksum", "download", "missing", "traversal", "link", "duplicate-ignored", "gzip-checksum"} {
+		for _, defect := range []string{"none", "custom", "check", "checksum", "missing-checksum", "other-platforms-only", "malformed-checksum", "download", "missing", "traversal", "link", "duplicate-ignored", "gzip-checksum"} {
 			t.Run(goos+"/"+defect, func(t *testing.T) {
 				testSelfUpdateVerifiedArchive(t, goos, defect)
 			})
@@ -207,6 +207,16 @@ func testSelfUpdateVerifiedArchive(t *testing.T, goos, defect string) {
 		case "/v1.1.1/checksums.txt":
 			if defect == "missing-checksum" {
 				_, _ = fmt.Fprint(w, "")
+				return
+			}
+			if defect == "other-platforms-only" {
+				// Every platform but this one, the way a release that
+				// shipped no build for it would read.
+				_, _ = fmt.Fprintf(w, "%x  antifailure_1.1.1_plan9_amd64.tar.gz\n", sha256.Sum256(archive))
+				return
+			}
+			if defect == "malformed-checksum" {
+				_, _ = fmt.Fprintf(w, "not-a-sha256  %s%s\n", archiveName, releaseArchiveExt(goos))
 				return
 			}
 			data := archive
@@ -301,8 +311,14 @@ func testSelfUpdateVerifiedArchive(t *testing.T, goos, defect string) {
 		// comparison that treats an absent checksum as one more value
 		// to compare is one careless "if expected != ''" away from
 		// verifying nothing at all.
-		if defect == "missing-checksum" && !strings.Contains(err.Error(), "no valid SHA256 checksum") {
+		if (defect == "missing-checksum" || defect == "other-platforms-only") &&
+			!strings.Contains(err.Error(), "release v1.1.1 publishes no build for "+goos+"/amd64") {
 			t.Fatalf("an unnamed archive was refused by something other than its missing checksum: %v", err)
+		}
+		// A checksum that is named and is not a checksum is a damaged
+		// release, not a missing build, and says so in its own words.
+		if defect == "malformed-checksum" && !strings.Contains(err.Error(), "no valid SHA256 checksum") {
+			t.Fatalf("a malformed checksum was refused by something other than its own guard: %v", err)
 		}
 		binary, _ := os.ReadFile(executable)
 		if string(binary) != "old binary" {
