@@ -361,20 +361,26 @@
     $runnerAside = $null
     if (Test-Path -LiteralPath $runner) {
       $runnerAside = "$runner.old-$suffix"
+      # A rename, through the runtime, rather than Move-Item. Move-Item was
+      # measured on windows-latest moving PART of a directory whose file was
+      # held open, then throwing, so the old runner was half here and half
+      # aside when this reported that nothing had been installed. A rename
+      # either happens whole or not at all.
       try {
-        Move-Item -LiteralPath $runner -Destination $runnerAside -Force
+        [System.IO.Directory]::Move($runner, $runnerAside)
       } catch {
+        $runnerAside = $null
         Remove-Item -LiteralPath $staged -Recurse -Force -ErrorAction SilentlyContinue
         Fail "the runner already in $share could not be moved aside, which is what happens while af test is running from it, so nothing was installed; stop it and run this again"
       }
     }
     function RestoreRunner {
       Remove-Item -LiteralPath $runner -Recurse -Force -ErrorAction SilentlyContinue
-      if ($runnerAside) { Move-Item -LiteralPath $runnerAside -Destination $runner -Force -ErrorAction SilentlyContinue }
+      if ($runnerAside) { try { [System.IO.Directory]::Move($runnerAside, $runner) } catch { } }
       Remove-Item -LiteralPath $staged -Recurse -Force -ErrorAction SilentlyContinue
     }
     try {
-      Move-Item -LiteralPath $staged -Destination $runner -Force
+      [System.IO.Directory]::Move($staged, $runner)
     } catch {
       RestoreRunner
       Fail "the runner could not be put in place in $share, so nothing was installed; check that you can write to it"
@@ -393,7 +399,7 @@
         try { Remove-Item -LiteralPath $aside -Force } catch { $aside = "$target.$suffix.old" }
       }
       try {
-        Move-Item -LiteralPath $target -Destination $aside -Force
+        [System.IO.File]::Move($target, $aside)
       } catch {
         RestoreRunner
         Fail "the af.exe already in $BinDir could not be moved aside to make room for this one, so nothing was installed; close anything running it and run this again"
@@ -405,7 +411,7 @@
       # Best effort by necessity: this runs on the way to reporting a failure,
       # and a restore that itself fails can only be reported by the sentence
       # below, which already says nothing was installed.
-      if ($aside) { Move-Item -LiteralPath $aside -Destination $target -Force -ErrorAction SilentlyContinue }
+      if ($aside) { try { [System.IO.File]::Move($aside, $target) } catch { } }
       RestoreRunner
       Fail "af.exe could not be written to $BinDir, so nothing was installed; check that you can write to it, or set AF_BIN_DIR to somewhere you can"
     }
