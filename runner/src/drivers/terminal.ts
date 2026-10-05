@@ -28,6 +28,7 @@
 // draw keeps their evidence the program's own output and nothing else.
 
 import { spawn } from 'node:child_process';
+import { closeSync, constants, openSync } from 'node:fs';
 import { failureSentence, firstShown, judgeAll, meetsAll, notFound, observed } from '../workflow.ts';
 import { classify, type Attempt, type Cause } from '../verdict.ts';
 import { nullSink, type LiveSink } from '../live.ts';
@@ -464,6 +465,7 @@ async function driveOnAScreen(
     // the program.
     return notOurs('a pseudo terminal could not be opened', err);
   }
+  const tail = holdTheTail(child);
 
   // The emulator parses asynchronously, so its writes are queued rather than
   // fired: two chunks parsed out of order would render a screen the program
@@ -806,6 +808,7 @@ async function driveOnAScreen(
   // that failed.
   const ended = exited;
   await release(child, ended !== undefined);
+  tail.close();
   screen.dispose();
 
   const drew = size.rows + ' by ' + size.cols;
@@ -1071,6 +1074,115 @@ export function asText(raw: string): string {
 function shownDetail(forbidden: string, where: 'output' | 'screen'): string {
   const said = /^\s*"[\s\S]+"\s*$/.test(forbidden) ? forbidden.trim() : JSON.stringify(forbidden);
   return `The ${where} showed ${said}, which this workflow says the program must never show.`;
+}
+
+/** The part of node-pty's Unix terminal that `holdTheTail` reaches into: the
+ *  name of the program's side of the pseudo terminal, and the socket the
+ *  driver reads the other side through. Not public API, against an exactly
+ *  pinned version; a test that loses the tail is what notices a change. */
+interface UnixTerminalParts {
+  readonly _pty?: string;
+  readonly _socket?: { destroy(...args: unknown[]): unknown; once(event: 'close', fn: () => void): unknown };
+  onData(fn: (data: string) => void): unknown;
+}
+
+/** How many turns of the event loop in a row must deliver nothing before the
+ *  program's side of the terminal is let go of. A turn polls every readable
+ *  descriptor, so output still in the kernel arrives within one; five is a
+ *  margin, and it costs microseconds rather than a wait chosen in
+ *  milliseconds, which a busy event loop would have exceeded without reading
+ *  anything. */
+const QUIET_TURNS = 5;
+
+/** holdTheTail keeps the end of a program's output from being thrown away on
+ *  Linux.
+ *
+ *  THE DEFECT, measured on ubuntu-latest. When the program exits it closes the
+ *  last handle on its side of the pseudo terminal, and output it wrote that the
+ *  driver had not read yet can be discarded with it. With a reader that spent
+ *  5 ms on each chunk, plain node-pty lost the end of a ten thousand line burst
+ *  in 122 runs of 150; on CI the burst test read to "line 9920" and failed a
+ *  program for output it certainly wrote. node-pty also destroys its socket
+ *  200 ms after the exit, which loses the same tail when the loop is busier
+ *  than that.
+ *
+ *  So the driver holds a handle on the program's side itself, opened without
+ *  becoming its controlling terminal. The program's exit then closes nothing
+ *  that matters, and every byte stays readable. When node-pty's timer asks to
+ *  destroy the socket, the driver waits instead for QUIET_TURNS turns of the
+ *  event loop that deliver nothing, which means the kernel holds no more, and
+ *  only then lets go of its handle; the socket then reads end of file and
+ *  closes by itself, which is what node-pty was waiting for. With the handle
+ *  held, the same probe lost 0 runs of 150 at either reading speed.
+ *
+ *  Windows has no such side to hold, ConPTY being read through its own agent,
+ *  and `release` handles what it leaves open. `close` is idempotent and must be
+ *  called when the workflow is over, so a program that never exits does not
+ *  leave the handle behind. */
+function holdTheTail(child: unknown): { close(): void } {
+  const parts = child as UnixTerminalParts;
+  if (process.platform === 'win32' || !parts._pty || !parts._socket) return { close() {} };
+  let held = -1;
+  try {
+    held = openSync(parts._pty, constants.O_RDWR | constants.O_NOCTTY);
+  } catch {
+    // Without the handle the driver reads exactly as it did before, which is
+    // correct for every program that is not outrun at its exit.
+    return { close() {} };
+  }
+  const close = () => {
+    if (held < 0) return;
+    try {
+      closeSync(held);
+    } catch {
+      // Already closed: the state this is trying to reach.
+    }
+    held = -1;
+  };
+  let delivered = false;
+  parts.onData(() => {
+    delivered = true;
+  });
+  const socket = parts._socket;
+  const destroy = socket.destroy.bind(socket);
+  let closed = false;
+  let fallback: ReturnType<typeof setTimeout> | undefined;
+  socket.once('close', () => {
+    closed = true;
+    close();
+    // The usual ending: nothing is left for the fallback to do, and a pending
+    // timer would hold a short command line run open for a second after its
+    // result was ready.
+    clearTimeout(fallback);
+  });
+  socket.destroy = (...args: unknown[]) => {
+    let quiet = 0;
+    const turn = () => {
+      if (delivered) {
+        delivered = false;
+        quiet = 0;
+      } else {
+        quiet += 1;
+      }
+      if (quiet < QUIET_TURNS) {
+        setImmediate(turn);
+        return;
+      }
+      close();
+      // End of file closes the socket by itself once the handle is gone. If a
+      // platform never reports it, which node-pty's own comment says macOS
+      // has done, the original destroy still runs, a second later.
+      fallback = setTimeout(() => {
+        if (!closed) destroy(...args);
+      }, 1_000);
+      // Not a reason to stay alive either: if the socket is the last thing
+      // the process has open, it is about to close on its own.
+      fallback.unref();
+    };
+    turn();
+    return socket;
+  };
+  return { close };
 }
 
 /** The part of node-pty's Windows terminal that `release` reaches into. It is
