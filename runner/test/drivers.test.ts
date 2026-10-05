@@ -5,7 +5,6 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer, type Server } from 'node:net';
 import { mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,12 +12,13 @@ import { execPath } from 'node:process';
 import {
   driverFor, surfaces, assertAvailable, NotImplementedError, type Surface, type SurfaceDriver,
 } from '../src/drivers/driver.ts';
+import { collector } from './live_collector.ts';
 import * as ios from '../src/drivers/ios.ts';
 import * as android from '../src/drivers/android.ts';
 import * as desktop from '../src/drivers/desktop.ts';
 import { runTerminal, asText, EXIT_GRACE_MS, QUIET_MS } from '../src/drivers/terminal.ts';
 import { Screen } from '../src/drivers/screen.ts';
-import { socketSink, decode, type LiveEvent } from '../src/live.ts';
+import { socketSink } from '../src/live.ts';
 import type { WorkflowResult } from '../src/execute.ts';
 
 test('the registry knows every surface and which are available', () => {
@@ -153,23 +153,8 @@ test('runTerminal blocks, not fails, when the program cannot start', async () =>
   assert.equal(results[0]!.outcome.verdict, 'blocked');
 });
 
-function collector(): Promise<{ path: string; lines: () => LiveEvent[]; close: () => void; server: Server }> {
-  const dir = mkdtempSync(join(tmpdir(), 'af-drv-'));
-  const path = join(dir, 'l.sock');
-  let buffer = '';
-  const server = createServer((s) => { s.setEncoding('utf8'); s.on('data', (c) => { buffer += c; }); });
-  return new Promise((resolve) => {
-    server.listen(path, () => resolve({
-      path,
-      lines: () => buffer.split('\n').map(decode).filter((e): e is LiveEvent => !!e),
-      close: () => server.close(),
-      server,
-    }));
-  });
-}
-
 test('runTerminal streams the agent lifecycle and its cast to a watcher', async () => {
-  const c = await collector();
+  const c = await collector('af-drv');
   const sink = socketSink(c.path);
   await runTerminal({
     live: sink,

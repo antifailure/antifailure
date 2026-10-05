@@ -5,13 +5,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer as createHTTP, type Server as HTTPServer } from 'node:http';
-import { createServer as createNet, type Server as NetServer } from 'node:net';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { collector } from './live_collector.ts';
 import { Session } from '../src/browser.ts';
 import { run } from '../src/execute.ts';
-import { socketSink, decode, type LiveEvent } from '../src/live.ts';
+import { socketSink } from '../src/live.ts';
 
 /** A tiny page with a heading, so a run has something to open and read. */
 function application(): { server: HTTPServer; url: Promise<string> } {
@@ -26,20 +26,6 @@ function application(): { server: HTTPServer; url: Promise<string> } {
     });
   });
   return { server, url };
-}
-
-function collector(): Promise<{ path: string; lines: () => LiveEvent[]; close: () => void }> {
-  const dir = mkdtempSync(join(tmpdir(), 'af-blive-'));
-  const path = join(dir, 'l.sock');
-  let buffer = '';
-  const server: NetServer = createNet((s) => { s.setEncoding('utf8'); s.on('data', (c) => { buffer += c; }); });
-  return new Promise((resolve) => {
-    server.listen(path, () => resolve({
-      path,
-      lines: () => buffer.split('\n').map(decode).filter((e): e is LiveEvent => !!e),
-      close: () => server.close(),
-    }));
-  });
 }
 
 test('a web Session captures a real JPEG frame of the viewport', async () => {
@@ -57,7 +43,7 @@ test('a web Session captures a real JPEG frame of the viewport', async () => {
 });
 
 test('a web Session pumps a real JPEG frame through the sink to a watcher', async () => {
-  const c = await collector();
+  const c = await collector('af-blive');
   const sink = socketSink(c.path);
   const artifacts = mkdtempSync(join(tmpdir(), 'af-art-'));
   const session = await Session.open({ artifacts, headless: true, live: { sink, agent: 'probe' } });
@@ -84,7 +70,7 @@ test('a web Session pumps a real JPEG frame through the sink to a watcher', asyn
 test('a web run streams agent lifecycle and steps to a watcher', async () => {
   const app = application();
   const baseURL = await app.url;
-  const c = await collector();
+  const c = await collector('af-blive');
   const sink = socketSink(c.path);
   const artifacts = mkdtempSync(join(tmpdir(), 'af-art-'));
   try {

@@ -10,7 +10,6 @@ import (
 	"image/color"
 	"image/jpeg"
 	"math"
-	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -122,26 +121,13 @@ func TestSnapshotDoesNotAliasHubState(t *testing.T) {
 }
 
 func TestSocketServerFeedsTheHubFromNDJSON(t *testing.T) {
-	// A short path on purpose: a unix socket's path has a hard length limit
-	// (104 bytes on macOS), and a test temp dir name blows past it. The engine
-	// creates its live socket in a short directory for the same reason.
-	dir, err := os.MkdirTemp("", "afl")
-	if err != nil {
-		t.Fatalf("temp dir: %v", err)
-	}
-	defer os.RemoveAll(dir)
-	path := filepath.Join(dir, "l.sock")
-	srv, err := Listen(path)
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	defer srv.Close()
+	srv := listenForTest(t)
 	hub := NewHub()
 	go srv.Serve(hub)
 
 	// A client that speaks the exact wire the runner speaks: connect, write
 	// NDJSON, close. This is the runner -> socket -> hub path end to end.
-	conn, err := net.Dial("unix", path)
+	conn, err := dialLive(srv.Path())
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -176,20 +162,11 @@ func TestFrameFromTheSocketReachesTheTerminalView(t *testing.T) {
 	// way the runner writes it, decoded by the server, folded into the hub, and
 	// shown in the rendered terminal view. If any link breaks, the frame's
 	// metadata is absent from the render.
-	dir, err := os.MkdirTemp("", "afl")
-	if err != nil {
-		t.Fatalf("temp dir: %v", err)
-	}
-	defer os.RemoveAll(dir)
-	srv, err := Listen(filepath.Join(dir, "l.sock"))
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	defer srv.Close()
+	srv := listenForTest(t)
 	hub := NewHub()
 	go srv.Serve(hub)
 
-	conn, err := net.Dial("unix", srv.Path())
+	conn, err := dialLive(srv.Path())
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -890,5 +867,49 @@ func TestAPaneWithNoPictureGivesTheRoomToTheCast(t *testing.T) {
 	// picture shows that one and does not fill the pane with repeats of it.
 	if n := strings.Count(drawn, "Read the delivery terms"); n != 1 {
 		t.Fatalf("a pane with a picture showed its step %d times, want 1:\n%s", n, drawn)
+	}
+}
+
+// listenForTest opens the endpoint the engine itself would open, through the
+// same two calls watchRun makes, in a short private directory: a unix socket's
+// path has a hard length limit (104 bytes on macOS) that a test temp dir name
+// blows past, which is why the engine uses a short directory too.
+func listenForTest(t *testing.T) *Server {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "afl")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	addr, err := Address(dir)
+	if err != nil {
+		t.Fatalf("address: %v", err)
+	}
+	srv, err := Listen(addr)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+	return srv
+}
+
+func TestAFailedListenReturnsAtOnceAndNamesTheEndpoint(t *testing.T) {
+	// The runner reads an unreachable watcher as nobody watching, so a listen
+	// that failed quietly, or one that blocked, would surface as a live view
+	// with no frames and no reason. It must come back as an error, quickly,
+	// saying which endpoint and that it is the live view's.
+	addr := unlistenable(t)
+	start := time.Now()
+	srv, err := Listen(addr)
+	if err == nil {
+		_ = srv.Close()
+		t.Fatalf("listening at %s succeeded; the case needs an endpoint that cannot be opened", addr)
+	}
+	if took := time.Since(start); took > 5*time.Second {
+		t.Fatalf("the failed listen took %s to say so", took)
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "live view") || !strings.Contains(msg, addr) {
+		t.Fatalf("the error does not say what failed: %q", msg)
 	}
 }
