@@ -522,6 +522,108 @@ test('a burst still being parsed is drawn before the screen is judged', async ()
   assert.equal(results[0]!.outcome.verdict, 'pass', results[0]!.outcome.detail);
 });
 
+test('output still unread when the program exits is read, however slowly the driver reads', {
+  skip: process.platform === 'win32' ? 'ConPTY is read through its own agent and has no program side to hold' : false,
+}, async (t) => {
+  // When the program exits it closes its side of the pseudo terminal, and on
+  // Linux output it wrote that the driver had not read yet can go with it.
+  // Measured on ubuntu-latest with node-pty alone and a reader spending 5 ms on
+  // each chunk: the end of this burst was lost in 122 runs of 150. On CI the
+  // burst test above read to "line 9920" and failed a program for output it
+  // certainly wrote. The driver is slowed the same way here, synchronously, so
+  // nothing else can make up the time.
+  const write = Screen.prototype.write;
+  const mock = t.mock.method(Screen.prototype, 'write', function (this: Screen, data: string) {
+    const until = Date.now() + 5;
+    while (Date.now() < until) { /* a reader slower than the writer */ }
+    return write.call(this, data);
+  });
+  try {
+    for (let run = 1; run <= 5; run++) {
+      const [result] = await runTerminal({
+        workflows: [{
+          name: 'tail',
+          command: execPath,
+          args: ['-e', String.raw`for (let i = 1; i <= 10000; i++) process.stdout.write("line " + i + "\n")`],
+          screen: { rows: 10, cols: 40 },
+          expect: ['"line 10000"'],
+          maxMs: 60_000,
+        }],
+      });
+      assert.equal(result!.outcome.verdict, 'pass', `run ${run}: ${result!.outcome.detail}`);
+    }
+  } finally {
+    mock.mock.restore();
+  }
+});
+
+test('a background process left holding the terminal does not hold the verdict past the program', {
+  timeout: 30_000,
+  skip: process.platform === 'win32' ? 'ConPTY is read through its own agent and has no program side to hold' : false,
+}, async () => {
+  // The program starts a process that outlives it and inherits its terminal,
+  // so the terminal never reads end of file: something still holds it open.
+  // The driver holds the program's side itself until the output has been read,
+  // and then it must still let go and fall back to node-pty's own close, or the
+  // program's exit is never reported. With `never` declared the driver watches
+  // until the exit or the budget, so a lost exit shows as a watch that ran the
+  // whole budget and says so.
+  const budgetMs = 8_000;
+  const program = 'const c = require("node:child_process").spawn(process.execPath, '
+    + '["-e", "setTimeout(() => {}, 20000)"], { stdio: "inherit", detached: true }); c.unref(); '
+    + 'process.stdout.write("grandchild " + c.pid + "\\ndone\\n");';
+  let grandchild: number | undefined;
+  try {
+    const [result] = await runTerminal({
+      workflows: [{
+        name: 'grandchild',
+        command: execPath,
+        args: ['-e', program],
+        screen: { rows: 10, cols: 40 },
+        expect: ['"done"'],
+        never: ['panic'],
+        maxMs: budgetMs,
+      }],
+    });
+    const pid = /grandchild (\d+)/.exec(result!.steps.join('\n'));
+    if (pid) grandchild = Number(pid[1]);
+    assert.ok(grandchild, 'the program never reported its background process, so this tested nothing');
+    assert.equal(result!.outcome.verdict, 'pass', result!.outcome.detail);
+    assert.doesNotMatch(result!.outcome.detail, /it was watched/,
+      'the exit was never reported, so the driver watched to its budget');
+    assert.ok(result!.durationMs < budgetMs - 2_000,
+      `the verdict took ${result!.durationMs} ms of an ${budgetMs} ms budget`);
+  } finally {
+    if (grandchild) {
+      try {
+        process.kill(grandchild);
+      } catch {
+        // Already gone.
+      }
+    }
+  }
+});
+
+test('a program that exits leaves no timer holding the runner open after its verdict', {
+  skip: process.platform === 'win32' ? 'ConPTY is read through its own agent and has no program side to hold' : false,
+}, async () => {
+  // The fallback that destroys the socket if the terminal never reports its
+  // close is for a program that leaves something holding the terminal. For one
+  // that simply exits, the close arrives and a timer still pending would keep a
+  // short command line run alive a second after its result was ready. Counted
+  // as timers rather than inferred from how long the process lingered.
+  const timers = () => process.getActiveResourcesInfo().filter((r) => r === 'Timeout').length;
+  const before = timers();
+  const [result] = await runTerminal({
+    workflows: [{
+      name: 'exits', command: execPath, args: ['-e', 'process.stdout.write("bye\\n")'],
+      screen: { rows: 5, cols: 20 }, expect: ['"bye"'], maxMs: 5_000,
+    }],
+  });
+  assert.equal(result!.outcome.verdict, 'pass', result!.outcome.detail);
+  assert.ok(timers() <= before, `timers left pending: ${JSON.stringify(process.getActiveResourcesInfo())}`);
+});
+
 test('the first screen recorded as evidence is one the program had finished drawing', async () => {
   // The verdict and the EVIDENCE come from two different reads, and the test
   // above covers only the verdict. A screen is recorded when the driver
