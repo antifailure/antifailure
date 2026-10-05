@@ -182,6 +182,31 @@ func TestAClaimLeftByADeadProcessIsRecovered(t *testing.T) {
 	require.NoError(t, ack(nil))
 }
 
+// A process that died between taking the lock on a batch and renaming it left
+// the lock behind. Nothing else removes it, so without the next process doing
+// so the batch is pending forever and never claimable: every Take skips it as
+// somebody else's claim in progress.
+func TestALockLeftByADeadProcessIsRecovered(t *testing.T) {
+	s, dir := newTestSpool(t)
+	ctx := context.Background()
+	require.NoError(t, s.Put(ctx, []controlplane.Event{evt("a", 1, time.Unix(1700000000, 0).UTC())}))
+	names, err := s.pending()
+	require.NoError(t, err)
+	require.Len(t, names, 1)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, names[0]+lockSuffix), nil, 0o600))
+
+	stuck, _, err := s.Take(ctx)
+	require.NoError(t, err)
+	require.Nil(t, stuck, "the precondition: a held lock is somebody else's claim")
+
+	recovered, err := NewSpool(SpoolOptions{Dir: dir, Redactor: redact.New()})
+	require.NoError(t, err)
+	batch, ack, err := recovered.Take(ctx)
+	require.NoError(t, err)
+	require.Len(t, batch, 1, "the next process can claim it")
+	require.NoError(t, ack(nil))
+}
+
 // Oldest first, because the control plane's projection refuses an event whose
 // sequence is behind the row's last_sequence. Draining newest first would make
 // every earlier batch a no-op on arrival.
