@@ -31,7 +31,7 @@ func requireWindows(t *testing.T) {
 	if required() {
 		t.Fatalf("AF_INSTALLPS1_REQUIRED is set and this is %s, so these tests cannot run here", runtime.GOOS)
 	}
-	t.Skip("install.ps1 runs on Windows only; .github/workflows/windows.yml runs these on Windows runners")
+	t.Skip("install.ps1 runs on Windows only; .github/workflows/windows-install.yml runs these on Windows runners")
 }
 
 // hosts are the two PowerShells a person can paste the install line into.

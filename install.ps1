@@ -319,12 +319,65 @@
     }
     $unpinned = -not (Test-Path -LiteralPath (Join-Path $tree 'runner\package-lock.json'))
 
-    foreach ($dir in @($BinDir, $Prefix)) {
+    # The bin directory only. The prefix holds nothing of its own any more, so
+    # an install into a custom AF_BIN_DIR does not leave an empty one behind.
+    foreach ($dir in @($BinDir)) {
       try {
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
       } catch {
         Fail "$dir could not be created, so nothing was installed; check that you can write to it, or set AF_PREFIX or AF_BIN_DIR to somewhere you can"
       }
+    }
+
+    # The runner source goes where `af runner install` looks for one, and af
+    # looks relative to ITSELF: <bin>\runner or <bin>\..\share\antifailure\runner,
+    # never under AF_PREFIX. So it is placed beside the bin directory, which for
+    # the default layout is <prefix>\share\antifailure\runner exactly as
+    # before, and for AF_BIN_DIR set to ~\.local\bin is ~\.local\share. It
+    # used to go under AF_PREFIX whatever AF_BIN_DIR said, and an install into
+    # a custom bin directory then reported success with a runner af could not
+    # find.
+    $share = [System.IO.Path]::GetFullPath((Join-Path $BinDir '..\share\antifailure'))
+    $runner = Join-Path $share 'runner'
+    $target = Join-Path $BinDir 'af.exe'
+    $suffix = [guid]::NewGuid().ToString('N')
+
+    # AN UPGRADE THAT FAILS PART WAY LEAVES WHAT WAS THERE. The new runner is
+    # copied beside the old one first, where a failure changes nothing; then
+    # the old runner and the old af.exe are each renamed aside, the new ones
+    # take their names, and only once both are in place is anything removed.
+    # Any failure on the way puts back what it moved. Deleting the old runner
+    # before copying the new one, which this did, left a machine whose copy
+    # failed holding a new af.exe and no runner at all.
+    $staged = "$runner.new-$suffix"
+    try {
+      New-Item -ItemType Directory -Path $share -Force | Out-Null
+      Copy-Item -LiteralPath (Join-Path $tree 'runner') -Destination $staged -Recurse -Force
+    } catch {
+      Remove-Item -LiteralPath $staged -Recurse -Force -ErrorAction SilentlyContinue
+      Fail "the runner could not be written to $share, so nothing was installed; check that you can write to it, or set AF_BIN_DIR to somewhere you can"
+    }
+
+    $runnerAside = $null
+    if (Test-Path -LiteralPath $runner) {
+      $runnerAside = "$runner.old-$suffix"
+      try {
+        Move-Item -LiteralPath $runner -Destination $runnerAside -Force
+      } catch {
+        Remove-Item -LiteralPath $staged -Recurse -Force -ErrorAction SilentlyContinue
+        Fail "the runner already in $share could not be moved aside, which is what happens while af test is running from it, so nothing was installed; stop it and run this again"
+      }
+    }
+    function RestoreRunner {
+      Remove-Item -LiteralPath $runner -Recurse -Force -ErrorAction SilentlyContinue
+      if ($runnerAside) { Move-Item -LiteralPath $runnerAside -Destination $runner -Force -ErrorAction SilentlyContinue }
+      Remove-Item -LiteralPath $staged -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    try {
+      Move-Item -LiteralPath $staged -Destination $runner -Force
+    } catch {
+      RestoreRunner
+      Fail "the runner could not be put in place in $share, so nothing was installed; check that you can write to it"
     }
 
     # Windows will not let a running .exe be overwritten or deleted, but it
@@ -333,41 +386,41 @@
     # MCP server in an editor work at all, and the new one is copied into the
     # name it left. af.exe.old is what af update leaves too, and the next run
     # of af removes it.
-    $target = Join-Path $BinDir 'af.exe'
     $aside = $null
     if (Test-Path -LiteralPath $target) {
       $aside = "$target.old"
       if (Test-Path -LiteralPath $aside) {
-        try { Remove-Item -LiteralPath $aside -Force } catch { $aside = "$target.$([guid]::NewGuid().ToString('N')).old" }
+        try { Remove-Item -LiteralPath $aside -Force } catch { $aside = "$target.$suffix.old" }
       }
       try {
         Move-Item -LiteralPath $target -Destination $aside -Force
       } catch {
+        RestoreRunner
         Fail "the af.exe already in $BinDir could not be moved aside to make room for this one, so nothing was installed; close anything running it and run this again"
       }
     }
     try {
       Copy-Item -LiteralPath (Join-Path $tree 'af.exe') -Destination $target -Force
     } catch {
-      if ($aside) { try { Move-Item -LiteralPath $aside -Destination $target -Force } catch { } }
-      Fail "af.exe could not be written to $BinDir; check that you can write to it, or set AF_PREFIX to somewhere you can"
+      # Best effort by necessity: this runs on the way to reporting a failure,
+      # and a restore that itself fails can only be reported by the sentence
+      # below, which already says nothing was installed.
+      if ($aside) { Move-Item -LiteralPath $aside -Destination $target -Force -ErrorAction SilentlyContinue }
+      RestoreRunner
+      Fail "af.exe could not be written to $BinDir, so nothing was installed; check that you can write to it, or set AF_BIN_DIR to somewhere you can"
     }
 
-    # The runner source lands where `af runner install` looks for one, which is
-    # share\antifailure\runner beside the bin directory. A tree an earlier
-    # installer left at <prefix>\runner with no dependencies would be found
-    # first and fail inside af test, so it is removed.
-    $share = Join-Path $Prefix 'share\antifailure'
-    $runner = Join-Path $share 'runner'
-    try {
-      if (Test-Path -LiteralPath $runner) { Remove-Item -LiteralPath $runner -Recurse -Force }
-      New-Item -ItemType Directory -Path $share -Force | Out-Null
-      Copy-Item -LiteralPath (Join-Path $tree 'runner') -Destination $runner -Recurse -Force
-    } catch {
-      Fail "the runner could not be written to $share; check that you can write to it, or set AF_PREFIX to somewhere you can"
-    }
-    $stale = Join-Path $Prefix 'runner'
-    if ((Test-Path -LiteralPath $stale) -and -not (Test-Path -LiteralPath (Join-Path $stale 'node_modules'))) {
+    # Both are in place. The old runner is removed now, and if something still
+    # holds a file in it the removal waits for the next install rather than
+    # failing this one.
+    if ($runnerAside) { Remove-Item -LiteralPath $runnerAside -Recurse -Force -ErrorAction SilentlyContinue }
+
+    # A tree an earlier installer left at <prefix>\runner with no dependencies
+    # would be found first and fail inside af test, so it is removed. Never the
+    # runner just placed, which is the same directory when AF_BIN_DIR is the
+    # prefix itself.
+    $stale = [System.IO.Path]::GetFullPath((Join-Path $Prefix 'runner'))
+    if ($stale -ne $runner -and (Test-Path -LiteralPath $stale) -and -not (Test-Path -LiteralPath (Join-Path $stale 'node_modules'))) {
       Remove-Item -LiteralPath $stale -Recurse -Force -ErrorAction SilentlyContinue
     }
 

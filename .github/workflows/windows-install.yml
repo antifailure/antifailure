@@ -24,7 +24,11 @@ on:
       - 'tools/reltar/**'
       - 'runner/package.json'
       - 'runner/package-lock.json'
-      - '.github/workflows/windows.yml'
+      - '.github/workflows/windows-install.yml'
+      # The matrix of what a release ships. A change to it alone has to run
+      # this, or the architectures published and the architectures tested
+      # here could drift apart with nothing going red.
+      - '.github/workflows/release.yml'
   pull_request:
     paths:
       - 'install.ps1'
@@ -33,7 +37,11 @@ on:
       - 'tools/reltar/**'
       - 'runner/package.json'
       - 'runner/package-lock.json'
-      - '.github/workflows/windows.yml'
+      - '.github/workflows/windows-install.yml'
+      # The matrix of what a release ships. A change to it alone has to run
+      # this, or the architectures published and the architectures tested
+      # here could drift apart with nothing going red.
+      - '.github/workflows/release.yml'
   workflow_dispatch:
 
 concurrency:

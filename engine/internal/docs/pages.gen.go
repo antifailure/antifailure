@@ -8432,9 +8432,10 @@ want ` + "`" + `af` + "`" + ` in a directory that is already on your PATH:
 curl -fsSL https://antifailure.dev/install.sh | AF_BIN_DIR=$HOME/.local/bin sh
 ` + "`" + "`" + "`" + `
 
-It moves the binary and nothing else. The runner still goes under ` + "`" + `AF_PREFIX` + "`" + `,
-which is ` + "`" + `~/.antifailure` + "`" + ` unless you set it too, and the PATH line the installer
-prints names the directory you chose. Both of these want a directory you can
+The runner goes beside it, in ` + "`" + `share/antifailure/runner` + "`" + ` next to the directory
+you named, so ` + "`" + `~/.local/bin` + "`" + ` puts it in ` + "`" + `~/.local/share/antifailure/runner` + "`" + `.
+That is where ` + "`" + `af` + "`" + ` looks for the runner it shipped with, relative to itself,
+and the PATH line the installer prints names the directory you chose. Both of these want a directory you can
 write to without ` + "`" + `sudo` + "`" + `; if the write fails the installer says which path it
 could not write and stops rather than installing half of a release.
 

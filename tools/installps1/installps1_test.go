@@ -239,6 +239,87 @@ func TestReinstallingOverARunningAFSucceeds(t *testing.T) {
 	})
 }
 
+// af looks for the runner it shipped with relative to ITSELF, at
+// <bin>\..\share\antifailure\runner, never under AF_PREFIX. The runner used
+// to go under AF_PREFIX whatever AF_BIN_DIR said, so an install into a custom
+// bin directory reported success with a runner af could not find.
+func TestACustomBinDirKeepsTheRunnerWhereAFLooks(t *testing.T) {
+	eachHost(t, func(t *testing.T, host string) {
+		s := newSession(t, host)
+		tools := filepath.Join(t.TempDir(), "tools")
+		s.env["AF_BIN_DIR"] = filepath.Join(tools, "bin")
+		s.succeeds()
+
+		if _, err := os.Stat(filepath.Join(tools, "bin", "af.exe")); err != nil {
+			t.Fatalf("af.exe is not in AF_BIN_DIR: %v", err)
+		}
+		want := filepath.Join(tools, "share", "antifailure", "runner", "src", "main.ts")
+		if _, err := os.Stat(want); err != nil {
+			t.Errorf("the runner is not where af looks for it beside %s: %v", s.env["AF_BIN_DIR"], err)
+		}
+		if _, err := os.Stat(filepath.Join(s.prefix, "share", "antifailure", "runner")); err == nil {
+			t.Error("the runner went under AF_PREFIX, where an af in a custom bin directory never looks")
+		}
+	})
+}
+
+// An upgrade that cannot replace the runner leaves the old installation as it
+// was: the old runner, and the old af.exe beside it. It used to replace af.exe
+// first and then delete the old runner before copying the new one, so a failure
+// in between left a new af.exe and no runner.
+//
+// The failure is arranged the way it happens: a file inside the installed
+// runner held open, as node holds one while af test is running from it, so the
+// directory cannot be moved.
+func TestAnUpgradeThatCannotReplaceTheRunnerLeavesTheOldInstall(t *testing.T) {
+	eachHost(t, func(t *testing.T, host string) {
+		s := newSession(t, host)
+		s.succeeds()
+
+		share := filepath.Join(s.prefix, "share", "antifailure")
+		runner := filepath.Join(share, "runner")
+		marker := filepath.Join(runner, "OLD")
+		if err := os.WriteFile(marker, []byte("old\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(s.installed(), []byte("old af.exe"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		held, err := os.Open(filepath.Join(runner, "src", "main.ts"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = held.Close() })
+
+		// The precondition, proved: with that file open the directory really
+		// cannot be moved, so this test is about the case it names.
+		if err := os.Rename(runner, runner+".probe"); err == nil {
+			_ = os.Rename(runner+".probe", runner)
+			t.Fatal("the runner directory could be moved with a file in it held open, so this machine does not reproduce the case")
+		}
+
+		r := s.run()
+		if r.code == 0 {
+			t.Fatalf("the upgrade succeeded although the runner could not be replaced:\n%s", r.out)
+		}
+		if !strings.Contains(r.out, "nothing was installed") {
+			t.Errorf("the refusal does not say nothing was installed:\n%s", r.out)
+		}
+		if _, err := os.Stat(marker); err != nil {
+			t.Errorf("the old runner is gone after a failed upgrade: %v", err)
+		}
+		if body, _ := os.ReadFile(s.installed()); string(body) != "old af.exe" {
+			t.Errorf("af.exe was replaced by an upgrade that then failed, so it no longer matches its runner")
+		}
+		entries, _ := os.ReadDir(share)
+		for _, e := range entries {
+			if e.Name() != "runner" {
+				t.Errorf("a failed upgrade left %s behind in %s", e.Name(), share)
+			}
+		}
+	})
+}
+
 // In a GitHub Actions job the next step is a new process, so PATH is handed on
 // through GITHUB_PATH, once, with no byte order mark in front of it.
 func TestInCIThePathIsHandedToTheNextStepOnce(t *testing.T) {

@@ -452,43 +452,68 @@ unpinned=0
 # left an empty PREFIX behind as well as an unexplained failure.
 mkdir -p "$BIN_DIR" 2>/dev/null \
   || die "$BIN_DIR could not be created, so nothing was installed; check that you can write to it, or set AF_PREFIX or AF_BIN_DIR to somewhere you can"
-mkdir -p "$PREFIX" 2>/dev/null \
-  || die "$PREFIX could not be created, so nothing was installed; check that you can write to it, or set AF_PREFIX to somewhere you can"
-if ! install -m 0755 "$tmp/$name/af" "$BIN_DIR/af" 2>/dev/null; then
-  cp "$tmp/$name/af" "$BIN_DIR/af" 2>/dev/null \
-    && chmod 0755 "$BIN_DIR/af" 2>/dev/null \
-    || die "af could not be written to $BIN_DIR; check that you can write to it, or set AF_PREFIX to somewhere you can"
+
+# The runner source goes where `af runner install` looks for one, and af looks
+# relative to ITSELF: <bin>/runner or <bin>/../share/antifailure/runner, never
+# under AF_PREFIX. So it is placed beside the bin directory, which for the
+# default layout is $PREFIX/share/antifailure/runner exactly as before, and for
+# AF_BIN_DIR=~/.local/bin is ~/.local/share/antifailure/runner.
+#
+# It used to go under $PREFIX whatever AF_BIN_DIR said, so an install into a
+# custom bin directory reported success with a runner af could not find, and
+# `af runner install` answered AF-AGT-004 naming two paths, neither of which
+# was where this script had just put it.
+share_dir="$(cd "$BIN_DIR/.." 2>/dev/null && pwd)/share/antifailure"
+runner_dir="$share_dir/runner"
+
+# AN UPGRADE THAT FAILS PART WAY LEAVES WHAT WAS THERE. The new runner is copied
+# beside the old one first, where a failure changes nothing. Then the old runner
+# is moved aside, the new one takes its name, af is written, and only once both
+# are in place is the old runner removed. Any failure on the way puts back what
+# it moved. This used to rm -rf the old runner before copying the new one, after
+# af had already been replaced, so a copy that failed left a new af and no
+# runner at all.
+staged="$runner_dir.new.$$"
+runner_aside=""
+restore_runner() {
+  rm -rf "$runner_dir"
+  [ -z "$runner_aside" ] || mv "$runner_aside" "$runner_dir" 2>/dev/null
+  rm -rf "$staged"
+}
+if ! { mkdir -p "$share_dir" && cp -R "$tmp/$name/runner" "$staged"; } 2>/dev/null; then
+  rm -rf "$staged"
+  die "the runner could not be written to $share_dir, so nothing was installed; check that you can write to it, or set AF_BIN_DIR to somewhere you can"
+fi
+if [ -e "$runner_dir" ]; then
+  runner_aside="$runner_dir.old.$$"
+  if ! mv "$runner_dir" "$runner_aside" 2>/dev/null; then
+    rm -rf "$staged"
+    die "the runner already in $share_dir could not be moved aside, so nothing was installed; check that you can write to it"
+  fi
+fi
+if ! mv "$staged" "$runner_dir" 2>/dev/null; then
+  restore_runner
+  die "the runner could not be put in place in $share_dir, so nothing was installed; check that you can write to it"
 fi
 
-# The runner source travels with the binary rather than being fetched later,
-# and it lands where `af runner install` looks for it.
-#
-# It used to land at $PREFIX/runner, which is where af LOOKS FOR AN INSTALLED
-# runner, not where it looks for a source to install from. The two effects,
-# both reproduced on a clean machine against v0.1.1:
-#
-#   af runner install  AF-AGT-004, no runner source was found, having searched
-#                      $PREFIX/bin/runner and $PREFIX/share/antifailure/runner
-#                      and neither of the two checkout paths. Its remediation
-#                      is "install it with af runner install", so the second
-#                      command the installer prints was a dead end that told
-#                      you to run itself.
-#   af runner check    "ok runner", because it stats src/main.ts, on a tree
-#                      with no node_modules. So the breakage surfaced later,
-#                      inside af test, as a node error.
-#
-# $PREFIX/share/antifailure/runner is one of the paths runnerSource already
-# checks, resolved from the binary's own directory. Nothing in the engine
-# changes; the file just goes where the engine was already looking.
-rm -rf "$PREFIX/share/antifailure/runner"
-mkdir -p "$PREFIX/share/antifailure"
-cp -R "$tmp/$name/runner" "$PREFIX/share/antifailure/runner" 2>/dev/null \
-  || die "the runner could not be written to $PREFIX/share/antifailure; check that you can write to it, or set AF_PREFIX to somewhere you can"
+# af is written to a temporary name in the same directory and renamed over the
+# old one, so the old af stays whole until the new one is complete. A rename
+# within a directory is atomic, and a running af keeps the file it opened.
+if ! { cp "$tmp/$name/af" "$BIN_DIR/.af.new.$$" && chmod 0755 "$BIN_DIR/.af.new.$$" \
+       && mv -f "$BIN_DIR/.af.new.$$" "$BIN_DIR/af"; } 2>/dev/null; then
+  rm -f "$BIN_DIR/.af.new.$$"
+  restore_runner
+  die "af could not be written to $BIN_DIR, so nothing was installed; check that you can write to it, or set AF_PREFIX to somewhere you can"
+fi
+[ -z "$runner_aside" ] || rm -rf "$runner_aside"
 
 # A tree left at the old location by an earlier installer is a source with no
 # dependencies, and af test finds it before it finds anything else. Removing it
 # turns a mysterious node failure into AF-AGT-004, whose remediation now works.
-if [ -d "$PREFIX/runner" ] && [ ! -d "$PREFIX/runner/node_modules" ]; then
+# Never the runner just placed, which is the same directory when AF_BIN_DIR is
+# the prefix itself.
+if [ -d "$PREFIX/runner" ] && [ ! -d "$PREFIX/runner/node_modules" ] \
+   && [ "$(cd "$PREFIX/runner" && pwd)" != "$(cd "$runner_dir" && pwd)" ]; then
   rm -rf "$PREFIX/runner"
 fi
 
