@@ -89,8 +89,9 @@ func TestDockerIsDecidedByTheDaemonNotThePlatform(t *testing.T) {
 }
 
 func TestThePendingNamesAreOneAnchoredPattern(t *testing.T) {
-	re := regexp.MustCompile(skipPattern())
-	for names := range pendingTests {
+	pending := map[string]string{"TestOne|TestTwo": "reason", "TestThree": "reason"}
+	re := regexp.MustCompile(skipPattern(pending))
+	for names := range pending {
 		for _, n := range strings.Split(names, "|") {
 			if !re.MatchString(n) {
 				t.Fatalf("%s is listed and not skipped", n)
@@ -118,4 +119,18 @@ func containsPrefix(xs []string, prefix string) bool {
 		}
 	}
 	return false
+}
+
+// Nothing pending means no -skip at all, rather than a pattern that matches
+// nothing and reads as though it skipped something.
+func TestNoPendingTestsMeansNoSkipFlag(t *testing.T) {
+	for _, a := range testArgs(nil) {
+		if a == "-skip" {
+			t.Fatal("-skip was passed with nothing to skip")
+		}
+	}
+	args := testArgs(map[string]string{"TestOne": "reason"})
+	if args[len(args)-2] != "-skip" {
+		t.Fatalf("a pending test was not skipped: %v", args)
+	}
 }

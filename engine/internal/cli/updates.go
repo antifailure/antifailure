@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -74,7 +73,8 @@ func stableVersion(v string) ([3]uint64, bool) {
 }
 
 func releaseCheck(ctx context.Context, current, endpoint string, client *http.Client) CheckResult {
-	r := CheckResult{Name: "CLI version", Status: CheckWarn, Remediation: updateRemediation()}
+	r := CheckResult{Name: "CLI version", Status: CheckWarn,
+		Remediation: "Run 'af update' to install the latest release. It verifies the published checksum before replacing this binary."}
 	installed, ok := stableVersion(current)
 	if !ok {
 		r.Detail = current + ": not a stable release version, so freshness cannot be checked"
@@ -150,17 +150,4 @@ func checkProjectManifest(_ context.Context, env *Env, _ Prober) CheckResult {
 	r.Detail = path + " is valid"
 	r.Remediation = "No action needed. 'af start' shows the remaining steps to a first result."
 	return r
-}
-
-// updateRemediation is how to get the latest release on this machine.
-//
-// af update replaces the running binary, which it cannot yet do on Windows:
-// it refuses there, so telling a Windows user to run it sent them to a
-// refusal. The PowerShell installer is what installs and upgrades af there.
-func updateRemediation() string {
-	if runtime.GOOS == "windows" {
-		return "Install the latest release with 'irm https://antifailure.dev/install.ps1 | iex' in PowerShell. " +
-			"It verifies the published checksum before replacing this binary."
-	}
-	return "Run 'af update' to install the latest release. It verifies the published checksum before replacing this binary."
 }

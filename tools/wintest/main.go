@@ -55,15 +55,10 @@ var excludedPackages = map[string]string{
 
 // pendingTests are skipped by name until the code they exercise supports
 // Windows, with the reason. A name here is a known gap, not a pass, and it is
-// printed on every run so it cannot be forgotten.
-var pendingTests = map[string]string{
-	"TestSelfUpdateVerifiedArchive|TestSelfUpdateDoesNotDowngradeOrReinstall|" +
-		"TestUpdateRecoveryAcrossCommitBoundaries|TestRecoveryClearsItsOwnStagingDirectory|" +
-		"TestUpdateLockReleasesWhenTheHandleCloses|TestUpdateSweepsAnAbandonedStage": "" +
-		"af update refuses on Windows today, because replacing a running .exe " +
-		"needs the running image moved aside first. These tests exercise the " +
-		"replacement and come off this list when af update supports Windows.",
-}
+// printed on every run so it cannot be forgotten. It is empty: the six self
+// update tests that were here came off when af update learned to replace a
+// running af.exe (#631).
+var pendingTests = map[string]string{}
 
 // dockerMode is what the daemon on this machine can do for the tests.
 type dockerMode struct {
@@ -255,9 +250,20 @@ func verdict(res result, floor int) (string, bool) {
 	return b.String(), ok
 }
 
-func skipPattern() string {
+// testArgs is go test's flags. -skip only when something is pending: an
+// empty pattern would be "^()$", which skips nothing today and reads as if it
+// skipped something.
+func testArgs(pending map[string]string) []string {
+	args := []string{"test", "-json", "-count=1", "-timeout=60m"}
+	if len(pending) > 0 {
+		args = append(args, "-skip", skipPattern(pending))
+	}
+	return args
+}
+
+func skipPattern(pending map[string]string) string {
 	var names []string
-	for k := range pendingTests {
+	for k := range pending {
 		names = append(names, k)
 	}
 	sort.Strings(names)
@@ -307,7 +313,7 @@ func run(root string) error {
 		}
 	}
 
-	args := append([]string{"test", "-json", "-count=1", "-timeout=60m", "-skip", skipPattern()}, pkgs...)
+	args := append(testArgs(pendingTests), pkgs...)
 	cmd := exec.Command("go", args...)
 	cmd.Dir = engine
 	cmd.Env = append(os.Environ(), mode.env...)
