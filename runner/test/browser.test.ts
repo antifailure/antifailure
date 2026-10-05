@@ -7,6 +7,7 @@ import { mkdtempSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
+import { chromium } from 'playwright';
 import { Session, artifactPath } from '../src/browser.ts';
 import { run, type WorkflowResult } from '../src/execute.ts';
 import { explore, type Goal } from '../src/explore.ts';
@@ -1118,6 +1119,7 @@ test('a workflow that uses every step and shows everything it expected passes', 
 
 /** browsersBelow is every Chromium process descended from pid. */
 function browsersBelow(pid: number): number[] {
+  if (process.platform === 'win32') return windowsBrowsersBelow(pid);
   let children: number[] = [];
   try {
     children = execFileSync('pgrep', ['-P', String(pid)], { encoding: 'utf8' })
@@ -1130,6 +1132,34 @@ function browsersBelow(pid: number): number[] {
     try { command = execFileSync('ps', ['-o', 'command=', '-p', String(c)], { encoding: 'utf8' }); } catch { /* gone */ }
     return [...(/chrom/i.test(command) ? [c] : []), ...browsersBelow(c)];
   });
+}
+
+/** windowsBrowsersBelow is browsersBelow where there is no pgrep and no ps.
+ *
+ *  Before it, the same function ran on Windows, pgrep was not found, the catch
+ *  read that as "no children", and every assertion that no browser was left
+ *  running passed on the required Windows check without having looked. This
+ *  reads the whole process table once and walks it from pid, and a table it
+ *  could not read throws rather than answering that nothing is running. */
+function windowsBrowsersBelow(pid: number): number[] {
+  const table = execFileSync('powershell', [
+    '-NoProfile', '-Command',
+    'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId) $($_.Name)" }',
+  ], { encoding: 'utf8' });
+  const rows = table.split(/\r?\n/).map((l) => l.trim().split(' '))
+    .filter((r) => r.length >= 3)
+    .map(([id, parent, ...name]) => ({ id: Number(id), parent: Number(parent), name: name.join(' ') }));
+  if (rows.length === 0) throw new Error('the Windows process table came back empty');
+  const below: number[] = [];
+  const walk = (p: number) => {
+    for (const r of rows) {
+      if (r.parent !== p || r.id === p) continue;
+      if (/chrom/i.test(r.name)) below.push(r.id);
+      walk(r.id);
+    }
+  };
+  walk(pid);
+  return below;
 }
 
 test('a budget spent while the browser is still starting leaves no browser running', { timeout: 120_000 }, async () => {
@@ -1156,6 +1186,128 @@ test('a budget spent while the browser is still starting leaves no browser runni
     }
     assert.deepEqual(left, [], 'a browser launched for a workflow its budget stopped is still running');
   } finally {
+    server.closeAllConnections();
+    server.close();
+  }
+});
+
+test('an open stopped while the browser is starting returns no session and leaves no browser', { timeout: 120_000 }, async () => {
+  // The launch is only the first process an open starts: the context, the
+  // trace and the first page follow it, and the first page starts a renderer.
+  // A workflow whose budget ran out during any of them waited for all of them
+  // and then closed the result, so a two second budget came back after twelve
+  // on a Windows machine starting its first browser. Stopped, the open has to
+  // fail rather than finish, whatever the host's speed.
+  const stop = new AbortController();
+  const opening = Session.open({ artifacts: mkdtempSync(join(tmpdir(), 'af-stop-open-')), stop: stop.signal });
+  stop.abort();
+  const outcome = await opening.then(
+    async (session) => { await session.close('stopped-open'); return 'a session'; },
+    () => 'refused',
+  );
+  assert.equal(outcome, 'refused', 'an open stopped while starting still produced a session');
+  let left = browsersBelow(process.pid);
+  for (let i = 0; i < 50 && left.length > 0; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    left = browsersBelow(process.pid);
+  }
+  assert.deepEqual(left, [], 'a browser stopped while starting is still running');
+});
+
+test('an open stopped after the launch, while the page is being made, returns no session', { timeout: 120_000 }, async () => {
+  // The stop has to reach an open that is past the launch, because that is
+  // where the rest of the time goes: the context, the trace and the first page
+  // each start or wait on a process. Here the stop lands exactly as the context
+  // is being created, by wrapping the browser the real launch returns, so the
+  // test does not depend on how fast this host starts anything.
+  const stop = new AbortController();
+  const launch = chromium.launch.bind(chromium);
+  chromium.launch = (async (options?: Parameters<typeof launch>[0]) => {
+    const browser = await launch(options);
+    const newContext = browser.newContext.bind(browser);
+    browser.newContext = (async (o?: Parameters<typeof newContext>[0]) => {
+      const making = newContext(o);
+      stop.abort();
+      return making;
+    }) as typeof browser.newContext;
+    return browser;
+  }) as typeof chromium.launch;
+  try {
+    const outcome = await Session.open({
+      artifacts: mkdtempSync(join(tmpdir(), 'af-stop-midway-')), stop: stop.signal,
+    }).then(
+      async (session) => { await session.close('stopped-midway'); return 'a session'; },
+      () => 'refused',
+    );
+    assert.ok(stop.signal.aborted, 'the stop never fired, so this checked nothing');
+    assert.equal(outcome, 'refused', 'an open stopped while its page was being made still produced a session');
+  } finally {
+    chromium.launch = launch as typeof chromium.launch;
+  }
+  let left = browsersBelow(process.pid);
+  for (let i = 0; i < 50 && left.length > 0; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    left = browsersBelow(process.pid);
+  }
+  assert.deepEqual(left, [], 'a browser stopped while its page was being made is still running');
+});
+
+test('an open whose launch limit has passed returns no session and leaves no browser', { timeout: 120_000 }, async () => {
+  // The other half: a stop can only close a browser that exists, so the launch
+  // itself carries the budget as its limit. One millisecond is shorter than any
+  // launch on any host, so this cannot pass by being fast.
+  const outcome = await Session.open({
+    artifacts: mkdtempSync(join(tmpdir(), 'af-launch-limit-')), launchWithinMs: 1,
+  }).then(
+    async (session) => { await session.close('launch-limit'); return 'a session'; },
+    () => 'refused',
+  );
+  assert.equal(outcome, 'refused', 'a launch past its limit still produced a session');
+  let left = browsersBelow(process.pid);
+  for (let i = 0; i < 50 && left.length > 0; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    left = browsersBelow(process.pid);
+  }
+  assert.deepEqual(left, [], 'a browser whose launch ran out of time is still running');
+});
+
+test('a workflow passes its budget to the browser it opens, and stops it when the budget runs out', { timeout: 120_000 }, async () => {
+  // The tests above prove the session can be stopped. This proves a workflow
+  // stops it. The real launch is wrapped twice: it records the limit it was
+  // handed, and the context it makes hangs for ten seconds unless the browser
+  // is closed under it, standing in for the slow processes an open starts. A
+  // workflow wired to its budget ends long before the hang would have; one that
+  // is not waits it out. No part of this depends on how fast the host is.
+  const { server, url } = slowWelcome(8_000);
+  const baseURL = await url;
+  const HANG_MS = 10_000;
+  let limit: number | undefined;
+  const launch = chromium.launch.bind(chromium);
+  chromium.launch = (async (options?: Parameters<typeof launch>[0]) => {
+    limit = options?.timeout;
+    const browser = await launch(options);
+    const newContext = browser.newContext.bind(browser);
+    browser.newContext = ((o?: Parameters<typeof newContext>[0]) => new Promise((resolve, reject) => {
+      const hang = setTimeout(() => { resolve(newContext(o)); }, HANG_MS);
+      browser.on('disconnected', () => { clearTimeout(hang); reject(new Error('the browser was closed')); });
+    })) as typeof browser.newContext;
+    return browser;
+  }) as typeof chromium.launch;
+  try {
+    const started = Date.now();
+    const [result] = await run({
+      baseURL, artifacts: mkdtempSync(join(tmpdir(), 'af-wired-')), attempts: 1,
+      workflows: [{ ...signUp, name: 'wired', maxMs: 500 }],
+      personas: nobody,
+    });
+    const elapsed = Date.now() - started;
+    assert.equal(result!.outcome.cause, 'budget-exhausted', JSON.stringify(result!.outcome, null, 2));
+    assert.ok(limit !== undefined && limit > 0 && limit <= 500 + 1_000,
+      `the browser was launched with a limit of ${limit} ms for a 500 ms budget`);
+    assert.ok(elapsed < HANG_MS / 2,
+      `a workflow stopped at its 500 ms budget took ${elapsed} ms: it waited for the open to finish`);
+  } finally {
+    chromium.launch = launch as typeof chromium.launch;
     server.closeAllConnections();
     server.close();
   }

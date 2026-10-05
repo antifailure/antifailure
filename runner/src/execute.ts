@@ -150,12 +150,16 @@ async function runOne(
     let session: Session | undefined;
     let opening: Promise<Session> | undefined;
     let interrupted = false;
+    const stopOpening = new AbortController();
     const taken: string[] = [];
     try {
       const attemptRun = (async () => {
         sink.agent(desc, 'connecting');
         opening = Session.open({
           artifacts: job.artifacts,
+          ...(deadline === undefined
+            ? {}
+            : { launchWithinMs: deadline - Date.now() + LAUNCH_GRACE_MS, stop: stopOpening.signal }),
           ...(job.headless === undefined ? {} : { headless: job.headless }),
           live: { sink, agent: desc.id },
         });
@@ -174,6 +178,7 @@ async function runOne(
         : await withinBudget(attemptRun, deadline - Date.now());
       if (settled === BUDGET_SPENT) {
         interrupted = true;
+        stopOpening.abort();
         attemptRun.catch(() => undefined);
         attempts.push({
           cause: 'budget-exhausted',
@@ -367,6 +372,17 @@ export function stepsExhausted(
   if (judged.cause === 'succeeded' || judged.cause === 'application-error') return judged;
   return { cause: 'budget-exhausted', detail: judged.detail, taken };
 }
+
+/** LAUNCH_GRACE_MS is how long past the time budget a browser may go on
+ *  starting.
+ *
+ *  The launch limit and the budget are two timers, and with no gap between
+ *  them the launch could reject first. The attempt then read as the runner's
+ *  own failure rather than a spent budget, measured once in six on a 50 ms
+ *  budget. The budget's timer has to settle the race, so the launch limit sits
+ *  after it. A quarter second is long against Windows' coarse timers and short
+ *  against what the budget used to overrun by. */
+const LAUNCH_GRACE_MS = 250;
 
 /** BUDGET_SPENT is what withinBudget settles to when the time ran out first. */
 const BUDGET_SPENT = Symbol('budget spent');

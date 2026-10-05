@@ -315,8 +315,38 @@ export class Session {
      *  ever taken for this purpose: the ordinary run pays nothing. The sink is
      *  best effort and never changes the run, exactly like the durable video. */
     readonly live?: { readonly sink: LiveSink; readonly agent: string };
+    /** launchWithinMs bounds the browser's start. A workflow with a time budget
+     *  passes what is left of it, because the start is part of what the budget
+     *  pays for: unbounded, a launch slower than the budget held the workflow
+     *  until Chromium was up, so a two second budget came back after twelve on
+     *  a Windows machine starting its first browser. When it runs out
+     *  Playwright stops the half started browser, so nothing is left running.
+     *  Absent means Playwright's own limit, as before. */
+    readonly launchWithinMs?: number;
+    /** stop, when it aborts while the session is still opening, closes the
+     *  browser at once, so the context, the trace and the first page that were
+     *  still being created fail instead of finishing. The launch is only the
+     *  first of the processes an open starts: the first page starts a renderer,
+     *  and measured on macOS the launch was the smaller part of an open, so
+     *  bounding it alone left most of the open unbounded.
+     *  Once open has returned, the session belongs to whoever closes it and
+     *  stop is no longer watched. */
+    readonly stop?: AbortSignal;
   }): Promise<Session> {
-    const browser = await chromium.launch({ headless: options.headless ?? true });
+    const browser = await chromium.launch({
+      headless: options.headless ?? true,
+      // Playwright reads a timeout of 0 as no limit at all, so a budget already
+      // spent is a one millisecond limit rather than the opposite of one.
+      ...(options.launchWithinMs === undefined
+        ? {}
+        : { timeout: Math.max(1, Math.ceil(options.launchWithinMs)) }),
+    });
+    const stopped = () => { void browser.close().catch(() => undefined); };
+    if (options.stop?.aborted) {
+      await browser.close().catch(() => undefined);
+      throw new Error('the browser was stopped while it was still starting');
+    }
+    options.stop?.addEventListener('abort', stopped, { once: true });
     const viewport = options.viewport ?? DEFAULT_VIEWPORT;
     const context = await browser.newContext({
       recordVideo: { dir: options.artifacts },
@@ -373,6 +403,7 @@ export class Session {
       );
       session.#pump.start();
     }
+    options.stop?.removeEventListener('abort', stopped);
     return session;
   }
 
