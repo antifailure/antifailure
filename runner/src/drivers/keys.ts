@@ -71,12 +71,56 @@ const CURSOR: Record<string, string> = {
   end: 'F',
 };
 
+/** The cursor keys as a Windows console knows them: the virtual key code and
+ *  the scan code a real keyboard reports. */
+const WIN32_CURSOR: Record<string, { vk: number; scan: number }> = {
+  up: { vk: 0x26, scan: 0x48 },
+  down: { vk: 0x28, scan: 0x50 },
+  right: { vk: 0x27, scan: 0x4d },
+  left: { vk: 0x25, scan: 0x4b },
+  home: { vk: 0x24, scan: 0x47 },
+  end: { vk: 0x23, scan: 0x4f },
+};
+
+/** ENHANCED_KEY in a console key event's control key state: the key is on the
+ *  navigation block rather than the numeric keypad. */
+const ENHANCED_KEY = 0x100;
+
+/** win32KeyPress is one key pressed and released, written in win32-input-mode,
+ *  `ESC [ Vk ; Sc ; Uc ; Kd ; Cs ; Rc _`.
+ *
+ *  WHY THIS EXISTS, measured on a Windows runner rather than read. Under
+ *  ConPTY the program's request for application cursor keys never reaches the
+ *  emulator: ConPTY consumes DECCKM itself and asks the terminal for
+ *  win32-input-mode instead, the private mode 9001. So the emulator always
+ *  reports the normal encoding, the driver sent ESC [ A, and a program that had
+ *  asked for ESC O A drew "normal up" where a person at a real Windows terminal
+ *  would have seen "application up". A key EVENT carries no encoding at all,
+ *  and the console host turns it into the sequence the program asked for, which
+ *  is exactly what a Windows terminal does: the same probe sent this event to
+ *  a program that set DECCKM and to one that did not, and they received ESC O A
+ *  and ESC [ A respectively. */
+export function win32KeyPress(vk: number, scan: number, state: number): string {
+  const event = (down: 0 | 1) => `${ESC}[${vk};${scan};0;${down};${state};1_`;
+  return event(1) + event(0);
+}
+
+/** How the terminal wants keys that depend on the program's own modes. `vt` is
+ *  the escape sequence for the cursor key mode the emulator observed; `win32`
+ *  is a console key event, for a terminal that has been asked for
+ *  win32-input-mode, which is what ConPTY asks for on Windows. */
+export type KeyProtocol = 'vt' | 'win32';
+
 /** encodeKey returns the bytes for one `<name>` token, or null when the name is
  *  not a key, in which case the caller types the token literally. */
-export function encodeKey(name: string, mode: CursorKeyMode): string | null {
+export function encodeKey(name: string, mode: CursorKeyMode, protocol: KeyProtocol = 'vt'): string | null {
   const key = name.trim().toLowerCase();
   if (Object.hasOwn(FIXED, key)) return FIXED[key]!;
   if (Object.hasOwn(CURSOR, key)) {
+    if (protocol === 'win32') {
+      const { vk, scan } = WIN32_CURSOR[key]!;
+      return win32KeyPress(vk, scan, ENHANCED_KEY);
+    }
     return (mode === 'application' ? ESC + 'O' : ESC + '[') + CURSOR[key]!;
   }
   // ctrl-<letter> is the letter's position in the alphabet as a control byte,
@@ -93,7 +137,7 @@ export function encodeKey(name: string, mode: CursorKeyMode): string | null {
 /** encodeKeys turns one input entry into the bytes to write to the pseudo
  *  terminal. Text is typed as written; every `<name>` that names a key becomes
  *  that key's bytes; every other `<...>` is typed as it appears. */
-export function encodeKeys(entry: string, mode: CursorKeyMode): string {
+export function encodeKeys(entry: string, mode: CursorKeyMode, protocol: KeyProtocol = 'vt'): string {
   let out = '';
   let i = 0;
   while (i < entry.length) {
@@ -109,7 +153,7 @@ export function encodeKeys(entry: string, mode: CursorKeyMode): string {
       out += entry.slice(i);
       break;
     }
-    const bytes = encodeKey(entry.slice(i + 1, close), mode);
+    const bytes = encodeKey(entry.slice(i + 1, close), mode, protocol);
     if (bytes === null) {
       // Not a key. Type the `<` and carry on from the next character, so a
       // later token in the same entry is still read: `<b><enter>` types `<b>`

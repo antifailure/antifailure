@@ -84,3 +84,26 @@ test('a step says press for a key and type for text, and never prints escape byt
       `a raw escape byte reached the report for ${entry}`);
   }
 });
+
+test('under win32-input-mode a cursor key is a key event, so the console host encodes it for the program', () => {
+  // ConPTY consumes the program's DECCKM, so the emulator cannot know which
+  // encoding the program wants. A key event carries none, and the console host
+  // writes the sequence the program asked for. Down then up, as a keyboard
+  // reports it, with ENHANCED_KEY set because these are the navigation keys.
+  const up = `${ESC}[38;72;0;1;256;1_${ESC}[38;72;0;0;256;1_`;
+  assert.equal(encodeKeys('<up>', 'normal', 'win32'), up);
+  // The mode the emulator reports does not change the event, because under
+  // ConPTY that report is not the program's.
+  assert.equal(encodeKeys('<up>', 'application', 'win32'), up);
+  assert.equal(encodeKey('left', 'normal', 'win32'), `${ESC}[37;75;0;1;256;1_${ESC}[37;75;0;0;256;1_`);
+  assert.equal(encodeKey('end', 'normal', 'win32'), `${ESC}[35;79;0;1;256;1_${ESC}[35;79;0;0;256;1_`);
+});
+
+test('under win32-input-mode text and the keys with one encoding are sent as they are', () => {
+  // Measured: ConPTY hands typed text and fixed sequences to the program
+  // unchanged, so only the keys whose bytes depend on the program's modes need
+  // to be events.
+  assert.equal(encodeKeys('hi<enter>', 'normal', 'win32'), 'hi\r');
+  assert.equal(encodeKeys('<ctrl-c>', 'normal', 'win32'), '\u0003');
+  assert.equal(encodeKeys('<f5>', 'normal', 'win32'), `${ESC}[15~`);
+});

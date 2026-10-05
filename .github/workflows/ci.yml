@@ -1175,8 +1175,8 @@ jobs:
         # two spellings of one gate are exactly what tools/gatecheck exists to
         # catch: it could not pair them, and reported the runner's tests as a
         # gate no workflow runs. The script is this command with a guard in
-        # front of it, `ls test/*.test.ts > /dev/null &&`, which fails rather
-        # than passing when the glob matches nothing.
+        # front of it, scripts/requiretests.mjs, which fails rather than
+        # passing when the pattern matches nothing, on Windows as well.
         run: npm test
         working-directory: runner
 

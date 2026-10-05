@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { replaceRegExp, writeFully } from '../src/emit.ts';
 
@@ -65,12 +65,14 @@ test('writeFully rejects when the write reports an error rather than hanging', a
 test('the runner delivers a document larger than the pipe buffer whole', async () => {
   const PAYLOAD = 256 * 1024;
   const here = dirname(fileURLToPath(import.meta.url));
+  // A URL rather than a path: on Windows an absolute path is not a module
+  // specifier, and "C:\..." is read as a URL whose scheme is "c:".
   const emitModule = join(here, '..', 'src', 'emit.ts');
   const dir = mkdtempSync(join(tmpdir(), 'af-emit-'));
   const script = join(dir, 'writer.ts');
   writeFileSync(
     script,
-    `import { writeFully } from ${JSON.stringify(emitModule)};\n` +
+    `import { writeFully } from ${JSON.stringify(pathToFileURL(emitModule).href)};\n` +
       `await writeFully(process.stdout, 'x'.repeat(${PAYLOAD}));\n` +
       `process.exit(0);\n`,
   );

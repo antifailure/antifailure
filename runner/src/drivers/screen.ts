@@ -30,7 +30,7 @@
 // history plus every screen the program showed along the way.
 
 import type { Terminal } from '@xterm/headless';
-import type { CursorKeyMode } from './keys.ts';
+import type { CursorKeyMode, KeyProtocol } from './keys.ts';
 
 /** Screen is one emulator, fed the bytes a program writes and read for what
  *  those bytes drew. */
@@ -39,10 +39,24 @@ export class Screen {
   readonly cols: number;
   private readonly term: Terminal;
 
+  /** Whether the terminal has been asked for win32-input-mode, the private
+   *  mode 9001. The emulator has no such mode and ignores the request, so the
+   *  request is watched for here. ConPTY makes it at startup on Windows, and
+   *  nothing else does. */
+  private win32Input = false;
+
   constructor(term: Terminal, rows: number, cols: number) {
     this.term = term;
     this.rows = rows;
     this.cols = cols;
+    const watch = (on: boolean) => (params: (number | number[])[]) => {
+      if (params.includes(9001)) this.win32Input = on;
+      // Not handled, so the emulator still applies every other mode in the
+      // same sequence.
+      return false;
+    };
+    term.parser.registerCsiHandler({ prefix: '?', final: 'h' }, watch(true));
+    term.parser.registerCsiHandler({ prefix: '?', final: 'l' }, watch(false));
   }
 
   /** write feeds the program's output to the emulator and resolves once it has
@@ -95,6 +109,12 @@ export class Screen {
    *  working and an expectation failing for no visible reason. */
   cursorKeys(): CursorKeyMode {
     return this.term.modes.applicationCursorKeysMode ? 'application' : 'normal';
+  }
+
+  /** keyProtocol is how keys whose bytes depend on the program's modes must
+   *  be sent. See keys.ts's win32KeyPress for why Windows is different. */
+  keyProtocol(): KeyProtocol {
+    return this.win32Input ? 'win32' : 'vt';
   }
 
   dispose(): void {

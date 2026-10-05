@@ -91,6 +91,11 @@ other encoding in complete silence. Antifailure reads the mode the program set
 and sends the encoding it asked for, so an arrow in a workflow is the arrow the
 program is waiting for.
 
+On Windows the program's terminal is ConPTY, which keeps that request to itself.
+There Antifailure sends an arrow as a key press and release, the way a Windows
+terminal does, and the console turns it into the encoding the program asked
+for.
+
 After every entry, Antifailure waits for the program to redraw and then reads
 the screen. Expectations are judged against every screen the program showed,
 not only the last one, so a workflow can name something that was on screen in
@@ -154,6 +159,15 @@ never read as one phrase.
 If the budget runs out with keys still to send, the workflow is blocked rather
 than passed, even with every expectation met: those keys are exactly where a
 forbidden string could have come from.
+
+On Windows a workflow with `never` that saw nothing forbidden is blocked rather
+than passed. ConPTY hands Antifailure the screen as it was drawn, not every
+byte the program wrote, so a line the program printed and then overwrote in
+place never arrives: measured on a Windows machine, a warning overwritten on
+its own line was missed in every one of fifteen runs. A forbidden string that
+does arrive still fails the workflow, so `never` there can catch a
+contradiction but cannot promise there was none. Run the workflow on Linux or
+macOS, or under WSL, for that promise.
 
 Two entries are refused before anything runs, because each decides the verdict
 by itself. One that a quoted expectation contains, since meeting the

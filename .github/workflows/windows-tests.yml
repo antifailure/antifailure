@@ -104,3 +104,40 @@ jobs:
           GOTOOLCHAIN: local
           AF_TEST_DATABASE_URL: postgres://postgres:test@127.0.0.1:55432/antifailure
         run: go run ./tools/wintest .
+
+  runner:
+    name: runner on Windows
+    runs-on: windows-latest
+    # The Linux job takes about ten minutes. The terminal tests that wait out a
+    # whole budget are the long pole, and they wait just as long here.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: runner/package-lock.json
+
+      - run: npm ci --no-audit --no-fund
+        working-directory: runner
+
+      # No --with-deps: that installs Linux packages, and the Windows image
+      # already has what Chromium needs.
+      - name: Install the browser
+        run: npx playwright install chromium
+        working-directory: runner
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+        working-directory: runner
+
+      # The same command the Linux job runs, under cmd.exe, which is what npm
+      # uses on Windows. That is the point: the test script's own guard used to
+      # be a Unix shell command, and under cmd.exe it failed before a single
+      # test started. Every terminal workflow here runs under ConPTY, which is
+      # the only way the driver's Windows behaviour gets executed at all.
+      - name: Test
+        run: npm test
+        working-directory: runner

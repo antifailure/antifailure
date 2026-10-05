@@ -189,17 +189,55 @@ function ariaRoleFor(role: string): string {
   return ARIA_ROLE[normal] ?? normal;
 }
 
+/** What Playwright rejects with when the process it launched is gone before
+ *  it said where to connect. */
+const LAUNCH_FAILED = 'Process failed to launch!';
+
+/** launchContained runs an Electron launch so that an application which dies
+ *  while starting is a blocked run rather than a crashed runner.
+ *
+ *  THE DEFECT, reproduced on macOS and on Windows. Playwright's launch waits
+ *  on several lines of the child's output at once, awaits one of them, and
+ *  leaves the others unawaited until that one succeeds. A child that exits
+ *  first, an application crashing at startup or, on Windows, a path that does
+ *  not exist, rejects ALL of them, and the ones nobody awaited are unhandled
+ *  rejections, which end a Node process. The runner then died with no result
+ *  document at all, and the engine was left to report a runner that said
+ *  nothing about an application that had simply failed to start.
+ *
+ *  So for the length of the launch, and one turn of the event loop after it,
+ *  a rejection carrying exactly Playwright's launch failure is absorbed. The
+ *  launch itself still rejects with it, which is what reports the run as
+ *  blocked; anything else that goes unhandled is rethrown, which is what Node
+ *  does with it when nobody is listening. */
+export async function launchContained<T>(launch: () => Promise<T>): Promise<T> {
+  const absorb = (reason: unknown) => {
+    if (reason instanceof Error && reason.message === LAUNCH_FAILED) return;
+    throw reason;
+  };
+  process.on('unhandledRejection', absorb);
+  try {
+    return await launch();
+  } finally {
+    // Unhandled rejections are reported after the microtask queue drains, so
+    // the siblings of the rejection just caught are reported before this
+    // timer fires.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    process.off('unhandledRejection', absorb);
+  }
+}
+
 /** openElectron launches an Electron application and returns a surface. */
 export async function openElectron(target: ElectronTarget): Promise<AxSurface> {
   let app: ElectronApplication;
   try {
-    app = await electron.launch({
+    app = await launchContained(() => electron.launch({
       executablePath: target.executablePath,
       args: [...(target.args ?? [])],
       ...(target.cwd ? { cwd: target.cwd } : {}),
       ...(target.env ? { env: { ...target.env } } : {}),
       timeout: target.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    });
+    }));
   } catch (err) {
     throw new ElectronError(
       `The Electron application at ${target.executablePath} did not start: ` +
