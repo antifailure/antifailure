@@ -111,7 +111,8 @@ jobs:
       # dbus-run-session gives them a session bus without an X server or a login
       # session, which is what makes this runnable on a runner at all.
       - name: A real keyring daemon
-        run: sudo apt-get update && sudo apt-get install -y libsecret-tools gnome-keyring dbus-x11
+        timeout-minutes: 10
+        run: tools/ci/apt-network.sh && sudo apt-get update && sudo apt-get install -y libsecret-tools gnome-keyring dbus-x11
 
       # The password guards a keyring that exists for the length of one job and
       # holds nothing but the test's own values, so it is a literal here rather

@@ -525,6 +525,7 @@ jobs:
         working-directory: www
 
       - name: A person can still use the careers form
+        timeout-minutes: 20
         # A PUBLISH IS NOT A WORKING FORM, and this is the assertion level the
         # steps above deliberately do not reach. routecheck asked the control
         # plane whether the route exists and got a status line. The API answers
@@ -561,7 +562,7 @@ jobs:
           # `working-directory: runner` since it was written; this matches it.
           cd runner
           npm ci --no-audit --no-fund
-          npx playwright install --with-deps chromium
+          ../tools/ci/install-browser.sh
           cd ..
           go run ./tools/sitesmoke -root . \
             -origin https://antifailure.dev \
