@@ -45,8 +45,23 @@ func TestTheLivePipeAdmitsOnlyTheUserRunningTheEngine(t *testing.T) {
 	// directory, so its own DACL is the whole protection, and the default one
 	// admits Everyone to read and the anonymous logon. Read the DACL the pipe
 	// actually carries and require exactly one allow entry, for this user.
+	//
+	// Read through a connected client handle, the way the runner reaches the
+	// pipe, with Serve accepting: go-winio creates the first instance without
+	// read or write access, so until something accepts, a by-name lookup is
+	// answered "All pipe instances are busy" rather than with the descriptor.
 	srv := listenForTest(t)
-	sd, err := windows.GetNamedSecurityInfo(srv.Path(), windows.SE_FILE_OBJECT,
+	go srv.Serve(NewHub())
+	conn, err := dialLive(srv.Path())
+	if err != nil {
+		t.Fatalf("connecting to the pipe as its owner: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+	fd, ok := conn.(interface{ Fd() uintptr })
+	if !ok {
+		t.Fatalf("the pipe connection %T exposes no handle", conn)
+	}
+	sd, err := windows.GetSecurityInfo(windows.Handle(fd.Fd()), windows.SE_KERNEL_OBJECT,
 		windows.DACL_SECURITY_INFORMATION)
 	if err != nil {
 		t.Fatalf("reading the pipe's security descriptor: %v", err)
