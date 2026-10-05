@@ -41,7 +41,7 @@
 //
 //   - a required context that is not the literal word `success` on the pull
 //     request's exact head sha, including one that never reported;
-//   - a required list that has drifted from the nine this file names;
+//   - a required list that has drifted from the ten this file names;
 //   - an unmergeable `mergeStateStatus`, read instead of `mergeable`, which
 //     only answers whether the branch conflicts;
 //   - an empty check list, which usually means the pull request conflicts and
@@ -89,7 +89,7 @@ import (
 	"time"
 )
 
-// required is the nine contexts main's protection blocks a merge on.
+// required is the ten contexts main's protection blocks a merge on.
 //
 // Named here AND compared against the live list on every run. Named so a
 // refusal can say which context is missing rather than print whatever the API
@@ -111,6 +111,11 @@ var required = []string{
 	"known vulnerabilities",
 	"no credentials in the tree",
 	"commits are attributed to their author",
+	// The engine's tests on a Windows machine, from windows-tests.yml, made
+	// required by #633. Protection gained it and this list did not, so this
+	// command refused every merge in the repository, which is the drift check
+	// below doing exactly its job.
+	"engine on Windows",
 }
 
 // willMerge are the `mergeStateStatus` values this command will merge on, with
@@ -127,7 +132,7 @@ var willMerge = map[string]string{
 	// UNSTABLE means a check protection does not require is red or still
 	// running. That is the ordinary state of a pull request here, because
 	// `Antifailure` and Dogfood are not required contexts, and refusing it
-	// would refuse nearly every pull request this repository opens. The nine
+	// would refuse nearly every pull request this repository opens. The ten
 	// required contexts are checked one by one above, so this state is not
 	// being trusted for anything protection would have blocked.
 	"UNSTABLE": "a check protection does not require is red or still running, which does not block a merge",
@@ -332,7 +337,7 @@ const pullFields = "number,title,state,isDraft,closed,mergedAt,mergeStateStatus,
 // check is one reported context on a commit, whether it arrived as a check run
 // or as a commit status.
 //
-// Both shapes are read. The nine required contexts are all check runs today,
+// Both shapes are read. The ten required contexts are all check runs today,
 // and a required context that was a commit status would be invisible to a
 // command that read only check runs: it would report as never having run, and
 // this command would refuse a pull request that was in fact green. Refusing
@@ -686,7 +691,7 @@ func listDrift(live []string) []string {
 	return problems
 }
 
-// contexts is the verdict on the nine, and the whole reason for reading a
+// contexts is the verdict on the ten, and the whole reason for reading a
 // commit's checks one by one rather than trusting a rollup.
 //
 // Only the literal word `success` passes. `skipped` and `cancelled` are the two
