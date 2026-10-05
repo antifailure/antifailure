@@ -184,9 +184,9 @@ func Rehearse(
 	}
 	collect := watchLocks(ctx, watch, exclude, LockSampleInterval)
 
-	start := time.Now()
+	clock := startStopwatch()
 	timings, applyErr := applier.Apply(ctx, url, r.Pending)
-	r.TotalMS = float64(time.Since(start).Microseconds()) / 1000
+	r.TotalMS = clock.elapsedMS()
 
 	r.Locks = collect()
 	// The lint said which lock this migration would ask for. The sampler now
@@ -373,9 +373,9 @@ func (a *SQLApplier) Apply(
 				// a COMMIT that takes no time is not a finding.
 				continue
 			}
-			start := time.Now()
+			clock := startStopwatch()
 			_, err := tx.Exec(ctx, st.SQL)
-			ms := float64(time.Since(start).Microseconds()) / 1000
+			ms := clock.elapsedMS()
 			out = append(out, StatementTiming{
 				Migration: st.Migration, Index: st.Index,
 				SQL: normalise(st.SQL), MS: ms,
