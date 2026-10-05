@@ -2,6 +2,7 @@ package workload_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -250,57 +251,90 @@ func denseShape() load.Shape {
 	return s
 }
 
-func TestTwoIdenticalBuildsPassOnceThereAreEnoughSamples(t *testing.T) {
+func TestTwoIdenticalBuildsNeverReadAsARegression(t *testing.T) {
 	// Without this arm the two above prove nothing: a threshold that fires on
 	// a real regression and also fires on two identical builds is a check that
 	// always says no, which is as useless as one that can never say no.
 	//
-	// It takes a denser run than it used to, and that is the change rather
-	// than a workaround for it. A hundred samples per route cannot place a
-	// hundred percent limit, so this used to report a pass it had not earned.
+	// Judged round against round, which is how `af load compare` judges a
+	// comparison and the only method in this package that measures the noise
+	// BETWEEN runs. This test used to judge one pooled run of each side by the
+	// single run band, which compareresolution_rounds.go records as describing
+	// only the noise inside a run, and that is the claim windows-latest broke:
+	// two identical builds read GET /health, a sub-millisecond route, as plus
+	// 257.7 percent against a band of 89.4. Thirty runs on windows-latest put
+	// that route's identical build ratio anywhere from minus 54 to plus 61
+	// percent while the band read 2 to 28, and the host's sleep granularity
+	// there is about half a millisecond, which is longer than the route takes.
+	// The single run band was being asked a question its own file says it
+	// cannot answer, and it answered on this machine only by the margin
+	// between its noise and the limit.
 	base := buildServer(t, map[string]time.Duration{"/orders": 5 * time.Millisecond})
 	cand := buildServer(t, map[string]time.Duration{"/orders": 5 * time.Millisecond})
 
-	baseRes := sendMixAt(t, base.URL, 40, 5*time.Second, denseShape())
-	candRes := sendMixAt(t, cand.URL, 40, 5*time.Second, denseShape())
+	// Six rounds, each side back to back inside a round as af load compare
+	// sends them, so a round's pair shares whatever the host was doing.
+	const rounds = 6
+	var baseParts, candParts []*load.Result
+	var pairs []workload.RoundP95
+	perRoute := func(r *load.Result) map[string]float64 {
+		out := map[string]float64{}
+		for _, rr := range r.Routes {
+			if rr.Latency.P95Ms > 0 {
+				out[workload.UnitKey("", rr.Route)] = rr.Latency.P95Ms
+			}
+		}
+		return out
+	}
+	for k := 0; k < rounds; k++ {
+		b := sendMixAt(t, base.URL, 40, time.Second, denseShape())
+		c := sendMixAt(t, cand.URL, 40, time.Second, denseShape())
+		baseParts, candParts = append(baseParts, b), append(candParts, c)
+		pairs = append(pairs, workload.RoundP95{Base: perRoute(b), Candidate: perRoute(c)})
+	}
+	baseRes, err := load.Merge(baseParts...)
+	require.NoError(t, err)
+	candRes, err := load.Merge(candParts...)
+	require.NoError(t, err)
 	c := compareSides(t, baseRes, candRes)
+	workload.ResolveByRounds(c, pairs)
 
 	rows := workload.Judge(c, proofThresholds())
 	outcome := workload.ComparisonOutcome(rows)
 	breaches := workload.ComparisonBreaches(rows)
-	for _, b := range breaches {
-		t.Logf("unexpected breach: %s on %q, observed %+.1f%%",
-			b.Name, b.Scope, *b.Observed*100)
-	}
-	orders := routeRow(t, c, "GET /orders")
-	t.Logf("identical builds, %d and %d samples on GET /orders: p95 %.1fms against "+
-		"%.1fms, ratio %+.1f%%, this run can see %.1f%%",
-		*orders.SentBaseline, *orders.SentCandidate,
-		*orders.P95Baseline, *orders.P95Candidate, *orders.P95Ratio*100,
-		*orders.Resolution.SmallestVisible*100)
-
+	// Logged before the assertions, so the run that fails carries them.
 	for _, r := range c.Routes {
-		if r.P95Ratio == nil || r.Resolution.SmallestVisible == nil {
+		if r.P95Ratio == nil {
 			continue
 		}
-		t.Logf("  %-14s ratio %+7.1f%%  can see %6.1f%%  n=%d/%d",
-			r.Route, *r.P95Ratio*100, *r.Resolution.SmallestVisible*100,
-			*r.SentBaseline, *r.SentCandidate)
+		low, high := "?", "?"
+		if r.Resolution.ChangeLow != nil && r.Resolution.ChangeHigh != nil {
+			low = fmt.Sprintf("%+.1f%%", *r.Resolution.ChangeLow*100)
+			high = fmt.Sprintf("%+.1f%%", *r.Resolution.ChangeHigh*100)
+		}
+		t.Logf("  %-14s pooled ratio %+7.1f%%  rounds %d  change interval %s to %s",
+			r.Route, *r.P95Ratio*100, r.Resolution.Rounds, low, high)
 	}
 	for _, j := range rows {
 		t.Logf("  judged %-14s %-10s unresolvable=%v", j.Scope, j.Value, j.Unresolvable)
 	}
+	for _, b := range breaches {
+		t.Logf("unexpected breach: %s on %q, observed %+.1f%%", b.Name, b.Scope, *b.Observed*100)
+	}
 
-	// The claim that matters, and the only one this machine supports: two
-	// identical builds NEVER produce a breach. A false regression is the
-	// harmful direction, because it is the one that sends somebody to open a
-	// pull request about a change that does not exist.
-	//
-	// It deliberately does NOT assert a pass. On a contended host the p95 of
-	// identical code moved 46 percent at nine hundred samples a side while the
-	// sampling band read 24, so a pass here would be the instrument claiming a
-	// confidence this machine does not give it. Refusing to decide is the
-	// correct outcome of that, and the run says which it was.
+	// The precondition: the rounds were what decided, on every route, or the
+	// assertion below would be about the single run band again.
+	for _, r := range c.Routes {
+		require.Equalf(t, workload.ResolutionRounds, r.Resolution.Method,
+			"%s was not judged round against round", r.Route)
+	}
+
+	// The claim that matters: two identical builds NEVER produce a breach. A
+	// false regression is the harmful direction, because it is the one that
+	// sends somebody to open a pull request about a change that does not
+	// exist. It deliberately does NOT assert a pass: a host whose rounds
+	// disagree cannot place a hundred percent limit, and refusing to decide is
+	// the correct answer from it.
 	require.NotEqual(t, workload.VerdictFail, outcome,
 		"two identical builds must never read as a regression")
 	require.Empty(t, breaches)
