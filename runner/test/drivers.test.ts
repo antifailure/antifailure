@@ -1153,8 +1153,18 @@ test('a queued parse respects the budget and preserves finished output', async (
         // across the deadline. `exited` holds it for longer than a settle's
         // own ceiling and well inside its budget, which an exited program
         // must be given in full: its complete screen is the drain.
+        //
+        // `exited` charges nothing for the parses after that first one. It
+        // charged 50 ms each, and how many there are is decided by how the
+        // host's pty happens to split 1317 bytes, not by anything under test:
+        // on CI the cell passed in about 3250 ms when the bytes arrived in one
+        // or two chunks and ran into its 4000 ms budget, 500 bytes undrawn,
+        // when they arrived in more. That is a verdict about the runner's
+        // scheduler. The one held parse is the whole claim this cell makes,
+        // and the backlog it needs is the other cells' business.
         const delay = parses === 1 && trigger === 'quiet' ? budgetMs + 500
-          : parses === 1 && trigger === 'exited' ? 3_200 : 50;
+          : parses === 1 && trigger === 'exited' ? 3_200
+          : trigger === 'exited' ? 0 : 50;
         await new Promise<void>((resolve) => setTimeout(resolve, delay));
         await write.call(this, data);
       });
