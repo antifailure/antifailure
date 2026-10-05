@@ -24,11 +24,13 @@ package injection
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -357,15 +359,33 @@ type family struct {
 	client  *http.Client
 	sleep   time.Duration
 	maxBody int64
+	// retryUnit is what one second of a Retry-After header is worth, and
+	// maxRetryWait caps a single wait. Production is a second and ten seconds;
+	// a test shrinks the unit so honouring a limiter costs milliseconds.
+	retryUnit    time.Duration
+	maxRetryWait time.Duration
 }
+
+// maxRateLimitRetries is how many times one request is retried after the
+// application answered that it was asked too often. Waiting as told, the bucket
+// has refilled by the first retry; the rest absorb a limiter shared with
+// whatever else the run sends from the same address.
+const maxRateLimitRetries = 4
+
+// errRateLimited is a request the application kept refusing for its RATE,
+// after the prober waited as it was asked every time. It is a comparison the
+// prober could not make, never a refusal of the value.
+var errRateLimited = errors.New("refused by the application's rate limit")
 
 // New builds the injection family. The router registers it with a bare New and
 // supplies the per run routes through security.Input.Routes.
 func New() security.Family {
 	return &family{
-		client:  airgap.Client(airgapSite, 30*time.Second),
-		sleep:   3 * time.Second,
-		maxBody: 64 << 10,
+		client:       airgap.Client(airgapSite, 30*time.Second),
+		sleep:        3 * time.Second,
+		maxBody:      64 << 10,
+		retryUnit:    time.Second,
+		maxRetryWait: 10 * time.Second,
 	}
 }
 
@@ -400,23 +420,46 @@ func (f *family) Probe(ctx context.Context, in security.Input) ([]report.Finding
 	}
 	proven := map[key]*report.Finding{}
 	var order []key
+	// planned counts every comparison the catalog asks for, compared the ones
+	// started, and limited the ones the application's rate limit would not let
+	// the prober make. A comparison it could not make is not a pass, so whenever
+	// one went unmade, through the limit or through the run's deadline, the probe
+	// returns an error beside whatever it did prove, and the spine records that
+	// the family did not complete.
+	planned := 0
+	for _, route := range routes {
+		for range route.Params {
+			for _, v := range catalog {
+				if in.Policy.Level(v.class) != report.LevelIgnore {
+					planned++
+				}
+			}
+		}
+	}
+	compared, limited := 0, 0
 
+fuzz:
 	for _, route := range routes {
 		for _, param := range route.Params {
 			for _, v := range catalog {
 				if in.Policy.Level(v.class) == report.LevelIgnore {
 					continue
 				}
-				control, cErr := f.send(ctx, route, base, param, v.control)
-				if cErr != nil {
-					continue
+				if ctx.Err() != nil {
+					break fuzz
 				}
-				payload, pErr := f.send(ctx, route, base, param, v.payload)
-				if pErr != nil {
-					continue
+				compared++
+				ok, effect, err := f.compare(ctx, route, base, param, v)
+				if errors.Is(err, errRateLimited) {
+					limited++
 				}
-				ok, effect := v.assess(control, payload)
-				if !ok {
+				if err != nil && ctx.Err() != nil {
+					// Stopped mid comparison, often while waiting out a limit.
+					// This one was not made either.
+					compared--
+					break fuzz
+				}
+				if err != nil || !ok {
 					continue
 				}
 				k := key{ref: route.Path, class: v.class}
@@ -439,8 +482,9 @@ func (f *family) Probe(ctx context.Context, in security.Input) ([]report.Finding
 		}
 	}
 
+	incomplete := incompleteness(planned, compared, limited, ctx.Err())
 	if len(order) == 0 {
-		return nil, nil
+		return nil, incomplete
 	}
 	sort.Slice(order, func(i, j int) bool {
 		if order[i].ref != order[j].ref {
@@ -452,11 +496,84 @@ func (f *family) Probe(ctx context.Context, in security.Input) ([]report.Finding
 	for _, k := range order {
 		out = append(out, *proven[k])
 	}
-	return out, nil
+	return out, incomplete
+}
+
+// incompleteness says which comparisons went unmade, or nil when every planned
+// comparison was made. It names both causes because they call for different
+// remedies: a rate limit is the application's pace, which a longer deadline
+// buys, and a stopped run is the deadline itself.
+func incompleteness(planned, compared, limited int, stopped error) error {
+	if limited == 0 && compared == planned {
+		return nil
+	}
+	var parts []string
+	if limited > 0 {
+		parts = append(parts, fmt.Sprintf(
+			"the application's rate limit refused %d even after the prober waited as it was asked", limited))
+	}
+	if unstarted := planned - compared; unstarted > 0 {
+		cause := "the run stopped"
+		if stopped != nil {
+			cause = "the run stopped (" + stopped.Error() + ")"
+		}
+		parts = append(parts, fmt.Sprintf("%s before the last %d were made", cause, unstarted))
+	}
+	return fmt.Errorf("the injection prober made %d of %d comparisons: %s, so those endpoints were not fuzzed",
+		compared-limited, planned, strings.Join(parts, ", and "))
+}
+
+// compare measures one vector on one parameter and reports whether it proved
+// its class.
+//
+// A difference is accepted only when it REPRODUCES with the order reversed:
+// control then payload, and then payload then control again. A value that
+// changed how the query was interpreted changes it every time, in either order.
+// A difference that came from the clock does not survive the swap: a denial that
+// was lifting or starting as the prober sent, a session refreshing, a limiter
+// whose token arrived between two requests. On 2026-09-29, 10-02 and 10-03 the
+// dogfood run reported a NoSQL operator smuggled into a static Next.js page on
+// an unchanged commit, on a different page each night, because the first
+// comparison was the only one it ever made. The confirmation costs two requests
+// only on a candidate finding, so a quiet endpoint pays nothing for it.
+func (f *family) compare(ctx context.Context, route security.Route, base, param string, v vector) (bool, string, error) {
+	control, err := f.send(ctx, route, base, param, v.control)
+	if err != nil {
+		return false, "", err
+	}
+	payload, err := f.send(ctx, route, base, param, v.payload)
+	if err != nil {
+		return false, "", err
+	}
+	ok, effect := v.assess(control, payload)
+	if !ok {
+		return false, "", nil
+	}
+	payloadAgain, err := f.send(ctx, route, base, param, v.payload)
+	if err != nil {
+		return false, "", err
+	}
+	controlAgain, err := f.send(ctx, route, base, param, v.control)
+	if err != nil {
+		return false, "", err
+	}
+	if again, _ := v.assess(controlAgain, payloadAgain); !again {
+		return false, "", nil
+	}
+	return true, effect, nil
 }
 
 // send issues one request with the parameter set to a value and returns the
-// bounded response. The body is read up to maxBody so a large response never
+// bounded response.
+//
+// A 429, or a 503 that says when to come back, refuses the RATE and not the
+// value, so it is never handed to an oracle: the prober waits as long as it was
+// told and asks again. Handing it over is how a static page behind the control
+// plane's own limiter (20 a second, a burst of 120, per address) was read as a
+// refusal the NoSQL payload had turned into an answer: the prober sends
+// hundreds of requests from one address, spends the burst itself, and then the
+// token that trickles back in lands between a control and its payload. Only the
+// final attempt is timed, so a wait never reaches the latency oracles. The body is read up to maxBody so a large response never
 // sits in memory, and neither the value nor the body ever reaches a finding.
 func (f *family) send(ctx context.Context, route security.Route, base, param, value string) (Response, error) {
 	method := route.Method
@@ -471,18 +588,63 @@ func (f *family) send(ctx context.Context, route security.Route, base, param, va
 	q.Set(param, value)
 	target.RawQuery = q.Encode()
 
-	req, err := http.NewRequestWithContext(ctx, method, target.String(), nil)
-	if err != nil {
-		return Response{}, err
+	for attempt := 0; ; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, method, target.String(), nil)
+		if err != nil {
+			return Response{}, err
+		}
+		start := time.Now()
+		resp, err := f.client.Do(req)
+		if err != nil {
+			return Response{}, err
+		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, f.maxBody))
+		resp.Body.Close()
+		latency := time.Since(start)
+
+		wait, limitedNow := f.rateLimitWait(resp.StatusCode, resp.Header.Get("Retry-After"))
+		if !limitedNow {
+			return Response{Status: resp.StatusCode, Body: string(body), Latency: latency}, nil
+		}
+		if attempt >= maxRateLimitRetries {
+			return Response{}, errRateLimited
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return Response{}, ctx.Err()
+		case <-timer.C:
+		}
 	}
-	start := time.Now()
-	resp, err := f.client.Do(req)
-	if err != nil {
-		return Response{}, err
+}
+
+// rateLimitWait reports whether a response refused the request's rate rather
+// than its content, and how long to wait before asking again. A 429 always
+// does. A 503 does only when it carries Retry-After, because a 503 with no
+// such header is a server failing, which is the application's answer and not
+// a request to slow down. The wait is the header's seconds, one second when it
+// is absent or unreadable, and never longer than maxRetryWait.
+func (f *family) rateLimitWait(status int, retryAfter string) (time.Duration, bool) {
+	header := strings.TrimSpace(retryAfter)
+	switch {
+	case status == http.StatusTooManyRequests:
+	case status == http.StatusServiceUnavailable && header != "":
+	default:
+		return 0, false
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, f.maxBody))
-	return Response{Status: resp.StatusCode, Body: string(body), Latency: time.Since(start)}, nil
+	wait := f.retryUnit
+	if secs, err := strconv.Atoi(header); err == nil && secs > 0 {
+		wait = time.Duration(secs) * f.retryUnit
+	} else if when, err := http.ParseTime(header); err == nil {
+		if d := time.Until(when); d > 0 {
+			wait = d
+		}
+	}
+	if wait > f.maxRetryWait {
+		wait = f.maxRetryWait
+	}
+	return wait, true
 }
 
 func titleFor(class report.PolicyKey) string {
