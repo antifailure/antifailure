@@ -193,12 +193,24 @@ func TestALockLeftByADeadProcessIsRecovered(t *testing.T) {
 	names, err := s.pending()
 	require.NoError(t, err)
 	require.Len(t, names, 1)
-	require.NoError(t, os.WriteFile(filepath.Join(dir, names[0]+lockSuffix), nil, 0o600))
+	lock := filepath.Join(dir, names[0]+lockSuffix)
+	require.NoError(t, os.WriteFile(lock, nil, 0o600))
 
 	stuck, _, err := s.Take(ctx)
 	require.NoError(t, err)
 	require.Nil(t, stuck, "the precondition: a held lock is somebody else's claim")
 
+	// A lock as young as a live claim is left alone by a process opening the
+	// spool, because it may be a drain in another process mid rename.
+	young, err := NewSpool(SpoolOptions{Dir: dir, Redactor: redact.New()})
+	require.NoError(t, err)
+	none, _, err := young.Take(ctx)
+	require.NoError(t, err)
+	require.Nil(t, none, "a lock that may be live was taken for a dead one")
+
+	// Older than any live claim, it is a dead one, and it is cleared.
+	old := time.Now().Add(-2 * staleLock)
+	require.NoError(t, os.Chtimes(lock, old, old))
 	recovered, err := NewSpool(SpoolOptions{Dir: dir, Redactor: redact.New()})
 	require.NoError(t, err)
 	batch, ack, err := recovered.Take(ctx)

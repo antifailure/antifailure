@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/antifailure/antifailure/engine/internal/controlplane"
 )
@@ -98,6 +99,12 @@ const claimSuffix = ".claimed"
 // Creating a file with O_EXCL is exclusive on both, so it is the claim, and
 // only its creator renames. The lock lasts for the rename alone.
 const lockSuffix = ".lock"
+
+// staleLock is how old a lock must be before a new process may take it for a
+// dead claim. A live one is held for a single rename, so a minute is many
+// orders of magnitude past any live claim and still short beside the minutes a
+// command runs, which is how often the spool is opened.
+const staleLock = time.Minute
 
 // NewSpool opens a spool directory.
 func NewSpool(opts SpoolOptions) (*Spool, error) {
@@ -195,7 +202,15 @@ func (s *Spool) recoverStaleClaims() {
 			// A claim that died between the lock and the rename. The file it
 			// was claiming was never renamed, so removing the lock is all that
 			// puts it back.
-			_ = os.Remove(filepath.Join(s.dir, name))
+			//
+			// Only an old one. A lock lives for one rename, microseconds, so
+			// one younger than staleLock may be a live drain in another
+			// process mid claim, and removing it would let a second drain
+			// claim the same batch, which is the race the lock exists to end.
+			info, err := e.Info()
+			if err == nil && time.Since(info.ModTime()) > staleLock {
+				_ = os.Remove(filepath.Join(s.dir, name))
+			}
 			continue
 		}
 		if !strings.HasSuffix(name, claimSuffix) {

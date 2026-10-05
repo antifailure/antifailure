@@ -61,6 +61,15 @@ func TestOpen_CreatesTheDirectoryAndSchema(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db2.Close()) })
 	privatefstest.RequirePrivate(t, filepath.Join(existing, state.FileName), 0o600)
+	// The journal beside it too, which is where the rows live until a
+	// checkpoint, and the directory, which is what decides the journal's
+	// access on Windows when SQLite makes it again later.
+	require.NoError(t, db2.SetMeta(context.Background(), "probe", "x"))
+	wal := filepath.Join(existing, state.FileName+"-wal")
+	_, statErr := os.Stat(wal)
+	require.NoError(t, statErr, "the precondition: the database is in WAL mode and has written a journal")
+	privatefstest.RequirePrivate(t, wal, 0o600)
+	privatefstest.RequirePrivate(t, existing, 0o700)
 }
 
 func TestOpen_IsIdempotentAcrossRuns(t *testing.T) {
