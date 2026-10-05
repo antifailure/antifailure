@@ -26,9 +26,9 @@ type reported struct {
 	at         string
 }
 
-// green is the ten required contexts, all successful, plus the two that are
+// green is the eleven required contexts, all successful, plus the two that are
 // NOT required and are red. That pairing is deliberate: the ordinary state of a
-// pull request in this repository is ten green and Dogfood red, and a command
+// pull request in this repository is eleven green and Dogfood red, and a command
 // that refused it would be a command nobody could merge with.
 func green() []reported {
 	var out []reported
@@ -84,7 +84,7 @@ const noStatuses = `{"state":"pending","statuses":[],"total_count":0}`
 const protectionBody = `{"required_status_checks":{"strict":false,"contexts":` +
 	`["engine","control plane","edition boundary","enterprise","runner","www",` +
 	`"known vulnerabilities","no credentials in the tree",` +
-	`"commits are attributed to their author","engine on Windows"]}}`
+	`"commits are attributed to their author","engine on Windows","runner on Windows"]}}`
 
 // The two payloads below are the bytes `gh pr view --json ...` really returned,
 // for pull request 235 while it was open and for 228 after it was merged, with
@@ -281,7 +281,7 @@ func TestAGreenPullRequestMergesAndCarriesTheSignOff(t *testing.T) {
 	f := ready(green(), "CLEAN")
 	out, err := attempt(f)
 	if err != nil {
-		t.Fatalf("a pull request with all ten required contexts green was refused: %v\n%s", err, out)
+		t.Fatalf("a pull request with all eleven required contexts green was refused: %v\n%s", err, out)
 	}
 	if !f.merged() {
 		t.Fatal("it reported success without ever issuing a merge")
@@ -997,7 +997,7 @@ func TestTheNewestReportUnderANameIsTheOneThatCounts(t *testing.T) {
 }
 
 // A required context can arrive as a commit status rather than as a check run.
-// None of the ten does today, and a command that read only check runs would
+// None of the eleven does today, and a command that read only check runs would
 // report such a context as never having run and refuse a pull request that was
 // green, so both endpoints are read.
 func TestARequiredContextArrivingAsACommitStatusIsRead(t *testing.T) {
@@ -1214,7 +1214,7 @@ func TestCheckFieldsRefusesAResponseMissingAKeyItAskedFor(t *testing.T) {
 	}
 }
 
-// The check run shape, which is where the ten required contexts are read from.
+// The check run shape, which is where the eleven required contexts are read from.
 func TestCheckFieldsRefusesACheckRunMissingAFieldItReads(t *testing.T) {
 	f := fieldsFake()
 	f.checkRuns = `{"total_count":1,"check_runs":[{"id":1,"name":"engine","status":"completed"}]}`
