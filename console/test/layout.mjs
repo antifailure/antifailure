@@ -348,8 +348,22 @@ async function main() {
 // The run ends when the verdict is printed, whatever is still open. A handle
 // nobody released must cost a leaked process, never a check that hangs until
 // the job is cancelled and so never says no.
+//
+// It exits only once both streams have flushed. Writes to a pipe are
+// asynchronous on macOS, so exiting straight away could cut off the very line
+// that says why the run failed. An empty write's callback runs after every
+// write queued before it on that stream.
 main()
   .catch((error) => {
     fail(error instanceof Error ? error.message : String(error));
   })
-  .finally(() => process.exit(process.exitCode ?? 0));
+  .finally(() => {
+    const code = process.exitCode ?? 0;
+    let open = 2;
+    const flushed = () => {
+      open -= 1;
+      if (open === 0) process.exit(code);
+    };
+    process.stdout.write("", flushed);
+    process.stderr.write("", flushed);
+  });
