@@ -162,7 +162,7 @@ jobs:
           test -x /usr/lib/postgresql/17/bin/pg_dump
 
       - name: Install the runner and its browser
-        timeout-minutes: 20
+        timeout-minutes: 10
         # Only the agents need a browser, and only `af test` runs agents. The
         # install is four minutes, so it is skipped for the two commands that
         # cannot use it rather than paid on every dispatch.

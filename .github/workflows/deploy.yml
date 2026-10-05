@@ -525,7 +525,7 @@ jobs:
         working-directory: www
 
       - name: A person can still use the careers form
-        timeout-minutes: 20
+        timeout-minutes: 12
         # A PUBLISH IS NOT A WORKING FORM, and this is the assertion level the
         # steps above deliberately do not reach. routecheck asked the control
         # plane whether the route exists and got a status line. The API answers

@@ -146,7 +146,7 @@ jobs:
         working-directory: runner
 
       - name: Install the browser
-        timeout-minutes: 18
+        timeout-minutes: 10
         run: ../tools/ci/install-browser.sh
         working-directory: runner
 
@@ -1163,7 +1163,7 @@ jobs:
         working-directory: runner
 
       - name: Install the browser
-        timeout-minutes: 18
+        timeout-minutes: 10
         run: ../tools/ci/install-browser.sh
         working-directory: runner
 

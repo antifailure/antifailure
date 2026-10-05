@@ -380,7 +380,7 @@ jobs:
           test -x /usr/lib/postgresql/17/bin/pg_dump
 
       - name: Install the runner and its browser
-        timeout-minutes: 20
+        timeout-minutes: 10
         run: |
           npm ci --no-audit --no-fund
           ../tools/ci/install-browser.sh
@@ -1014,7 +1014,7 @@ jobs:
           test -x /usr/lib/postgresql/17/bin/pg_dump
 
       - name: Install the runner and its browser
-        timeout-minutes: 20
+        timeout-minutes: 10
         run: |
           npm ci --no-audit --no-fund
           ../tools/ci/install-browser.sh
