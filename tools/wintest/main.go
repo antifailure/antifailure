@@ -33,15 +33,15 @@ import (
 // minimumPassed is the fewest passing tests a run may report and still be
 // green, counting top level tests and not their subtests.
 //
-// Measured on windows-latest on 2026-10-05 with Docker out of the picture and
-// no Postgres: 4692 passed, 470 skipped and 13 failed, the 13 being the defects
-// and Unix shaped tests this change fixes. The floor sits about 3 per cent
-// under the passing count after those fixes, which is the room for a few tests
-// to move between packages or be retired, and well inside what losing one
-// mid sized package costs: internal/cli alone passes more than 600. A run
-// below it has lost something whole, and a green summary of that run would be
-// the failure this command exists to prevent.
-const minimumPassed = 4550
+// Measured on windows-latest on 2026-10-05, with Docker out of the picture and
+// the host Postgres the workflow starts: 4909 passed, 280 skipped, none failed
+// (run 37271153613). The floor is about 3 per cent under that, which is room
+// for a few tests to be retired or moved, and far less than losing any sizable
+// package: internal/cli alone defines 664. A run below it has lost something
+// whole, a package that stopped building or a Postgres that never started,
+// and a green summary of that run would be the failure this command exists to
+// prevent.
+const minimumPassed = 4750
 
 // excludedPackages are not run at all, with the reason. Each is code that
 // never executes on a Windows host, so its tests describe another platform.
