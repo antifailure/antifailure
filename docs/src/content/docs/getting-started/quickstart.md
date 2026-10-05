@@ -112,6 +112,67 @@ prints names the directory you chose. Both of these want a directory you can
 write to without `sudo`; if the write fails the installer says which path it
 could not write and stops rather than installing half of a release.
 
+### On Windows
+
+In PowerShell, either the Windows PowerShell every machine has or PowerShell 7:
+
+```powershell
+irm https://antifailure.dev/install.ps1 | iex
+```
+
+It is the same installer with the same promises, written for PowerShell rather
+than translated into it. It finds the newest release the same way, refuses a
+download that does not match `checksums.txt` or that `checksums.txt` does not
+name, and says what GitHub answered when something does not arrive. It
+installs the build for your machine's architecture, `amd64` or `arm64`, and on
+an Arm laptop it asks the machine rather than the PowerShell process, so an
+emulated x64 shell still gets the native build.
+
+`af.exe` goes in `%USERPROFILE%\.antifailure\bin` and the runner in
+`%USERPROFILE%\.antifailure\share\antifailure\runner`. The bin directory is
+added to your user PATH, as `%USERPROFILE%\.antifailure\bin` so a moved
+profile does not leave a dead entry, and to the terminal you ran it in, so
+`af start` works straight away. Remove the entry under Edit environment
+variables for your account to undo it. The settings are the same as on the
+other platforms, set as environment variables first:
+
+```powershell
+$env:AF_VERSION = '<tag>'; irm https://antifailure.dev/install.ps1 | iex
+```
+
+A release from before the Windows builds existed has no zip to install, and
+the installer says that the release does not include a build for Windows rather
+than installing something else.
+
+`AF_PREFIX`, `AF_BIN_DIR` and `AF_NO_MODIFY_PATH` work as they do above, and in
+GitHub Actions the bin directory goes to `GITHUB_PATH` instead. To upgrade, run
+the same line again: Windows will not overwrite a running program, so an
+`af.exe` that an editor holds open as its MCP server is moved aside to
+`af.exe.old` and the new one takes its name.
+
+Environments run in Linux containers, so Docker Desktop has to be in its Linux
+containers mode, which is its default. `af doctor` says so when it is not.
+
+`af.exe` is not code signed yet. Installed this way it carries no mark of
+having been downloaded, which is what SmartScreen's warning keys on. A zip saved
+from the releases page in a browser does carry that mark, and the binary
+extracted from it can be stopped with "Windows protected your PC"; run
+`Unblock-File` on the zip before extracting it.
+On Windows 11 with Smart App Control turned on, an unsigned program can be
+refused outright, and the way through is to install from WSL instead.
+
+### In WSL
+
+WSL 2 answers as Linux, so the Linux installer is the one to use there, and it
+installs the Linux build:
+
+```bash
+curl -fsSL https://antifailure.dev/install.sh | sh
+```
+
+`install.sh` run from Git Bash, MSYS2 or Cygwin is not Linux, and it points
+you at `install.ps1` rather than installing anything.
+
 ## Find out where you are
 
 ```bash

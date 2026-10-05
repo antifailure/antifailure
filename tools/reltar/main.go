@@ -33,10 +33,22 @@
 // builder with umask 002 stages files as 0664 and one with umask 022 stages
 // them as 0644, so without this the archive depends on a setting of the machine
 // that built it. What has to survive is the executable bit on af, and that does.
+//
+// It writes a .zip as well, chosen by the extension of -o, because Windows is
+// the one platform whose people do not have tar in the place they look for an
+// archive. Explorer opens a zip and does not open a .tar.gz, and
+// Expand-Archive, which is what a PowerShell installer reaches for, reads zip
+// only. Every property above holds for the zip too: sorted entries, one mtime,
+// one compression level named rather than inherited, and modes normalised. The
+// one rule that differs is a symlink, which a zip refuses rather than encodes,
+// because Windows will not create one for an ordinary user and an archive that
+// extracts differently depending on Developer Mode is not one artifact.
 package main
 
 import (
 	"archive/tar"
+	"archive/zip"
+	"compress/flate"
 	"compress/gzip"
 	"flag"
 	"fmt"
@@ -52,7 +64,7 @@ import (
 
 func main() {
 	dir := flag.String("C", ".", "directory holding the tree to archive")
-	out := flag.String("o", "", "archive to write")
+	out := flag.String("o", "", "archive to write, ending in .tar.gz or .zip")
 	mtime := flag.String("mtime", "", "modification time for every entry, as a Unix epoch or RFC 3339")
 	flag.Parse()
 
@@ -92,7 +104,28 @@ func parseTime(value string) (time.Time, error) {
 	return when.UTC(), nil
 }
 
+// format is decided by the name of the output rather than by a flag, because
+// the name is what a person downloads and what checksums.txt lists, so an
+// archive whose bytes disagreed with its own extension would be a release that
+// lies about itself. Anything else is refused rather than defaulted: a
+// misspelled extension that silently produced a tar would be found by whoever
+// tried to open it, which is the wrong person.
+func format(out string) (string, error) {
+	switch {
+	case strings.HasSuffix(out, ".tar.gz"):
+		return "tar.gz", nil
+	case strings.HasSuffix(out, ".zip"):
+		return "zip", nil
+	default:
+		return "", fmt.Errorf("%s ends in neither .tar.gz nor .zip, so which archive to write is not known", out)
+	}
+}
+
 func write(root, name, out string, when time.Time) error {
+	archiveFormat, err := format(out)
+	if err != nil {
+		return err
+	}
 	tree := filepath.Join(root, name)
 	info, err := os.Stat(tree)
 	if err != nil {
@@ -120,6 +153,17 @@ func write(root, name, out string, when time.Time) error {
 		return err
 	}
 	defer func() { _ = os.Remove(tmp) }()
+
+	if archiveFormat == "zip" {
+		if err := writeZip(f, root, paths, when); err != nil {
+			_ = f.Close()
+			return err
+		}
+		if err := f.Close(); err != nil {
+			return err
+		}
+		return os.Rename(tmp, out)
+	}
 
 	// BestCompression rather than the default, named rather than inherited: the
 	// level is part of the output bytes, so leaving it implicit would make the
@@ -259,6 +303,81 @@ func add(tw *tar.Writer, root, rel string, when time.Time) error {
 		// corrupt in a way only the person extracting it finds out about.
 		return fmt.Errorf("read %d bytes for a %d byte header; the file changed while it was being archived",
 			written, header.Size)
+	}
+	return nil
+}
+
+// writeZip is the zip half of write. f is already the .partial file, so the
+// rename that publishes it stays in one place.
+func writeZip(f *os.File, root string, paths []string, when time.Time) error {
+	zw := zip.NewWriter(f)
+	// Named rather than inherited, for the reason the gzip level is: the level is
+	// part of the output bytes, and archive/zip's default is whatever flate's
+	// default is in the Go release that built it.
+	zw.RegisterCompressor(zip.Deflate, func(w io.Writer) (io.WriteCloser, error) {
+		return flate.NewWriter(w, flate.BestCompression)
+	})
+	for _, p := range paths {
+		if err := addZip(zw, root, p, when); err != nil {
+			return fmt.Errorf("%s: %w", p, err)
+		}
+	}
+	return zw.Close()
+}
+
+func addZip(zw *zip.Writer, root, rel string, when time.Time) error {
+	full := filepath.Join(root, filepath.FromSlash(rel))
+	info, err := os.Lstat(full)
+	if err != nil {
+		return err
+	}
+
+	// Modified rather than the DOS fields alone. archive/zip writes both from
+	// it, the DOS date in the location of the time it is given, which is UTC
+	// here, and an extended timestamp carrying the Unix second, so a reader of
+	// either sees the commit date and nothing about the machine.
+	header := &zip.FileHeader{Name: rel, Modified: when}
+
+	switch {
+	case info.IsDir():
+		header.Name = rel + "/"
+		header.Method = zip.Store
+		header.SetMode(fs.ModeDir | 0o755)
+	case info.Mode()&fs.ModeSymlink != 0:
+		return fmt.Errorf("%s is a symlink, and a zip is the Windows archive, where creating one "+
+			"needs Developer Mode or an administrator, so it would extract differently on "+
+			"different machines", rel)
+	case info.Mode().IsRegular():
+		header.Method = zip.Deflate
+		if info.Mode()&0o111 != 0 {
+			header.SetMode(0o755)
+		} else {
+			header.SetMode(0o644)
+		}
+	default:
+		return fmt.Errorf("%s is a %s, which does not belong in a release archive", rel, kind(info.Mode()))
+	}
+
+	w, err := zw.CreateHeader(header)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return nil
+	}
+
+	f, err := os.Open(full)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	written, err := io.Copy(w, f)
+	if err != nil {
+		return err
+	}
+	if written != info.Size() {
+		return fmt.Errorf("read %d bytes of a %d byte file; the file changed while it was being archived",
+			written, info.Size())
 	}
 	return nil
 }

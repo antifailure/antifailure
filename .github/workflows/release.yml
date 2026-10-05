@@ -96,6 +96,14 @@ jobs:
           - { os: darwin, arch: amd64 }
           - { os: linux,  arch: amd64 }
           - { os: linux,  arch: arm64 }
+          # Windows ships a .zip holding af.exe, because that is the archive
+          # Explorer and Expand-Archive open and the binary name PowerShell can
+          # run. build.sh decides both from the os, so this is the whole of the
+          # change here. Cross compiled on Linux like the rest: the binary is
+          # static and needs no Windows toolchain, and building it on the
+          # platform that builds everything else keeps one compiler for all six.
+          - { os: windows, arch: amd64 }
+          - { os: windows, arch: arm64 }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -123,7 +131,13 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ matrix.os }}-${{ matrix.arch }}
-          path: dist/*.tar.gz*
+          # Both shapes, and fail if neither matched. A path that matched
+          # nothing used to warn and upload no artifact, and the publish job
+          # would then sign a release one platform short.
+          path: |
+            dist/*.tar.gz*
+            dist/*.zip*
+          if-no-files-found: error
 
   # ---------------------------------------------------------------------------
   # The egress sidecar image, published so that a customer's first af up does
@@ -512,7 +526,7 @@ jobs:
         # materials describing nothing.
         #
         # The previous version pointed syft at dist/, and by the time this job
-        # runs dist/ holds four .tar.gz files and a checksums file. syft's
+        # runs dist/ holds the archives and a checksums file. syft's
         # directory cataloger does not open archives, so it walked past every
         # one of them and emitted a valid SPDX 2.3 document containing exactly
         # one package: the directory itself. Zero Go modules. That document
@@ -526,7 +540,16 @@ jobs:
           for archive in dist/*.tar.gz; do
             tar -C unpacked -xzf "$archive"
           done
-          find unpacked -name af -type f | sort
+          # The Windows builds are zips, and leaving them packed is the same
+          # defect in a smaller sentence: syft would walk past both, and the
+          # signed bill of materials would describe four platforms of six.
+          # tools/sbomcheck counts af.exe as the binary, so a zip this loop
+          # missed is a binary that check reports as absent rather than one
+          # nobody notices.
+          for archive in dist/*.zip; do
+            unzip -q -o "$archive" -d unpacked
+          done
+          find unpacked \( -name af -o -name af.exe \) -type f | sort
 
       - name: Software bill of materials
         # Read out of the built binaries rather than generated from go.mod.
@@ -661,6 +684,7 @@ jobs:
         with:
           files: |
             dist/*.tar.gz
+            dist/*.zip
             dist/checksums.txt
             dist/checksums.txt.sigstore.json
             dist/sbom.spdx.json

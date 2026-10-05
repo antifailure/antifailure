@@ -163,6 +163,13 @@ why_not() {
 os=$(uname -s | tr '[:upper:]' '[:lower:]')
 case "$os" in
   linux|darwin) ;;
+  # Git Bash, MSYS2 and Cygwin all answer uname with the name of their own
+  # layer rather than "windows", so without this a Windows user who reached for
+  # the one line install they already knew was told to build from source,
+  # about a platform that has a release. WSL answers linux and installs the
+  # Linux build, which is the right one for it.
+  mingw*|msys*|cygwin*)
+    die "this is Windows, which has its own installer. In PowerShell, run: irm https://antifailure.dev/install.ps1 | iex" ;;
   *) die "$os is not a platform this release supports; build from source with 'go build ./engine/cmd/af'" ;;
 esac
 

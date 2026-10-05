@@ -23,7 +23,11 @@ func binaries(t *testing.T, platforms ...string) (dir string, sums map[string]st
 		if err := os.MkdirAll(filepath.Join(dir, p), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, p, "af"), body, 0o755); err != nil {
+		bin := "af"
+		if strings.Contains(p, "_windows_") {
+			bin = "af.exe"
+		}
+		if err := os.WriteFile(filepath.Join(dir, p, bin), body, 0o755); err != nil {
 			t.Fatal(err)
 		}
 		sum := sha256.Sum256(body)
@@ -245,6 +249,37 @@ func TestEveryPlatformIsFoundWithoutBeingListed(t *testing.T) {
 		if found[i-1].rel > found[i].rel {
 			t.Fatalf("results are not sorted, so the output order depends on the filesystem")
 		}
+	}
+}
+
+// The Windows binary is af.exe. A walk matching the bare name finds four of the
+// six platforms, and every one of the four is covered, so the gate passes a bill
+// of materials nobody checked against either Windows binary.
+func TestAWindowsBinaryIsFoundAndMustBeCovered(t *testing.T) {
+	dir, sums := binaries(t, "antifailure_1.2.3_linux_amd64", "antifailure_1.2.3_windows_amd64",
+		"antifailure_1.2.3_windows_arm64")
+	found, err := findBinaries(dir, "af")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 3 {
+		t.Fatalf("found %d binaries, want 3 including both af.exe", len(found))
+	}
+
+	// Covered: the Linux binary and one Windows binary. The other is not, and
+	// the verdict has to say so by name.
+	files := map[string]string{
+		"antifailure_1.2.3_linux_amd64/af":       sums["antifailure_1.2.3_linux_amd64"],
+		"antifailure_1.2.3_windows_amd64/af.exe": sums["antifailure_1.2.3_windows_amd64"],
+	}
+	problems := run(t, writeSBOM(t, spdx(60, true, files)), dir)
+	if len(problems) != 1 || !mentions(problems, "windows_arm64") {
+		t.Fatalf("expected exactly the uncovered windows_arm64 binary, got %v", problems)
+	}
+
+	files["antifailure_1.2.3_windows_arm64/af.exe"] = sums["antifailure_1.2.3_windows_arm64"]
+	if problems := run(t, writeSBOM(t, spdx(60, true, files)), dir); len(problems) != 0 {
+		t.Fatalf("a document covering all three binaries was refused: %v", problems)
 	}
 }
 

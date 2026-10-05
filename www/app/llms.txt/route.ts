@@ -88,6 +88,11 @@ export function GET() {
   lines.push("```");
   lines.push("");
   lines.push(
+    "On Windows, install from PowerShell with `irm https://antifailure.dev/install.ps1 | iex`;",
+    "the commands after it are the same.",
+  );
+  lines.push("");
+  lines.push(
     "af init writes database.source_url_env only when the repository already names its",
     "production variable. With no source, or once a verified golden for the project exists",
     "on the machine, af up is the next command. af start reports every step as observed on",
@@ -155,7 +160,8 @@ export function GET() {
   );
   lines.push(
     `- [CLI reference](${DOCS_URL}/reference/cli): every af command and option. Install with ` +
-      "`curl -fsSL https://antifailure.dev/install.sh | sh`.",
+      "`curl -fsSL https://antifailure.dev/install.sh | sh`, or on Windows " +
+      "`irm https://antifailure.dev/install.ps1 | iex`.",
   );
   lines.push(
     `- [Machine-readable error catalog](${SITE_URL}/errors.v1.json): error codes, messages, recovery steps, retryability, and exit codes.`,

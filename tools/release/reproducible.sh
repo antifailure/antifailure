@@ -61,11 +61,21 @@ echo "commit date $commit_date"
 echo "platform    $goos/$goarch"
 echo
 
+# The Windows zip as well as this machine's own archive. It is a second
+# encoding written by a second code path in tools/reltar, with its own header
+# fields and its own clock, and a property proved for the tar says nothing about
+# it. Cross compiling it costs one more build and needs no Windows machine,
+# which is the only reason a developer's gate can make this claim at all.
+platforms="$goos/$goarch"
+[ "$goos" = "windows" ] || platforms="$platforms windows/amd64"
+
 build() {
-  local where="$1" cache="$2"
-  ( cd "$where" && GOCACHE="$cache" \
-      ./tools/release/build.sh "$goos" "$goarch" "$bare" "$commit" "$commit_date" \
-      "$where/dist" "$where/stage" > /dev/null )
+  local where="$1" cache="$2" p
+  for p in $platforms; do
+    ( cd "$where" && GOCACHE="$cache" \
+        ./tools/release/build.sh "${p%/*}" "${p#*/}" "$bare" "$commit" "$commit_date" \
+        "$where/dist" "$where/stage" > /dev/null )
+  done
 }
 
 echo "building once"
@@ -73,7 +83,6 @@ build "$one" "$work/cache-one"
 echo "building again, in another directory, with a cold cache"
 build "$two" "$work/cache-two"
 
-name="antifailure_${bare}_${goos}_${goarch}"
 failed=0
 
 compare() {
@@ -93,8 +102,13 @@ compare() {
 }
 
 echo
-compare "the binary"  "$one/stage/$name/af"      "$two/stage/$name/af"      || true
-compare "the archive" "$one/dist/$name.tar.gz"   "$two/dist/$name.tar.gz"   || true
+for p in $platforms; do
+  name="antifailure_${bare}_${p%/*}_${p#*/}"
+  bin=af; ext=tar.gz
+  if [ "${p%/*}" = windows ]; then bin=af.exe; ext=zip; fi
+  compare "the $p binary"  "$one/stage/$name/$bin"  "$two/stage/$name/$bin"  || true
+  compare "the $p archive" "$one/dist/$name.$ext"   "$two/dist/$name.$ext"   || true
+done
 
 if [ "$failed" = "0" ]; then
   echo
@@ -116,5 +130,12 @@ echo "mtime from disk and gzip writes its own into the header, which is why"
 echo "tools/reltar exists and why the packaging has to go through it."
 echo
 echo "What differs inside the archive:"
-diff <(tar -tvf "$one/dist/$name.tar.gz") <(tar -tvf "$two/dist/$name.tar.gz") || true
+for p in $platforms; do
+  name="antifailure_${bare}_${p%/*}_${p#*/}"
+  if [ "${p%/*}" = windows ]; then
+    diff <(unzip -Zv "$one/dist/$name.zip") <(unzip -Zv "$two/dist/$name.zip") || true
+  else
+    diff <(tar -tvf "$one/dist/$name.tar.gz") <(tar -tvf "$two/dist/$name.tar.gz") || true
+  fi
+done
 exit 1

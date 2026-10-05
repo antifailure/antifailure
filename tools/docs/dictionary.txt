@@ -56,6 +56,7 @@ lockfiles
 lookback
 lychee
 millicores
+msys
 ndjson
 neon
 partitionable

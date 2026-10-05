@@ -125,6 +125,7 @@ gate: _reports
     run "coverage"                       just coverage
     run "engine"                         just test-engine
     run "this platform's keyring"        just keyring
+    run "the Windows installer"          just installps1
     run "the other platforms lint"       just lint-platforms
     run "control plane"                  just test-web
     run "the site API"                   just test-site-api
@@ -2132,6 +2133,15 @@ lint-tools:
     # CI's action verifies it.
     golangci-lint config verify
     golangci-lint run --timeout 15m ./...
+
+# The same command the Windows install workflow runs. On Windows it installs
+# through install.ps1 under both PowerShells; everywhere else every test in it
+# skips and says so, because install.ps1 refuses to run anywhere but Windows.
+# That is the keyring recipe's bargain: the workflow is where these must run, and
+# it sets AF_INSTALLPS1_REQUIRED so a skip there is a failure. -count=1 because
+# the script is run by PowerShell and the cache cannot see the machine it reads.
+installps1:
+    cd tools && go test ./installps1/ -count=1
 
 # Lint the code the other platforms compile.
 #

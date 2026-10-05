@@ -54,6 +54,10 @@ type module struct {
 	// Licence and Notices are filled in by attribute, never by go list.
 	Licence string    `json:"-"`
 	Notices []shipped `json:"-"`
+	// DeclaredIn names the file a licence was read from when the module ships
+	// no licence text at all, so the notices say the attribution rests on a
+	// declaration rather than presenting it as read from a licence.
+	DeclaredIn string `json:"-"`
 }
 
 // target is one GOOS and GOARCH the release publishes an archive for.
@@ -313,6 +317,11 @@ func render(targets []target, mods []module) string {
 	for _, m := range mods {
 		if m.Licence == "" {
 			fmt.Fprintf(&b, "- `%s` %s\n", m.Path, m.Version)
+			continue
+		}
+		if m.DeclaredIn != "" {
+			fmt.Fprintf(&b, "- `%s` %s, %s (declared in its %s, no licence file shipped)\n",
+				m.Path, m.Version, m.Licence, m.DeclaredIn)
 			continue
 		}
 		fmt.Fprintf(&b, "- `%s` %s, %s\n", m.Path, m.Version, m.Licence)

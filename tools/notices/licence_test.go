@@ -125,6 +125,42 @@ func TestAModuleThatShipsNoLicenceFileFails(t *testing.T) {
 	}
 }
 
+// A module that ships no licence file and states its licence in its README is
+// attributed from that statement, and says so, only while a rule names it and
+// only while the README still says it.
+func TestALicenceDeclaredInAReadmeIsAttributedOnlyWhileItIsDeclared(t *testing.T) {
+	rules := map[string]fileRule{"example.com/bare README.md": {declares: "MIT", reason: "declared"}}
+
+	dir := moduleDir(t, map[string]string{"README.md": "# bare\n\nReads things.\n\n## License\n\nMIT\n"})
+	got, err := attribute([]module{{Path: "example.com/bare", Version: "v1.0.0", Dir: dir}}, rules)
+	if err != nil {
+		t.Fatalf("a declared licence with a rule naming it was refused: %v", err)
+	}
+	if got[0].Licence != "MIT" || got[0].DeclaredIn != "README.md" {
+		t.Fatalf("attributed as %q declared in %q, want MIT declared in README.md", got[0].Licence, got[0].DeclaredIn)
+	}
+
+	// The README changed its terms. The rule now asserts something the module
+	// does not say, and that has to stop the run.
+	changed := moduleDir(t, map[string]string{"README.md": "# bare\n\n## License\n\nGPL-3.0\n"})
+	_, err = attribute([]module{{Path: "example.com/bare", Version: "v1.1.0", Dir: changed}}, rules)
+	if err == nil || !strings.Contains(err.Error(), "no longer does") {
+		t.Fatalf("a README that stopped declaring MIT was still attributed MIT: %v", err)
+	}
+
+	// A mention is not a declaration.
+	mention := moduleDir(t, map[string]string{"README.md": "# bare\n\nLike most MIT code, this is small.\n"})
+	if _, err = attribute([]module{{Path: "example.com/bare", Version: "v1.2.0", Dir: mention}}, rules); err == nil {
+		t.Fatal("a README that only mentions MIT in passing was read as declaring it")
+	}
+
+	// And with no rule the same README is still a module with no licence file.
+	if _, err = attribute([]module{{Path: "example.com/bare", Version: "v1.0.0", Dir: dir}}, nil); err == nil ||
+		!strings.Contains(err.Error(), "ships no licence file") {
+		t.Fatalf("without a rule, a README declaration was accepted on its own: %v", err)
+	}
+}
+
 func TestAModuleWithNoDirectoryInTheCacheFails(t *testing.T) {
 	_, err := attribute([]module{{Path: "example.com/missing", Version: "v1.0.0"}}, nil)
 	// The module cache wording as well as the name, because reading an empty

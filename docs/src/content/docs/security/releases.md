@@ -23,17 +23,18 @@ a few minutes. Most people should do the first two.
 
 ## What a release contains
 
-Each tag publishes four archives, one per platform, plus the files you check
+Each tag publishes six archives, one per platform, plus the files you check
 them with.
 
 | File | What it is |
 | --- | --- |
-| `antifailure_<version>_<os>_<arch>.tar.gz` | The `af` binary, the agent runner's source, the licence and the README |
+| `antifailure_<version>_<os>_<arch>.tar.gz` | For macOS and Linux, `amd64` and `arm64`: the `af` binary, the agent runner's source, the licence and the README |
+| `antifailure_<version>_windows_<arch>.zip` | For Windows, `amd64` and `arm64`: the same, with the binary named `af.exe`. Not code signed yet |
 | `checksums.txt` | The SHA256 of every archive |
 | `checksums.txt.sigstore.json` | A signature over `checksums.txt`, with the certificate that made it |
 | `sbom.spdx.json` | An SPDX bill of materials, read out of the built binaries |
 | `sbom.spdx.json.sigstore.json` | A signature over the bill of materials |
-| `THIRD_PARTY_NOTICES.md` | Attribution, generated from what is actually linked, as the union over all four platforms |
+| `THIRD_PARTY_NOTICES.md` | Attribution, generated from what is actually linked, as the union over all six platforms |
 
 Only `checksums.txt` is signed rather than each archive. That is deliberate.
 `checksums.txt` names every archive by its hash, so one signature covers all of
@@ -218,7 +219,7 @@ of them goes red.
    a broken one. [Signing the tags too](#signing-the-tags-too) is what to set
    up if you want it to answer differently.
 
-4. Watch `.github/workflows/release.yml`. It builds four platforms, packages
+4. Watch `.github/workflows/release.yml`. It builds six platforms, packages
    each with `tools/release/build.sh`, unpacks them so the bill of materials can
    read the binaries, signs `checksums.txt` and the bill of materials, verifies
    both signatures, proves a tampered file is rejected, and only then creates

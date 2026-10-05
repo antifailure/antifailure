@@ -227,13 +227,20 @@ type binary struct {
 // list of platforms written here would go stale the moment the release matrix
 // gains one, and the gate would then pass while silently covering three of four
 // artifacts.
+//
+// The name with .exe counts as the name, because the Windows build of af is
+// af.exe and the release ships two of them. Matching the bare name alone was the
+// discovery doing exactly what the paragraph above warns about: the matrix
+// gained two platforms, the walk found four binaries out of six, and every one
+// of the four was covered, so the gate would have passed signing a bill of
+// materials that nobody had checked against either Windows binary.
 func findBinaries(root, name string) ([]binary, error) {
 	var out []binary
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() || d.Name() != name {
+		if d.IsDir() || (d.Name() != name && d.Name() != name+".exe") {
 			return nil
 		}
 		rel, err := filepath.Rel(root, p)

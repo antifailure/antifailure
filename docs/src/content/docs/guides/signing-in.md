@@ -98,13 +98,16 @@ Tokens expire after ninety days. `af whoami` says when.
 
 ## Where the credential is kept
 
-On macOS, the operating system keyring, under the service name `antifailure`.
+In the operating system's own credential store, under the service name
+`antifailure`: the keychain on macOS, the Credential Manager on Windows, and on
+Linux the Secret Service, reached through `secret-tool`, when that is installed.
 
-On Linux and Windows there is no keyring the engine can use yet, so the token
-goes in `~/.antifailure/credentials/`, in a file with mode `0600` inside a
-directory with mode `0700`. `af login` says which of the two happened rather
-than leaving you to find out, because a credential protected only by file
-permissions is a different thing from one the operating system is protecting.
+Where there is no such store, a Linux machine without `secret-tool` for
+instance, the token goes in `~/.antifailure/credentials/`, in a file with mode
+`0600` inside a directory with mode `0700`. `af login` says which of the two
+happened rather than leaving you to find out, because a credential protected
+only by file permissions is a different thing from one the operating system is
+protecting.
 
 Neither is inside your repository. Nothing reads or writes a token in the
 working tree, so there is nothing for a commit or a support bundle to pick up.
