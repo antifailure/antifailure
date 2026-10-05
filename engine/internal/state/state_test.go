@@ -51,6 +51,16 @@ func TestOpen_CreatesTheDirectoryAndSchema(t *testing.T) {
 	// readable.
 	privatefstest.RequirePrivate(t, dir, 0o700)
 	privatefstest.RequirePrivate(t, filepath.Join(dir, state.FileName), 0o600)
+
+	// And in a state directory that already existed, readable by everybody,
+	// the database is narrowed by itself rather than by inheriting from a
+	// directory this run made private.
+	existing := filepath.Join(privatefstest.OpenFolder(t), state.DirName)
+	require.NoError(t, os.Mkdir(existing, 0o755))
+	db2, err := state.Open(context.Background(), existing)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db2.Close()) })
+	privatefstest.RequirePrivate(t, filepath.Join(existing, state.FileName), 0o600)
 }
 
 func TestOpen_IsIdempotentAcrossRuns(t *testing.T) {

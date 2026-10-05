@@ -45,6 +45,20 @@ func TestAcquire_CreatesTheLockWithOwnerMetadata(t *testing.T) {
 	privatefstest.RequirePrivate(t, path, 0o600)
 }
 
+// In a state directory that already existed and is readable by everybody, the
+// lock is still private by itself, rather than by inheriting from a directory
+// this run made private.
+func TestAcquire_TheLockIsPrivateInADirectoryThatAlreadyExisted(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(privatefstest.OpenFolder(t), ".antifailure")
+	require.NoError(t, os.Mkdir(dir, 0o755))
+	path := filepath.Join(dir, "lock")
+	l, err := lock.Acquire(path, clock.NewFake(epoch), "af up")
+	require.NoError(t, err)
+	defer func() { require.NoError(t, l.Release()) }()
+	privatefstest.RequirePrivate(t, path, 0o600)
+}
+
 // The whole point: two af up invocations on one branch must not both proceed.
 func TestAcquire_RefusesWhenALiveProcessHoldsIt(t *testing.T) {
 	t.Parallel()

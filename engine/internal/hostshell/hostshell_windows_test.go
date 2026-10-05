@@ -5,6 +5,7 @@ package hostshell
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -44,4 +45,25 @@ func TestTheLauncherIsPreferred(t *testing.T) {
 	sh, err := findFrom(filepath.ToSlash(filepath.Join(root, "mingw64", "libexec", "git-core")))
 	require.NoError(t, err)
 	require.Equal(t, filepath.Join(root, "bin", "sh.exe"), sh)
+}
+
+// Found through git and not through PATH. On a machine whose PATH reaches git
+// and no sh, which is how the Git for Windows installer leaves it by default,
+// a PATH lookup finds nothing and this still finds Git's own sh. A lookup that
+// happened to work because Git's bin directory was on PATH, as it is on a
+// GitHub runner, would pass every other test here.
+func TestTheShellIsFoundWithoutItBeingOnThePath(t *testing.T) {
+	git, err := exec.LookPath("git")
+	require.NoError(t, err)
+	gitDir := filepath.Dir(git)
+	if _, err := os.Stat(filepath.Join(gitDir, "sh.exe")); err == nil {
+		t.Skipf("git and sh share %s here, so a PATH without sh cannot be made", gitDir)
+	}
+	t.Setenv("PATH", gitDir+string(os.PathListSeparator)+os.Getenv("SystemRoot")+`\System32`)
+	_, err = exec.LookPath("sh")
+	require.Error(t, err, "the precondition: sh is not on this PATH")
+
+	sh, err := Find()
+	require.NoError(t, err)
+	require.True(t, strings.EqualFold(filepath.Base(sh), "sh.exe"), sh)
 }
