@@ -57,6 +57,15 @@ func updateArchiveFor(t *testing.T, goos, defect string) (string, []byte) {
 			t.Fatal(err)
 		}
 	}
+	if defect == "duplicate-ignored" {
+		w, err := zw.CreateHeader(&zip.FileHeader{Name: root + "/LICENSE", Method: zip.Store})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte("a second LICENSE")); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if defect == "link" {
 		h := &zip.FileHeader{Name: root + "/runner/link", Method: zip.Store}
 		h.SetMode(os.ModeSymlink | 0777)
@@ -113,6 +122,16 @@ func updateArchive(t *testing.T, defect string) []byte {
 			t.Fatal(err)
 		}
 	}
+	if defect == "duplicate-ignored" {
+		for _, body := range []string{"a LICENSE", "a second LICENSE"} {
+			if err := tw.WriteHeader(&tar.Header{Name: updateArchiveName + "/LICENSE", Size: int64(len(body)), Mode: 0644, Typeflag: tar.TypeReg}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tw.Write([]byte(body)); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	if err := tw.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +170,7 @@ func updateInstallationFor(t *testing.T, goos string) (string, string) {
 
 func TestSelfUpdateVerifiedArchive(t *testing.T) {
 	for _, goos := range []string{"linux", "windows"} {
-		for _, defect := range []string{"none", "custom", "check", "checksum", "missing-checksum", "download", "missing", "traversal", "link", "gzip-checksum"} {
+		for _, defect := range []string{"none", "custom", "check", "checksum", "missing-checksum", "download", "missing", "traversal", "link", "duplicate-ignored", "gzip-checksum"} {
 			t.Run(goos+"/"+defect, func(t *testing.T) {
 				testSelfUpdateVerifiedArchive(t, goos, defect)
 			})
@@ -256,11 +275,12 @@ func testSelfUpdateVerifiedArchive(t *testing.T, goos, defect string) {
 		// archive formats. Any error at all would pass a zip whose own guard
 		// was missing if some later step happened to fail instead.
 		reason := map[string]string{
-			"checksum":      "archive checksum mismatch",
-			"missing":       "missing required file runner/package-lock.json",
-			"traversal":     "unsafe path in release archive",
-			"link":          "contains a link or unsupported entry",
-			"gzip-checksum": map[string]string{"linux": "gzip: invalid checksum", "windows": "zip: checksum error"}[goos],
+			"checksum":          "archive checksum mismatch",
+			"missing":           "missing required file runner/package-lock.json",
+			"traversal":         "unsafe path in release archive",
+			"link":              "contains a link or unsupported entry",
+			"duplicate-ignored": "duplicate file in release archive",
+			"gzip-checksum":     map[string]string{"linux": "gzip: invalid checksum", "windows": "zip: checksum error"}[goos],
 		}[defect]
 		if reason != "" && !strings.Contains(err.Error(), reason) {
 			t.Fatalf("%s was refused for another reason than its own guard: %v", defect, err)

@@ -94,19 +94,22 @@ func TestSweepRemovesOnlyBinariesAWindowsUpdateMovedAside(t *testing.T) {
 	dir := t.TempDir()
 	executable := filepath.Join(dir, "af.exe")
 	files := map[string]bool{
-		"af.exe":              false,
-		"af.exe.old-1a2b3c":   true,
-		"AF.EXE.OLD-4d5e6f":   true,
-		"tool.exe.old-1a2b3c": false,
-		"af.exe.older":        false,
-		"notes.txt":           false,
+		"af.exe":                    false,
+		"af.exe.old-1a2b3c4d5e6f":   true,
+		"AF.EXE.OLD-4D5E6F7A8B9C":   true,
+		"af.exe.old-backup":         false,
+		"af.exe.old-1a2b3c":         false,
+		"af.exe.old-zzzzzzzzzzzz":   false,
+		"tool.exe.old-1a2b3c4d5e6f": false,
+		"af.exe.older":              false,
+		"notes.txt":                 false,
 	}
 	for name := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := os.Mkdir(filepath.Join(dir, "af.exe.old-directory"), 0755); err != nil {
+	if err := os.Mkdir(filepath.Join(dir, "af.exe.old-0d0d0d0d0d0d"), 0755); err != nil {
 		t.Fatal(err)
 	}
 	sweepReplacedExecutable("linux", executable)
@@ -116,7 +119,7 @@ func TestSweepRemovesOnlyBinariesAWindowsUpdateMovedAside(t *testing.T) {
 		}
 	}
 	sweepReplacedExecutable("windows", filepath.Join(dir, "tool.exe"))
-	if _, err := os.Stat(filepath.Join(dir, "tool.exe.old-1a2b3c")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "tool.exe.old-1a2b3c4d5e6f")); err != nil {
 		t.Fatal("a sweep from a binary that is not af removed a file")
 	}
 	sweepReplacedExecutable("windows", executable)
@@ -129,7 +132,7 @@ func TestSweepRemovesOnlyBinariesAWindowsUpdateMovedAside(t *testing.T) {
 			t.Fatalf("the sweep removed %s, which no update put there", name)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(dir, "af.exe.old-directory")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "af.exe.old-0d0d0d0d0d0d")); err != nil {
 		t.Fatal("the sweep removed a directory")
 	}
 }
@@ -139,7 +142,7 @@ func TestSweepRemovesOnlyBinariesAWindowsUpdateMovedAside(t *testing.T) {
 // the next start, because the update itself is the process using the file.
 func TestStartingAfSweepsWhatAWindowsUpdateMovedAside(t *testing.T) {
 	executable, _ := updateInstallationFor(t, "windows")
-	moved := filepath.Join(filepath.Dir(executable), "af.exe.old-0a0b0c")
+	moved := filepath.Join(filepath.Dir(executable), "af.exe.old-0a0b0c0d0e0f")
 	if err := os.WriteFile(moved, []byte("old binary"), 0755); err != nil {
 		t.Fatal(err)
 	}

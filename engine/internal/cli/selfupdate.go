@@ -473,11 +473,27 @@ func sweepReplacedExecutable(goos, executable string) {
 	}
 	prefix := strings.ToLower(replacedPrefix(executable))
 	for _, entry := range entries {
-		if !entry.Type().IsRegular() || !strings.HasPrefix(strings.ToLower(entry.Name()), prefix) {
+		// Only the exact shape an update writes, the prefix and twelve hex
+		// digits, so a file somebody named af.exe.old-backup by hand is theirs
+		// and is never touched.
+		name := strings.ToLower(entry.Name())
+		if !entry.Type().IsRegular() || !strings.HasPrefix(name, prefix) || !isReplacedSuffix(name[len(prefix):]) {
 			continue
 		}
 		_ = os.Remove(filepath.Join(dir, entry.Name()))
 	}
+}
+
+// replacedSuffixLen is the length of the random suffix commitUpdate gives a
+// binary it moves aside: six random bytes written as hex.
+const replacedSuffixLen = 12
+
+func isReplacedSuffix(suffix string) bool {
+	if len(suffix) != replacedSuffixLen {
+		return false
+	}
+	_, err := hex.DecodeString(suffix)
+	return err == nil
 }
 
 // hostGOOS and hostExecutable are what a starting process sweeps with. They
@@ -526,13 +542,15 @@ func (u *releaseUnpacker) entry(name string, dir, regular bool, size int64, body
 		return errors.New("release archive contains a link or unsupported entry")
 	}
 	rel := strings.TrimPrefix(clean, u.root+"/")
-	if rel != u.binary && rel != "runner" && !strings.HasPrefix(rel, "runner/") {
-		return nil
-	}
+	// Checked before anything is ignored. An archive carrying two entries of
+	// one name was not built by the release pipeline, whichever name it is.
 	if u.seen[rel] {
 		return errors.New("duplicate file in release archive")
 	}
 	u.seen[rel] = true
+	if rel != u.binary && rel != "runner" && !strings.HasPrefix(rel, "runner/") {
+		return nil
+	}
 	// The binary is staged as af on every platform, so the recovery journal,
 	// which reads a staged af as "the commit did not happen", means the same
 	// thing whichever platform wrote it.
@@ -695,7 +713,7 @@ func commitUpdate(result updateResult, stage, runner, goos string, rename func(s
 		// renames are adjacent; a process killed exactly between them leaves
 		// no af.exe, only the moved aside copy, and rerunning install.ps1
 		// restores it.
-		var suffix [6]byte
+		var suffix [replacedSuffixLen / 2]byte
 		if _, err := rand.Read(suffix[:]); err != nil {
 			return restoreRunner(err)
 		}
