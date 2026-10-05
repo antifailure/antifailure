@@ -13,8 +13,13 @@ func TestStartCommandsAreForThePlatformsShell(t *testing.T) {
 	win := shellCommands("windows")
 	require.Equal(t, "af.exe", win.binary)
 	require.Equal(t, "where.exe af", win.listAll)
-	require.Equal(t, `$env:Path = "C:\Users\me\.antifailure\bin;" + $env:Path`,
+	require.Equal(t, `$env:Path = 'C:\Users\me\.antifailure\bin;' + $env:Path`,
 		win.addToPath(`C:\Users\me\.antifailure\bin`))
+	// A prefix somebody chose can hold $, a backtick or a quote. Inside
+	// double quotes PowerShell would expand the first two, so the line would
+	// add a different directory from the one that was installed into.
+	require.Equal(t, "$env:Path = 'C:\\tools\\$x`y''s\\bin;' + $env:Path",
+		win.addToPath("C:\\tools\\$x`y's\\bin"))
 
 	unix := shellCommands("darwin")
 	require.Equal(t, "af", unix.binary)

@@ -321,7 +321,10 @@ func shellCommands(goos string) startShell {
 			binary:  "af.exe",
 			listAll: "where.exe af",
 			addToPath: func(dir string) string {
-				return fmt.Sprintf(`$env:Path = "%s;" + $env:Path`, dir)
+				// Single quoted, with a quote doubled, because PowerShell
+				// expands $ and backticks inside double quotes, and AF_BIN_DIR
+				// or AF_PREFIX is a path somebody chose.
+				return `$env:Path = '` + strings.ReplaceAll(dir, `'`, `''`) + `;' + $env:Path`
 			},
 		}
 	}
