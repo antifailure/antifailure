@@ -662,6 +662,7 @@ func WithSignals(ctx context.Context) (context.Context, <-chan struct{}, func())
 // forced may be nil, which means a caller that does not handle signals, and
 // Run then behaves exactly as Execute does.
 func Run(ctx context.Context, forced <-chan struct{}, args []string, opts Options) int {
+	sweepAtStart()
 	done := make(chan int, 1)
 	go func() { done <- Execute(ctx, args, opts) }()
 

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -12,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +22,69 @@ import (
 )
 
 const updateArchiveName = "antifailure_1.1.1_linux_amd64"
+
+// updateArchiveFor builds the release archive goos is published as: a tarball
+// holding af, or for Windows a zip holding af.exe.
+func updateArchiveFor(t *testing.T, goos, defect string) (string, []byte) {
+	t.Helper()
+	if goos != "windows" {
+		return updateArchiveName, updateArchive(t, defect)
+	}
+	root := "antifailure_1.1.1_windows_amd64"
+	var b bytes.Buffer
+	zw := zip.NewWriter(&b)
+	// LICENSE is in every real release and is not something the update
+	// installs, so it is the entry an unpacker could skip without reading.
+	for _, file := range []string{"af.exe", "LICENSE", "runner/src/main.ts", "runner/package.json", "runner/package-lock.json"} {
+		if defect == "missing" && file == "runner/package-lock.json" {
+			continue
+		}
+		name := root + "/" + file
+		if defect == "traversal" && file == "af.exe" {
+			name = root + "/../af.exe"
+		}
+		body := "new " + file
+		if file == "af.exe" {
+			body = "new af"
+		}
+		h := &zip.FileHeader{Name: name, Method: zip.Store}
+		h.SetMode(0755)
+		w, err := zw.CreateHeader(h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if defect == "link" {
+		h := &zip.FileHeader{Name: root + "/runner/link", Method: zip.Store}
+		h.SetMode(os.ModeSymlink | 0777)
+		w, err := zw.CreateHeader(h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte("/tmp/outside")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data := b.Bytes()
+	if defect == "gzip-checksum" {
+		// Stored, so the body is in the archive verbatim and one flipped byte
+		// of it is a CRC failure rather than a decompression failure. The
+		// entry corrupted is one the update ignores, because an unpacker that
+		// skips what it does not install would verify nothing about it.
+		i := bytes.Index(data, []byte("new LICENSE"))
+		if i < 0 {
+			t.Fatal("stored body not found")
+		}
+		data[i] ^= 1
+	}
+	return root, data
+}
 
 func updateArchive(t *testing.T, defect string) []byte {
 	t.Helper()
@@ -62,8 +127,13 @@ func updateArchive(t *testing.T, defect string) []byte {
 
 func updateInstallation(t *testing.T) (string, string) {
 	t.Helper()
+	return updateInstallationFor(t, "linux")
+}
+
+func updateInstallationFor(t *testing.T, goos string) (string, string) {
+	t.Helper()
 	prefix := t.TempDir()
-	executable := filepath.Join(prefix, "bin", "af")
+	executable := filepath.Join(prefix, "bin", releaseBinary(goos))
 	runner := filepath.Join(prefix, "share", "antifailure", "runner")
 	for _, dir := range []string{filepath.Dir(executable), runner} {
 		if err := os.MkdirAll(dir, 0755); err != nil {
@@ -80,108 +150,148 @@ func updateInstallation(t *testing.T) (string, string) {
 }
 
 func TestSelfUpdateVerifiedArchive(t *testing.T) {
-	for _, defect := range []string{"none", "custom", "check", "checksum", "missing-checksum", "download", "missing", "traversal", "link", "gzip-checksum"} {
-		t.Run(defect, func(t *testing.T) {
-			executable, runner := updateInstallation(t)
-			prefix := ""
-			if defect == "custom" {
-				prefix = filepath.Dir(filepath.Dir(executable))
-				customDir := filepath.Join(prefix, "custom-tools")
-				if err := os.Mkdir(customDir, 0755); err != nil {
-					t.Fatal(err)
-				}
-				customPath := filepath.Join(customDir, "af")
-				if err := os.Rename(executable, customPath); err != nil {
-					t.Fatal(err)
-				}
-				executable = customPath
+	for _, goos := range []string{"linux", "windows"} {
+		for _, defect := range []string{"none", "custom", "check", "checksum", "missing-checksum", "download", "missing", "traversal", "link", "gzip-checksum"} {
+			t.Run(goos+"/"+defect, func(t *testing.T) {
+				testSelfUpdateVerifiedArchive(t, goos, defect)
+			})
+		}
+	}
+}
+
+func testSelfUpdateVerifiedArchive(t *testing.T, goos, defect string) {
+	executable, runner := updateInstallationFor(t, goos)
+	prefix := ""
+	if defect == "custom" {
+		prefix = filepath.Dir(filepath.Dir(executable))
+		customDir := filepath.Join(prefix, "custom-tools")
+		if err := os.Mkdir(customDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		customPath := filepath.Join(customDir, releaseBinary(goos))
+		if err := os.Rename(executable, customPath); err != nil {
+			t.Fatal(err)
+		}
+		executable = customPath
+	}
+	archiveName, archive := updateArchiveFor(t, goos, defect)
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/latest":
+			_, _ = fmt.Fprint(w, `{"tag_name":"v1.1.1"}`)
+		case "/v1.1.1/" + archiveName + releaseArchiveExt(goos):
+			if defect == "download" {
+				w.WriteHeader(503)
+				return
 			}
-			archive := updateArchive(t, defect)
-			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				switch r.URL.Path {
-				case "/latest":
-					_, _ = fmt.Fprint(w, `{"tag_name":"v1.1.1"}`)
-				case "/v1.1.1/checksums.txt":
-					if defect == "missing-checksum" {
-						_, _ = fmt.Fprint(w, "")
-						return
-					}
-					data := archive
-					if defect == "checksum" {
-						data = []byte("not the archive")
-					}
-					_, _ = fmt.Fprintf(w, "%x  %s.tar.gz\n", sha256.Sum256(data), updateArchiveName)
-				default:
-					if defect == "download" {
-						w.WriteHeader(503)
-						return
-					}
-					_, _ = w.Write(archive)
-				}
-			}))
-			defer s.Close()
-			result, err := performUpdate(context.Background(), executable, prefix, "v1.0.0", "linux", "amd64", s.URL+"/latest", s.URL, s.Client(), defect == "check")
-			switch defect {
-			case "none", "custom":
-				if err != nil {
-					t.Fatal(err)
-				}
-				if !result.Applied {
-					t.Fatal("successful update not reported")
-				}
-				binary, _ := os.ReadFile(executable)
-				if string(binary) != "new af" {
-					t.Fatalf("binary was not replaced: %q", binary)
-				}
-				source, _ := os.ReadFile(filepath.Join(runner, "src", "main.ts"))
-				if string(source) != "new runner/src/main.ts" {
-					t.Fatal("runner source was not replaced")
-				}
-				info, err := os.Stat(executable)
-				if err != nil || info.Mode().Perm() != 0711 {
-					t.Fatal("updater changed the executable permissions")
-				}
-			case "check":
-				if err != nil || result.Applied {
-					t.Fatalf("check wrote or failed: %+v %v", result, err)
-				}
-				binary, _ := os.ReadFile(executable)
-				if string(binary) != "old binary" {
-					t.Fatal("check replaced the binary")
-				}
-			default:
-				if err == nil {
-					t.Fatal("unsafe update was accepted")
-				}
-				// A refused download is caught three times over: by the status
-				// code, then by the checksum an empty body cannot match, then
-				// by the gzip reader. Only the first of those can say WHY, and
-				// an error that reports a checksum mismatch for a release the
-				// server refused to send sends somebody looking in the wrong
-				// place. So the status is part of the contract, not incidental.
-				if defect == "download" && !strings.Contains(err.Error(), "HTTP 503") {
-					t.Fatalf("a refused download did not report the refusal: %v", err)
-				}
-				// An archive no checksum names must be refused BEFORE it is
-				// fetched, by the absence of a checksum rather than by a
-				// comparison against the empty string. The two are the same
-				// verdict here and they are not the same guarantee: a
-				// comparison that treats an absent checksum as one more value
-				// to compare is one careless "if expected != ''" away from
-				// verifying nothing at all.
-				if defect == "missing-checksum" && !strings.Contains(err.Error(), "no valid SHA256 checksum") {
-					t.Fatalf("an unnamed archive was refused by something other than its missing checksum: %v", err)
-				}
-				binary, _ := os.ReadFile(executable)
-				if string(binary) != "old binary" {
-					t.Fatal("failed update changed the binary")
-				}
-				source, _ := os.ReadFile(filepath.Join(runner, "old-source"))
-				if string(source) != "old runner" {
-					t.Fatal("failed update changed runner source")
-				}
+			_, _ = w.Write(archive)
+		case "/v1.1.1/checksums.txt":
+			if defect == "missing-checksum" {
+				_, _ = fmt.Fprint(w, "")
+				return
 			}
-		})
+			data := archive
+			if defect == "checksum" {
+				data = []byte("not the archive")
+			}
+			// Both formats are listed, the way checksums.txt lists every
+			// platform, so a platform that fetched the other one's
+			// archive would find a checksum and fail on the content.
+			_, _ = fmt.Fprintf(w, "%x  %s%s\n", sha256.Sum256(data), archiveName, releaseArchiveExt(goos))
+		default:
+			// Any other name is an archive for another platform.
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer s.Close()
+	result, err := performUpdate(context.Background(), executable, prefix, "v1.0.0", goos, "amd64", s.URL+"/latest", s.URL, s.Client(), defect == "check")
+	switch defect {
+	case "none", "custom":
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.Applied {
+			t.Fatal("successful update not reported")
+		}
+		binary, _ := os.ReadFile(executable)
+		if string(binary) != "new af" {
+			t.Fatalf("binary was not replaced: %q", binary)
+		}
+		source, _ := os.ReadFile(filepath.Join(runner, "src", "main.ts"))
+		if string(source) != "new runner/src/main.ts" {
+			t.Fatal("runner source was not replaced")
+		}
+		// Mode bits exist to carry over only where the platform has them.
+		if goos != "windows" && runtime.GOOS != "windows" {
+			info, err := os.Stat(executable)
+			if err != nil || info.Mode().Perm() != 0711 {
+				t.Fatal("updater changed the executable permissions")
+			}
+		}
+		if goos == "windows" {
+			// The binary that was replaced is moved aside, never lost,
+			// and holds exactly the old bytes.
+			moved, _ := filepath.Glob(filepath.Join(filepath.Dir(executable), replacedPrefix(executable)+"*"))
+			if len(moved) != 1 {
+				t.Fatalf("the replaced binary was not moved aside exactly once: %v", moved)
+			}
+			old, _ := os.ReadFile(moved[0])
+			if string(old) != "old binary" {
+				t.Fatalf("the moved aside binary is not the old one: %q", old)
+			}
+		}
+	case "check":
+		if err != nil || result.Applied {
+			t.Fatalf("check wrote or failed: %+v %v", result, err)
+		}
+		binary, _ := os.ReadFile(executable)
+		if string(binary) != "old binary" {
+			t.Fatal("check replaced the binary")
+		}
+	default:
+		if err == nil {
+			t.Fatal("unsafe update was accepted")
+		}
+		// Each defect has to be refused by the guard written for it, in both
+		// archive formats. Any error at all would pass a zip whose own guard
+		// was missing if some later step happened to fail instead.
+		reason := map[string]string{
+			"checksum":      "archive checksum mismatch",
+			"missing":       "missing required file runner/package-lock.json",
+			"traversal":     "unsafe path in release archive",
+			"link":          "contains a link or unsupported entry",
+			"gzip-checksum": map[string]string{"linux": "gzip: invalid checksum", "windows": "zip: checksum error"}[goos],
+		}[defect]
+		if reason != "" && !strings.Contains(err.Error(), reason) {
+			t.Fatalf("%s was refused for another reason than its own guard: %v", defect, err)
+		}
+		// A refused download is caught three times over: by the status
+		// code, then by the checksum an empty body cannot match, then
+		// by the gzip reader. Only the first of those can say WHY, and
+		// an error that reports a checksum mismatch for a release the
+		// server refused to send sends somebody looking in the wrong
+		// place. So the status is part of the contract, not incidental.
+		if defect == "download" && !strings.Contains(err.Error(), "HTTP 503") {
+			t.Fatalf("a refused download did not report the refusal: %v", err)
+		}
+		// An archive no checksum names must be refused BEFORE it is
+		// fetched, by the absence of a checksum rather than by a
+		// comparison against the empty string. The two are the same
+		// verdict here and they are not the same guarantee: a
+		// comparison that treats an absent checksum as one more value
+		// to compare is one careless "if expected != ''" away from
+		// verifying nothing at all.
+		if defect == "missing-checksum" && !strings.Contains(err.Error(), "no valid SHA256 checksum") {
+			t.Fatalf("an unnamed archive was refused by something other than its missing checksum: %v", err)
+		}
+		binary, _ := os.ReadFile(executable)
+		if string(binary) != "old binary" {
+			t.Fatal("failed update changed the binary")
+		}
+		source, _ := os.ReadFile(filepath.Join(runner, "old-source"))
+		if string(source) != "old runner" {
+			t.Fatal("failed update changed runner source")
+		}
 	}
 }
 
@@ -320,7 +430,7 @@ func TestSelfUpdateRollsBackRunnerWhenBinaryCannotBeReplaced(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(stage, "af"), []byte("new binary"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	_, err := commitUpdate(updateResult{InstalledPath: executable}, stage, runner, func(a, b string) error {
+	_, err := commitUpdate(updateResult{InstalledPath: executable}, stage, runner, "linux", func(a, b string) error {
 		if b == executable {
 			return fmt.Errorf("injected permission failure")
 		}
