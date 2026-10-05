@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -778,4 +779,75 @@ func TestShortErrorOnNothingIsNothing(t *testing.T) {
 	// It is called on paths that may have no error, and returning "<nil>"
 	// there would put that word in a message a person reads.
 	require.Equal(t, "", shortError(nil))
+}
+
+// A database being dropped while the listing reads it has no files left, and
+// pg_database_size answers NULL for it rather than raising. That NULL failed
+// the whole listing, for every golden, because of one database that need not
+// even be ours. Found on a Windows runner where every package's tests share one
+// server; the race is the same on any server with two clients.
+//
+// So it is made to happen. DROP DATABASE removes the files before it commits,
+// and until it commits the listing still sees the row, so the window is the
+// time the files take to remove. A template with a thousand tables makes that
+// long enough to land in on purpose; an empty database closed it too fast for
+// a mutation to be caught.
+func TestAListingSurvivesADatabaseDroppedWhileItReads(t *testing.T) {
+	p, ctx := newProvider(t)
+	template := goldenPrefix + "gv_19700101000000000000_racetmpl"
+	racing := goldenPrefix + "gv_19700101000000000000_racing00"
+	drop := func(name string) { _ = p.exec(context.Background(), "DROP DATABASE IF EXISTS "+quoteIdent(name)) }
+	drop(racing)
+	drop(template)
+	require.NoError(t, p.exec(ctx, "CREATE DATABASE "+quoteIdent(template)))
+	t.Cleanup(func() { drop(racing); drop(template) })
+	{
+		db, err := sql.Open("pgx", replaceDatabase(t, requirePostgres(t), template))
+		require.NoError(t, err)
+		_, err = db.ExecContext(ctx, `DO $$ BEGIN
+			FOR i IN 1..1000 LOOP EXECUTE format('CREATE TABLE t%s (id int)', i); END LOOP;
+		END $$`)
+		require.NoError(t, err)
+		require.NoError(t, db.Close())
+	}
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	cycles := 0
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if p.exec(ctx, "CREATE DATABASE "+quoteIdent(racing)+" TEMPLATE "+quoteIdent(template)) == nil {
+				drop(racing)
+				cycles++
+			}
+		}
+	}()
+
+	deadline := time.Now().Add(5 * time.Second)
+	listings := 0
+	var err error
+	for time.Now().Before(deadline) && err == nil {
+		_, err = p.ListGoldens(ctx)
+		listings++
+	}
+	close(stop)
+	<-done
+	t.Logf("%d listings across %d create and drop cycles", listings, cycles)
+	require.Positive(t, cycles, "the precondition: the database was created and dropped while the listing ran")
+	require.NoError(t, err, "listing %d failed after %d create and drop cycles", listings, cycles)
+}
+
+// replaceDatabase is raw with its database name swapped for name.
+func replaceDatabase(t *testing.T, raw, name string) string {
+	t.Helper()
+	u, err := url.Parse(raw)
+	require.NoError(t, err)
+	u.Path = "/" + name
+	return u.String()
 }
