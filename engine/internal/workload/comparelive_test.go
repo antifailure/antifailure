@@ -131,13 +131,22 @@ func routeRow(t *testing.T, c *workload.Comparison, name string) workload.RouteD
 func TestARealBuildThatGotSlowerFailsTheBaseBranchLatencyThreshold(t *testing.T) {
 	// A real sleep on one route of a real server, which is the regression a
 	// person would introduce by adding a query inside a loop.
-	base := buildServer(t, nil)
+	//
+	// Both sides take 5ms to answer /health. Answered immediately, its p95 was
+	// a fraction of a millisecond and on windows-latest it moved by more than
+	// the declared doubling in 5 runs of 20 with nothing changed, 0.3ms to
+	// 1.4ms at worst, so "exactly one route breached" failed on a neighbour
+	// that only jittered. A floor of 5ms puts that jitter at a fifth of the
+	// limit rather than past it, and is the same on both sides, so it is not
+	// a regression of its own.
+	neighbour := 5 * time.Millisecond
+	base := buildServer(t, map[string]time.Duration{"/health": neighbour})
 	// A hundred milliseconds, sized against the slowest floor measured rather
 	// than the fastest. The base side's p95 is almost all scheduling: 7ms to
 	// 26ms on a contended Mac, and 28.9ms on windows-latest, where a 40ms
 	// sleep moved p95 to 42.8ms, +48 per cent, under the declared doubling.
 	// Against 29ms this is more than four times the floor.
-	cand := buildServer(t, map[string]time.Duration{"/orders": 100 * time.Millisecond})
+	cand := buildServer(t, map[string]time.Duration{"/orders": 100 * time.Millisecond, "/health": neighbour})
 
 	// Fifty in flight rather than twenty. A hundred requests a second to a
 	// route that takes a tenth of a second keeps about ten in flight, and
