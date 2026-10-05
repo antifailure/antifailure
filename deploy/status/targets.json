@@ -44,6 +44,15 @@
     "expect_body": "#!/bin/sh"
   },
   {
+    "id": "installer-windows",
+    "name": "Windows installer",
+    "group": "Website and documentation",
+    "description": "The script antifailure.dev/install.ps1 serves to PowerShell.",
+    "url": "https://antifailure.dev/install.ps1",
+    "check": "http",
+    "expect_body": "# Antifailure installer for Windows."
+  },
+  {
     "id": "site-api",
     "name": "Site API",
     "group": "Website and documentation",

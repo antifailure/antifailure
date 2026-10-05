@@ -37,10 +37,11 @@ others are fine.
 | Website | `antifailure.dev/` | The marketing site. |
 | Documentation | `antifailure.dev/docs` | Every error the engine prints ends in a link to a page here. A publish that drops the subtree breaks all of them. |
 | CLI installer | `antifailure.dev/install.sh` | What `curl` is piped from. It is placed by the site assembly. |
+| Windows installer | `antifailure.dev/install.ps1` | What PowerShell's `irm` is piped from. Placed by the same assembly, with its type declared in the host config as plain text, which is what `irm` hands to `iex` as a script. |
 | Site API | `antifailure.dev/api` | A managed function, not a static file. It can be present and refuse every request. |
 | Control plane, staging | `app.dev.antifailure.dev/readyz` | Where `main` lands first. Listed as pre-production, because it is not a customer surface and should never be read as one. |
 
-The first two share a process and the next four share a Static Web App, so an
+The first two share a process and the next five share a Static Web App, so an
 outage of one will often show as an outage of its neighbours.
 
 ## What a check asserts

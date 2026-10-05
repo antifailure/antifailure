@@ -101,6 +101,11 @@ af test           # agents run your workflows and return verdicts with evidence
 af down           # every resource it created, gone
 ```
 
+On Windows, install from PowerShell with
+`irm https://antifailure.dev/install.ps1 | iex`, and the commands are the same.
+[The quickstart](https://antifailure.dev/docs/getting-started/quickstart#on-windows)
+covers where it puts things and the code signing it does not have yet.
+
 The refresh is the one conditional step. `af init` writes
 `database.source_url_env` only when the repository already names its
 production variable; with no source, or once a verified golden exists on the

@@ -91,6 +91,7 @@ var surfaces = []surface{
 	{"deploy/docker/", "the container a self-hosted control plane runs"},
 	{"deploy/helm/", "the chart a self-hosted control plane installs from"},
 	{"install.sh", "how the CLI gets onto a machine"},
+	{"install.ps1", "how the CLI gets onto a Windows machine"},
 	{"action.yml", "the composite action every customer's workflow runs, with uses: antifailure/antifailure@v1"},
 }
 

@@ -8,7 +8,8 @@
 # the product hard-codes into things people have already installed.
 #
 #   - README.md tells a reader to pipe https://antifailure.dev/install.sh
-#     into sh.
+#     into sh, and a Windows reader to pipe https://antifailure.dev/install.ps1
+#     into PowerShell.
 #   - Every antifailure.yaml names
 #     https://antifailure.dev/schemas/manifest.v1.json as its $schema, and
 #     every event the engine emits carries
@@ -170,6 +171,7 @@ DOCIDENTITY
 
 # The addresses that live outside both builds.
 cp install.sh site/install.sh
+cp install.ps1 site/install.ps1
 mkdir -p site/schemas && cp schemas/*.json site/schemas/
 
 # The Static Web Apps configuration, generated rather than written.
@@ -690,6 +692,7 @@ for required in \
   404.html \
   staticwebapp.config.json \
   install.sh \
+  install.ps1 \
   schemas/manifest.v1.json \
   schemas/events.v1.json
 do

@@ -22,10 +22,12 @@ one release ships all of them and a module can be linked on one platform
 and not another. A list taken from a single platform attributes too few
 people on every other one.
 
-Platforms: darwin/amd64, darwin/arm64, linux/amd64, linux/arm64.
+Platforms: darwin/amd64, darwin/arm64, linux/amd64, linux/arm64,
+windows/amd64, windows/arm64.
 
-### Go modules (98)
+### Go modules (102)
 
+- `github.com/Microsoft/go-winio` v0.6.2, MIT
 - `github.com/aymanbagabas/go-osc52/v2` v2.0.1, MIT
 - `github.com/cespare/xxhash/v2` v2.3.0, MIT
 - `github.com/charmbracelet/bubbletea` v1.3.10, MIT
@@ -44,6 +46,7 @@ Platforms: darwin/amd64, darwin/arm64, linux/amd64, linux/arm64.
 - `github.com/docker/go-units` v0.5.0, Apache-2.0
 - `github.com/dustin/go-humanize` v1.0.1, MIT
 - `github.com/emicklei/go-restful/v3` v3.13.0, MIT
+- `github.com/erikgeiser/coninput` v0.0.0-20211004153227-1c3628e74d0f, MIT
 - `github.com/felixge/httpsnoop` v1.1.0, MIT
 - `github.com/fxamacker/cbor/v2` v2.9.1, MIT
 - `github.com/go-logr/logr` v1.4.4, Apache-2.0
@@ -64,6 +67,7 @@ Platforms: darwin/amd64, darwin/arm64, linux/amd64, linux/arm64.
 - `github.com/go-openapi/swag/yamlutils` v0.27.1, Apache-2.0
 - `github.com/google/gnostic-models` v0.7.0, Apache-2.0
 - `github.com/google/uuid` v1.6.0, BSD-3-Clause
+- `github.com/inconshreveable/mousetrap` v1.1.0, Apache-2.0
 - `github.com/jackc/pgpassfile` v1.0.0, MIT
 - `github.com/jackc/pgservicefile` v0.0.0-20240606120523-5a60cdf6a761, MIT
 - `github.com/jackc/pgx/v5` v5.11.0, MIT
@@ -71,6 +75,7 @@ Platforms: darwin/amd64, darwin/arm64, linux/amd64, linux/arm64.
 - `github.com/json-iterator/go` v1.1.12, MIT
 - `github.com/lucasb-eyer/go-colorful` v1.4.0, MIT
 - `github.com/mattn/go-isatty` v0.0.24, MIT
+- `github.com/mattn/go-localereader` v0.0.1, MIT (declared in its README.md, no licence file shipped)
 - `github.com/mattn/go-runewidth` v0.0.24, MIT
 - `github.com/moby/docker-image-spec` v1.3.1, Apache-2.0
 - `github.com/moby/moby/api` v1.56.0, Apache-2.0

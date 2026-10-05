@@ -99,7 +99,7 @@ func TestThePlatformsAreStillTheOnesTheReleasePublishes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("released: %v", err)
 	}
-	want := "darwin/amd64, darwin/arm64, linux/amd64, linux/arm64"
+	want := "darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64"
 	if got := names(targets); got != want {
 		t.Errorf("the release builds %s, and this file was written against %s.\n"+
 			"Regenerate THIRD_PARTY_NOTICES.md and update this test together: a "+

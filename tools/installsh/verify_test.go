@@ -214,3 +214,27 @@ func TestAGoodInstallSaysItVerified(t *testing.T) {
 	out := s.install()
 	contains(t, out, "Checksum verified")
 }
+
+// A Windows shell that is not PowerShell. Git Bash, MSYS2 and Cygwin answer
+// uname with the name of their own layer, so the one line install somebody
+// already knew used to tell a Windows user to build from source, about a
+// platform that now has a release and an installer of its own. Each of the
+// three spellings is pointed at install.ps1, and nothing is downloaded first.
+func TestAWindowsShellIsSentToTheWindowsInstaller(t *testing.T) {
+	for _, uname := range []string{"MINGW64_NT-10.0-26100", "MSYS_NT-10.0-26100", "CYGWIN_NT-10.0-26100"} {
+		t.Run(uname, func(t *testing.T) {
+			s := newSession(t)
+			stub := "#!/bin/sh\ncase \"$1\" in -m) echo x86_64 ;; *) echo " + uname + " ;; esac\n"
+			if err := os.WriteFile(filepath.Join(s.stubs, "uname"), []byte(stub), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			out := refuses(t, s, "irm https://antifailure.dev/install.ps1 | iex")
+			if strings.Contains(out, "build from source") {
+				t.Errorf("a Windows shell was still told to build from source:\n%s", out)
+			}
+			if asked := s.github.paths(); len(asked) != 0 {
+				t.Errorf("the installer asked github.com for %v before refusing a platform it cannot install on", asked)
+			}
+		})
+	}
+}

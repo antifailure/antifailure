@@ -940,3 +940,67 @@ func mustLookPath(t *testing.T, name string) string {
 	}
 	return p
 }
+
+// af looks for the runner it shipped with relative to ITSELF, at
+// <bin>/../share/antifailure/runner, never under AF_PREFIX. The runner used to
+// go under AF_PREFIX whatever AF_BIN_DIR said, so an install into a custom bin
+// directory reported success with a runner `af runner install` could not find.
+func TestACustomBinDirKeepsTheRunnerWhereAFLooks(t *testing.T) {
+	s := newSession(t)
+	tools := filepath.Join(s.home, ".local")
+	s.env["AF_BIN_DIR"] = filepath.Join(tools, "bin")
+	s.install()
+
+	want := filepath.Join(tools, "share", "antifailure", "runner", "src", "main.ts")
+	if _, err := os.Stat(want); err != nil {
+		t.Errorf("with AF_BIN_DIR=%s the runner is not where af looks for it: %v", s.env["AF_BIN_DIR"], err)
+	}
+	if _, err := os.Stat(filepath.Join(s.home, ".antifailure", "share", "antifailure", "runner")); err == nil {
+		t.Error("the runner went under AF_PREFIX, where an af in a custom bin directory never looks")
+	}
+}
+
+// An upgrade that cannot write the new runner leaves the old installation as it
+// was. It used to replace af first and then rm -rf the old runner before
+// copying the new one, so a copy that failed left a new af and no runner.
+func TestAnUpgradeThatCannotWriteTheRunnerLeavesTheOldInstall(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can write a read only directory, so this cannot be provoked here")
+	}
+	s := newSession(t)
+	s.install()
+
+	share := filepath.Join(s.home, ".antifailure", "share", "antifailure")
+	marker := filepath.Join(share, "runner", "OLD")
+	if err := os.WriteFile(marker, []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	af := filepath.Join(s.binDir(), "af")
+	if err := os.WriteFile(af, []byte("#!/bin/sh\necho old\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The directory the new runner is staged in cannot take a new entry, so
+	// the copy fails before anything is replaced.
+	if err := os.Chmod(share, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(share, 0o755) })
+
+	out, err := s.run()
+	if err == nil {
+		t.Fatalf("the upgrade succeeded although the runner could not be written:\n%s", out)
+	}
+	contains(t, out, "nothing was installed")
+	if _, err := os.Stat(marker); err != nil {
+		t.Errorf("the old runner is gone after a failed upgrade: %v", err)
+	}
+	if body, _ := os.ReadFile(af); string(body) != "#!/bin/sh\necho old\n" {
+		t.Errorf("af was replaced by an upgrade that then failed, so it no longer matches its runner")
+	}
+	entries, _ := os.ReadDir(share)
+	for _, e := range entries {
+		if e.Name() != "runner" {
+			t.Errorf("a failed upgrade left %s behind in %s", e.Name(), share)
+		}
+	}
+}

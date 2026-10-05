@@ -1,0 +1,130 @@
+name: Windows install
+
+# The Windows installer, run on Windows, against the release this commit
+# builds.
+#
+# There is no Windows machine in this development loop, the same gap
+# keyring.yml was written for, so without this workflow install.ps1 and the
+# Windows archives would be code nobody had ever executed. Two jobs, because the
+# two questions are different: whether the installer keeps its promises, which
+# a fixture release answers, and whether the release this commit would publish
+# installs and runs, which only the real archives answer. Both are in the second
+# job, since the first needs nothing the second does not already have.
+#
+# Separate from ci.yml on purpose, as keyring.yml is: these runners are slower
+# and rarer than ubuntu-latest, and this runs only when what it covers changes.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'install.ps1'
+      - 'tools/installps1/**'
+      - 'tools/release/**'
+      - 'tools/reltar/**'
+      - 'runner/package.json'
+      - 'runner/package-lock.json'
+      - '.github/workflows/windows-install.yml'
+      # The matrix of what a release ships. A change to it alone has to run
+      # this, or the architectures published and the architectures tested
+      # here could drift apart with nothing going red.
+      - '.github/workflows/release.yml'
+  pull_request:
+    paths:
+      - 'install.ps1'
+      - 'tools/installps1/**'
+      - 'tools/release/**'
+      - 'tools/reltar/**'
+      - 'runner/package.json'
+      - 'runner/package-lock.json'
+      - '.github/workflows/windows-install.yml'
+      # The matrix of what a release ships. A change to it alone has to run
+      # this, or the architectures published and the architectures tested
+      # here could drift apart with nothing going red.
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Nothing reads a per commit conclusion from this workflow, so a superseded
+  # run on a branch is cancelled, and a run on main is left to finish, for the
+  # reasons keyring.yml gives at length.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+env:
+  # A version no release will ever carry, so nothing built here can be
+  # mistaken for a published artifact.
+  AF_CI_VERSION: v0.0.0-windows-ci
+
+jobs:
+  build:
+    name: build the Windows archives
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      # The script release.yml calls, with the arguments it passes, so what is
+      # installed below is what a tag would publish, apart from the version.
+      - name: Build both, the way a release does
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            ./tools/release/build.sh windows "$arch" \
+              "${AF_CI_VERSION#v}" "$GITHUB_SHA" "$(git show -s --format=%cI HEAD)" \
+              dist stage
+          done
+          cd dist
+          cat ./*.sha256 > checksums.txt
+          rm -f ./*.sha256
+          ls -l
+          cat checksums.txt
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-release
+          path: dist/
+          if-no-files-found: error
+
+  install:
+    name: install on ${{ matrix.runner }}
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both architectures the release ships, each on its own hardware, so
+        # the arm64 archive is installed and run natively rather than assumed
+        # from the amd64 one.
+        runner: [windows-latest, windows-11-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: tools/go.mod
+          cache-dependency-path: tools/go.sum
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-release
+          path: ${{ runner.temp }}/windows-release
+
+      # AF_INSTALLPS1_REQUIRED turns every skip in the package into a failure:
+      # not Windows, no Windows PowerShell 5.1, no PowerShell 7, or no built
+      # release handed over. So this step cannot pass having tested nothing.
+      - name: The installer, under 5.1 and 7, and the real release
+        working-directory: tools
+        env:
+          GOTOOLCHAIN: local
+          AF_INSTALLPS1_REQUIRED: '1'
+          AF_INSTALLPS1_DIST: ${{ runner.temp }}/windows-release
+          AF_INSTALLPS1_VERSION: ${{ env.AF_CI_VERSION }}
+        run: go test ./installps1/ -count=1 -v -timeout 20m

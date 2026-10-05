@@ -8432,11 +8432,74 @@ want ` + "`" + `af` + "`" + ` in a directory that is already on your PATH:
 curl -fsSL https://antifailure.dev/install.sh | AF_BIN_DIR=$HOME/.local/bin sh
 ` + "`" + "`" + "`" + `
 
-It moves the binary and nothing else. The runner still goes under ` + "`" + `AF_PREFIX` + "`" + `,
-which is ` + "`" + `~/.antifailure` + "`" + ` unless you set it too, and the PATH line the installer
-prints names the directory you chose. Both of these want a directory you can
+The runner goes beside it, in ` + "`" + `share/antifailure/runner` + "`" + ` next to the directory
+you named, so ` + "`" + `~/.local/bin` + "`" + ` puts it in ` + "`" + `~/.local/share/antifailure/runner` + "`" + `.
+That is where ` + "`" + `af` + "`" + ` looks for the runner it shipped with, relative to itself,
+and the PATH line the installer prints names the directory you chose. Both of these want a directory you can
 write to without ` + "`" + `sudo` + "`" + `; if the write fails the installer says which path it
 could not write and stops rather than installing half of a release.
+
+### On Windows
+
+In PowerShell, either the Windows PowerShell every machine has or PowerShell 7:
+
+` + "`" + "`" + "`" + `powershell
+irm https://antifailure.dev/install.ps1 | iex
+` + "`" + "`" + "`" + `
+
+It is the same installer with the same promises, written for PowerShell rather
+than translated into it. It finds the newest release the same way, refuses a
+download that does not match ` + "`" + `checksums.txt` + "`" + ` or that ` + "`" + `checksums.txt` + "`" + ` does not
+name, and says what GitHub answered when something does not arrive. It
+installs the build for your machine's architecture, ` + "`" + `amd64` + "`" + ` or ` + "`" + `arm64` + "`" + `, and on
+an Arm laptop it asks the machine rather than the PowerShell process, so an
+emulated x64 shell still gets the native build.
+
+` + "`" + `af.exe` + "`" + ` goes in ` + "`" + `%USERPROFILE%\.antifailure\bin` + "`" + ` and the runner in
+` + "`" + `%USERPROFILE%\.antifailure\share\antifailure\runner` + "`" + `. The bin directory is
+added to your user PATH, as ` + "`" + `%USERPROFILE%\.antifailure\bin` + "`" + ` so a moved
+profile does not leave a dead entry, and to the terminal you ran it in, so
+` + "`" + `af start` + "`" + ` works straight away. Remove the entry under Edit environment
+variables for your account to undo it. The settings are the same as on the
+other platforms, set as environment variables first:
+
+` + "`" + "`" + "`" + `powershell
+$env:AF_VERSION = '<tag>'; irm https://antifailure.dev/install.ps1 | iex
+` + "`" + "`" + "`" + `
+
+A release from before the Windows builds existed has no zip to install, and
+the installer says that the release does not include a build for Windows rather
+than installing something else.
+
+` + "`" + `AF_PREFIX` + "`" + `, ` + "`" + `AF_BIN_DIR` + "`" + ` and ` + "`" + `AF_NO_MODIFY_PATH` + "`" + ` work as they do above, and in
+GitHub Actions the bin directory goes to ` + "`" + `GITHUB_PATH` + "`" + ` instead. To upgrade, run
+the same line again: Windows will not overwrite a running program, so an
+` + "`" + `af.exe` + "`" + ` that an editor holds open as its MCP server is moved aside and the
+new one takes its name. The next ` + "`" + `af` + "`" + ` to start removes the old one once nothing
+is running it, as it does after ` + "`" + `af update` + "`" + `.
+
+Environments run in Linux containers, so Docker Desktop has to be in its Linux
+containers mode, which is its default. ` + "`" + `af doctor` + "`" + ` says so when it is not.
+
+` + "`" + `af.exe` + "`" + ` is not code signed yet. Installed this way it carries no mark of
+having been downloaded, which is what SmartScreen's warning keys on. A zip saved
+from the releases page in a browser does carry that mark, and the binary
+extracted from it can be stopped with "Windows protected your PC"; run
+` + "`" + `Unblock-File` + "`" + ` on the zip before extracting it.
+On Windows 11 with Smart App Control turned on, an unsigned program can be
+refused outright, and the way through is to install from WSL instead.
+
+### In WSL
+
+WSL 2 answers as Linux, so the Linux installer is the one to use there, and it
+installs the Linux build:
+
+` + "`" + "`" + "`" + `bash
+curl -fsSL https://antifailure.dev/install.sh | sh
+` + "`" + "`" + "`" + `
+
+` + "`" + `install.sh` + "`" + ` run from Git Bash, MSYS2 or Cygwin is not Linux, and it points
+you at ` + "`" + `install.ps1` + "`" + ` rather than installing anything.
 
 ## Find out where you are
 
@@ -14291,13 +14354,16 @@ Tokens expire after ninety days. ` + "`" + `af whoami` + "`" + ` says when.
 
 ## Where the credential is kept
 
-On macOS, the operating system keyring, under the service name ` + "`" + `antifailure` + "`" + `.
+In the operating system's own credential store, under the service name
+` + "`" + `antifailure` + "`" + `: the keychain on macOS, the Credential Manager on Windows, and on
+Linux the Secret Service, reached through ` + "`" + `secret-tool` + "`" + `, when that is installed.
 
-On Linux and Windows there is no keyring the engine can use yet, so the token
-goes in ` + "`" + `~/.antifailure/credentials/` + "`" + `, in a file with mode ` + "`" + `0600` + "`" + ` inside a
-directory with mode ` + "`" + `0700` + "`" + `. ` + "`" + `af login` + "`" + ` says which of the two happened rather
-than leaving you to find out, because a credential protected only by file
-permissions is a different thing from one the operating system is protecting.
+Where there is no such store, a Linux machine without ` + "`" + `secret-tool` + "`" + ` for
+instance, the token goes in ` + "`" + `~/.antifailure/credentials/` + "`" + `, in a file with mode
+` + "`" + `0600` + "`" + ` inside a directory with mode ` + "`" + `0700` + "`" + `. ` + "`" + `af login` + "`" + ` says which of the two
+happened rather than leaving you to find out, because a credential protected
+only by file permissions is a different thing from one the operating system is
+protecting.
 
 Neither is inside your repository. Nothing reads or writes a token in the
 working tree, so there is nothing for a commit or a support bundle to pick up.
@@ -28835,17 +28901,18 @@ a few minutes. Most people should do the first two.
 
 ## What a release contains
 
-Each tag publishes four archives, one per platform, plus the files you check
+Each tag publishes six archives, one per platform, plus the files you check
 them with.
 
 | File | What it is |
 | --- | --- |
-| ` + "`" + `antifailure_<version>_<os>_<arch>.tar.gz` + "`" + ` | The ` + "`" + `af` + "`" + ` binary, the agent runner's source, the licence and the README |
+| ` + "`" + `antifailure_<version>_<os>_<arch>.tar.gz` + "`" + ` | For macOS and Linux, ` + "`" + `amd64` + "`" + ` and ` + "`" + `arm64` + "`" + `: the ` + "`" + `af` + "`" + ` binary, the agent runner's source, the licence and the README |
+| ` + "`" + `antifailure_<version>_windows_<arch>.zip` + "`" + ` | For Windows, ` + "`" + `amd64` + "`" + ` and ` + "`" + `arm64` + "`" + `: the same, with the binary named ` + "`" + `af.exe` + "`" + `. Not code signed yet |
 | ` + "`" + `checksums.txt` + "`" + ` | The SHA256 of every archive |
 | ` + "`" + `checksums.txt.sigstore.json` + "`" + ` | A signature over ` + "`" + `checksums.txt` + "`" + `, with the certificate that made it |
 | ` + "`" + `sbom.spdx.json` + "`" + ` | An SPDX bill of materials, read out of the built binaries |
 | ` + "`" + `sbom.spdx.json.sigstore.json` + "`" + ` | A signature over the bill of materials |
-| ` + "`" + `THIRD_PARTY_NOTICES.md` + "`" + ` | Attribution, generated from what is actually linked, as the union over all four platforms |
+| ` + "`" + `THIRD_PARTY_NOTICES.md` + "`" + ` | Attribution, generated from what is actually linked, as the union over all six platforms |
 
 Only ` + "`" + `checksums.txt` + "`" + ` is signed rather than each archive. That is deliberate.
 ` + "`" + `checksums.txt` + "`" + ` names every archive by its hash, so one signature covers all of
@@ -29030,7 +29097,7 @@ of them goes red.
    a broken one. [Signing the tags too](#signing-the-tags-too) is what to set
    up if you want it to answer differently.
 
-4. Watch ` + "`" + `.github/workflows/release.yml` + "`" + `. It builds four platforms, packages
+4. Watch ` + "`" + `.github/workflows/release.yml` + "`" + `. It builds six platforms, packages
    each with ` + "`" + `tools/release/build.sh` + "`" + `, unpacks them so the bill of materials can
    read the binaries, signs ` + "`" + `checksums.txt` + "`" + ` and the bill of materials, verifies
    both signatures, proves a tampered file is rejected, and only then creates
@@ -31664,7 +31731,7 @@ cutting one.
 
 | Workflow | Triggered by | What it does |
 | --- | --- | --- |
-| ` + "`" + `.github/workflows/release.yml` + "`" + ` | ` + "`" + `push` + "`" + ` of a tag matching ` + "`" + `v*` + "`" + ` | Waits for CI, builds four platforms, packages, signs, and creates the GitHub release |
+| ` + "`" + `.github/workflows/release.yml` + "`" + ` | ` + "`" + `push` + "`" + ` of a tag matching ` + "`" + `v*` + "`" + ` | Waits for CI, builds six platforms, packages, signs, and creates the GitHub release |
 | ` + "`" + `.github/workflows/cd.yml` + "`" + ` | ` + "`" + `push` + "`" + ` to ` + "`" + `main` + "`" + ` **and** ` + "`" + `push` + "`" + ` of a tag matching ` + "`" + `v*` + "`" + ` | Waits for CI, builds the control plane image, applies staging's configuration from its tfvars and deploys staging, then waits for a human to approve production and does the same there |
 
 ` + "`" + `release.yml` + "`" + ` has a gate of its own, and until recently it did not. A ` + "`" + `gate` + "`" + `
@@ -31908,16 +31975,16 @@ empty conclusion are all reasons to wait.
 
 | Stage | Green looks like | Red means |
 | --- | --- | --- |
-| ` + "`" + `build darwin-arm64` + "`" + ` and its three siblings | Each uploads one ` + "`" + `.tar.gz` + "`" + ` and one ` + "`" + `.sha256` + "`" + ` | A compile failure, or a ` + "`" + `-X` + "`" + ` flag naming a symbol that no longer exists. ` + "`" + `just ldcheck` + "`" + ` locally is the same question |
+| ` + "`" + `build darwin-arm64` + "`" + ` and its five siblings | Each uploads one archive and one ` + "`" + `.sha256` + "`" + `: a ` + "`" + `.tar.gz` + "`" + ` for macOS and Linux, a ` + "`" + `.zip` + "`" + ` for Windows | A compile failure, or a ` + "`" + `-X` + "`" + ` flag naming a symbol that no longer exists. ` + "`" + `just ldcheck` + "`" + ` locally is the same question |
 | Third party notices | ` + "`" + `THIRD_PARTY_NOTICES.md` + "`" + ` regenerated from what is linked | A dependency whose licence the generator does not know |
-| Checksums | Four lines in ` + "`" + `checksums.txt` + "`" + ` | Fewer than four archives arrived, so a build job silently produced nothing |
-| Unpack | Four paths printed, one per platform | Two archives unpacked over each other, which would leave the bill of materials describing three of four binaries |
+| Checksums | Six lines in ` + "`" + `checksums.txt` + "`" + ` | Fewer than six archives arrived, so a build job silently produced nothing |
+| Unpack | Six paths printed, one per platform, four named ` + "`" + `af` + "`" + ` and two ` + "`" + `af.exe` + "`" + ` | Two archives unpacked over each other, or a zip left packed, which would leave the bill of materials describing fewer binaries than shipped |
 | Software bill of materials | An SPDX document written to ` + "`" + `dist/sbom.spdx.json` + "`" + ` | syft failed. The document is not published unless the next stage passes |
-| The bill of materials describes this release | ` + "`" + `sbomcheck: <n> packages, 4 binaries, every one described` + "`" + `, where n is in the hundreds | The count is the load bearing number and the floor is 50. A document listing one package is what syft produces when it is pointed at archives instead of binaries, and it is valid SPDX, so only this stage can tell you |
+| The bill of materials describes this release | ` + "`" + `sbomcheck: <n> packages, 6 binaries, every one described` + "`" + `, where n is in the hundreds | The count is the load bearing number and the floor is 50. A document listing one package is what syft produces when it is pointed at archives instead of binaries, and it is valid SPDX, so only this stage can tell you |
 | Sign the checksums and the bill of materials | Two ` + "`" + `.sigstore.json` + "`" + ` bundles written | Sigstore was unreachable, or the job lost ` + "`" + `id-token: write` + "`" + ` |
 | The signature verifies, and a changed byte does not | ` + "`" + `Verified OK` + "`" + ` twice, then ` + "`" + `a tampered checksums.txt was rejected, as it must be` + "`" + ` | Either half failing stops the release. The second half failing means cosign accepted a file that does not match its signature, and every verification instruction the project publishes is worthless until that is understood |
 | The release notes | ` + "`" + `tools/relnotes` + "`" + ` prints the notes it wrote, opening with the verification instructions and then this version's changelog section | ` + "`" + `CHANGELOG.md` + "`" + ` has no ` + "`" + `## vX.Y.Z` + "`" + ` section for this tag, or the section is empty. ` + "`" + `just relnotes` + "`" + ` before tagging is the same question, and the only remedy here is deleting a tag people may already have fetched |
-| Release | The tag appears under Releases with nine assets | The publish itself failed. A ` + "`" + `files:` + "`" + ` pattern matching nothing is one of the ways, because ` + "`" + `fail_on_unmatched_files` + "`" + ` is set, which turns the silent version of this into a red stage. Nothing was signed with a key, so there is nothing to revoke |
+| Release | The tag appears under Releases with eleven assets | The publish itself failed. A ` + "`" + `files:` + "`" + ` pattern matching nothing is one of the ways, because ` + "`" + `fail_on_unmatched_files` + "`" + ` is set, which turns the silent version of this into a red stage. Nothing was signed with a key, so there is nothing to revoke |
 
 ### The two stages to watch, and the two checks only a person can do
 
@@ -34103,10 +34170,11 @@ others are fine.
 | Website | ` + "`" + `antifailure.dev/` + "`" + ` | The marketing site. |
 | Documentation | ` + "`" + `antifailure.dev/docs` + "`" + ` | Every error the engine prints ends in a link to a page here. A publish that drops the subtree breaks all of them. |
 | CLI installer | ` + "`" + `antifailure.dev/install.sh` + "`" + ` | What ` + "`" + `curl` + "`" + ` is piped from. It is placed by the site assembly. |
+| Windows installer | ` + "`" + `antifailure.dev/install.ps1` + "`" + ` | What PowerShell's ` + "`" + `irm` + "`" + ` is piped from. Placed by the same assembly, with its type declared in the host config as plain text, which is what ` + "`" + `irm` + "`" + ` hands to ` + "`" + `iex` + "`" + ` as a script. |
 | Site API | ` + "`" + `antifailure.dev/api` + "`" + ` | A managed function, not a static file. It can be present and refuse every request. |
 | Control plane, staging | ` + "`" + `app.dev.antifailure.dev/readyz` + "`" + ` | Where ` + "`" + `main` + "`" + ` lands first. Listed as pre-production, because it is not a customer surface and should never be read as one. |
 
-The first two share a process and the next four share a Static Web App, so an
+The first two share a process and the next five share a Static Web App, so an
 outage of one will often show as an outage of its neighbours.
 
 ## What a check asserts

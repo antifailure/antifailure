@@ -147,8 +147,15 @@ var (
 
 // fileRule says what a file named like a licence is, when it is not a licence
 // this tool names. reproduce carries the file into the notices verbatim.
+//
+// declares is the other direction: a module that ships NO licence file and
+// states its licence in another file, a README's License heading. The rule
+// names the licence, and the file is still read every run and has to say it,
+// under a License heading, so a README that changes its terms fails the run
+// rather than leaving a rule asserting what the module no longer says.
 type fileRule struct {
 	reproduce bool
+	declares  string
 	reason    string
 }
 
@@ -158,6 +165,10 @@ type fileRule struct {
 // .govulncheck.yaml's entries do: a rule about a file that is not there
 // describes nothing, and it would silently cover whatever takes that name next.
 var fileRules = map[string]fileRule{
+	"github.com/mattn/go-localereader README.md": {
+		declares: "MIT",
+		reason:   "the module ships no licence file and states its licence as MIT under the License heading of its README, the only place its author wrote one; it is linked only into the Windows builds, through bubbletea's Windows console input",
+	},
 	"modernc.org/memory LICENSE-LOGO": {
 		reason: "a single link to the project's logo image, which is not a licence and is not part of the binary",
 	},
@@ -217,9 +228,27 @@ func attributeOne(m module, rules map[string]fileRule, used map[string]bool) (mo
 	ids := map[string]bool{}
 	var problems []string
 	sawLicence := false
+	declared := ""
 	for _, e := range entries {
 		name := e.Name()
 		isLicence, isNotice := licenceFile.MatchString(name), noticeFile.MatchString(name)
+		if rule, ok := rules[m.Path+" "+name]; ok && rule.declares != "" && !e.IsDir() {
+			used[m.Path+" "+name] = true
+			body, err := os.ReadFile(filepath.Join(m.Dir, name))
+			if err != nil {
+				problems = append(problems, fmt.Sprintf("%s: reading %s: %v", m.Path, name, err))
+				continue
+			}
+			if !declaresLicence(string(body), rule.declares) {
+				problems = append(problems, fmt.Sprintf("%s %s: the rule says %s declares %s under a "+
+					"License heading, and it no longer does; read what it says now and decide again",
+					m.Path, m.Version, name, rule.declares))
+				continue
+			}
+			declared = name
+			ids[rule.declares] = true
+			continue
+		}
 		if e.IsDir() || (!isLicence && !isNotice) {
 			continue
 		}
@@ -261,6 +290,8 @@ func attributeOne(m module, rules map[string]fileRule, used map[string]bool) (mo
 	}
 
 	switch {
+	case !sawLicence && declared != "":
+		m.DeclaredIn = declared
 	case !sawLicence:
 		problems = append(problems, fmt.Sprintf("%s %s ships no licence file at all", m.Path, m.Version))
 	case len(ids) == 0 && len(problems) == 0:
@@ -275,6 +306,15 @@ func attributeOne(m module, rules map[string]fileRule, used map[string]bool) (mo
 	sort.Strings(names)
 	m.Licence = strings.Join(names, " AND ")
 	return m, problems
+}
+
+// declaresLicence reports whether a document states the licence under a
+// License heading: the heading, then the identifier as the first thing after
+// it. A README that merely mentions the word somewhere is not a declaration.
+func declaresLicence(doc, id string) bool {
+	pattern := `(?im)^#{1,6}[ \t]*licen[cs]e[ \t]*\r?\n(?:[ \t]*\r?\n)*[ \t]*` +
+		regexp.QuoteMeta(id) + `[ \t.]*\r?$`
+	return regexp.MustCompile(pattern).MatchString(doc)
 }
 
 // fenceFor returns a code fence longer than any run of backticks in the text,

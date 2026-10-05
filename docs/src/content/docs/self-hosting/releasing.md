@@ -22,7 +22,7 @@ cutting one.
 
 | Workflow | Triggered by | What it does |
 | --- | --- | --- |
-| `.github/workflows/release.yml` | `push` of a tag matching `v*` | Waits for CI, builds four platforms, packages, signs, and creates the GitHub release |
+| `.github/workflows/release.yml` | `push` of a tag matching `v*` | Waits for CI, builds six platforms, packages, signs, and creates the GitHub release |
 | `.github/workflows/cd.yml` | `push` to `main` **and** `push` of a tag matching `v*` | Waits for CI, builds the control plane image, applies staging's configuration from its tfvars and deploys staging, then waits for a human to approve production and does the same there |
 
 `release.yml` has a gate of its own, and until recently it did not. A `gate`
@@ -266,16 +266,16 @@ empty conclusion are all reasons to wait.
 
 | Stage | Green looks like | Red means |
 | --- | --- | --- |
-| `build darwin-arm64` and its three siblings | Each uploads one `.tar.gz` and one `.sha256` | A compile failure, or a `-X` flag naming a symbol that no longer exists. `just ldcheck` locally is the same question |
+| `build darwin-arm64` and its five siblings | Each uploads one archive and one `.sha256`: a `.tar.gz` for macOS and Linux, a `.zip` for Windows | A compile failure, or a `-X` flag naming a symbol that no longer exists. `just ldcheck` locally is the same question |
 | Third party notices | `THIRD_PARTY_NOTICES.md` regenerated from what is linked | A dependency whose licence the generator does not know |
-| Checksums | Four lines in `checksums.txt` | Fewer than four archives arrived, so a build job silently produced nothing |
-| Unpack | Four paths printed, one per platform | Two archives unpacked over each other, which would leave the bill of materials describing three of four binaries |
+| Checksums | Six lines in `checksums.txt` | Fewer than six archives arrived, so a build job silently produced nothing |
+| Unpack | Six paths printed, one per platform, four named `af` and two `af.exe` | Two archives unpacked over each other, or a zip left packed, which would leave the bill of materials describing fewer binaries than shipped |
 | Software bill of materials | An SPDX document written to `dist/sbom.spdx.json` | syft failed. The document is not published unless the next stage passes |
-| The bill of materials describes this release | `sbomcheck: <n> packages, 4 binaries, every one described`, where n is in the hundreds | The count is the load bearing number and the floor is 50. A document listing one package is what syft produces when it is pointed at archives instead of binaries, and it is valid SPDX, so only this stage can tell you |
+| The bill of materials describes this release | `sbomcheck: <n> packages, 6 binaries, every one described`, where n is in the hundreds | The count is the load bearing number and the floor is 50. A document listing one package is what syft produces when it is pointed at archives instead of binaries, and it is valid SPDX, so only this stage can tell you |
 | Sign the checksums and the bill of materials | Two `.sigstore.json` bundles written | Sigstore was unreachable, or the job lost `id-token: write` |
 | The signature verifies, and a changed byte does not | `Verified OK` twice, then `a tampered checksums.txt was rejected, as it must be` | Either half failing stops the release. The second half failing means cosign accepted a file that does not match its signature, and every verification instruction the project publishes is worthless until that is understood |
 | The release notes | `tools/relnotes` prints the notes it wrote, opening with the verification instructions and then this version's changelog section | `CHANGELOG.md` has no `## vX.Y.Z` section for this tag, or the section is empty. `just relnotes` before tagging is the same question, and the only remedy here is deleting a tag people may already have fetched |
-| Release | The tag appears under Releases with nine assets | The publish itself failed. A `files:` pattern matching nothing is one of the ways, because `fail_on_unmatched_files` is set, which turns the silent version of this into a red stage. Nothing was signed with a key, so there is nothing to revoke |
+| Release | The tag appears under Releases with eleven assets | The publish itself failed. A `files:` pattern matching nothing is one of the ways, because `fail_on_unmatched_files` is set, which turns the silent version of this into a red stage. Nothing was signed with a key, so there is nothing to revoke |
 
 ### The two stages to watch, and the two checks only a person can do
 

@@ -41,7 +41,18 @@ dist=$(cd "$dist" && pwd)
 stage=$(cd "$stage" && pwd)
 
 name="antifailure_${version}_${goos}_${goarch}"
-binary="$stage/$name/af"
+
+# Windows is the one platform whose binary needs an extension and whose people
+# need a different archive. Without .exe the file is not runnable by name from
+# PowerShell or cmd at all, and Explorer and Expand-Archive open a zip and do
+# not open a .tar.gz. Every other platform is unchanged, byte for byte.
+exe=""
+ext="tar.gz"
+if [ "$goos" = "windows" ]; then
+  exe=".exe"
+  ext="zip"
+fi
+binary="$stage/$name/af$exe"
 mkdir -p "$stage/$name/runner"
 
 # Static, so the binary runs on a distroless image and on a distribution whose
@@ -84,8 +95,11 @@ cp "$root/LICENSE" "$root/README.md" "$root/THIRD_PARTY_NOTICES.md" "$stage/$nam
 # into the header, so the archive carried the wall clock twice over. The
 # binaries were reproducible and the archives never were, which matters because
 # the archive is what a person downloads and what checksums.txt names.
-go run "$root/tools/reltar" -C "$stage" -o "$dist/$name.tar.gz" -mtime "$commit_date" "$name"
+#
+# The format follows the extension, and reltar writes the zip under the same
+# rules as the tar: sorted, one mtime, one compression level, normalised modes.
+go run "$root/tools/reltar" -C "$stage" -o "$dist/$name.$ext" -mtime "$commit_date" "$name"
 
-(cd "$dist" && shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256")
+(cd "$dist" && shasum -a 256 "$name.$ext" > "$name.$ext.sha256")
 
-echo "$dist/$name.tar.gz"
+echo "$dist/$name.$ext"
