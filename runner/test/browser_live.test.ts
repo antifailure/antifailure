@@ -68,9 +68,12 @@ test('a web Session pumps a real JPEG frame through the sink to a watcher', asyn
 });
 
 test('a web run streams agent lifecycle and steps to a watcher', async () => {
+  // The watcher first: if it cannot listen, nothing else has been opened yet.
+  // The other way round, a refused listen left the application's server
+  // holding the event loop, and the file sat out the whole test timeout.
+  const c = await collector('af-blive');
   const app = application();
   const baseURL = await app.url;
-  const c = await collector('af-blive');
   const sink = socketSink(c.path);
   const artifacts = mkdtempSync(join(tmpdir(), 'af-art-'));
   try {
