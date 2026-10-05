@@ -9,6 +9,7 @@ import {
   chromium, devices, type Browser, type BrowserContext, type Page as PWPage,
 } from 'playwright';
 import type { Request as PWRequest, Response as PWResponse } from 'playwright';
+import * as nodePath from 'node:path';
 import type { Page } from './login.ts';
 import type { Snapshot } from './workflow.ts';
 import { FramePump, type LiveSink } from './live.ts';
@@ -28,6 +29,16 @@ import { FramePump, type LiveSink } from './live.ts';
  * pattern matches nothing at all, and the fill times out after ten seconds
  * with an error naming the regex and not the reason.
  */
+// artifactPath names a workflow's evidence file inside the artifacts directory.
+// It joins with the platform's own separator, because the engine hands this
+// runner a native directory and prints the path it gets back: a forward slash
+// glued onto C:\work\app\.antifailure\artifacts\env read on Windows as a
+// path in two styles at once. The path module is a parameter so a test on any
+// platform can hold it to Windows' rules.
+export function artifactPath(dir: string, file: string, path: typeof nodePath = nodePath): string {
+  return path.join(dir, file);
+}
+
 function unanchored(field: RegExp): RegExp {
   return new RegExp(field.source.replace(/^\^/, '').replace(/\$$/, ''), field.flags);
 }
@@ -757,7 +768,7 @@ export class Session {
     // page finally answered at eight, so the budget capped the verdict and not
     // the time. Bounded, the screenshot is skipped when it cannot be taken and
     // the trace, which is the thing to open, is still kept.
-    const screenshot = `${this.#artifacts}/${safe}.png`;
+    const screenshot = artifactPath(this.#artifacts, `${safe}.png`);
     await this.#page.screenshot({
       path: screenshot, fullPage: true,
       ...(options.interrupted ? { timeout: INTERRUPTED_SCREENSHOT_MS } : {}),
@@ -766,7 +777,7 @@ export class Session {
       () => undefined,
     );
 
-    const trace = `${this.#artifacts}/${safe}.trace.zip`;
+    const trace = artifactPath(this.#artifacts, `${safe}.trace.zip`);
     await this.#context.tracing.stop({ path: trace }).then(
       () => { evidence.trace = trace; },
       () => undefined,

@@ -7,7 +7,7 @@ import { mkdtempSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Session } from '../src/browser.ts';
+import { Session, artifactPath } from '../src/browser.ts';
 import { run, type WorkflowResult } from '../src/execute.ts';
 import { explore, type Goal } from '../src/explore.ts';
 import { exitCodeFor } from '../src/verdict.ts';
@@ -1393,4 +1393,21 @@ test('the session bounds captured bodies by declared length and by truncation', 
     await session.close('caps').catch(() => undefined);
     app.close();
   }
+});
+
+// The evidence paths a run hands back are printed to the person who ran it. On
+// Windows they were the native artifacts directory with a forward slash glued
+// on, C:\work\app\.antifailure\artifacts\env/flow-1.trace.zip, which Node opens
+// but nobody should have to read. Held to Windows' rules here so a macOS or
+// Linux run of this suite can still say no.
+test('an evidence path is joined in the platform separator, not with a forward slash', async () => {
+  const { win32, posix } = await import('node:path');
+  assert.equal(
+    artifactPath('C:\\work\\app\\.antifailure\\artifacts\\env', 'flow-1.trace.zip', win32),
+    'C:\\work\\app\\.antifailure\\artifacts\\env\\flow-1.trace.zip',
+  );
+  assert.equal(
+    artifactPath('/work/app/.antifailure/artifacts/env', 'flow-1.png', posix),
+    '/work/app/.antifailure/artifacts/env/flow-1.png',
+  );
 });
