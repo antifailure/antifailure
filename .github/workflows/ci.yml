@@ -122,7 +122,8 @@ jobs:
       # rather than skip when CI is set, so a missing zsh fails loudly here
       # instead of passing quietly.
       - name: The shell the installer tests drive
-        run: sudo apt-get update && sudo apt-get install -y zsh
+        timeout-minutes: 10
+        run: tools/ci/apt-network.sh && sudo apt-get update && sudo apt-get install -y zsh
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -145,7 +146,8 @@ jobs:
         working-directory: runner
 
       - name: Install the browser
-        run: npx playwright install --with-deps chromium
+        timeout-minutes: 10
+        run: ../tools/ci/install-browser.sh
         working-directory: runner
 
       - name: The generators run, most of them with the tests of the packages they live in
@@ -589,6 +591,7 @@ jobs:
           fi
 
       - name: A pg_dump new enough to read that Postgres
+        timeout-minutes: 10
         # The step below starts a Postgres 17, matching `just db` so local and
         # CI agree. The runner ships a 16 client, and pg_dump refuses outright
         # to read a server newer than itself. pgcopy detects that and refuses
@@ -613,6 +616,7 @@ jobs:
           sudo install -m 0644 .github/keys/apt.postgresql.org.asc /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
             | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          tools/ci/apt-network.sh
           sudo apt-get -o Acquire::Retries=5 update -qq
           sudo apt-get -o Acquire::Retries=5 install -y -qq postgresql-client-17
           # Proof, not hope: the version that will actually be chosen.
@@ -1159,7 +1163,8 @@ jobs:
         working-directory: runner
 
       - name: Install the browser
-        run: npx playwright install --with-deps chromium
+        timeout-minutes: 10
+        run: ../tools/ci/install-browser.sh
         working-directory: runner
 
       - name: Typecheck
@@ -1195,7 +1200,9 @@ jobs:
           cache: npm
           cache-dependency-path: sdk/typescript/package-lock.json
       - name: Install replay prerequisites
+        timeout-minutes: 10
         run: |
+          tools/ci/apt-network.sh
           sudo apt-get update
           sudo apt-get install -y postgresql-client
           npm --prefix sdk/typescript ci --no-audit --no-fund
@@ -1762,6 +1769,7 @@ jobs:
           cache-dependency-path: engine/go.sum
 
       - name: A pg_dump new enough for the servers those suites build
+        timeout-minutes: 10
         # The same step the engine job carries, and for the same reason. This
         # job runs the engine's own suites too, and several of them build a
         # Postgres 17 and copy a schema out of it. The runner ships a 16
@@ -1782,6 +1790,7 @@ jobs:
           sudo install -m 0644 .github/keys/apt.postgresql.org.asc /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
             | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          tools/ci/apt-network.sh
           sudo apt-get -o Acquire::Retries=5 update -qq
           sudo apt-get -o Acquire::Retries=5 install -y -qq postgresql-client-17
           test -x /usr/lib/postgresql/17/bin/pg_dump

@@ -76,6 +76,7 @@ jobs:
           cache-dependency-path: tools/go.sum
 
       - name: Install the runner and its browser
+        timeout-minutes: 10
         # The product's own agent, not a second browser harness beside it.
         # `af runner install` resolves the same dependencies; this job installs
         # them directly because it has no engine binary and needs no
@@ -96,7 +97,7 @@ jobs:
         # was the one site that still installed from the root.
         run: |
           npm ci --no-audit --no-fund
-          npx playwright install --with-deps chromium
+          ../tools/ci/install-browser.sh
         working-directory: runner
 
       - name: Drive the careers form on every hostname
