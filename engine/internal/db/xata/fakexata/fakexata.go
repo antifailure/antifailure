@@ -34,7 +34,9 @@
 package fakexata
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -44,6 +46,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the pgx driver
@@ -56,6 +59,31 @@ import (
 var descriptionPattern = regexp.MustCompile(`^([a-zA-Z0-9][a-zA-Z0-9\-_./: ]*)?$`)
 
 const descriptionMax = 255
+
+// databaseSeq and processTag make every database this package creates unique
+// on the Postgres it shares with every other fake in the run.
+//
+// The name used to be the clock's nanoseconds modulo a million and a counter
+// that every Server starts at one. Each conformance case builds its own
+// Server, so the counter told two Servers apart not at all, and the clock did
+// it only where the clock is fine: on Windows two Servers built close together
+// read the same value, and the second one's root branch failed with
+// `database "af_fake_xata_530700_1" already exists` (engine on Windows on
+// #663, 2026-10-06). The sequence is per process, so it cannot repeat inside a
+// run, and the random tag keeps two processes, or a database an earlier run
+// left behind, from meeting either.
+var (
+	databaseSeq atomic.Uint64
+	processTag  = newProcessTag()
+)
+
+func newProcessTag() string {
+	b := make([]byte, 4)
+	if _, err := rand.Read(b); err != nil {
+		panic("fakexata: no randomness for a database name: " + err.Error())
+	}
+	return hex.EncodeToString(b)
+}
 
 // Options configure the fake.
 type Options struct {
@@ -281,7 +309,7 @@ func (s *Server) newBranch(name, parent, description string) *branch {
 		CreatedAt:   time.Now().UTC(),
 		UpdatedAt:   time.Now().UTC(),
 		Region:      "us-east-1",
-		dbName:      fmt.Sprintf("af_fake_xata_%d_%d", time.Now().UnixNano()%1000000, s.next),
+		dbName:      fmt.Sprintf("af_fake_xata_%s_%d", processTag, databaseSeq.Add(1)),
 		pending:     s.pendingPolls,
 	}
 	if parent != "" {
