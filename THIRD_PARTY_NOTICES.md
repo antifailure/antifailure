@@ -792,7 +792,7 @@ says so.
 - `pkce-challenge` 5.0.1, MIT
 - `postgres` 3.4.9, Unlicense (declared, no licence file shipped)
 - `posthog-node` 5.55.0, Apache-2.0 AND MIT
-- `proxy-addr` 2.0.7, MIT
+- `proxy-addr` 2.0.8, MIT
 - `qs` 6.16.0, BSD-3-Clause
 - `range-parser` 1.3.0, MIT
 - `raw-body` 3.0.2, MIT
