@@ -241,6 +241,56 @@ test('runTerminal drives a full screen program and judges the rendered screen', 
   assert.match(drawn.at(-1)!, /Eleven posts are live\./);
 });
 
+test('runTerminal records the screen a slow program opens on before it sends a key', {
+  // Only ConPTY writes its own setup before the program, which is what made
+  // this defect possible. Elsewhere the fixture's invisible bytes are the
+  // program's own, so it has answered, and the next test holds that side.
+  skip: process.platform === 'win32' ? false : 'only ConPTY writes before the program; the blank screen test covers the rest',
+}, async () => {
+  // Found on windows-latest, where ConPTY writes its own setup before the
+  // program draws. The driver took those bytes for the program's first screen,
+  // captured a blank grid, sent the first arrow while node was still starting,
+  // and recorded the menu only after the arrow had moved it: the screen the
+  // program opened on was never seen.
+  const results = await runTerminal({
+    workflows: [{
+      name: 'inbox, slowly',
+      command: execPath,
+      args: [fixture('slow-start-tui.mjs')],
+      screen: { rows: 12, cols: 50 },
+      input: ['<down>', '<down>', '<enter>', 'q'],
+      expect: ['"Eleven posts are live."'],
+    }],
+  });
+  const result = results[0]!;
+  assert.equal(result.outcome.verdict, 'pass', result.outcome.detail);
+  const drawn = screens(result);
+  assert.match(drawn[0]!, /> Drafts/, 'the opening screen was not recorded before the first key');
+  assert.ok(drawn.some((s) => /> Scheduled/.test(s)), 'the first arrow never moved the selection');
+});
+
+test('runTerminal sends the first key promptly to a program that opens on a blank screen', {
+  skip: process.platform === 'win32' ? 'ConPTY speaks first, so a blank opening waits like a silent one there' : false,
+}, async () => {
+  // A program that takes the screen, clears it and waits for a key has
+  // answered. Waiting for it to draw a character it will only draw after the
+  // key spent the opening settle's whole ceiling, and a budget shorter than
+  // that ran out before the first key was ever sent.
+  const results = await runTerminal({
+    workflows: [{
+      name: 'blank until a key',
+      command: execPath,
+      args: [fixture('blank-until-key.mjs')],
+      screen: { rows: 6, cols: 40 },
+      maxMs: 2_000,
+      input: ['x'],
+      expect: ['"got x"'],
+    }],
+  });
+  const result = results[0]!;
+  assert.equal(result.outcome.verdict, 'pass', result.outcome.detail);
+});
+
 test('runTerminal fails when the screen never shows what was expected', async () => {
   // The same run as above with one word changed, so a pass and a fail differ
   // in the expectation and in nothing else. A driver that could not produce
