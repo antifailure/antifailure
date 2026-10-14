@@ -1,13 +1,13 @@
 {
   "counted_through": {
-    "console": "2026-10-14T20:36:04Z",
-    "control-plane-api": "2026-10-14T20:36:04Z",
-    "docs": "2026-10-14T20:36:05Z",
-    "installer": "2026-10-14T20:36:07Z",
-    "site-api": "2026-10-14T20:36:09Z",
-    "staging": "2026-10-14T20:36:09Z",
-    "website": "2026-10-14T20:36:05Z",
-    "installer-windows": "2026-10-14T20:36:07Z"
+    "console": "2026-10-14T23:24:41Z",
+    "control-plane-api": "2026-10-14T23:24:41Z",
+    "docs": "2026-10-14T23:24:42Z",
+    "installer": "2026-10-14T23:24:43Z",
+    "site-api": "2026-10-14T23:24:45Z",
+    "staging": "2026-10-14T23:24:45Z",
+    "website": "2026-10-14T23:24:42Z",
+    "installer-windows": "2026-10-14T23:24:43Z"
   },
   "days": [
     {
@@ -265,8 +265,8 @@
     {
       "id": "console",
       "day": "2026-10-14",
-      "checks": 5,
-      "ok": 5
+      "checks": 6,
+      "ok": 6
     },
     {
       "id": "control-plane-api",
@@ -523,8 +523,8 @@
     {
       "id": "control-plane-api",
       "day": "2026-10-14",
-      "checks": 5,
-      "ok": 5
+      "checks": 6,
+      "ok": 6
     },
     {
       "id": "docs",
@@ -781,8 +781,8 @@
     {
       "id": "docs",
       "day": "2026-10-14",
-      "checks": 5,
-      "ok": 5
+      "checks": 6,
+      "ok": 6
     },
     {
       "id": "installer",
@@ -1039,8 +1039,8 @@
     {
       "id": "installer",
       "day": "2026-10-14",
-      "checks": 5,
-      "ok": 5
+      "checks": 6,
+      "ok": 6
     },
     {
       "id": "installer-windows",
@@ -1099,8 +1099,8 @@
     {
       "id": "installer-windows",
       "day": "2026-10-14",
-      "checks": 5,
-      "ok": 5
+      "checks": 6,
+      "ok": 6
     },
     {
       "id": "site-api",
@@ -1357,8 +1357,8 @@
     {
       "id": "site-api",
       "day": "2026-10-14",
-      "checks": 5,
-      "ok": 5
+      "checks": 6,
+      "ok": 6
     },
     {
       "id": "staging",
@@ -1627,8 +1627,8 @@
     {
       "id": "staging",
       "day": "2026-10-14",
-      "checks": 5,
-      "ok": 5
+      "checks": 6,
+      "ok": 6
     },
     {
       "id": "website",
@@ -1885,8 +1885,8 @@
     {
       "id": "website",
       "day": "2026-10-14",
-      "checks": 5,
-      "ok": 5
+      "checks": 6,
+      "ok": 6
     }
   ]
 }
