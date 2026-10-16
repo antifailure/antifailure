@@ -170,11 +170,20 @@ func securityFindings(
 		findings, probeErr := fam.Probe(ctx, in)
 		if probeErr != nil {
 			// A blocked probe is a fact about our tooling, never a verdict about
-			// the change, so it is a note and not a finding.
-			run.Notes = append(run.Notes, fmt.Sprintf(
-				"the %s security family could not complete, so it reached no verdict: %s",
-				fam.Name(), probeErr.Error()))
-			continue
+			// the change, so it is a note and not a finding. A family that proved
+			// something before it was stopped returns those findings beside the
+			// error, and they are kept: a hole it exercised is no less proven for
+			// the comparisons it could not make afterwards, and dropping it would
+			// turn "incomplete" into "clean".
+			if len(findings) == 0 {
+				run.Notes = append(run.Notes, fmt.Sprintf(
+					"the %s security family could not complete, so it reached no verdict: %s",
+					fam.Name(), probeErr.Error()))
+			} else {
+				run.Notes = append(run.Notes, fmt.Sprintf(
+					"the %s security family could not complete, so what it did not reach is unjudged rather than clean: %s",
+					fam.Name(), probeErr.Error()))
+			}
 		}
 		out = append(out, findings...)
 	}
