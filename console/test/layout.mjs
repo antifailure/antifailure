@@ -37,7 +37,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const out = path.resolve(here, "..", "out");
+// AF_LAYOUT_OUT and AF_LAYOUT_LAUNCH_MS exist for layout.test.mjs, which drives
+// this script against a fake browser to prove a failed launch ends the run.
+const out = process.env.AF_LAYOUT_OUT ? path.resolve(process.env.AF_LAYOUT_OUT) : path.resolve(here, "..", "out");
+const LAUNCH_MS = Number(process.env.AF_LAYOUT_LAUNCH_MS) || 20_000;
 const fixture = JSON.parse(readFileSync(path.join(here, "layout-fixture.json"), "utf8"));
 
 // Phone widths stack the table; 640 is the first width it is a table again and
@@ -157,32 +160,46 @@ async function launch(binary) {
     ],
     { stdio: ["ignore", "ignore", "pipe"] },
   );
-  const endpoint = await new Promise((resolve, reject) => {
-    let seen = "";
-    const timer = setTimeout(() => reject(new Error(`the browser never announced a debugging port: ${seen.slice(-400)}`)), 20_000);
-    child.stderr.on("data", (chunk) => {
-      seen += chunk.toString();
-      const match = seen.match(/DevTools listening on (ws:\/\/\S+)/);
-      if (match) {
+  // Waits for the process to be gone before removing its profile, because a
+  // browser still flushing into the directory makes the removal fail.
+  async function close() {
+    if (child.exitCode === null && child.signalCode === null) {
+      const gone = new Promise((resolve) => child.once("exit", resolve));
+      child.kill("SIGKILL");
+      await gone;
+    }
+    rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
+  }
+  let endpoint;
+  try {
+    endpoint = await new Promise((resolve, reject) => {
+      let seen = "";
+      const timer = setTimeout(
+        () => reject(new Error(`the browser never announced a debugging port: ${seen.slice(-400)}`)),
+        LAUNCH_MS,
+      );
+      child.stderr.on("data", (chunk) => {
+        seen += chunk.toString();
+        const match = seen.match(/DevTools listening on (ws:\/\/\S+)/);
+        if (match) {
+          clearTimeout(timer);
+          resolve(match[1]);
+        }
+      });
+      child.on("exit", (code) => {
         clearTimeout(timer);
-        resolve(match[1]);
-      }
+        reject(new Error(`the browser exited with ${code}: ${seen.slice(-400)}`));
+      });
     });
-    child.on("exit", (code) => reject(new Error(`the browser exited with ${code}: ${seen.slice(-400)}`)));
-  });
-  return {
-    endpoint,
-    // Waits for the process to be gone before removing its profile, because a
-    // browser still flushing into the directory makes the removal fail.
-    async close() {
-      if (child.exitCode === null) {
-        const gone = new Promise((resolve) => child.once("exit", resolve));
-        child.kill("SIGKILL");
-        await gone;
-      }
-      rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
-    },
-  };
+  } catch (error) {
+    // A browser that never announced a port is still running and still holds
+    // its stderr pipe open. Left alive, it kept the whole script alive after
+    // the failure was printed, and the www job sat silent until its own
+    // timeout cancelled it, which reads as a slow job rather than a refusal.
+    await close();
+    throw error;
+  }
+  return { endpoint, close };
 }
 
 function connect(url) {
@@ -287,9 +304,13 @@ async function main() {
   }
   const server = await serve();
   const base = `http://127.0.0.1:${server.address().port}`;
-  const browser = await launch(binary);
-  const client = await connect(browser.endpoint);
+  // Everything started from here is released in the finally, including when
+  // the browser never comes up: the listening server alone keeps Node alive.
+  let browser;
+  let client;
   try {
+    browser = await launch(binary);
+    client = await connect(browser.endpoint);
     const { targetId } = await client.send("Target.createTarget", { url: "about:blank" });
     const { sessionId } = await client.send("Target.attachToTarget", { targetId, flatten: true });
     await client.send("Page.enable", {}, sessionId);
@@ -315,14 +336,34 @@ async function main() {
       else console.log(`layout: ${width} ok, nothing in the verdicts is clipped (document ${m.docWidth}px)`);
     }
   } finally {
-    client.close();
+    client?.close();
     server.close();
-    await browser.close();
+    server.closeAllConnections();
+    await browser?.close();
   }
   if (process.exitCode) console.error("layout: FAILED");
   else console.log(`layout: all ${WIDTHS.length} widths measured, none clipped`);
 }
 
-main().catch((error) => {
-  fail(error instanceof Error ? error.message : String(error));
-});
+// The run ends when the verdict is printed, whatever is still open. A handle
+// nobody released must cost a leaked process, never a check that hangs until
+// the job is cancelled and so never says no.
+//
+// It exits only once both streams have flushed. Writes to a pipe are
+// asynchronous on macOS, so exiting straight away could cut off the very line
+// that says why the run failed. An empty write's callback runs after every
+// write queued before it on that stream.
+main()
+  .catch((error) => {
+    fail(error instanceof Error ? error.message : String(error));
+  })
+  .finally(() => {
+    const code = process.exitCode ?? 0;
+    let open = 2;
+    const flushed = () => {
+      open -= 1;
+      if (open === 0) process.exit(code);
+    };
+    process.stdout.write("", flushed);
+    process.stderr.write("", flushed);
+  });
