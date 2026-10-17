@@ -1,13 +1,13 @@
 {
   "counted_through": {
-    "console": "2026-10-16T22:59:14Z",
-    "control-plane-api": "2026-10-16T22:59:14Z",
-    "docs": "2026-10-16T22:59:15Z",
-    "installer": "2026-10-16T22:59:16Z",
-    "site-api": "2026-10-16T22:59:18Z",
-    "staging": "2026-10-16T22:59:19Z",
-    "website": "2026-10-16T22:59:15Z",
-    "installer-windows": "2026-10-16T22:59:16Z"
+    "console": "2026-10-17T01:07:31Z",
+    "control-plane-api": "2026-10-17T01:07:31Z",
+    "docs": "2026-10-17T01:07:31Z",
+    "installer": "2026-10-17T01:07:32Z",
+    "site-api": "2026-10-17T01:07:34Z",
+    "staging": "2026-10-17T01:07:34Z",
+    "website": "2026-10-17T01:07:31Z",
+    "installer-windows": "2026-10-17T01:07:32Z"
   },
   "days": [
     {
@@ -281,6 +281,12 @@
       "ok": 7
     },
     {
+      "id": "console",
+      "day": "2026-10-17",
+      "checks": 1,
+      "ok": 1
+    },
+    {
       "id": "control-plane-api",
       "day": "2026-09-02",
       "checks": 6,
@@ -551,6 +557,12 @@
       "ok": 7
     },
     {
+      "id": "control-plane-api",
+      "day": "2026-10-17",
+      "checks": 1,
+      "ok": 1
+    },
+    {
       "id": "docs",
       "day": "2026-09-02",
       "checks": 6,
@@ -821,6 +833,12 @@
       "ok": 7
     },
     {
+      "id": "docs",
+      "day": "2026-10-17",
+      "checks": 1,
+      "ok": 1
+    },
+    {
       "id": "installer",
       "day": "2026-09-02",
       "checks": 6,
@@ -1089,6 +1107,12 @@
       "day": "2026-10-16",
       "checks": 7,
       "ok": 7
+    },
+    {
+      "id": "installer",
+      "day": "2026-10-17",
+      "checks": 1,
+      "ok": 1
     },
     {
       "id": "installer-windows",
@@ -1161,6 +1185,12 @@
       "day": "2026-10-16",
       "checks": 7,
       "ok": 7
+    },
+    {
+      "id": "installer-windows",
+      "day": "2026-10-17",
+      "checks": 1,
+      "ok": 1
     },
     {
       "id": "site-api",
@@ -1431,6 +1461,12 @@
       "day": "2026-10-16",
       "checks": 7,
       "ok": 7
+    },
+    {
+      "id": "site-api",
+      "day": "2026-10-17",
+      "checks": 1,
+      "ok": 1
     },
     {
       "id": "staging",
@@ -1715,6 +1751,12 @@
       "ok": 7
     },
     {
+      "id": "staging",
+      "day": "2026-10-17",
+      "checks": 1,
+      "ok": 1
+    },
+    {
       "id": "website",
       "day": "2026-09-02",
       "checks": 6,
@@ -1983,6 +2025,12 @@
       "day": "2026-10-16",
       "checks": 7,
       "ok": 7
+    },
+    {
+      "id": "website",
+      "day": "2026-10-17",
+      "checks": 1,
+      "ok": 1
     }
   ]
 }
