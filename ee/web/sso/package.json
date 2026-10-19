@@ -16,8 +16,8 @@
     "@antifailure/api": "file:../../../web/apps/api",
     "@antifailure/db": "file:../../../web/packages/db",
     "@xmldom/xmldom": "^0.9.8",
-    "xml-crypto": "^6.3.2",
-    "xpath": "^0.0.34"
+    "xml-crypto": "^6.4.0",
+    "xpath": "^0.0.35"
   },
   "devDependencies": {
     "@types/node": "^24.19.1",
