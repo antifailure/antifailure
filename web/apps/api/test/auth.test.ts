@@ -41,8 +41,32 @@ describe('open redirects', () => {
       // Backslashes are treated as slashes by some browsers.
       '/\\evil.test',
       'javascript:alert(1)',
+      // A URL parser deletes tabs and line breaks before reading a URL, so each
+      // of these is "//evil.test" to `new URL` and one slash to a string check.
+      // `redirect_to=/%09/evil.test` is the first of them once decoded.
+      '/\t/evil.test',
+      '/\n/evil.test',
+      '/\r/evil.test',
+      '\t//evil.test',
+      '/\t\\evil.test',
+      // The other controls are trimmed from the ends rather than removed, and
+      // none has any business in a path.
+      '/environments\u0000',
+      '/environments\u007f',
     ]) {
-      assert.equal(safeRedirect(bad), null, `${bad} was accepted as a return target`)
+      assert.equal(safeRedirect(bad), null, `${JSON.stringify(bad)} was accepted as a return target`)
+    }
+  })
+
+  it('accepts nothing that resolves off this application', () => {
+    // The callback builds its redirect with `new URL(target, base)`, so that is
+    // the reading that decides where somebody lands, whatever a string check
+    // made of the same value.
+    const base = 'https://app.antifailure.test/'
+    for (const value of ['/', '/environments', '/repos/acme/app?tab=runs', '/invite#accept', '/a/../b']) {
+      const target = safeRedirect(value)
+      assert.notEqual(target, null, `${value} was refused`)
+      assert.equal(new URL(target!, base).origin, new URL(base).origin)
     }
   })
 
