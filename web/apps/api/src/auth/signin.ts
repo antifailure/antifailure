@@ -239,6 +239,15 @@ export async function sweepOAuthStates(pool: Pool, clock: Clock): Promise<number
  * An absolute URL here is an open redirect, and an open redirect on the
  * sign-in path is the one that matters: it is the link people are trained to
  * click, and it arrives carrying a session.
+ *
+ * The checks on the string are not the whole of it, because a URL parser does
+ * not read the string the way they do. It deletes every tab, line feed and
+ * carriage return before it starts, so "/\t/evil.test", which is what
+ * `redirect_to=/%09/evil.test` decodes to, begins with one slash here and with
+ * two by the time `new URL(target, base)` in the callback has read it, and the
+ * callback then sent a freshly signed-in person to https://evil.test/. So a
+ * control character is refused outright, and what is left is resolved the way
+ * the callback resolves it and must still be on the origin it started on.
  */
 export function safeRedirect(value: string | undefined | null): string | null {
   if (!value) return null
@@ -247,8 +256,24 @@ export function safeRedirect(value: string | undefined | null): string | null {
   // slash, and it is the form that gets past a naive check.
   if (value.startsWith('//')) return null
   if (value.includes('\\')) return null
+  if (CONTROL_CHARACTER.test(value)) return null
+  let resolved: URL
+  try {
+    resolved = new URL(value, RETURN_TARGET_ORIGIN)
+  } catch {
+    return null
+  }
+  if (resolved.origin !== RETURN_TARGET_ORIGIN) return null
   return withoutToken(value)
 }
+
+/** C0 controls and DEL. Tab, line feed and carriage return are the three a URL
+ *  parser removes from the middle of a URL; the rest it trims from the ends. */
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/
+
+/** An origin nothing can serve, so a target that resolves to anywhere else
+ *  has named a host of its own. */
+const RETURN_TARGET_ORIGIN = 'https://return-target.invalid'
 
 /**
  * The same return target with any `token` parameter taken out of its query.
