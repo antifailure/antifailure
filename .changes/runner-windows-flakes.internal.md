@@ -24,3 +24,10 @@ cannot keep its file's process, and with it the job, alive: a test stuck on a
 promise never reaches the `finally` that closes its server. The tests that
 check a stopped workflow left no browser now give it five seconds on the clock
 rather than fifty polls, which on Windows cost PowerShell's start up each.
+
+`TestRun_MeasuresARealServer` in the engine's load package compared the slow
+route's p95 with the fast route's, and on a loaded Windows runner the fast
+route measured 56.44 ms against the slow route's 28.41. It now checks what
+the server guarantees on every host: every request to the slow route waited
+25 ms, so that route's median cannot be lower. The sort order it checks is
+decided by baselines far enough apart that no host speed can reverse it.

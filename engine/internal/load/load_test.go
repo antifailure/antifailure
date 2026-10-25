@@ -174,8 +174,13 @@ func TestRun_MeasuresARealServer(t *testing.T) {
 		Shape: load.Shape{
 			RequestsPerSecond: 200,
 			Routes: []load.Route{
-				{Method: "GET", Path: "/", Weight: 6, P95Ms: 5},
-				{Method: "GET", Path: "/slow", Weight: 3, P95Ms: 5},
+				// The baselines are far apart so that the order below is decided
+				// by the ratio the table sorts on, not by how fast this host is.
+				// The slow route waits 25 ms on every request, so against a 1 ms
+				// baseline it is at least 24 times slower; the other route would
+				// need a p95 over 25 seconds, inside a 700 ms run, to pass it.
+				{Method: "GET", Path: "/", Weight: 6, P95Ms: 1000},
+				{Method: "GET", Path: "/slow", Weight: 3, P95Ms: 1},
 				{Method: "GET", Path: "/broken", Weight: 1},
 			},
 		},
@@ -191,8 +196,16 @@ func TestRun_MeasuresARealServer(t *testing.T) {
 	for _, r := range res.Routes {
 		byRoute[r.Route] = r
 	}
-	require.Greater(t, byRoute["GET /slow"].Latency.P95Ms, byRoute["GET /"].Latency.P95Ms,
-		"the slow route measures slower")
+	// The slow route's latency is measured from the slow route's requests.
+	// Every one of them waited 25 ms in the handler, so its median cannot be
+	// below that on any host, and a table that mixed the routes' samples would
+	// pull it under. This used to compare the two routes' p95s, which is a
+	// claim about the host: on a loaded Windows runner the fast route's p95
+	// was 56.44 ms against the slow route's 28.41 (#669, an @types/node bump),
+	// because queueing on the client is shared by both and the 25 ms is not
+	// much bigger than it.
+	require.GreaterOrEqual(t, byRoute["GET /slow"].Latency.P50Ms, 25.0,
+		"the slow route's median is below the 25 ms every one of its requests waited")
 
 	// A 500 is an error, and it is counted against the route that returned it.
 	require.Positive(t, res.ErrorRate)
