@@ -40,7 +40,7 @@ export function SolutionsHubPage() {
     <PageShell>
       <PageHero
         path="/solutions"
-        eyebrow="Solutions"
+        eyebrow="Use cases"
         title="Test the changes your business depends on."
         lead="From subscription upgrades to background workers, Antifailure gives each change an isolated environment and a result your team can inspect."
       />

@@ -8,7 +8,7 @@ export function MarketplacesPage() {
       <SplitHero
         stack
         path="/solutions/marketplaces"
-        eyebrow="Solutions · Marketplaces"
+        eyebrow="Use cases · Marketplaces"
         title="Test the whole order flow, including the workers."
         paragraphs={[
           "Run services, workers, and queues together in an isolated environment.",

@@ -72,7 +72,7 @@ const docsHome = base || "/docs";
 const here = Astro.url.pathname.replace(/\/$/, "") || "/";
 const nav = [
   { id: "product", text: "Product", href: "/product" },
-  { id: "solutions", text: "Solutions", href: "/solutions" },
+  { id: "solutions", text: "Use cases", href: "/solutions" },
   // Two fixes on one line. `base`, not `${base}/`: the host sets
   // "trailingSlash": "never", so the slashed form 301s, and this is the Docs
   // link in the header of all 82 documentation pages, which made it the

@@ -10,7 +10,7 @@ export function SaasPage() {
     <PageShell>
       <SplitHero
         path="/solutions/saas"
-        eyebrow="Solutions · B2B SaaS"
+        eyebrow="Use cases · B2B SaaS"
         title="Keep shipping as your database grows."
         paragraphs={[
           "Rehearse schema changes and account workflows on a masked copy of your data.",

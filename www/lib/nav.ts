@@ -24,7 +24,7 @@ export const HEADER_MENUS: HeaderMenu[] = [
   },
   {
     id: "solutions",
-    text: "Solutions",
+    text: "Use cases",
     sections: [
       {
         id: "teams",
@@ -123,7 +123,7 @@ export const FOOTER_MENUS = [
     id: "company",
     heading: "Company",
     items: [
-      { id: "solutions", text: "Solutions", href: "/solutions" },
+      { id: "solutions", text: "Use cases", href: "/solutions" },
       { id: "saas", text: "B2B SaaS", href: "/solutions/saas" },
       { id: "fintech", text: "Fintech", href: "/solutions/fintech" },
       { id: "marketplaces", text: "Marketplaces", href: "/solutions/marketplaces" },

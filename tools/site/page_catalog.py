@@ -76,7 +76,7 @@ def main():
         if not label:
             raise SystemExit(f"built page has no title: {path}")
         label = re.sub(r"\s+[·|]\s+Antifailure$", "", label)
-        section = "Docs" if path.startswith("/docs") else "Writing" if path.startswith("/blog") else "Product" if path.startswith("/product") else "Solutions" if path.startswith("/solutions") else "Website"
+        section = "Docs" if path.startswith("/docs") else "Writing" if path.startswith("/blog") else "Product" if path.startswith("/product") else "Use cases" if path.startswith("/solutions") else "Website"
         page = {"path": path, "title": label, "section": section}
         if section == "Writing" and path != "/blog":
             page.update({"description": title.description[:300], "published": title.published[:32], "tags": title.tags[:12]})

@@ -12,7 +12,7 @@ export function DevtoolsPage() {
     <PageShell>
       <SplitHero
         path="/solutions/devtools"
-        eyebrow="Solutions · Developer tools"
+        eyebrow="Use cases · Developer tools"
         title="Test schema changes at the scale your users depend on."
         paragraphs={[
           "See how a migration behaves on realistic Postgres data.",

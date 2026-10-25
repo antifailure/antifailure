@@ -66,10 +66,10 @@ export const ROUTES: readonly Route[] = [
     parent: "/",
   },
 
-  // Solutions
+  // Use cases
   {
     path: "/solutions",
-    title: pageTitle("Solutions"),
+    title: pageTitle("Use cases"),
     description:
       "Pre-production deployment safety for SaaS, fintech, commerce, marketplaces, and developer tools.",
     summary: "Index of the vertical and role pages.",

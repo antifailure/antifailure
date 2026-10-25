@@ -35,7 +35,7 @@ export const dynamic = "force-static";
 const SECTION_TITLES: Record<RouteSection, string> = {
   root: "Start here",
   product: "Product",
-  solutions: "Solutions",
+  solutions: "Use cases",
   company: "Company",
   writing: "Writing",
   legal: "Legal",

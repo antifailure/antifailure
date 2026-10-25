@@ -8,7 +8,7 @@ export function FintechPage() {
       <SplitHero
         flip
         path="/solutions/fintech"
-        eyebrow="Solutions · Fintech"
+        eyebrow="Use cases · Fintech"
         title="Rehearse billing changes before money moves."
         paragraphs={[
           "Test payment flows with masked account data and a local Stripe simulator.",

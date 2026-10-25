@@ -21,7 +21,7 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  if (!META[slug]) return { title: pageTitle("Solutions") };
+  if (!META[slug]) return { title: pageTitle("Use cases") };
   return pageMetadata(`/solutions/${slug}`);
 }
 

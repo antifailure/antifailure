@@ -343,7 +343,7 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                   broken promise in the header of every page. */}
               {/* And there is no second Docs link. One sat here with a book
                   icon, next to GitHub, while HEADER_MENUS already put "Docs"
-                  in the nav list between Solutions and Writing, so from 1280px
+                  in the nav list between Use cases and Writing, so from 1280px
                   up the header said Docs twice and pointed both at the same
                   page. The nav item renders through HeaderLink, which is a
                   plain anchor for /docs because Astro builds that tree and the
@@ -378,7 +378,7 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
       </div>
 
       {/* A nav rather than a div, and the change is only the tag name. This
-          panel holds every link under Product and Solutions and it sits after
+          panel holds every link under Product and Use cases and it sits after
           </header> and before <main>, so it belonged to no landmark at all:
           somebody navigating by landmark went from the header straight past
           the site's whole product menu. nav is block level like div, so every
