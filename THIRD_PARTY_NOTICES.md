@@ -720,7 +720,7 @@ says so.
 
 - `@hono/node-server` 2.1.3, MIT
 - `@hono/trpc-server` 0.4.2, MIT (declared, no licence file shipped)
-- `@modelcontextprotocol/sdk` 1.31.0, MIT
+- `@modelcontextprotocol/sdk` 1.32.0, MIT
 - `@posthog/core` 1.55.2, Apache-2.0 AND MIT
 - `@posthog/types` 1.412.4, Apache-2.0 AND MIT
 - `@trpc/server` 11.19.0, MIT
