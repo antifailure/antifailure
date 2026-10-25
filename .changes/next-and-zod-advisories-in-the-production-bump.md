@@ -29,7 +29,12 @@ out or whose browser sends Global Privacy Control. The control plane's
 API moves fast-uri to 3.1.9, which fixes four advisories in how it parses and
 normalises URIs; the MCP SDK loads it through its JSON schema validator.
 body-parser moves to 2.4.0 for a denial of service through trailing bytes
-after a compressed body, and ip-address to 10.7.4 for a zone identifier
+after a compressed body, and ip-address to 10.7.5 for a zone identifier
 matched in quadratic time. Both arrive with Express, which the SDK depends on
 and the API never imports. body-parser 2.4.0 requires qs 6.16.1, so qs moves
 with it.
+
+The documentation site's build tooling takes the same Next.js 16.4.3 and
+undici 8.12.3, the release after the one that fixed three undici advisories,
+so the console, the site and the documentation build resolve the same
+Next.js release.

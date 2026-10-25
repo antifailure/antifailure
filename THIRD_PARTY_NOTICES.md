@@ -768,7 +768,7 @@ says so.
 - `http-errors` 2.0.1, MIT
 - `iconv-lite` 0.7.3, MIT
 - `inherits` 2.0.4, ISC
-- `ip-address` 10.7.4, MIT
+- `ip-address` 10.7.5, MIT
 - `ipaddr.js` 1.9.1, MIT
 - `is-promise` 4.0.0, MIT
 - `isexe` 2.0.0, ISC
