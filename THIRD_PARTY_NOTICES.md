@@ -105,7 +105,7 @@ windows/amd64, windows/arm64.
 - `go.yaml.in/yaml/v2` v2.4.4, Apache-2.0 AND MIT
 - `go.yaml.in/yaml/v3` v3.0.5, MIT
 - `golang.org/x/crypto` v0.57.0, BSD-3-Clause
-- `golang.org/x/net` v0.59.0, BSD-3-Clause
+- `golang.org/x/net` v0.60.0, BSD-3-Clause
 - `golang.org/x/oauth2` v0.36.0, BSD-3-Clause
 - `golang.org/x/sync` v0.23.0, BSD-3-Clause
 - `golang.org/x/sys` v0.48.0, BSD-3-Clause
