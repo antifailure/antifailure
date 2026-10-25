@@ -18,3 +18,18 @@ the first fixed release.
 Next.js 16.4.3 rather than 16.4.2 is deliberate. Google Fonts sometimes
 serves a font file at a URL with no extension, and every release before
 16.4.3 fails the site's build when it does.
+
+Four more packages take the releases that fix advisories published on 22 and
+23 October. The public site moves DOMPurify to 3.4.17, which fixes one
+critical and one high advisory: GHSA-cg2g-xh64-v4q7, a SAFE_FOR_TEMPLATES
+bypass, and GHSA-mrv2-3pqr-j5jr, an IN_PLACE hook leaving a detached subtree
+unsanitized, plus a low one. DOMPurify reaches the site only inside the
+analytics library, which is not fetched at all for a reader who has opted
+out or whose browser sends Global Privacy Control. The control plane's
+API moves fast-uri to 3.1.9, which fixes four advisories in how it parses and
+normalises URIs; the MCP SDK loads it through its JSON schema validator.
+body-parser moves to 2.4.0 for a denial of service through trailing bytes
+after a compressed body, and ip-address to 10.7.4 for a zone identifier
+matched in quadratic time. Both arrive with Express, which the SDK depends on
+and the API never imports. body-parser 2.4.0 requires qs 6.16.1, so qs moves
+with it.

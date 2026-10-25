@@ -727,7 +727,7 @@ says so.
 - `accepts` 2.0.0, MIT
 - `ajv` 8.20.0, MIT
 - `ajv-formats` 3.0.1, MIT
-- `body-parser` 2.3.0, MIT
+- `body-parser` 2.4.0, MIT
 - `bytes` 3.1.2, MIT
 - `call-bind-apply-helpers` 1.0.2, MIT
 - `call-bound` 1.0.4, MIT
@@ -754,7 +754,7 @@ says so.
 - `express` 5.2.1, MIT
 - `express-rate-limit` 8.7.0, MIT
 - `fast-deep-equal` 3.1.3, MIT
-- `fast-uri` 3.1.8, BSD-3-Clause
+- `fast-uri` 3.1.9, BSD-3-Clause
 - `finalhandler` 2.1.1, MIT
 - `forwarded` 0.2.0, MIT
 - `fresh` 2.0.0, MIT
@@ -768,7 +768,7 @@ says so.
 - `http-errors` 2.0.1, MIT
 - `iconv-lite` 0.7.3, MIT
 - `inherits` 2.0.4, ISC
-- `ip-address` 10.7.3, MIT
+- `ip-address` 10.7.4, MIT
 - `ipaddr.js` 1.9.1, MIT
 - `is-promise` 4.0.0, MIT
 - `isexe` 2.0.0, ISC
@@ -793,7 +793,7 @@ says so.
 - `postgres` 3.4.9, Unlicense (declared, no licence file shipped)
 - `posthog-node` 5.56.1, Apache-2.0 AND MIT
 - `proxy-addr` 2.0.8, MIT
-- `qs` 6.16.0, BSD-3-Clause
+- `qs` 6.16.1, BSD-3-Clause
 - `range-parser` 1.3.0, MIT
 - `raw-body` 3.0.2, MIT
 - `require-from-string` 2.0.2, MIT
