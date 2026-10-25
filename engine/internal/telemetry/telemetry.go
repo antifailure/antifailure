@@ -391,6 +391,13 @@ func (t *Telemetry) FlushControlPlane(ctx context.Context) error {
 	if t == nil || t.cpSink == nil {
 		return nil
 	}
+	// An event emitted just before this call may still be on the bus rather
+	// than in the sink, and flushing the sink first would leave it behind.
+	if t.bus != nil {
+		if err := t.bus.Settle(ctx); err != nil {
+			return err
+		}
+	}
 	return t.cpSink.Flush(ctx)
 }
 

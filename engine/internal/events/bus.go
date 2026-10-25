@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
 )
@@ -59,6 +60,11 @@ type sinkState struct {
 	queue   chan Event
 	dropped atomic.Uint64
 	done    chan struct{}
+	// queued counts events put on this sink's queue and handled counts the
+	// ones its goroutine has finished with, delivered or not. Settle waits
+	// for the second to reach the first.
+	queued  atomic.Uint64
+	handled atomic.Uint64
 }
 
 // Option configures a Bus.
@@ -127,6 +133,7 @@ func (b *Bus) run(st *sinkState) {
 		if err := st.sink.Deliver(ctx, e); err != nil {
 			st.dropped.Add(1)
 		}
+		st.handled.Add(1)
 	}
 }
 
@@ -154,6 +161,11 @@ func (b *Bus) Emit(env string, t Type, level Level, msg string, fields ...Field)
 	for _, st := range sinks {
 		select {
 		case st.queue <- e:
+			// Counted once it is on the queue. The sink may finish it before
+			// this line runs, which only lets a concurrent Settle return a
+			// moment sooner; any Settle called after this Emit returned
+			// counts it.
+			st.queued.Add(1)
 		default:
 			// The sink is behind. Dropping is deliberate: an environment must
 			// not stall because a consumer is slow.
@@ -229,6 +241,35 @@ func (b *Bus) Seq(env string) uint64 {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	return b.seqByEnv[env]
+}
+
+// Settle waits until every sink has finished with every event emitted before
+// the call, or ctx ends.
+//
+// Emit only queues: each sink takes its events on a goroutine of its own. So a
+// caller that emits and then asks a sink to flush can flush before the event
+// has reached the sink, and the event misses the flush. That is what happened
+// to the artifact.stored events the evidence upload emits just before it
+// flushes the control plane sink: one of three was still on the bus. Settle is
+// the barrier between the two. It does not stop the bus or close a sink, and a
+// sink whose goroutine has stopped, which a panic does, is not waited for.
+func (b *Bus) Settle(ctx context.Context) error {
+	b.mu.RLock()
+	sinks := b.sinks
+	b.mu.RUnlock()
+	for _, st := range sinks {
+		target := st.queued.Load()
+		for st.handled.Load() < target {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-st.done:
+				target = 0
+			case <-time.After(time.Millisecond):
+			}
+		}
+	}
+	return nil
 }
 
 // Close stops accepting events, drains every sink queue, and closes each sink.
