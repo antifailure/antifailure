@@ -108,6 +108,15 @@ func newFixture(t *testing.T) *fixture {
 	// A fixture has neither, and inheriting a hooks path from an outer clone
 	// would make these tests depend on it.
 	f.git("config", "core.hooksPath", filepath.Join(root, "no-hooks"))
+	// git commit and git push start automatic maintenance as a DETACHED
+	// process, which can still be writing into .git when the test returns.
+	// t.TempDir's cleanup then fails with "directory not empty", and a test
+	// whose every assertion passed reports FAIL. That happened on CI on
+	// 2026-10-25 to TestABranchTipThatMovedBetweenTheScanAndTheDeletionIsRefused
+	// on a pull request that touched none of this code. Nothing in these
+	// fixtures needs a repository maintained, so none is.
+	noMaintenance(f, f.dir)
+	noMaintenance(f, f.origin)
 	f.git("remote", "add", "origin", f.origin)
 	f.write("base.txt", "base\n")
 	f.git("add", "-A")
@@ -970,4 +979,49 @@ func TestTheRealLsofListsThisProcess(t *testing.T) {
 		}
 	}
 	t.Fatalf("this process is not in its own listing of %d", len(procs))
+}
+
+// noMaintenance turns off every way git starts work in the background in the
+// repository at dir: automatic maintenance after a commit, automatic gc, and the
+// gc a push runs in the repository it lands in.
+func noMaintenance(f *fixture, dir string) {
+	f.t.Helper()
+	for _, kv := range [][2]string{
+		{"maintenance.auto", "false"},
+		{"gc.auto", "0"},
+		{"gc.autoDetach", "false"},
+		{"receive.autogc", "false"},
+	} {
+		f.run(dir, "git", "config", kv[0], kv[1])
+	}
+}
+
+// A fixture's git must start nothing in the background, because a detached
+// process outlives the test and fails its temporary directory's cleanup. The
+// trace is the instrument: git names every command it starts, so a commit and a
+// push in a fixture must name no maintenance and no gc.
+func TestAFixtureStartsNoBackgroundMaintenance(t *testing.T) {
+	f := newFixture(t)
+	f.write("traced.txt", "traced\n")
+	for _, args := range [][]string{
+		{"add", "-A"},
+		{"commit", "--quiet", "-m", "traced"},
+		{"push", "--quiet", "origin", "main"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = f.dir
+		cmd.Env = append(os.Environ(), "GIT_TRACE=1")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+		for _, line := range strings.Split(string(out), "\n") {
+			if !strings.Contains(line, "run_command:") {
+				continue
+			}
+			if strings.Contains(line, " maintenance ") || strings.Contains(line, " gc ") {
+				t.Errorf("git %s started background work a fixture must not have: %s", strings.Join(args, " "), line)
+			}
+		}
+	}
 }
