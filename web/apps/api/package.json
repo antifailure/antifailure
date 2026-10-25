@@ -32,7 +32,7 @@
     "hono": "^4.13.12",
     "postgres": "^3.4.9",
     "posthog-node": "^5.55.0",
-    "zod": "^4.6.5"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@types/node": "^24.19.1",
