@@ -718,11 +718,11 @@ says so.
 
 ### npm packages (100)
 
-- `@hono/node-server` 2.1.3, MIT
+- `@hono/node-server` 2.1.5, MIT
 - `@hono/trpc-server` 0.4.2, MIT (declared, no licence file shipped)
-- `@modelcontextprotocol/sdk` 1.32.0, MIT
-- `@posthog/core` 1.55.2, Apache-2.0 AND MIT
-- `@posthog/types` 1.412.4, Apache-2.0 AND MIT
+- `@modelcontextprotocol/sdk` 1.32.1, MIT
+- `@posthog/core` 1.59.1, Apache-2.0 AND MIT
+- `@posthog/types` 1.416.0, Apache-2.0 AND MIT
 - `@trpc/server` 11.19.0, MIT
 - `accepts` 2.0.0, MIT
 - `ajv` 8.20.0, MIT
@@ -740,7 +740,7 @@ says so.
 - `cross-spawn` 7.0.6, MIT
 - `debug` 4.4.3, MIT
 - `depd` 2.0.0, MIT
-- `drizzle-orm` 0.45.3, Apache-2.0 (declared, no licence file shipped)
+- `drizzle-orm` 0.45.4, Apache-2.0 (declared, no licence file shipped)
 - `dunder-proto` 1.0.1, MIT
 - `ee-first` 1.1.1, MIT
 - `encodeurl` 2.0.0, MIT
@@ -764,7 +764,7 @@ says so.
 - `gopd` 1.2.0, MIT
 - `has-symbols` 1.1.0, MIT
 - `hasown` 2.0.4, MIT
-- `hono` 4.13.12, MIT
+- `hono` 4.13.13, MIT
 - `http-errors` 2.0.1, MIT
 - `iconv-lite` 0.7.3, MIT
 - `inherits` 2.0.4, ISC
@@ -791,7 +791,7 @@ says so.
 - `path-to-regexp` 8.4.2, MIT
 - `pkce-challenge` 5.0.1, MIT
 - `postgres` 3.4.9, Unlicense (declared, no licence file shipped)
-- `posthog-node` 5.55.0, Apache-2.0 AND MIT
+- `posthog-node` 5.56.1, Apache-2.0 AND MIT
 - `proxy-addr` 2.0.8, MIT
 - `qs` 6.16.0, BSD-3-Clause
 - `range-parser` 1.3.0, MIT
@@ -816,44 +816,44 @@ says so.
 - `vary` 1.1.2, MIT
 - `which` 2.0.2, ISC
 - `wrappy` 1.0.2, ISC
-- `zod` 4.6.5, MIT
+- `zod` 4.6.7, MIT
 - `zod-to-json-schema` 3.25.2, ISC
 
 ### The console export (42)
 
 - `@swc/helpers` 0.5.23, Apache-2.0
-- `@tiptap/core` 3.31.4, MIT
-- `@tiptap/extension-blockquote` 3.31.4, MIT
-- `@tiptap/extension-bold` 3.31.4, MIT
-- `@tiptap/extension-code` 3.31.4, MIT
-- `@tiptap/extension-code-block` 3.31.4, MIT
-- `@tiptap/extension-document` 3.31.4, MIT
-- `@tiptap/extension-hard-break` 3.31.4, MIT
-- `@tiptap/extension-heading` 3.31.4, MIT
-- `@tiptap/extension-horizontal-rule` 3.31.4, MIT
-- `@tiptap/extension-italic` 3.31.4, MIT
-- `@tiptap/extension-link` 3.31.4, MIT
-- `@tiptap/extension-list` 3.31.4, MIT
-- `@tiptap/extension-paragraph` 3.31.4, MIT
-- `@tiptap/extension-strike` 3.31.4, MIT
-- `@tiptap/extension-text` 3.31.4, MIT
-- `@tiptap/extension-underline` 3.31.4, MIT
-- `@tiptap/extensions` 3.31.4, MIT
-- `@tiptap/react` 3.31.4, MIT
-- `@tiptap/starter-kit` 3.31.4, MIT
-- `geist` 1.7.2, OFL-1.1
+- `@tiptap/core` 3.32.0, MIT
+- `@tiptap/extension-blockquote` 3.32.0, MIT
+- `@tiptap/extension-bold` 3.32.0, MIT
+- `@tiptap/extension-code` 3.32.0, MIT
+- `@tiptap/extension-code-block` 3.32.0, MIT
+- `@tiptap/extension-document` 3.32.0, MIT
+- `@tiptap/extension-hard-break` 3.32.0, MIT
+- `@tiptap/extension-heading` 3.32.0, MIT
+- `@tiptap/extension-horizontal-rule` 3.32.0, MIT
+- `@tiptap/extension-italic` 3.32.0, MIT
+- `@tiptap/extension-link` 3.32.0, MIT
+- `@tiptap/extension-list` 3.32.0, MIT
+- `@tiptap/extension-paragraph` 3.32.0, MIT
+- `@tiptap/extension-strike` 3.32.0, MIT
+- `@tiptap/extension-text` 3.32.0, MIT
+- `@tiptap/extension-underline` 3.32.0, MIT
+- `@tiptap/extensions` 3.32.0, MIT
+- `@tiptap/react` 3.32.0, MIT
+- `@tiptap/starter-kit` 3.32.0, MIT
+- `geist` 1.8.1, OFL-1.1
 - `linkifyjs` 4.3.3, MIT
-- `next` 16.3.8, MIT
-- `next/dist/compiled/process` vendored in next 16.3.8, MIT
-- `next/dist/compiled/react` vendored in next 16.3.8, MIT
-- `next/dist/compiled/react-dom` vendored in next 16.3.8, MIT
-- `next/dist/compiled/react-server-dom-turbopack` vendored in next 16.3.8, MIT
-- `next/dist/compiled/scheduler` vendored in next 16.3.8, MIT
+- `next` 16.4.3, MIT
+- `next/dist/compiled/process` vendored in next 16.4.3, MIT
+- `next/dist/compiled/react` vendored in next 16.4.3, MIT
+- `next/dist/compiled/react-dom` vendored in next 16.4.3, MIT
+- `next/dist/compiled/react-server-dom-turbopack` vendored in next 16.4.3, MIT
+- `next/dist/compiled/scheduler` vendored in next 16.4.3, MIT
 - `orderedmap` 2.1.1, MIT
 - `prosemirror-commands` 1.7.2, MIT
 - `prosemirror-dropcursor` 1.8.4, MIT
 - `prosemirror-gapcursor` 1.4.1, MIT
-- `prosemirror-history` 1.5.0, MIT
+- `prosemirror-history` 1.5.1, MIT
 - `prosemirror-keymap` 1.2.3, MIT
 - `prosemirror-model` 1.25.12, MIT
 - `prosemirror-schema-list` 1.5.1, MIT
@@ -879,7 +879,7 @@ enterprise Go modules to attribute.
 - `@xmldom/is-dom-node` 1.0.1, MIT
 - `@xmldom/xmldom` 0.8.15, MIT
 - `@xmldom/xmldom` 0.9.12, MIT
-- `xml-crypto` 6.3.2, MIT
+- `xml-crypto` 6.4.0, MIT
 - `xpath` 0.0.33, MIT
-- `xpath` 0.0.34, MIT
+- `xpath` 0.0.35, MIT
 - `yaml` 2.9.1, ISC
