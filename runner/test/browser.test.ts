@@ -1162,6 +1162,25 @@ function windowsBrowsersBelow(pid: number): number[] {
   return below;
 }
 
+/** browsersLeftBelow is browsersBelow once the browsers below pid have had
+ *  five seconds to go, measured on the clock.
+ *
+ *  It was fifty polls a tenth of a second apart, which is five seconds only
+ *  where a poll costs nothing. On Windows each poll starts PowerShell to read
+ *  the process table, measured at 0.4 s apiece on an idle Windows Server VM,
+ *  so the same loop gave a browser twenty five seconds or more, longer still
+ *  on a loaded runner, and a leak could spend a test's whole timeout here and
+ *  be reported as "timed out" instead of by the assertion that names it. */
+async function browsersLeftBelow(pid: number, withinMs = 5_000): Promise<number[]> {
+  const until = Date.now() + withinMs;
+  let left = browsersBelow(pid);
+  while (left.length > 0 && Date.now() < until) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    left = browsersBelow(pid);
+  }
+  return left;
+}
+
 test('a budget spent while the browser is still starting leaves no browser running', { timeout: 120_000 }, async () => {
   // The attempt is raced against the time budget, and the race can end while
   // Chromium is still launching. The launch finished after the race with
@@ -1179,11 +1198,7 @@ test('a budget spent while the browser is still starting leaves no browser runni
       personas: nobody,
     });
     assert.equal(result!.outcome.cause, 'budget-exhausted', JSON.stringify(result!.outcome, null, 2));
-    let left = browsersBelow(process.pid);
-    for (let i = 0; i < 50 && left.length > 0; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      left = browsersBelow(process.pid);
-    }
+    const left = await browsersLeftBelow(process.pid);
     assert.deepEqual(left, [], 'a browser launched for a workflow its budget stopped is still running');
   } finally {
     server.closeAllConnections();
@@ -1206,11 +1221,7 @@ test('an open stopped while the browser is starting returns no session and leave
     () => 'refused',
   );
   assert.equal(outcome, 'refused', 'an open stopped while starting still produced a session');
-  let left = browsersBelow(process.pid);
-  for (let i = 0; i < 50 && left.length > 0; i++) {
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    left = browsersBelow(process.pid);
-  }
+  const left = await browsersLeftBelow(process.pid);
   assert.deepEqual(left, [], 'a browser stopped while starting is still running');
 });
 
@@ -1244,12 +1255,51 @@ test('an open stopped after the launch, while the page is being made, returns no
   } finally {
     chromium.launch = launch as typeof chromium.launch;
   }
-  let left = browsersBelow(process.pid);
-  for (let i = 0; i < 50 && left.length > 0; i++) {
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    left = browsersBelow(process.pid);
-  }
+  const left = await browsersLeftBelow(process.pid);
   assert.deepEqual(left, [], 'a browser stopped while its page was being made is still running');
+});
+
+test('an open stopped while a page that will never arrive is being made still ends', { timeout: 60_000 }, async () => {
+  // Closing the browser was how a stop used to end an open: the call in flight
+  // was meant to fail when its browser went away. On Windows one did not. A
+  // stop that landed while the first page was being made, as its video
+  // recorder started, closed the browser and the recorder, and `newPage`
+  // neither resolved nor rejected, so the open never ended and neither did the
+  // workflow whose budget had run out. Seen at 4 in 13 stop times on a Windows
+  // VM, and as a 120 s test timeout followed by a 30 minute job timeout on the
+  // required check. The page here is one that will never arrive, which is what
+  // that call looked like from outside, so the case is the same on every host.
+  const stop = new AbortController();
+  const launch = chromium.launch.bind(chromium);
+  let launched: Awaited<ReturnType<typeof launch>> | undefined;
+  chromium.launch = (async (options?: Parameters<typeof launch>[0]) => {
+    const browser = await launch(options);
+    launched = browser;
+    const newContext = browser.newContext.bind(browser);
+    browser.newContext = (async (o?: Parameters<typeof newContext>[0]) => {
+      const context = await newContext(o);
+      context.newPage = (() => {
+        stop.abort();
+        return new Promise(() => undefined);
+      }) as typeof context.newPage;
+      return context;
+    }) as typeof browser.newContext;
+    return browser;
+  }) as typeof chromium.launch;
+  try {
+    const outcome = await Promise.race([
+      Session.open({ artifacts: mkdtempSync(join(tmpdir(), 'af-stop-hung-page-')), stop: stop.signal }).then(
+        async (session) => { await session.close('stopped-hung-page'); return 'a session'; },
+        () => 'refused',
+      ),
+      new Promise<string>((resolve) => { setTimeout(() => resolve('never ended'), 20_000).unref(); }),
+    ]);
+    assert.ok(stop.signal.aborted, 'the stop never fired, so this checked nothing');
+    assert.equal(outcome, 'refused', 'an open stopped while its page was being made did not end');
+  } finally {
+    chromium.launch = launch as typeof chromium.launch;
+    await launched?.close().catch(() => undefined);
+  }
 });
 
 test('an open whose launch limit has passed returns no session and leaves no browser', { timeout: 120_000 }, async () => {
@@ -1263,11 +1313,7 @@ test('an open whose launch limit has passed returns no session and leaves no bro
     () => 'refused',
   );
   assert.equal(outcome, 'refused', 'a launch past its limit still produced a session');
-  let left = browsersBelow(process.pid);
-  for (let i = 0; i < 50 && left.length > 0; i++) {
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    left = browsersBelow(process.pid);
-  }
+  const left = await browsersLeftBelow(process.pid);
   assert.deepEqual(left, [], 'a browser whose launch ran out of time is still running');
 });
 

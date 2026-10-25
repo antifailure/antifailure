@@ -341,14 +341,41 @@ export class Session {
         ? {}
         : { timeout: Math.max(1, Math.ceil(options.launchWithinMs)) }),
     });
-    const stopped = () => { void browser.close().catch(() => undefined); };
     if (options.stop?.aborted) {
       await browser.close().catch(() => undefined);
       throw new Error('the browser was stopped while it was still starting');
     }
+    // A stop closes the browser AND ends the open, without waiting for
+    // Playwright to fail the call that was in flight. Closing alone was meant
+    // to make that call fail, and on Windows it does not always: a stop that
+    // landed while the first page was being made, as its video recorder
+    // started, closed the browser and the recorder, both exited, and
+    // `newPage` neither resolved nor rejected. Measured on Windows Server 2022
+    // by stopping opens at every 2 ms from 108 to 132 ms in: 4 of 13 never
+    // settled in 60 s, with no browser left running. The open hung, so the
+    // workflow's budget never came back, and the required Windows check timed
+    // out a test after 120 s and then sat until the job's own 30 minutes,
+    // because the hung test never reached the line that closed its server.
+    let refuse: (err: Error) => void = () => undefined;
+    const refused = new Promise<never>((_, reject) => { refuse = reject; });
+    refused.catch(() => undefined);
+    // Refused once the close has finished rather than as it starts, so an open
+    // that ended has also left nothing running: the close is bounded by
+    // Playwright itself, which kills the browser if it will not close in time,
+    // and it is the call that hung that was not.
+    const stopped = () => {
+      void browser.close().catch(() => undefined)
+        .finally(() => refuse(new Error('the browser was stopped while it was still starting')));
+    };
+    const step = <T>(work: Promise<T>): Promise<T> => {
+      if (!options.stop) return work;
+      // What loses the race may still settle later, against a closed browser.
+      work.catch(() => undefined);
+      return Promise.race([work, refused]);
+    };
     options.stop?.addEventListener('abort', stopped, { once: true });
     const viewport = options.viewport ?? DEFAULT_VIEWPORT;
-    const context = await browser.newContext({
+    const context = await step(browser.newContext({
       recordVideo: { dir: options.artifacts },
       viewport,
       ...(options.mobile
@@ -357,10 +384,10 @@ export class Session {
       // A preview environment serves its own certificate for any host the
       // policy inspects, and the browser is inside that environment.
       ignoreHTTPSErrors: true,
-    });
-    await context.tracing.start({ screenshots: true, snapshots: true, sources: false });
+    }));
+    await step(context.tracing.start({ screenshots: true, snapshots: true, sources: false }));
 
-    const page = await context.newPage();
+    const page = await step(context.newPage());
     const session = new Session(browser, context, page, options.artifacts, viewport);
 
     page.on('request', (r) => {

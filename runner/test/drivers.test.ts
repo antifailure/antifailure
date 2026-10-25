@@ -872,7 +872,7 @@ async function withinReach<T>(work: Promise<T>, ms: number): Promise<T | typeof 
 // for a hang anywhere else in the test, and it is longer than the race so the
 // assertion is the one that speaks. The run measures about 3 s, so both are an
 // order of magnitude of room and neither bounds anything that works.
-test('a program still writing when the budget runs out is blocked, not judged', { timeout: 30_000 }, async () => {
+test('a program still writing when the budget runs out is blocked, not judged', { timeout: 30_000 }, async (t) => {
   // THE DIFFERENCE BETWEEN THE TWO REDS, and the one the test above used to
   // print the wrong one of. "The expectation was not met" is a claim about the
   // program. "I stopped reading before the program stopped writing" is a claim
@@ -880,9 +880,23 @@ test('a program still writing when the budget runs out is blocked, not judged', 
   // line 3892 of 20000, and a reader of that check would have gone looking for
   // a bug in a program that was working.
   //
-  // Nothing here is calibrated: the program never exits and never goes silent,
-  // so no budget can ever be enough and the outcome is the same on every
-  // machine at every load. The budget is small so the test is cheap.
+  // The program never exits and never goes silent, so no budget can ever be
+  // enough and the verdict is the same on every machine at every load. The
+  // budget is small so the test is cheap.
+  //
+  // HOW FAR BEHIND THE SCREEN WAS is made, not hoped for. This used to rely on
+  // a program writing flat out putting the emulator behind on its own, and on
+  // Windows it does not have to: ConPTY hands over what its console buffer
+  // looks like, frame by frame, rather than every byte the program wrote, and
+  // the emulator kept up with all 211487 bytes of it, so the required Windows
+  // check failed on a pull request that touched no runner code with the screen
+  // reported 0 bytes behind. Nothing was wrong with the driver; the test had
+  // assumed a host property. So the first parse goes through at once, which is
+  // what puts something on the screen, and the second is held until after the
+  // budget, which is what leaves the screen behind by however much the program
+  // wrote after the first batch was taken. Both numbers are then real on every
+  // host, which is what the assertions below exist to check.
+  const held = holdSecondParse(t, 1_500 + 1_000);
   const raced = await withinReach(runTerminal({
     workflows: [{
       name: 'never-stops',
@@ -893,9 +907,11 @@ test('a program still writing when the budget runs out is blocked, not judged', 
       maxMs: 1_500,
     }],
   }), 20_000);
+  held.restore();
   if (raced === NEVER_RETURNED) {
     assert.fail(`${NEVER_RETURNED} for a program that never stops writing, so its emulator drain has no ceiling`);
   }
+  assert.ok(held.parses() >= 2, `only ${held.parses()} parse ran, so no backlog was arranged and this checked nothing`);
   const outcome = raced[0]!.outcome;
   assert.equal(outcome.verdict, 'blocked', outcome.detail);
   assert.equal(outcome.cause, 'budget-exhausted', outcome.detail);
@@ -908,9 +924,9 @@ test('a program still writing when the budget runs out is blocked, not judged', 
   assert.ok(measured, `the report never said how far behind it stopped: ${outcome.detail}`);
   const [written, behind] = [Number(measured[1]), Number(measured[2])];
   // Both numbers have to be REAL, because a zero in either would satisfy the
-  // pattern above while measuring nothing. A program writing flat out for a
-  // second and a half puts the emulator far behind and puts something on the
-  // grid, so neither end of that is in doubt.
+  // pattern above while measuring nothing. The first parse put something on
+  // the grid and the held second one left everything after it undrawn, so
+  // neither end of that is in doubt on any host.
   assert.ok(behind > 0, `the screen was reported fully caught up with a program still writing: ${outcome.detail}`);
   assert.ok(written > behind,
     `${behind} bytes behind out of ${written} written leaves nothing on the screen: ${outcome.detail}`);
@@ -1259,6 +1275,21 @@ function slowParse(t: TestContext, first?: number, msPerKb = PARSE_MS_PER_KB) {
   return { restore: () => mock.mock.restore(), parses: () => parses };
 }
 
+/** holdSecondParse lets the emulator's first parse through at once and holds
+ *  the second for `ms`, so a run has drawn something and is then behind by
+ *  everything that arrived after, whatever the host's speed. Parses after the
+ *  second are not slowed. */
+function holdSecondParse(t: TestContext, ms: number) {
+  const write = Screen.prototype.write;
+  let parses = 0;
+  const mock = t.mock.method(Screen.prototype, 'write', async function (this: Screen, data: string) {
+    parses += 1;
+    if (parses === 2) await new Promise<void>((resolve) => setTimeout(resolve, ms));
+    await write.call(this, data);
+  });
+  return { restore: () => mock.mock.restore(), parses: () => parses };
+}
+
 test('never 6: a forbidden line the screen never got to draw is still read, from the bytes', async (t) => {
   // The emulator can fall behind the program, and the bytes it has not drawn
   // are exactly where a late error would be. `never` reads the bytes as they
@@ -1432,7 +1463,17 @@ test('a queued parse respects the budget and preserves finished output', async (
       // the deadline. `exited` holds it for longer than a settle's own ceiling
       // and well inside its budget, which an exited program must be given in
       // full: its complete screen is the drain.
-      const slow = slowParse(t, trigger === 'quiet' ? budgetMs + 500 : trigger === 'exited' ? 3_200 : undefined,
+      // `keys-pending` holds its first parse across the deadline as well, and
+      // for the same reason as `quiet`: its claim is that the budget ran out
+      // with a key unsent, so the startup wait has to be the thing that spends
+      // the budget. It used to rely on a program writing every millisecond
+      // never going quiet for 120 ms, and on Windows that program writes every
+      // 15.6 ms and ConPTY writes its own setup before node has started, so the
+      // startup wait could end on that setup, the key went out, and the run
+      // ended "still writing" instead: the required check failed with exactly
+      // that on a pull request that touched no runner code.
+      const slow = slowParse(t, trigger === 'quiet' || trigger === 'keys-pending' ? budgetMs + 500
+        : trigger === 'exited' ? 3_200 : undefined,
         trigger === 'exited-over-budget' ? 100 : PARSE_MS_PER_KB);
       const writer = 'setInterval(() => process.stdout.write("still going\\n"), 1);';
       const finite = 'process.stdout.write("still going\\n".repeat(100) + "the burst ended\\n");';
