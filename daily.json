@@ -1,13 +1,13 @@
 {
   "counted_through": {
-    "console": "2026-10-25T21:10:14Z",
-    "control-plane-api": "2026-10-25T21:10:14Z",
-    "docs": "2026-10-25T21:10:15Z",
-    "installer": "2026-10-25T21:10:15Z",
-    "site-api": "2026-10-25T21:10:18Z",
-    "staging": "2026-10-25T21:10:18Z",
-    "website": "2026-10-25T21:10:14Z",
-    "installer-windows": "2026-10-25T21:10:16Z"
+    "console": "2026-10-25T21:44:49Z",
+    "control-plane-api": "2026-10-25T21:44:49Z",
+    "docs": "2026-10-25T21:44:50Z",
+    "installer": "2026-10-25T21:44:53Z",
+    "site-api": "2026-10-25T21:44:54Z",
+    "staging": "2026-10-25T21:44:54Z",
+    "website": "2026-10-25T21:44:50Z",
+    "installer-windows": "2026-10-25T21:44:53Z"
   },
   "days": [
     {
@@ -331,8 +331,8 @@
     {
       "id": "console",
       "day": "2026-10-25",
-      "checks": 7,
-      "ok": 7
+      "checks": 8,
+      "ok": 8
     },
     {
       "id": "control-plane-api",
@@ -655,8 +655,8 @@
     {
       "id": "control-plane-api",
       "day": "2026-10-25",
-      "checks": 7,
-      "ok": 7
+      "checks": 8,
+      "ok": 8
     },
     {
       "id": "docs",
@@ -979,8 +979,8 @@
     {
       "id": "docs",
       "day": "2026-10-25",
-      "checks": 7,
-      "ok": 7
+      "checks": 8,
+      "ok": 8
     },
     {
       "id": "installer",
@@ -1303,8 +1303,8 @@
     {
       "id": "installer",
       "day": "2026-10-25",
-      "checks": 7,
-      "ok": 7
+      "checks": 8,
+      "ok": 8
     },
     {
       "id": "installer-windows",
@@ -1429,8 +1429,8 @@
     {
       "id": "installer-windows",
       "day": "2026-10-25",
-      "checks": 7,
-      "ok": 7
+      "checks": 8,
+      "ok": 8
     },
     {
       "id": "site-api",
@@ -1753,8 +1753,8 @@
     {
       "id": "site-api",
       "day": "2026-10-25",
-      "checks": 7,
-      "ok": 7
+      "checks": 8,
+      "ok": 8
     },
     {
       "id": "staging",
@@ -2089,8 +2089,8 @@
     {
       "id": "staging",
       "day": "2026-10-25",
-      "checks": 7,
-      "ok": 7
+      "checks": 8,
+      "ok": 8
     },
     {
       "id": "website",
@@ -2413,8 +2413,8 @@
     {
       "id": "website",
       "day": "2026-10-25",
-      "checks": 7,
-      "ok": 7
+      "checks": 8,
+      "ok": 8
     }
   ]
 }
