@@ -86,7 +86,7 @@ func Acquire(path string, c clock.Clock, command string) (*Lock, error) {
 				time.Sleep(time.Millisecond)
 				continue
 			}
-			return nil, fmt.Errorf("lock: acquire %s: the lock changed hands %d times while this process tried for it, the last look failing with: %v",
+			return nil, fmt.Errorf("lock: acquire %s: the lock changed hands %d times while this process tried for it, the last look failing with: %w",
 				path, maxVanished, errors.Join(err, readErr))
 		}
 		if readErr == nil && Alive(holder) {
@@ -203,10 +203,11 @@ func publish(path string, me Owner) error {
 	_ = os.Remove(staging)
 	f, err := privatefs.CreateExclusive(staging)
 	if err != nil {
-		// %v rather than %w: a staging file that cannot be made says nothing
-		// about the lock, and wrapped it would read as "the lock exists" or as
-		// a remove in progress to the caller deciding whether to wait.
-		return fmt.Errorf("lock: stage %s: %v", staging, err)
+		// Held in a stageError, which does not unwrap: a staging file that
+		// cannot be made says nothing about the lock, and unwrapped it would
+		// read as "the lock exists" or as a remove in progress to the caller
+		// deciding whether to wait.
+		return fmt.Errorf("lock: stage %s: %w", staging, stageError{err})
 	}
 	if err := writeOwner(f, staging, me); err != nil {
 		return err
@@ -222,6 +223,12 @@ func publish(path string, me Owner) error {
 	}
 	return writeOwner(direct, path, me)
 }
+
+// stageError carries a failure to make the staging file without letting
+// errors.Is or os.IsExist see through it.
+type stageError struct{ err error }
+
+func (e stageError) Error() string { return e.err.Error() }
 
 // stagingSeq keeps two goroutines of one process from staging under one name.
 var stagingSeq atomic.Uint64
