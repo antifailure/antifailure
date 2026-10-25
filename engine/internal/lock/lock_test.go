@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -147,6 +149,82 @@ func TestRelease_IsIdempotentAndSurvivesAMissingFile(t *testing.T) {
 	require.NoError(t, l.Release())
 	require.NoFileExists(t, path)
 	require.NoError(t, l.Release(), "releasing twice must be safe")
+}
+
+// The ordering the replay store's own test reached on Windows: one goroutine
+// waits for the lock while another holds and releases it, so the waiter's read
+// of who holds it lands inside the holder's release. The read used to open the
+// file without sharing delete there, the release failed, and the waiter was
+// then refused for the whole of its wait by a lock its own process had already
+// let go of. Every release is checked, and each cycle ends with the lock taken
+// again, so a single leaked file fails the cycle it happened in.
+func TestRelease_IsNotDefeatedByAConcurrentReader(t *testing.T) {
+	t.Parallel()
+	path := lockPath(t)
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				_, _, _ = lock.Holder(path)
+			}
+		}
+	}()
+	defer func() { close(stop); <-done }()
+
+	for cycle := 0; cycle < 300; cycle++ {
+		l, err := lock.AcquireWithin(context.Background(), path, clock.NewFake(epoch), "af up", time.Second)
+		require.NoError(t, err, "cycle %d: the lock released in the cycle before could not be taken", cycle)
+		require.NoError(t, l.Release(), "cycle %d: a concurrent reader made the release fail", cycle)
+	}
+}
+
+// The lock's one promise, asked of many waiters at once: nobody holds it while
+// somebody else does. It was broken by the moment between creating the lock
+// file and writing the owner into it. A waiter that read the file then found
+// it empty, took it for a crash, and removed it, so on Unix the waiter took a
+// lock a live process was still writing and both went on to hold it. On
+// Windows the remove was refused instead and the waiter failed outright.
+// Eight goroutines take and release the lock in turn, and each one checks on
+// the way in that nobody else is inside.
+func TestAcquire_NeverHandsOneLockToTwoHolders(t *testing.T) {
+	t.Parallel()
+	path := lockPath(t)
+	var inside, overlaps, failures atomic.Int64
+	var wg sync.WaitGroup
+	for w := 0; w < 8; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 100; i++ {
+				l, err := lock.AcquireWithin(context.Background(), path, clock.NewFake(epoch), "af up", 10*time.Second)
+				if err != nil {
+					if failures.Add(1) == 1 {
+						t.Logf("first acquire failure: %v", err)
+					}
+					continue
+				}
+				if inside.Add(1) != 1 {
+					overlaps.Add(1)
+				}
+				inside.Add(-1)
+				if err := l.Release(); err != nil {
+					if failures.Add(1) == 1 {
+						t.Logf("first release failure: %v", err)
+					}
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	// Both counted before either is asserted, so a run that broke both says so.
+	t.Logf("overlaps %d, failures %d", overlaps.Load(), failures.Load())
+	require.Zero(t, overlaps.Load(), "the lock was held by two goroutines at once")
+	require.Zero(t, failures.Load(), "an acquire or a release failed with the lock merely contended")
 }
 
 // The dangerous case: a slow process whose lock was reclaimed as stale must

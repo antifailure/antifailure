@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
@@ -57,49 +58,69 @@ func Acquire(path string, c clock.Clock, command string) (*Lock, error) {
 	me := Owner{PID: os.Getpid(), Host: host, Command: command, AcquiredAt: c.Now().UTC()}
 
 	reclaimed := false
-	for attempt := 0; attempt < 2; attempt++ {
-		// O_EXCL is the atomic part. Two processes racing here, on the same
-		// machine or on a shared filesystem that honours it, cannot both win.
-		f, err := privatefs.CreateExclusive(path)
+	reclaims, vanished := 0, 0
+	for {
+		// Publishing a complete file under the lock's name is the atomic part.
+		// Two processes racing here, on the same machine or on a shared
+		// filesystem that honours it, cannot both win.
+		err := publish(path, me)
 		if err == nil {
-			if wErr := writeOwner(f, path, me); wErr != nil {
-				return nil, wErr
-			}
 			return &Lock{path: path, owner: me, reclaimed: reclaimed}, nil
 		}
-		if !os.IsExist(err) {
+		if !os.IsExist(err) && !transient(err) {
 			return nil, fmt.Errorf("lock: acquire %s: %w", path, err)
 		}
 
 		holder, readErr := read(path)
-		if readErr != nil {
-			// A truncated or unreadable lock file can only come from a crash
-			// between create and write. Refusing forever because of one would
-			// need a manual delete that no error message can make obvious, so
-			// it is treated as stale.
-			if rmErr := os.Remove(path); rmErr != nil && !os.IsNotExist(rmErr) {
-				return nil, fmt.Errorf("lock: reclaim an unreadable lock at %s: %w", path, rmErr)
+		if transient(err) || os.IsNotExist(readErr) || transient(readErr) {
+			// The holder let go between this attempt and this look. That is
+			// contention resolving rather than a crash, so nothing is reclaimed
+			// and nothing has failed: try again. It used to fall into the
+			// unreadable branch below, which counted it as a reclaim, and once
+			// the attempts ran out the final look found no file and returned
+			// "no such file or directory" to a caller that should have queued.
+			// On Windows the same moment can also read as a refusal, while the
+			// holder's remove is still in progress; see transient.
+			vanished++
+			if vanished <= maxVanished {
+				time.Sleep(time.Millisecond)
+				continue
 			}
-			reclaimed = true
-			continue
+			return nil, fmt.Errorf("lock: acquire %s: the lock changed hands %d times while this process tried for it, the last look failing with: %v",
+				path, maxVanished, errors.Join(err, readErr))
 		}
-		if Alive(holder) {
+		if readErr == nil && Alive(holder) {
 			return nil, heldBy(holder)
 		}
-		if rmErr := os.Remove(path); rmErr != nil && !os.IsNotExist(rmErr) {
+		if reclaims == 2 {
+			// Two reclaim attempts both lost the race, which means another
+			// process is actively taking the lock. Reporting contention is the
+			// correct answer.
+			if readErr != nil {
+				return nil, fmt.Errorf("lock: acquire %s: %w", path, readErr)
+			}
+			return nil, heldBy(holder)
+		}
+		if readErr != nil {
+			// A truncated or unreadable lock file can only come from a crash,
+			// because publish never lets the name exist before its contents do.
+			// Refusing forever because of one would need a manual delete that
+			// no error message can make obvious, so it is treated as stale.
+			if rmErr := os.Remove(path); rmErr != nil && !os.IsNotExist(rmErr) && !transient(rmErr) {
+				return nil, fmt.Errorf("lock: reclaim an unreadable lock at %s: %w", path, rmErr)
+			}
+		} else if rmErr := os.Remove(path); rmErr != nil && !os.IsNotExist(rmErr) && !transient(rmErr) {
 			return nil, fmt.Errorf("lock: reclaim the stale lock at %s: %w", path, rmErr)
 		}
 		reclaimed = true
+		reclaims++
 	}
-
-	// Two reclaim attempts both lost the race, which means another process is
-	// actively taking the lock. Reporting contention is the correct answer.
-	holder, err := read(path)
-	if err != nil {
-		return nil, fmt.Errorf("lock: acquire %s: %w", path, err)
-	}
-	return nil, heldBy(holder)
 }
+
+// maxVanished bounds how many times Acquire retries a lock that was released
+// between its attempt and its look. Each retry means another process made
+// progress, so the bound is only there to stop a pathological churn spinning.
+const maxVanished = 100
 
 // heldBy is the refusal for a lock a live process holds.
 //
@@ -158,6 +179,53 @@ func IsHeld(err error) bool {
 	return errors.Is(err, aferrors.Coded(aferrors.AFRUN003))
 }
 
+// publish makes path name a file that already holds me, or fails with an error
+// os.IsExist recognises when path is taken.
+//
+// The owner is written to a private file of its own first and only then linked
+// to the lock's name, because a lock that is visible before it is written is
+// two defects. A reader that arrives between the create and the write finds an
+// empty file, which Acquire reclaims as a crash: on Unix that removed the lock
+// a live process was still writing and handed the same lock to a second one,
+// and on Windows the remove was refused, because the writer's handle does not
+// share delete, and the waiter failed with an error instead of waiting. The
+// replay store's test that retires and imports at once reached the second form
+// on the required Windows check. A hard link is created exclusively on every
+// platform, so it is the same O_EXCL race as before with the contents already
+// in place.
+//
+// A filesystem that cannot link is the one case that falls back to creating
+// the name directly, which is the old behaviour and its old window.
+func publish(path string, me Owner) error {
+	staging := fmt.Sprintf("%s.%d.%d.new", path, me.PID, stagingSeq.Add(1))
+	// The name is this process's own, so anything already there was left by
+	// an earlier process that had the same identifier and crashed mid stage.
+	_ = os.Remove(staging)
+	f, err := privatefs.CreateExclusive(staging)
+	if err != nil {
+		// %v rather than %w: a staging file that cannot be made says nothing
+		// about the lock, and wrapped it would read as "the lock exists" or as
+		// a remove in progress to the caller deciding whether to wait.
+		return fmt.Errorf("lock: stage %s: %v", staging, err)
+	}
+	if err := writeOwner(f, staging, me); err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(staging) }()
+	linkErr := os.Link(staging, path)
+	if linkErr == nil || os.IsExist(linkErr) {
+		return linkErr
+	}
+	direct, err := privatefs.CreateExclusive(path)
+	if err != nil {
+		return err
+	}
+	return writeOwner(direct, path, me)
+}
+
+// stagingSeq keeps two goroutines of one process from staging under one name.
+var stagingSeq atomic.Uint64
+
 func writeOwner(f *os.File, path string, me Owner) error {
 	body, err := json.Marshal(me)
 	if err != nil {
@@ -195,24 +263,34 @@ func (l *Lock) Reclaimed() bool { return l.reclaimed }
 // slow process whose lock was reclaimed as stale cannot delete the lock a
 // newer process now holds.
 func (l *Lock) Release() error {
-	holder, err := read(l.path)
-	if err != nil {
-		if os.IsNotExist(err) {
+	for try := 0; ; try++ {
+		retry := try < maxVanished
+		holder, err := read(l.path)
+		if err != nil {
+			if transient(err) && retry {
+				// Another process is part way through removing or reclaiming
+				// it; look again rather than leave a file that may be ours.
+				time.Sleep(time.Millisecond)
+				continue
+			}
+			// Gone, or unreadable, and an unreadable file is not ours to
+			// remove either: the next Acquire reclaims it.
 			return nil
 		}
-		// An unreadable file is not ours to remove either; the next Acquire
-		// reclaims it.
+		if holder.PID != l.owner.PID || !holder.AcquiredAt.Equal(l.owner.AcquiredAt) {
+			// Someone else owns it now. Deleting would hand a third process a
+			// lock the second one believes it holds.
+			return nil
+		}
+		if err := os.Remove(l.path); err != nil && !os.IsNotExist(err) {
+			if transient(err) && retry {
+				time.Sleep(time.Millisecond)
+				continue
+			}
+			return fmt.Errorf("lock: release %s: %w", l.path, err)
+		}
 		return nil
 	}
-	if holder.PID != l.owner.PID || !holder.AcquiredAt.Equal(l.owner.AcquiredAt) {
-		// Someone else owns it now. Deleting would hand a third process a lock
-		// the second one believes it holds.
-		return nil
-	}
-	if err := os.Remove(l.path); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("lock: release %s: %w", l.path, err)
-	}
-	return nil
 }
 
 // Holder reports who holds the lock at path, if anyone.
@@ -228,7 +306,7 @@ func Holder(path string) (Owner, bool, error) {
 }
 
 func read(path string) (Owner, error) {
-	b, err := os.ReadFile(path) //nolint:gosec // the path is inside our own state directory
+	b, err := readFile(path)
 	if err != nil {
 		return Owner{}, err
 	}
