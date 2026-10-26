@@ -58,6 +58,18 @@ var licences = []licenceText{
 		"sil open font license version 1.1",
 		"to use, study, copy, merge, embed, modify, redistribute, and sell modified and unmodified copies of the font software",
 	}},
+	// The Mozilla Public License 2.0, which github.com/go-sql-driver/mysql
+	// carries. Three phrases from the body of the licence, so the one line
+	// header a covered source file opens with, which only points at the
+	// licence, is still read as nothing. It is a file level copyleft: it asks
+	// that the source of the covered files be available and that this notice
+	// say where, which naming the module and its version does, and it asks
+	// nothing of the files around them.
+	{"MPL-2.0", []string{
+		"mozilla public license version 2.0",
+		`1.1. "contributor" means each individual or legal entity that creates, contributes to the creation of, or owns covered software`,
+		"exhibit a - source code form license notice",
+	}},
 	// SQLite is not under a licence at all. Its authors dedicated it to the
 	// public domain, and modernc.org/sqlite ships that dedication beside its own
 	// licence because the code it carries is SQLite's. SPDX has no identifier for

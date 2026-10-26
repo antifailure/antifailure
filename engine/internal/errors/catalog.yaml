@@ -492,6 +492,13 @@ errors:
     docs: concepts/load
     retryable: false
     exit_code: 7
+  - code: AF-DB-046
+    area: DB
+    message: "The MySQL at {host} did not complete a verified TLS connection, which a source on another machine requires: {detail}"
+    next_step: "Give the server a certificate this machine trusts for {host}, which is the fix. If you accept the risk instead, say so in the address with ?tls=preferred, ?tls=skip-verify or ?tls=false; each lets anyone between here and {host} read the credential in the address and the unmasked rows it returns, which is why none of them is chosen for you."
+    docs: providers/datastores
+    retryable: false
+    exit_code: 3
 
   # Masking
   - code: AF-MSK-001

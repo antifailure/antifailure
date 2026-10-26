@@ -2225,21 +2225,47 @@ changecheck:
 
 # Nothing this repository created is still running.
 #
-# The machine's ClickHouse is the one exception, and it is an exception rather
-# than an oversight. A store server is not an environment resource: goldens and
-# branches are databases on it, several environments share one, and `af down`
-# deliberately leaves it running because starting it costs the better part of a
-# minute and the next `af up` would pay that again. There is exactly one, under
-# a fixed name, so it cannot accumulate, and every branch and every golden
-# inside it is still swept by the suites' own leak checks.
+# The machine's ClickHouse and its MySQL are the exceptions, and they are
+# exceptions rather than oversights. A store server is not an environment
+# resource: goldens and branches are databases on it, several environments
+# share one, and `af down` deliberately leaves it running because starting it
+# costs the better part of a minute and the next `af up` would pay that again.
+# There is exactly one per engine, under a fixed name, so it cannot accumulate,
+# and every branch and every golden inside it is still swept by the suites' own
+# leak checks.
 #
-# docker ps has no label!= filter, so the kind is formatted out and the one
-# exception is dropped here rather than by the daemon.
+# docker ps has no label!= filter, so the kind is formatted out and the
+# exceptions are dropped here rather than by the daemon.
+#
+# What is inside the two servers is printed first and never fails, the same
+# listing as ci.yml's "The goldens the suites left behind": a server is meant
+# to outlive a run and the databases on it are not, so this is where a suite
+# that forgot its cleanup shows up. The MySQL's root password is read from the
+# container's own environment rather than written here.
 leaks:
     #!/usr/bin/env bash
+    if docker inspect af-clickhouse > /dev/null 2>&1; then
+      if dbs=$(docker exec af-clickhouse clickhouse-client --query \
+          "SELECT name FROM system.databases WHERE name LIKE 'af_golden_%' FORMAT TSV"); then
+        echo "golden databases on the managed ClickHouse: $(printf '%s' "$dbs" | grep -c .)"
+        printf '%s\n' "$dbs" | sed '/^$/d; s|^|  |'
+      else
+        echo "golden databases: could not look, the managed ClickHouse did not answer"
+      fi
+    fi
+    q="SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME LIKE 'af\\_golden\\_%' OR SCHEMA_NAME LIKE 'af\\_env\\_%' OR SCHEMA_NAME LIKE 'af\\_cand\\_%'"
+    if docker inspect af-mysql > /dev/null 2>&1; then
+      if dbs=$(docker exec -e Q="$q" af-mysql \
+          sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot -N -e "$Q"'); then
+        echo "golden, branch and candidate databases on the managed MySQL: $(printf '%s' "$dbs" | grep -c .)"
+        printf '%s\n' "$dbs" | sed '/^$/d; s|^|  |'
+      else
+        echo "MySQL databases: could not look, the managed MySQL did not answer"
+      fi
+    fi
     managed=$(docker ps -a --filter label=dev.antifailure.managed \
       --format '{{{{.ID}} {{{{.Names}} {{{{.Label "dev.antifailure.kind"}}')
-    leaked=$(printf '%s\n' "$managed" | grep -v ' clickhouse-server$' | grep . || true)
+    leaked=$(printf '%s\n' "$managed" | grep -v -E ' (clickhouse|mysql)-server$' | grep . || true)
     left=$(printf '%s' "$leaked" | grep -c . || true)
     nets=$(docker network ls -q --filter label=dev.antifailure.managed | wc -l | tr -d ' ')
     echo "containers: $left, networks: $nets"

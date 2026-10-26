@@ -228,6 +228,55 @@ func TestDatastores_AMongoBesideAPostgresIsASecondStore(t *testing.T) {
 		"a store holding application records is a twin of nothing when it is empty")
 }
 
+func TestDatastores_AMySQLWithNoPostgresIsTheDatabaseAndNotASecondStore(t *testing.T) {
+	t.Parallel()
+	// The same rule as a Mongo with nothing beside it: a MySQL alone is the
+	// application's own database, which mergeDatabase asks about by name.
+	res := run(t, "shop", map[string]string{
+		"package.json": `{"name":"shop","scripts":{"start":"node server.js"},
+			"dependencies":{"express":"4.0.0","mysql2":"3.0.0"}}`,
+		"docker-compose.yml": `services:
+  web:
+    build: .
+    ports:
+      - "3000:3000"
+  mysql:
+    image: mysql:8.4
+`,
+		"Dockerfile": "FROM node:20\nCMD [\"node\", \"server.js\"]\n",
+	})
+	require.Empty(t, res.Datastores,
+		"the application's own database must not also be proposed as a store beside itself")
+}
+
+func TestDatastores_AMySQLBesideAPostgresIsAGoldenThisBuildCanHold(t *testing.T) {
+	t.Parallel()
+	// A Postgres for the product and a MySQL for the half of it that came from
+	// an acquisition, which is the shape that left that half empty in a twin.
+	// It is proposed golden, and it is written into the manifest rather than
+	// named as a store this build cannot bring up, because it now can.
+	res := run(t, "merged", map[string]string{
+		"package.json": `{"name":"merged","scripts":{"start":"node server.js"},
+			"dependencies":{"express":"4.0.0","pg":"8.0.0","mysql2":"3.0.0"}}`,
+		"docker-compose.yml": `services:
+  web:
+    build: .
+    ports:
+      - "3000:3000"
+  db:
+    image: postgres:16
+  legacy:
+    image: mariadb:11
+`,
+		"Dockerfile": "FROM node:20\nCMD [\"node\", \"server.js\"]\n",
+	})
+	legacy := proposalFor(t, res.Datastores, "legacy")
+	require.Equal(t, "mysql", legacy.Engine)
+	require.Equal(t, schema.StanceGolden, legacy.Stance)
+	require.True(t, legacy.Provisionable,
+		"a MySQL was named as a store this build cannot hold, and it can")
+}
+
 func TestDatastores_AServiceCalledPrimaryDoesNotCollideWithTheDatabase(t *testing.T) {
 	t.Parallel()
 	// primary is reserved for the entry database: normalizes into, and the

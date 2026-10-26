@@ -233,6 +233,9 @@ const (
 	// The environment {env} is already running a database branch on
 	// {running} and this run asked for {asked}.
 	AFDB045 Code = "AF-DB-045"
+	// The MySQL at {host} did not complete a verified TLS connection,
+	// which a source on another machine requires: {detail}
+	AFDB046 Code = "AF-DB-046"
 
 	// Detection
 	// No application could be detected in {path}.
@@ -1360,6 +1363,15 @@ var catalog = map[Code]Entry{
 		Docs:      "concepts/load",
 		Retryable: false,
 		ExitCode:  ExitVerification,
+	},
+	AFDB046: {
+		Code:      AFDB046,
+		Area:      "DB",
+		Message:   "The MySQL at {host} did not complete a verified TLS connection, which a source on another machine requires: {detail}",
+		NextStep:  "Give the server a certificate this machine trusts for {host}, which is the fix. If you accept the risk instead, say so in the address with ?tls=preferred, ?tls=skip-verify or ?tls=false; each lets anyone between here and {host} read the credential in the address and the unmasked rows it returns, which is why none of them is chosen for you.",
+		Docs:      "providers/datastores",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
 	},
 	AFDET001: {
 		Code:      AFDET001,

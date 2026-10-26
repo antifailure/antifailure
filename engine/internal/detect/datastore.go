@@ -99,6 +99,11 @@ var stanceProposals = map[string]stanceProposal{
 		because: "this holds application records rather than a cache, so an empty one is a " +
 			"twin of nothing",
 	},
+	"mysql": {
+		stance: schema.StanceGolden,
+		because: "a MySQL beside the Postgres holds records the application reads, so a twin " +
+			"with it empty answers every query against that half of the product with nothing",
+	},
 }
 
 // datastoreEngineOf maps the image classifier's answer onto the engine name a
@@ -110,7 +115,7 @@ var stanceProposals = map[string]stanceProposal{
 // entry for it would be two records of one store.
 func datastoreEngineOf(kind string) string {
 	switch kind {
-	case "clickhouse", "redis", "kafka", "elasticsearch", "mongodb":
+	case "clickhouse", "redis", "kafka", "elasticsearch", "mongodb", "mysql":
 		return kind
 	}
 	return ""
@@ -119,18 +124,18 @@ func datastoreEngineOf(kind string) string {
 // mergeDatastores turns the datastore findings into proposals, and the
 // provisionable proposals into manifest entries.
 //
-// A mongodb with no Postgres beside it is the application's own database
-// rather than a second store, and mergeDatabase already asks about that case
-// by name. Proposing a stance for it too would be the same fact said twice in
-// two different vocabularies, so it is proposed only when a Postgres was found
-// as well.
+// A mongodb or a mysql with no Postgres beside it is the application's own
+// database rather than a second store, and mergeDatabase already asks about
+// that case by name. Proposing a stance for it too would be the same fact said
+// twice in two different vocabularies, so it is proposed only when a Postgres
+// was found as well.
 func mergeDatastores(findings []Finding, hasPostgres bool) ([]ProposedDatastore, []schema.Datastore) {
 	seen := map[string]bool{}
 	var proposed []ProposedDatastore
 
 	for _, f := range OfKind(findings, KindDatastore) {
 		engine := f.Subject
-		if engine == "mongodb" && !hasPostgres {
+		if (engine == "mongodb" || engine == "mysql") && !hasPostgres {
 			continue
 		}
 		p, ok := stanceProposals[engine]

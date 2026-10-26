@@ -1014,6 +1014,18 @@ The environment {env} is already running a database branch on {running} and this
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/load](/docs/concepts/load) |
 
+### AF-DB-046
+
+The MySQL at {host} did not complete a verified TLS connection, which a source on another machine requires: {detail}
+
+**What to do.** Give the server a certificate this machine trusts for {host}, which is the fix. If you accept the risk instead, say so in the address with ?tls=preferred, ?tls=skip-verify or ?tls=false; each lets anyone between here and {host} read the credential in the address and the unmasked rows it returns, which is why none of them is chosen for you.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [providers/datastores](/docs/providers/datastores) |
+
 ## Detection
 
 ### AF-DET-001

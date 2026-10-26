@@ -1074,23 +1074,27 @@ jobs:
         # was learned from. One adds information to a failure, the other invents
         # one. The step below uses `always()` because it only prints.
         #
-        # The machine's ClickHouse is the one exception, and it is an exception
-        # rather than an oversight. A store server is not an environment
-        # resource: goldens and branches are databases on it, several
-        # environments share one, and `af down` deliberately leaves it running
+        # The machine's ClickHouse and its MySQL are the exceptions, and they
+        # are exceptions rather than oversights. A store server is not an
+        # environment resource: goldens and branches are databases on it,
+        # several environments share one, and `af down` deliberately leaves it running
         # because starting it costs the better part of a minute and the next
-        # `af up` would pay that again. There is exactly one server, under a
-        # fixed name, so the server cannot accumulate. What is inside it can:
-        # this comment used to say every golden on it was swept by the suites'
-        # own leak checks, and one live test had left eighteen golden databases
-        # on a laptop by 2026-09-13. The step after this one prints them.
+        # `af up` would pay that again. There is exactly one server per
+        # engine, under a fixed name, so a server cannot accumulate. What is
+        # inside it can: this comment used to say every golden on it was swept
+        # by the suites' own leak checks, and one live test had left eighteen
+        # golden databases on a laptop by 2026-09-13. The step after this one
+        # prints them, on the ClickHouse and on the MySQL.
+        # af-mysql joined in #684: the MySQL suite starts it the way the
+        # ClickHouse suite starts af-clickhouse, and the first run with it
+        # failed this step on a container that is the design, not a leak.
         # docker ps has no label!= filter, so the kind is formatted out and
-        # the one exception is dropped here rather than by the daemon.
+        # the exceptions are dropped here rather than by the daemon.
         if: '!cancelled()'
         run: |
           managed=$(docker ps -a --filter label=dev.antifailure.managed \
             --format '{{.ID}} {{.Names}} {{.Label "dev.antifailure.kind"}}')
-          leaked=$(printf '%s\n' "$managed" | grep -v ' clickhouse-server$' | grep . || true)
+          leaked=$(printf '%s\n' "$managed" | grep -v -E ' (clickhouse|mysql)-server$' | grep . || true)
           left=$(printf '%s' "$leaked" | grep -c . || true)
           nets=$(docker network ls -q --filter label=dev.antifailure.managed | wc -l | tr -d ' ')
           echo "containers: $left, networks: $nets"
@@ -1101,11 +1105,11 @@ jobs:
 
       - name: The goldens the suites left behind
         # The check above cannot see a golden. With the Docker provider a
-        # golden is an image, on the managed ClickHouse it is a database, and
-        # either one outlives af down by design. So this names the golden
-        # images that exist now and did not before the suites, and the golden
-        # databases on the managed server, which a fresh runner has none of
-        # until a suite makes one.
+        # golden is an image, on the managed ClickHouse and the managed MySQL
+        # it is a database, and each outlives af down by design. So this names
+        # the golden images that exist now and did not before the suites, and
+        # the provider's databases on each managed server, which a fresh
+        # runner has none of until a suite makes one.
         #
         # It prints and never fails, for one run on main: that run measures
         # what a clean engine job leaves. The assertion that it leaves none is
@@ -1135,6 +1139,21 @@ jobs:
             echo "golden databases: could not look, the managed ClickHouse did not answer"
           else
             echo "golden databases on the managed ClickHouse: $(printf '%s' "$dbs" | grep -c .)"
+            printf '%s\n' "$dbs" | sed '/^$/d; s|^|  |'
+          fi
+          # The managed MySQL keeps its goldens, branches and candidates as
+          # databases too. Its root password is read from the container's own
+          # environment, so it is not written here.
+          q="SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME LIKE 'af\\_golden\\_%' OR SCHEMA_NAME LIKE 'af\\_env\\_%' OR SCHEMA_NAME LIKE 'af\\_cand\\_%'"
+          if ! docker version > /dev/null 2>&1; then
+            echo "MySQL databases: could not look, Docker did not answer"
+          elif ! docker inspect af-mysql > /dev/null 2>&1; then
+            echo "MySQL databases: no managed MySQL on this runner"
+          elif ! dbs=$(docker exec -e Q="$q" af-mysql \
+              sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot -N -e "$Q"'); then
+            echo "MySQL databases: could not look, the managed MySQL did not answer"
+          else
+            echo "golden, branch and candidate databases on the managed MySQL: $(printf '%s' "$dbs" | grep -c .)"
             printf '%s\n' "$dbs" | sed '/^$/d; s|^|  |'
           fi
           exit 0

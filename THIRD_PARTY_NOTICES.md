@@ -25,8 +25,9 @@ people on every other one.
 Platforms: darwin/amd64, darwin/arm64, linux/amd64, linux/arm64,
 windows/amd64, windows/arm64.
 
-### Go modules (103)
+### Go modules (105)
 
+- `filippo.io/edwards25519` v1.2.0, BSD-3-Clause
 - `github.com/Microsoft/go-winio` v0.6.4, MIT
 - `github.com/aymanbagabas/go-osc52/v2` v2.0.1, MIT
 - `github.com/cespare/xxhash/v2` v2.3.0, MIT
@@ -65,6 +66,7 @@ windows/amd64, windows/arm64.
 - `github.com/go-openapi/swag/stringutils` v0.27.1, Apache-2.0
 - `github.com/go-openapi/swag/typeutils` v0.27.1, Apache-2.0
 - `github.com/go-openapi/swag/yamlutils` v0.27.1, Apache-2.0
+- `github.com/go-sql-driver/mysql` v1.10.1, MPL-2.0
 - `github.com/google/gnostic-models` v0.7.0, Apache-2.0
 - `github.com/google/uuid` v1.6.0, BSD-3-Clause
 - `github.com/inconshreveable/mousetrap` v1.1.0, Apache-2.0

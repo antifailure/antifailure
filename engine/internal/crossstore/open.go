@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/antifailure/antifailure/engine/internal/datastore/clickhouse"
+	"github.com/antifailure/antifailure/engine/internal/datastore/mysql"
 	"github.com/antifailure/antifailure/engine/internal/masking"
 )
 
@@ -40,9 +41,11 @@ func Open(ctx context.Context, s Store) (Catalog, error) {
 		return openPostgres(ctx, s)
 	case "clickhouse":
 		return &clickHouseCatalog{store: s}, nil
+	case "mysql", "mariadb":
+		return &mysqlCatalog{store: s}, nil
 	default:
 		return nil, fmt.Errorf(
-			"this build reads the schema of a postgres and of a clickhouse, and %s runs %s; "+
+			"this build reads the schema of a postgres, a clickhouse and a mysql, and %s runs %s; "+
 				"the cross store check compares the stores it can read and says which it could not",
 			s.Name, s.Engine)
 	}
@@ -103,6 +106,27 @@ func (c *clickHouseCatalog) Tables(ctx context.Context) ([]masking.Table, error)
 func (c *clickHouseCatalog) Skipped() []string { return c.skipped }
 
 func (c *clickHouseCatalog) Close() error { return nil }
+
+// mysqlCatalog reads a MySQL's schema with the provider's own reader, so the
+// check sees the tables masking would.
+type mysqlCatalog struct {
+	store   Store
+	skipped []string
+}
+
+func (c *mysqlCatalog) Tables(ctx context.Context) ([]masking.Table, error) {
+	tables, skipped, err := mysql.Catalog(ctx, c.store.URL)
+	if err != nil {
+		return nil, fmt.Errorf("reading the schema named by %s: %w",
+			orUnnamedVar(c.store.Var), redactedConnectError(err))
+	}
+	c.skipped = skipped
+	return tables, nil
+}
+
+func (c *mysqlCatalog) Skipped() []string { return c.skipped }
+
+func (c *mysqlCatalog) Close() error { return nil }
 
 // redactedConnectError keeps a connection string out of a message.
 //

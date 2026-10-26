@@ -318,11 +318,145 @@ func (clickhouseDialect) quoteIdent(name string) string {
 	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
 }
 
-// Postgres and ClickHouse name the two dialects for a caller assembling a
+// mysqlTypes maps MySQL's type names onto the Postgres ones this scanner
+// classifies by, keyed on the base name of information_schema's COLUMN_TYPE.
+//
+// Independently written from the table in the masking package and required to
+// agree with it by a test that lives over there, for the reason at the top of
+// this file.
+var mysqlTypes = map[string]string{
+	"char": "character", "varchar": "character varying",
+	"tinytext": "text", "text": "text", "mediumtext": "text", "longtext": "text",
+	"binary": "bytea", "varbinary": "bytea",
+	"tinyblob": "bytea", "blob": "bytea", "mediumblob": "bytea", "longblob": "bytea",
+	"tinyint": "smallint", "smallint": "smallint", "year": "smallint",
+	"mediumint": "integer", "int": "integer", "integer": "integer",
+	"bigint":  "bigint",
+	"decimal": "numeric", "numeric": "numeric", "dec": "numeric", "fixed": "numeric",
+	"float": "real", "double": "double precision",
+	"bool": "boolean", "boolean": "boolean",
+	"bit":  "bit",
+	"date": "date", "datetime": "timestamp without time zone",
+	"timestamp": "timestamp with time zone", "time": "time without time zone",
+	"json": "jsonb",
+	"enum": "USER-DEFINED", "set": "USER-DEFINED", "vector": "USER-DEFINED",
+	"geometry": "USER-DEFINED", "point": "USER-DEFINED", "linestring": "USER-DEFINED",
+	"polygon": "USER-DEFINED", "multipoint": "USER-DEFINED",
+	"multilinestring": "USER-DEFINED", "multipolygon": "USER-DEFINED",
+	"geometrycollection": "USER-DEFINED", "geomcollection": "USER-DEFINED",
+}
+
+// mysqlUnsignedTypes is the canonical name of an unsigned integer, one signed
+// width up, because the unsigned type holds numbers the signed one cannot.
+var mysqlUnsignedTypes = map[string]string{
+	"tinyint": "smallint", "smallint": "integer", "mediumint": "integer",
+	"int": "bigint", "integer": "bigint", "bigint": "numeric",
+}
+
+// mysqlSpatial are the types whose value is a binary encoding of a shape.
+var mysqlSpatial = map[string]bool{
+	"geometry": true, "point": true, "linestring": true, "polygon": true,
+	"multipoint": true, "multilinestring": true, "multipolygon": true,
+	"geometrycollection": true, "geomcollection": true,
+}
+
+// mysqlDialect reads a MySQL, and a MariaDB or a Percona through the same
+// catalog.
+type mysqlDialect struct{}
+
+func (mysqlDialect) Engine() string { return "mysql" }
+
+// splitMySQLType returns a COLUMN_TYPE's base name and whether it is unsigned,
+// reading the modifiers only after the parenthesised part, because an enum's
+// values are free text.
+func splitMySQLType(dataType string) (string, bool) {
+	t := strings.ToLower(strings.TrimSpace(dataType))
+	base, rest := t, ""
+	if open := strings.IndexByte(t, '('); open >= 0 {
+		base = t[:open]
+		if end := strings.LastIndexByte(t, ')'); end > open {
+			rest = t[end+1:]
+		}
+	} else if space := strings.IndexByte(t, ' '); space >= 0 {
+		base, rest = t[:space], t[space:]
+	}
+	unsigned := false
+	for _, w := range strings.Fields(rest) {
+		unsigned = unsigned || w == "unsigned"
+	}
+	return strings.TrimSpace(base), unsigned
+}
+
+func (mysqlDialect) Canonical(dataType string) string {
+	lower := strings.ToLower(strings.TrimSpace(dataType))
+	// A name that is already canonical stays as it is, so feeding the output
+	// back in is safe.
+	for _, table := range []map[string]string{mysqlTypes, mysqlUnsignedTypes} {
+		for _, canon := range table {
+			if strings.ToLower(canon) == lower {
+				return canon
+			}
+		}
+	}
+	base, unsigned := splitMySQLType(dataType)
+	if canon, ok := mysqlUnsignedTypes[base]; ok && unsigned {
+		return canon
+	}
+	if canon, ok := mysqlTypes[base]; ok {
+		return canon
+	}
+	return dataType
+}
+
+// Kind reads a spatial column as unread rather than as text.
+//
+// A geometry is USER-DEFINED the way a PostGIS one is, and the shared table
+// reads that through its text form. A MySQL geometry has no text form short of
+// a function call: it arrives as the server's binary encoding, which no
+// detector matches, so read as text it would be counted as read and clean when
+// it holds a location. Unread is what it is, and the report says so.
+func (d mysqlDialect) Kind(dataType string) string {
+	if base, _ := splitMySQLType(dataType); mysqlSpatial[base] {
+		return "unread"
+	}
+	return KindOf(d.Canonical(dataType))
+}
+
+// Columns lists every column of every base table outside the server's own
+// schemas, with information_schema's COLUMN_TYPE, which carries the length,
+// the signedness and an enum's values where DATA_TYPE carries the base name
+// alone.
+func (mysqlDialect) Columns() string {
+	return `
+SELECT c.TABLE_SCHEMA, c.TABLE_NAME, c.COLUMN_NAME, c.COLUMN_TYPE
+FROM information_schema.COLUMNS c
+JOIN information_schema.TABLES t
+  ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME
+WHERE t.TABLE_TYPE = 'BASE TABLE'
+  AND c.TABLE_SCHEMA NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')
+ORDER BY c.TABLE_SCHEMA, c.TABLE_NAME, c.ORDINAL_POSITION`
+}
+
+// Sample reads one column as it is stored. The driver returns every type in
+// its text form already, and a binary string as its bytes, which is the bytea
+// path's whole point.
+func (d mysqlDialect) Sample(c Column, limit int) string {
+	return fmt.Sprintf(
+		"SELECT %s FROM %s.%s WHERE %s IS NOT NULL LIMIT %d",
+		d.quoteIdent(c.Name), d.quoteIdent(c.Schema), d.quoteIdent(c.Table),
+		d.quoteIdent(c.Name), limit)
+}
+
+func (mysqlDialect) quoteIdent(name string) string {
+	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
+}
+
+// Postgres, ClickHouse and MySQL name the dialects for a caller assembling a
 // source. They are values rather than a registry because this package has no
 // manifest to read an engine name out of: whatever chose the engine is the
 // thing holding the connection.
 var (
 	Postgres   Dialect = postgresDialect{}
 	ClickHouse Dialect = clickhouseDialect{}
+	MySQL      Dialect = mysqlDialect{}
 )

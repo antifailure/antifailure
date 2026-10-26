@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/antifailure/antifailure/engine/internal/datastore/clickhouse"
+	"github.com/antifailure/antifailure/engine/internal/datastore/mysql"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/events"
 	"github.com/antifailure/antifailure/engine/internal/journal"
@@ -67,10 +68,11 @@ func DatastoreURLVar(name string) string {
 type datastoreHandle struct {
 	decl schema.Datastore
 	prov provider.Datastore
-	// server is the local ClickHouse this store lives on, when it lives on
-	// one. It is what the runtime attaches to the environment's network so a
-	// service can reach the store by name.
-	server *clickhouse.LocalServer
+	// server is the local container this store lives on, when it lives on
+	// one, and serverRef names it. It is what the runtime attaches to the
+	// environment's network so a service can reach the store by name.
+	server    local.Attachable
+	serverRef string
 }
 
 // datastoreDeclarations returns the stores a manifest declares other than the
@@ -96,7 +98,7 @@ func datastoreDeclarations(m *schema.Manifest) []schema.Datastore {
 // openDatastores opens a provider per declared store, once per session.
 //
 // Lazily, and only from the two commands that need one. Opening a ClickHouse
-// datastore starts the machine's ClickHouse if it is not already running, and
+// or a MySQL datastore starts the machine's server if it is not already running, and
 // doing that on every `af status` would make a read only command wait a minute
 // on a container it never asks anything.
 func (o *Orchestrator) openDatastores(ctx context.Context, s *session, mustExist bool) error {
@@ -118,7 +120,7 @@ func (o *Orchestrator) openDatastores(ctx context.Context, s *session, mustExist
 			//
 			// Skipped here rather than at each of those five call sites,
 			// because opening is what refuses. newDatastoreProvider knows how
-			// to provide clickhouse and nothing else, so a Kafka declared
+			// to provide clickhouse and mysql and nothing else, so a Kafka declared
 			// topics_only used to fail `af up` outright with a message about
 			// there being no provider for kafka, which is true and is beside
 			// the point: nothing was ever going to branch it. Its container is
@@ -191,7 +193,27 @@ func (o *Orchestrator) newDatastoreProvider(
 		if err != nil {
 			return nil, err
 		}
-		return &datastoreHandle{decl: ds, prov: p, server: &server}, nil
+		return &datastoreHandle{decl: ds, prov: p, server: &server, serverRef: server.ContainerRef}, nil
+	case "mysql":
+		server, err := mysql.EnsureLocalServer(ctx, mysql.LocalServerOptions{
+			Getenv:        o.opts.Getenv,
+			Progress:      o.progress,
+			OnlyIfPresent: mustExist,
+		})
+		if err != nil {
+			if mustExist && errorsIsNoLocalServer(err) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		p, err := mysql.New(mysql.Options{
+			ServerURL: server.URL, Name: ds.Name,
+			Clock: o.opts.Clock, Progress: o.progress,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return &datastoreHandle{decl: ds, prov: p, server: &server, serverRef: server.ContainerRef}, nil
 	default:
 		// Named and not built here, and saying so beats every alternative. A
 		// silent skip would leave the store empty in an environment whose
@@ -209,7 +231,8 @@ func (o *Orchestrator) newDatastoreProvider(
 }
 
 func errorsIsNoLocalServer(err error) bool {
-	return strings.Contains(err.Error(), clickhouse.ErrNoLocalServer.Error())
+	return strings.Contains(err.Error(), clickhouse.ErrNoLocalServer.Error()) ||
+		strings.Contains(err.Error(), mysql.ErrNoLocalServer.Error())
 }
 
 // datastores brings every declared store to the state its stance asks for, and
@@ -360,7 +383,7 @@ func (o *Orchestrator) refreshDatastore(
 				"source_url_env on it and add that secret to the repository.", h.decl.Name))
 	}
 
-	var masked clickhouse.MaskResult
+	var masked maskedStore
 	var report verify.Report
 	gv, err := h.prov.RefreshGolden(ctx, provider.GoldenSpec{
 		SourceURL: source, RulesHash: hash, Provenance: want,
@@ -369,19 +392,12 @@ func (o *Orchestrator) refreshDatastore(
 			// closure and the statement it is an argument to would write that
 			// one, and a reader cannot tell which assignment wins by looking.
 			var maskErr error
-			masked, maskErr = clickhouse.Mask(ctx, candidate, clickhouse.MaskOptions{
-				Key: key, Rules: rules, RulesHash: hash,
-				Progress: func(line string) { o.progress(line) },
-			})
+			masked, maskErr = o.maskStore(ctx, h.decl, candidate, source, key, rules, hash)
 			return maskErr
 		},
 		Verify: func(ctx context.Context, candidate secrets.Value) (string, error) {
 			var scanErr error
-			report, scanErr = clickhouse.Scan(ctx, candidate, clickhouse.ScanOptions{
-				Unruled:  masked.CopiedUnchanged,
-				Now:      o.opts.Clock.Now,
-				Progress: func(line string) { o.progress("verification: " + line) },
-			})
+			report, scanErr = o.scanStore(ctx, h.decl, candidate, masked.CopiedUnchanged)
 			if scanErr != nil {
 				return "", aferrors.Wrap(scanErr, aferrors.AFMSK002,
 					"detector", "scan", "table", "any", "column", "any")
@@ -413,6 +429,71 @@ func (o *Orchestrator) refreshDatastore(
 		Name: h.decl.Name, Version: gv.ID, Rows: masked.Rows,
 		Tables: masked.Tables, Columns: report.Columns, Empty: source.IsZero(),
 	}, nil
+}
+
+// maskedStore is what masking one store's candidate did, in the terms the
+// refresh reports and the scan needs, whichever engine did it.
+type maskedStore struct {
+	Rows            int64
+	Tables          int
+	CopiedUnchanged []string
+}
+
+// maskStore masks a golden candidate with the engine's own executor.
+//
+// The rules, the key and the hash are the same for every engine. What differs
+// is the loop that reads and rewrites rows, which belongs with each engine's
+// provider for the reason masking.Dialect gives.
+func (o *Orchestrator) maskStore(
+	ctx context.Context, ds schema.Datastore, candidate, source secrets.Value,
+	key *masking.Key, rules *masking.RuleSet, hash string,
+) (maskedStore, error) {
+	progress := func(line string) { o.progress(line) }
+	switch ds.Engine {
+	case "clickhouse":
+		res, err := clickhouse.Mask(ctx, candidate, clickhouse.MaskOptions{
+			Key: key, Rules: rules, RulesHash: hash, Progress: progress,
+		})
+		return maskedStore{Rows: res.Rows, Tables: res.Tables, CopiedUnchanged: res.CopiedUnchanged}, err
+	case "mysql":
+		// The schema masking derives every key from is the source database's
+		// name, so the same address masks the same way on every refresh. A
+		// store with no source has nothing in it to mask, and its own name is
+		// as stable as anything.
+		schemaName := mysql.DatabaseOf(source)
+		if schemaName == "" {
+			schemaName = ds.Name
+		}
+		res, err := mysql.Mask(ctx, candidate, mysql.MaskOptions{
+			Key: key, Rules: rules, RulesHash: hash, Schema: schemaName, Progress: progress,
+		})
+		return maskedStore{Rows: res.Rows, Tables: res.Tables, CopiedUnchanged: res.CopiedUnchanged}, err
+	default:
+		return maskedStore{}, fmt.Errorf(
+			"the datastore %s declares the engine %s and this build has no masking executor for it",
+			ds.Name, ds.Engine)
+	}
+}
+
+// scanStore reads a masked candidate back with the shared detectors.
+func (o *Orchestrator) scanStore(
+	ctx context.Context, ds schema.Datastore, candidate secrets.Value, unruled []string,
+) (verify.Report, error) {
+	progress := func(line string) { o.progress("verification: " + line) }
+	switch ds.Engine {
+	case "clickhouse":
+		return clickhouse.Scan(ctx, candidate, clickhouse.ScanOptions{
+			Unruled: unruled, Now: o.opts.Clock.Now, Progress: progress,
+		})
+	case "mysql":
+		return mysql.Scan(ctx, candidate, mysql.ScanOptions{
+			Unruled: unruled, Now: o.opts.Clock.Now, Progress: progress,
+		})
+	default:
+		return verify.Report{}, fmt.Errorf(
+			"the datastore %s declares the engine %s and this build has no scanner for it",
+			ds.Name, ds.Engine)
+	}
 }
 
 // DatastoreGolden is what one store's refresh did.
@@ -616,7 +697,7 @@ func (o *Orchestrator) attachDatastores(
 			continue
 		}
 		inside, err := networked.AttachStore(
-			ctx, h.server, h.server.ContainerRef, networkID, h.decl.Name, host)
+			ctx, h.server, h.serverRef, networkID, h.decl.Name, host)
 		if err != nil {
 			return nil, err
 		}

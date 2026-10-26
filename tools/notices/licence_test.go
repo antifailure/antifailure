@@ -30,6 +30,7 @@ func TestEachLicenceTheLinkedModulesCarryIsNamedFromItsOwnText(t *testing.T) {
 		{"ISC.txt", "ISC"},
 		{"SQLite-public-domain.txt", "LicenseRef-SQLite-public-domain"},
 		{"OFL-1.1.txt", "OFL-1.1"},
+		{"MPL-2.0.txt", "MPL-2.0"},
 	} {
 		t.Run(c.want, func(t *testing.T) {
 			// Exactly this and nothing else, so a three clause text also being
@@ -43,7 +44,7 @@ func TestEachLicenceTheLinkedModulesCarryIsNamedFromItsOwnText(t *testing.T) {
 
 func TestATextThatOnlyResemblesALicenceIsNamedAsNothing(t *testing.T) {
 	for name, text := range map[string]string{
-		"the Mozilla Public License header, a licence this tool does not know": "This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0.",
+		"the Mozilla Public License header, which points at the licence without carrying it": "This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0.",
 		"a bare copyright line": "Copyright 2020 Somebody. All rights reserved.",
 		"the MIT grant without the condition that makes it the MIT licence": "Permission is hereby granted, free of charge, to any person obtaining a copy of this software.",
 		"a sentence that names the Apache licence without carrying it":      "This project is licensed under the Apache License, Version 2.0.",

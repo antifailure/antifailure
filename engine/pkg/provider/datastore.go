@@ -133,7 +133,7 @@ var ErrNoGolden = errors.New("provider: this datastore holds no golden")
 // registrations would be a different list in af init than in af up, which is
 // the disagreement this exists to prevent.
 func BuiltInDatastoreEngines() []string {
-	return []string{"clickhouse"}
+	return []string{"clickhouse", "mysql"}
 }
 
 // ProvidesDatastoreEngine reports whether this build can bring up an engine

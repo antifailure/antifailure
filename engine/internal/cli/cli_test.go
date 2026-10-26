@@ -1034,3 +1034,49 @@ func TestExplain_ShowsTheResolvedFidelitySettings(t *testing.T) {
 	require.Contains(t, got.stdout, "inventory    on")
 	require.Contains(t, got.stdout, "required     database")
 }
+
+// A MySQL source carries production's credential and unmasked rows, and the
+// TLS it is reached with is a parameter inside a secret nobody prints. explain
+// says which mode each source gets, and what a weaker one exposes, and never
+// the address.
+func TestExplain_SaysWhichTLSModeEachMySQLSourceUses(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeManifest(t, dir, `
+version: 1
+name: shop
+services:
+  - name: web
+    kind: web
+    command: npm start
+    port: 3000
+datastores:
+  - name: billing
+    engine: mysql
+    stance: golden
+    source_url_env: BILLING_PRODUCTION_URL
+  - name: ledger
+    engine: mysql
+    stance: golden
+    source_url_env: LEDGER_PRODUCTION_URL
+  - name: audit
+    engine: mysql
+    stance: golden
+    source_url_env: AUDIT_PRODUCTION_URL
+`)
+	got := runCLI(t, dir, map[string]string{
+		"BILLING_PRODUCTION_URL": "mysql://app:hunter2@billing.internal/billing_prod",
+		"LEDGER_PRODUCTION_URL":  "mysql://app:hunter3@ledger.internal/ledger?tls=skip-verify",
+	}, "explain")
+	require.Zero(t, got.code, got.stderr)
+	// Read as words, because each sentence is wrapped to the terminal.
+	out := strings.Join(strings.Fields(got.stdout), " ")
+	require.Contains(t, out, "Datastore sources")
+	require.Contains(t, out, "verified TLS, the default for billing.internal")
+	require.Contains(t, out, "tls=skip-verify, as the address says")
+	require.Contains(t, out, "read the credential")
+	require.Contains(t, out, "AUDIT_PRODUCTION_URL")
+	require.Contains(t, out, "not set here")
+	require.NotContains(t, out, "hunter2")
+	require.NotContains(t, out, "hunter3")
+}

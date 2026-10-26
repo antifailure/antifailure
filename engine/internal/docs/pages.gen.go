@@ -16390,6 +16390,7 @@ undeclared empty store wearing a manifest entry.
 | Provider | Engine | Mechanism | Holds a golden | Branch shares storage |
 | --- | --- | --- | --- | --- |
 | ` + "`" + `clickhouse` + "`" + ` | ` + "`" + `clickhouse` + "`" + ` | ` + "`" + `ATTACH PARTITION FROM` + "`" + ` against a local ClickHouse the engine starts | yes | usually |
+| ` + "`" + `mysql` + "`" + ` | ` + "`" + `mysql` + "`" + ` | ` + "`" + `INSERT ... SELECT` + "`" + ` against a local MySQL 8.4 the engine starts | yes | no |
 
 ClickHouse branch time is the interesting column and the answer is measured
 rather than assumed in either direction. ` + "`" + `ATTACH PARTITION FROM` + "`" + ` hardlinks the
@@ -16400,6 +16401,84 @@ server's storage policy: with a multi disk policy, or a source and a
 destination on different volumes, ClickHouse copies the parts instead and
 branch time becomes proportional to size. So the capability is declared false
 and the fast case is a bonus rather than a promise.
+
+### MySQL
+
+` + "`" + "`" + "`" + `yaml
+datastores:
+  - name: billing
+    engine: mysql
+    stance: golden
+    source_url_env: BILLING_PRODUCTION_URL
+` + "`" + "`" + "`" + `
+
+The variable holds ` + "`" + `mysql://user:password@host:port/database` + "`" + `. A password
+holding ` + "`" + `@` + "`" + `, ` + "`" + `/` + "`" + ` or ` + "`" + `:` + "`" + ` is percent encoded, as in any URL. The user needs
+` + "`" + `SELECT` + "`" + ` on the database. Any other form of address, a ` + "`" + `mariadb://` + "`" + ` URL, a
+` + "`" + `jdbc:` + "`" + ` URL or a Go driver DSN, is refused rather than read as no source, so a
+typo cannot publish an empty golden that looks like a full one.
+
+The source connection carries production's credential and its unmasked rows,
+so a source on another machine is reached over verified TLS unless the
+address says otherwise: with no ` + "`" + `tls=` + "`" + `, the server must present a certificate
+this machine trusts for that host name, and a server that cannot is refused
+with AF-DB-046 naming the host. An address that is literally a loopback
+address, such as ` + "`" + `127.0.0.1` + "`" + ` or ` + "`" + `::1` + "`" + `, or exactly ` + "`" + `localhost` + "`" + `, defaults to
+` + "`" + `tls=preferred` + "`" + ` instead, because a local server rarely has such a certificate
+and its traffic crosses nobody else's network. Any other name is verified even
+if it resolves to this machine, because whoever controls that resolution
+decides where it points.
+To accept the risk for a remote source, write the mode into the address:
+
+| ` + "`" + `tls=` + "`" + ` | What it does | What it exposes |
+| :- | :- | :- |
+| ` + "`" + `true` + "`" + ` | Verified TLS. The default for a remote host. | Nothing on the path. |
+| ` + "`" + `preferred` + "`" + ` | TLS when the server offers it, certificate never checked. | A plaintext downgrade or an impostor reads the credential and the rows. |
+| ` + "`" + `skip-verify` + "`" + ` | TLS, certificate never checked. | An impostor reads the credential and the rows. |
+| ` + "`" + `false` + "`" + ` | No TLS. | Anyone on the path reads the credential and the rows. |
+
+` + "`" + `af explain` + "`" + ` prints the mode each MySQL source will use, and whether the
+address chose it or the default did, without printing the address.
+
+A refresh reads every table inside one read only transaction, the way
+` + "`" + `mysqldump --single-transaction` + "`" + ` does, so the golden is production at one
+instant rather than each table at the moment it was copied. Rows are copied as
+the bytes each column stores, so a ` + "`" + `latin1` + "`" + ` column, a binary column holding
+bytes that are not UTF-8, a zero date and a ` + "`" + `TIMESTAMP` + "`" + ` all arrive unchanged.
+Masking then rewrites each row by its primary key, in the same rule file and
+with the same transforms as Postgres, and the verification scan reads the
+result back before anything is published.
+
+Rules name a MySQL table as ` + "`" + `<database>.<table>` + "`" + `, using the source's database
+name, such as ` + "`" + `billing_prod.invoices` + "`" + `. Masking derives each column's key from
+that name too, so an address masks to the same value on every refresh.
+
+A branch is a database on the same local server, with each table created from
+the golden's own definition and filled from it by the server. That is a copy,
+so branch time grows with the golden's size; MySQL has nothing that lets two
+tables share storage the way a ClickHouse part can. A branch keeps the golden's
+foreign keys, its indexes and each table's ` + "`" + `AUTO_INCREMENT` + "`" + ` position. A service
+reaches it at ` + "`" + `AF_DATASTORE_BILLING_URL` + "`" + ` as a ` + "`" + `mysql://` + "`" + ` URL.
+
+What a MySQL golden does not hold, said rather than discovered:
+
+- **Views.** A view's definition names the source's database and its definer,
+  neither of which exists where the golden lives. The golden holds the tables a
+  view reads, and each refresh names every view it left out.
+- **Triggers, stored routines and events.** None of them are copied, and none
+  of them fire while a golden is masked.
+- **A table with no primary key that a rule rewrites.** MySQL has no row
+  identifier a statement can address, so masking refuses such a table when it
+  plans rather than partway through it. Add a primary key, or give the table's
+  columns rules that leave them as they are.
+
+A table whose primary key is itself rewritten, such as a UUID key masked with
+` + "`" + `uuid_remap` + "`" + `, is read in one pass rather than in chunks, because resuming by a
+key the run is changing would read some rows twice.
+
+The local server is MySQL 8.4. A MariaDB image in a compose file is detected as
+` + "`" + `mysql` + "`" + `, and a MariaDB source is untested: a definition using a type only
+MariaDB has fails to create, and the refresh says which table.
 
 ` + "`" + `engine` + "`" + ` is an open string in the manifest rather than a closed list, which is
 deliberate: a manifest naming an engine this build has no provider for is
@@ -23932,6 +24011,18 @@ The environment {env} is already running a database branch on {running} and this
 | Exit code | ` + "`" + `7` + "`" + ` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/load](/docs/concepts/load) |
+
+### AF-DB-046
+
+The MySQL at {host} did not complete a verified TLS connection, which a source on another machine requires: {detail}
+
+**What to do.** Give the server a certificate this machine trusts for {host}, which is the fix. If you accept the risk instead, say so in the address with ?tls=preferred, ?tls=skip-verify or ?tls=false; each lets anyone between here and {host} read the credential in the address and the unmasked rows it returns, which is why none of them is chosen for you.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `3` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [providers/datastores](/docs/providers/datastores) |
 
 ## Detection
 

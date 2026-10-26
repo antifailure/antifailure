@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/antifailure/antifailure/engine/internal/datastore/mysql"
 	"github.com/antifailure/antifailure/engine/internal/env"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/manifest"
@@ -46,6 +47,7 @@ one line answer.`),
 			}
 			env.Out.Raw(manifest.Explain(m, env.Out.Width))
 			explainSecrets(cmd.Context(), env, m, filepath.Dir(path))
+			explainDatastoreTLS(cmd.Context(), env, m, filepath.Dir(path))
 			return nil
 		},
 	}
@@ -134,6 +136,46 @@ var _ = aferrors.ExitSuccess
 // terminal somebody may be sharing and goes into support bundles, and a
 // fingerprint is enough to answer the other common question, which is whether
 // two machines have the same value without either person reading theirs out.
+// explainDatastoreTLS says how each MySQL datastore's source will be
+// connected to.
+//
+// The source carries production's credential and its unmasked rows, and
+// whether that crosses a network encrypted and verified is decided by a
+// parameter inside a secret nobody prints. So the mode is printed here, from
+// the same chain af up resolves the variable through, with what a weaker mode
+// exposes. The address itself is never printed.
+func explainDatastoreTLS(ctx context.Context, e *Env, m *schema.Manifest, root string) {
+	var stores []schema.Datastore
+	for _, ds := range m.Datastores {
+		if ds.Engine == "mysql" && ds.SourceURLEnv != "" {
+			stores = append(stores, ds)
+		}
+	}
+	if len(stores) == 0 {
+		return
+	}
+	chain := secrets.LocalChain(root, e.Getenv, extension.Default, e.Keyring())
+	e.Out.Section("Datastore sources")
+	block := e.Out.Block()
+	for _, ds := range stores {
+		label := ds.Name + " (" + ds.SourceURLEnv + ")"
+		value, _, found, err := chain.Lookup(ctx, ds.SourceURLEnv)
+		switch {
+		case err != nil:
+			block.Add(label, "could not be read: "+err.Error())
+		case !found || value.IsZero():
+			block.Add(label, "not set here, so the mode cannot be shown; a refresh refuses an unset source")
+		default:
+			if _, _, sentence, ok := mysql.TLSMode(value); ok {
+				block.Add(label, sentence)
+			} else {
+				block.Add(label, "not a mysql:// address, so a refresh refuses it")
+			}
+		}
+	}
+	block.Flush()
+}
+
 func explainSecrets(ctx context.Context, e *Env, m *schema.Manifest, root string) {
 	declared := secrets.DeclaredFor(m)
 	sandbox := secrets.SandboxNames(m)
