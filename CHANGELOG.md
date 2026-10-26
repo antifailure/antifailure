@@ -14,6 +14,47 @@ and the per change entries are what make it a wall. `just relnotes` refuses an
 unbalanced marker, a second region in one section, an empty region, and a
 section that omits all of itself.
 
+## v1.10.0
+
+Windows is a platform this ships to. Every tag now publishes
+`antifailure_<version>_windows_amd64.zip` and `antifailure_<version>_windows_arm64.zip`,
+and `af update` works on Windows. The engine had never been run there, and
+running it found that every replay and incident write failed. Those, the
+terminal and browser workflows, the live view, and the installer's Ctrl-C
+handling are fixed for Windows now, and the Windows tests run on every pull
+request.
+
+A MySQL datastore can hold a masked, verified golden. Set `engine: mysql` with
+`stance: golden` and it copies the production database named by
+`source_url_env`, masks it, and verifies it before it is used. A MySQL source on
+another machine is read over verified TLS by default. A connection that cannot
+negotiate it fails with AF-DB-046 and names the opt-outs. A mode written in the
+URL is honoured, and `af explain` shows which mode each source is using.
+
+Run recordings can leave the machine that made them, and only when an owner or
+an administrator turns that on in the console. The upload is capped per
+organization, expires after its retention period, and is deleted with the
+organization. A recording that expired is not served, and the run page says so.
+A failed run's video, trace and screenshot can be opened from the console.
+
+Agent replay captures explicit TypeScript agent boundaries locally and saves an
+incident with a verified Postgres golden. Terminal workflows can say what a
+program must never show.
+
+Security: a tab in the sign-in return target could send the person who used a
+sign-in link to another site. Changing the User-Agent on every request got
+around the sign-in rate limit. The Go toolchain moves to go1.26.10 and
+`golang.org/x/net` to v0.60.0 for ten advisories, and Next.js to 16.4.3 for a
+critical one. The MCP SDK moves to 1.32.0.
+
+Fixed: a console path with a broken percent escape was answered as a server
+failure. A control plane run from a path with a space served no console. Two
+installer tests ran nothing from such a path. `af` could not find its runner
+when `AF_BIN_DIR` was set. A plus address written in two cases masked to two
+mailboxes. Database snapshots dropped repeated rows in a table without a primary
+key. A lock could be reported held after its holder died on Windows, and a
+waiter could give up on a lock that was part way through being removed.
+
 ## v1.9.0
 
 The Website editor can now create a public page or Writing article without a
