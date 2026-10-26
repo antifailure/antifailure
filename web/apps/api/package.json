@@ -31,7 +31,7 @@
     "@trpc/server": "^11.19.0",
     "hono": "^4.13.13",
     "postgres": "^3.4.9",
-    "posthog-node": "^5.56.1",
+    "posthog-node": "^5.57.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
