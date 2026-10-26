@@ -58,7 +58,8 @@ func Acquire(path string, c clock.Clock, command string) (*Lock, error) {
 	me := Owner{PID: os.Getpid(), Host: host, Command: command, AcquiredAt: c.Now().UTC()}
 
 	reclaimed := false
-	reclaims, vanished := 0, 0
+	reclaims := 0
+	var settling *settle
 	for {
 		// Publishing a complete file under the lock's name is the atomic part.
 		// Two processes racing here, on the same machine or on a shared
@@ -81,13 +82,14 @@ func Acquire(path string, c clock.Clock, command string) (*Lock, error) {
 			// "no such file or directory" to a caller that should have queued.
 			// On Windows the same moment can also read as a refusal, while the
 			// holder's remove is still in progress; see transient.
-			vanished++
-			if vanished <= maxVanished {
-				time.Sleep(time.Millisecond)
+			if settling == nil {
+				settling = newSettle()
+			}
+			if settling.wait() {
 				continue
 			}
-			return nil, fmt.Errorf("lock: acquire %s: the lock changed hands %d times while this process tried for it, the last look failing with: %w",
-				path, maxVanished, errors.Join(err, readErr))
+			return nil, fmt.Errorf("lock: acquire %s: the lock was still being let go after %s and %d looks, the last failing with: %w",
+				path, settleWithin, settling.looks, errors.Join(err, readErr))
 		}
 		if readErr == nil && Alive(holder) {
 			return nil, heldBy(holder)
@@ -117,10 +119,52 @@ func Acquire(path string, c clock.Clock, command string) (*Lock, error) {
 	}
 }
 
-// maxVanished bounds how many times Acquire retries a lock that was released
-// between its attempt and its look. Each retry means another process made
-// progress, so the bound is only there to stop a pathological churn spinning.
-const maxVanished = 100
+// settleWithin is how long Acquire and Release keep looking at a lock that is
+// part way through being let go: released between an attempt and a look, or,
+// on Windows, a name whose remove has not finished and refuses to be opened.
+//
+// It is a TIME and not a count, and that is the correction. It was a hundred
+// retries a millisecond apart, which is a hundred milliseconds only where a
+// millisecond sleep sleeps a millisecond, and a remove that is still pending is
+// not another process making progress: it lasts as long as whatever holds the
+// file open, an antivirus scan, an indexer, or a reader built before the lock
+// was read sharing delete. On a hosted Windows runner the hundred retries were
+// spent in 0.20 s against a remove held for 0.2 s, and a waiter that should
+// have queued failed instead.
+//
+// Two seconds because the thing being waited for is a remove of a file of a
+// hundred bytes. Even a scan holding it finishes in milliseconds, so two
+// seconds is generous by two orders of magnitude, and it is still well inside
+// the five seconds AcquireWithin's callers already accept for a live holder,
+// so the wait is never the long part of anybody's refusal. A name still
+// refusing after that is not a remove in progress, and is reported with what
+// the last look saw.
+const settleWithin = 2 * time.Second
+
+// settle paces the looks inside settleWithin: a millisecond first, because
+// the ordinary case is a remove that finishes in microseconds, doubling to
+// fifty, so a long hold costs a few dozen looks rather than thousands.
+type settle struct {
+	until time.Time
+	pause time.Duration
+	looks int
+}
+
+func newSettle() *settle {
+	return &settle{until: time.Now().Add(settleWithin), pause: time.Millisecond}
+}
+
+// wait sleeps before the next look and reports whether there is time for one.
+func (s *settle) wait() bool {
+	s.looks++
+	left := time.Until(s.until)
+	if left <= 0 {
+		return false
+	}
+	time.Sleep(min(s.pause, left))
+	s.pause = min(2*s.pause, 50*time.Millisecond)
+	return true
+}
 
 // heldBy is the refusal for a lock a live process holds.
 //
@@ -270,14 +314,13 @@ func (l *Lock) Reclaimed() bool { return l.reclaimed }
 // slow process whose lock was reclaimed as stale cannot delete the lock a
 // newer process now holds.
 func (l *Lock) Release() error {
-	for try := 0; ; try++ {
-		retry := try < maxVanished
+	settling := newSettle()
+	for {
 		holder, err := read(l.path)
 		if err != nil {
-			if transient(err) && retry {
+			if transient(err) && settling.wait() {
 				// Another process is part way through removing or reclaiming
 				// it; look again rather than leave a file that may be ours.
-				time.Sleep(time.Millisecond)
 				continue
 			}
 			// Gone, or unreadable, and an unreadable file is not ours to
@@ -290,8 +333,7 @@ func (l *Lock) Release() error {
 			return nil
 		}
 		if err := os.Remove(l.path); err != nil && !os.IsNotExist(err) {
-			if transient(err) && retry {
-				time.Sleep(time.Millisecond)
+			if transient(err) && settling.wait() {
 				continue
 			}
 			return fmt.Errorf("lock: release %s: %w", l.path, err)
