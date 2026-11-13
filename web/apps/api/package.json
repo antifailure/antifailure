@@ -25,7 +25,7 @@
     "@antifailure/website": "*",
     "@antifailure/db": "*",
     "@antifailure/policy": "*",
-    "@hono/node-server": "^2.1.5",
+    "@hono/node-server": "^2.1.6",
     "@hono/trpc-server": "^0.4.0",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "@trpc/server": "^11.19.0",
