@@ -37,15 +37,34 @@ organization, expires after its retention period, and is deleted with the
 organization. A recording that expired is not served, and the run page says so.
 A failed run's video, trace and screenshot can be opened from the console.
 
+`af up` brings up a service in a pnpm, yarn, npm or bun workspace. A package
+with no Dockerfile is built as a member of its workspace: the frozen install
+runs once at the root with every member and patch file present, the build runs
+through turbo or pnpm's dependency filter so the packages it imports are built
+first, and the service starts from its own directory. A generated build no
+longer sends `.git` or any `node_modules`, and no build sends a git worktree
+checked out inside the repository, which is where coding agents keep theirs.
+`af up --only <service>` brings up the named services and what they depend on.
+`af status` and `describe_environment` say when a failed run left something
+standing, and `.antifailure/` no longer shows in `git status`.
+
 Agent replay captures explicit TypeScript agent boundaries locally and saves an
 incident with a verified Postgres golden. Terminal workflows can say what a
 program must never show.
 
 Security: a tab in the sign-in return target could send the person who used a
 sign-in link to another site. Changing the User-Agent on every request got
-around the sign-in rate limit. The Go toolchain moves to go1.26.10 and
-`golang.org/x/net` to v0.60.0 for ten advisories, and Next.js to 16.4.3 for a
-critical one. The MCP SDK moves to 1.32.0.
+around the sign-in rate limit. The Go toolchain moves to go1.26.11 and
+`golang.org/x/net` to v0.60.0 for eleven advisories, the last a race in
+`net/http` that could crash an HTTP/1 server. Next.js moves to 16.4.6, and
+`hono`, `@hono/node-server`, `astro` and `fast-xml-parser` close nineteen more,
+among them a backslash in a request path that `@hono/node-server` read as a
+separator and that could slip past path based access control. The MCP SDK
+moves to 1.32.0.
+
+A generated pnpm or yarn image fetched its package manager again when the
+service started, as a different user from the build, and in a sealed
+environment that refused it and stopped the service.
 
 Fixed: a console path with a broken percent escape was answered as a server
 failure. A control plane run from a path with a space served no console. Two
