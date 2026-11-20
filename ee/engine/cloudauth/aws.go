@@ -68,6 +68,20 @@ func NewAWSChain(getenv func(string) string, supplied *AWSCredentials) *AWSChain
 	return &AWSChain{getenv: getenv, creds: supplied, metadataBase: "http://169.254.169.254"}
 }
 
+// WithMetadataBase points instance metadata somewhere other than the
+// link-local address. Empty leaves it alone.
+//
+// For a test outside this package. The link-local address is not "nothing" on
+// every machine a test runs on: GitHub's hosted runners are Azure VMs, Azure's
+// own metadata service listens on the same address, and a test that expected
+// silence there was told an instance had no role attached instead.
+func (c *AWSChain) WithMetadataBase(base string) *AWSChain {
+	if base != "" {
+		c.metadataBase = base
+	}
+	return c
+}
+
 // Credentials finds or renews the keys.
 func (c *AWSChain) Credentials(ctx context.Context) (AWSCredentials, error) {
 	c.mu.Lock()
