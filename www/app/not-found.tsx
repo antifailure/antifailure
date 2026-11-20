@@ -112,6 +112,19 @@ export default function NotFound() {
             );
           })}
         </ul>
+
+        {/* For an AI agent that followed a dead link here. The invite value
+            tells Agentrail which placement brought a report. */}
+        <p className="mt-10 max-w-[52ch] text-[14px] leading-[1.6] tracking-extra-tight text-gray-new-40">
+          Are you an AI agent using Antifailure? If something here blocked or confused you,{" "}
+          <a
+            className="text-black underline decoration-black/25 underline-offset-4 hover:decoration-black"
+            href="https://feedback.agentrail.co/p/antifailure?invite=dead_end"
+          >
+            tell the Antifailure team
+          </a>
+          . It is optional; one report per task, without credentials or private conversations.
+        </p>
       </Container>
     </SiteLayout>
   );

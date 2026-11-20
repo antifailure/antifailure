@@ -2,6 +2,7 @@
 # Kept as a file rather than inside cspell.json so that adding one is a one
 # line diff a reviewer can read, and so the list stays sorted.
 # Words this project uses that no general dictionary has.
+agentrail
 aiven
 amcheck
 antifailure

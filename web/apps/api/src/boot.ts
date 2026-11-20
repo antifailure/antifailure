@@ -73,6 +73,7 @@ import {
 } from './hosted.ts'
 import { POSTHOG_REGIONS, postHogRegionFrom, postHogSummary } from './analytics/posthog.ts'
 import { createPostHogSink, postHogSinkSummary } from './analytics/posthog-sink.ts'
+import { agentrailConfigFrom, agentrailSummary, startAgentrail } from './analytics/agentrail.ts'
 import { startWebsiteRefreshWorker } from './website-refresh.ts'
 import { ArtifactStores } from './artifacts/store.ts'
 import { PostgresArtifactStore } from './artifacts/postgres-store.ts'
@@ -318,6 +319,19 @@ export async function startControlPlane(hooks: BootHooks = {}): Promise<ControlP
     region: postHogRegion,
   })
   console.log(postHogSinkSummary(postHogSink))
+
+  // The same shape for Agentrail, which records sign ins, the auth routes and
+  // hosted MCP calls and nothing else. Started here, before the server is
+  // built, because init patches the HTTP builtins and a request that arrives
+  // before the patch is a request nobody records.
+  //
+  // A half configuration throws out of agentrailConfigFrom, which refuses to
+  // start. That is deliberate: one credential looks configured and records
+  // nothing.
+  const agentrail = await startAgentrail(agentrailConfigFrom(process.env), {
+    serviceName: 'antifailure-control-plane',
+  })
+  console.log(agentrailSummary(agentrail))
 
   // Said out loud at startup, every time. Whether an instance is open to the
   // world is not something anybody should have to infer from a deployment
@@ -602,6 +616,7 @@ export async function startControlPlane(hooks: BootHooks = {}): Promise<ControlP
     selfServeSignup,
     postHog: postHogRegion ? { bases: POSTHOG_REGIONS[postHogRegion] } : null,
     postHogSink,
+    agentrail,
     leadNotifier: leads.notifier,
     keyring,
     githubWebhookSecret: appConfig?.webhookSecret ?? null,
@@ -863,6 +878,7 @@ export async function startControlPlane(hooks: BootHooks = {}): Promise<ControlP
           .then(() => failures.flush())
           .catch((err) => console.error('failure store flush on shutdown', err))
           .then(() => postHogSink.shutdown())
+          .then(() => agentrail.shutdown())
           .then(() => adminPool?.close())
           .then(() => pool.close())
           .then(() => process.exit(0))
@@ -890,6 +906,7 @@ export async function startControlPlane(hooks: BootHooks = {}): Promise<ControlP
             .then(() => failures.flush())
             .catch((err) => console.error('failure store flush on close', err))
             .then(() => postHogSink.shutdown())
+            .then(() => agentrail.shutdown())
             .then(() => adminPool?.close())
             .then(() => pool.close())
             .then(() => resolve())

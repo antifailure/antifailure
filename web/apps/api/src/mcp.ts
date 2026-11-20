@@ -14,6 +14,7 @@ import {
   identifyMcpToken,
 } from './auth/mcp.ts'
 import type { McpTool, McpOutcome, PostHogSink } from './analytics/posthog-sink.ts'
+import { NO_AGENTRAIL, type AgentrailFacade } from './analytics/agentrail.ts'
 
 /** Everything but what is per request: the actor, and the request's id. */
 type BaseContext = Omit<Context, 'actor' | 'requestId'>
@@ -26,6 +27,10 @@ interface Options {
    *  theirs. See analytics/posthog-sink.ts, in particular the paragraph about
    *  why nothing of this shape may ever go in engine/. */
   postHog?: PostHogSink | null
+  /** Where this MCP surface's calls are recorded as steps. Absent records
+   *  nothing, the default on a self-hosted installation. See
+   *  analytics/agentrail.ts. */
+  agentrail?: AgentrailFacade | null
 }
 
 function uniqueParameters(parameters: URLSearchParams): Record<string, string> {
@@ -193,6 +198,11 @@ export function mountHostedMcp(app: Hono<any>, options: Options): void {
       c.header('www-authenticate', `Bearer resource_metadata="${metadata}", scope="mcp:read"`)
       return c.json({ error: 'invalid_token' }, 401)
     }
+    // The token is authenticated, so the actor may be named to Agentrail. The
+    // SDK hashes the id before export; the tool name, method and client are
+    // recorded and the arguments and results never are.
+    const agentrail = options.agentrail ?? NO_AGENTRAIL
+    agentrail.identifyUser(identity.actor.userId)
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true })
     // The pseudonym, taken from the analytics recorder rather than computed
     // here, so PostHog holds the identifier our own store already holds and
@@ -211,7 +221,7 @@ export function mountHostedMcp(app: Hono<any>, options: Options): void {
       report,
     )
     try {
-      await server.connect(transport)
+      await server.connect(agentrail.mcpTransport(transport))
       return await transport.handleRequest(c.req.raw)
     } finally { await server.close() }
   }

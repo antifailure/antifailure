@@ -181,9 +181,11 @@ export function PrivacyPage() {
         />
         <Prose className="mt-10">
           <p>
-            Website measurement uses an internal page counter and PostHog for
-            interaction analytics and session replay. PostHog&rsquo;s recorder
-            loads through our endpoint. The contact page also loads a Cal.com
+            Website measurement uses an internal page counter, PostHog for
+            interaction analytics and session replay, and Agentrail to see how
+            AI agents find and use Antifailure. PostHog&rsquo;s recorder loads
+            through our endpoint, and Agentrail&rsquo;s code is served from this
+            site rather than from theirs. The contact page also loads a Cal.com
             booking widget, which uses its own Sentry error reporting.
           </p>
           <p>
@@ -210,14 +212,38 @@ export function PrivacyPage() {
             separately sends the details needed to process that request.
           </p>
           <p>
-            Neither analytics system sets cookies. Their identifiers are scoped
-            to the current browser tab.
+            Agentrail sees less than PostHog: the address of each page you load without its query
+            string, the time, your browser identification string, and the method, path, status and
+            duration of this site&rsquo;s requests to itself. Never what you type, click or scroll,
+            never the content of the page, and never a recording. Agentrail keeps a keyed hash of
+            your IP address and an approximate location rather than the address itself.
+          </p>
+          <p>
+            Agentrail sets one cookie, <code>agentrail_session</code>, holding a random identifier
+            that ends after thirty minutes without a page load or a day after it began. It is the
+            only cookie this site sets. The counter and PostHog set none, and their identifiers are
+            scoped to the current browser tab.
           </p>
           <p>
             PostHog, Inc. receives and processes this website analytics data in the United
             States through PostHog Cloud US. Requests go through our endpoint at{" "}
             <code>app.antifailure.dev</code>, which forwards the analytics to
-            PostHog without forwarding your IP address.
+            PostHog without forwarding your IP address. Agentrail receives its events
+            directly at <code>api.agentrail.co</code>.
+          </p>
+          <p>
+            The hosted control plane reports to Agentrail too, when{" "}
+            {switchedOnBy("Agentrail").map((name, i, all) => (
+              <span key={name}>
+                <code>{name}</code>
+                {i < all.length - 1 ? (i === all.length - 2 ? " and " : ", ") : ""}
+              </span>
+            ))}{" "}
+            are configured, and only for signing in and for the hosted MCP endpoint: the path,
+            status and browser identification string of those requests, a keyed hash of the
+            account that signed in, and the name of each MCP tool called with the client that
+            called it. Never a tool&rsquo;s arguments or results, never a request body, and never
+            a request about your organization, repositories or environments.
           </p>
           <p>
             One claim is unaffected and it is a different claim: your production data never leaves
@@ -225,12 +251,14 @@ export function PrivacyPage() {
             analytics client to leave with. This section is about a website you are reading.
           </p>
           <p>
-            Global Privacy Control and Do Not Track are honoured by both, without asking. The
+            Global Privacy Control and Do Not Track are honoured by all three, without asking. The
             switch below is for everybody else, and it takes effect on the page you are reading
-            rather than on the next one: anything captured and not yet sent is thrown away with
-            it, and the recording ends. If you arrive with any of those already set, PostHog&rsquo;s
-            code is never fetched at all, so there is no recorder that read this page before
-            something told it not to.
+            rather than on the next one: anything PostHog captured and not yet sent is thrown away
+            with it, and the recording ends. Agentrail stops too and its cookie is deleted, but it
+            sends the page loads it already queued, which is at most the last few seconds. If you
+            arrive with any of those already set, neither PostHog&rsquo;s code nor Agentrail&rsquo;s
+            is fetched at all, so there is no recorder that read this page before something told
+            it not to.
           </p>
         </Prose>
         <MeasurementSwitch />

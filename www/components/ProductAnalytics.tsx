@@ -3,9 +3,10 @@
 import { Suspense, useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { startProductAnalytics, watchMeasurement } from "@/lib/posthog";
+import { startAgentrail, watchAgentrail } from "@/lib/agentrail";
 
 /**
- * Starts PostHog, once, for a reader who is being measured.
+ * Starts PostHog and Agentrail, once each, for a reader who is being measured.
  *
  * Mounted by the root layout beside <PageViews />, and for the same reason it
  * is: a layout survives client side navigation and a page does not, so a
@@ -29,9 +30,15 @@ function ProductAnalyticsBoundary(): null {
     // even in the case where the gate refused and nothing started. A reader who
     // arrives opted out, reads the page and then turns measurement on has
     // changed the answer, and nothing would be listening if this ran second.
-    return watchMeasurement();
+    const stopPostHog = watchMeasurement();
+    // Agentrail follows the same switch, subscribed first for the same reason.
+    const stopAgentrail = watchAgentrail();
+    return () => { stopPostHog(); stopAgentrail(); };
   }, []);
-  useEffect(() => { void startProductAnalytics(); }, [pathname]);
+  useEffect(() => {
+    void startProductAnalytics();
+    void startAgentrail();
+  }, [pathname]);
   return null;
 }
 

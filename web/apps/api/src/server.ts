@@ -52,6 +52,7 @@ import { matchSiteOrigin } from './siteorigin.ts'
 import { endImpersonation, registerImpersonationRoutes } from './admin/customers.ts'
 import { appRouter } from './routers/index.ts'
 import { mountHostedMcp } from './mcp.ts'
+import type { AgentrailFacade } from './analytics/agentrail.ts'
 import type { Context as TrpcContext, Actor } from './trpc.ts'
 import type { Clock } from './clock.ts'
 import { systemClock } from './clock.ts'
@@ -244,6 +245,16 @@ export interface ServerOptions {
    * the right default for somebody self-hosting this: their usage is theirs.
    */
   postHogSink?: PostHogSink | null
+
+  /**
+   * Where this process records control plane journeys for Agentrail, or absent.
+   *
+   * Absent records nothing, which is the right default for a self-hosted
+   * installation. See analytics/agentrail.ts: the path allowlist there is what
+   * keeps a customer identifier from reaching the vendor, so it is the boundary
+   * rather than a filter.
+   */
+  agentrail?: AgentrailFacade | null
 
   /** Who may sign in at all. Null is open, which is the self-hosted default.
    *  See parseAllowlist: an empty list is closed to everyone, not open. */
@@ -1085,6 +1096,7 @@ export function createServer(options: ServerOptions) {
 
   mountHostedMcp(app, {
     postHog: options.postHogSink ?? null,
+    agentrail: options.agentrail ?? null,
     base: {
       pool: options.pool, clock, github: options.github, stripe: options.stripe ?? null,
       appBaseUrl: options.appBaseUrl ?? '', mailer: options.emailSignIn?.mailer ?? null,
@@ -1300,6 +1312,9 @@ export function createServer(options: ServerOptions) {
         userAgent: c.req.header('user-agent') ?? undefined,
         replacing: existing ?? undefined,
       })
+      // The session is issued, so this identity is verified. The SDK exports a
+      // keyed hash of the id rather than the id.
+      options.agentrail?.identifyUser(result.userId)
 
       c.header('set-cookie', sessionCookie(issued.token, issued.expiresAt, secure))
       await recordSignIn('github', result.userId, decision.orgId)
@@ -1635,6 +1650,8 @@ export function createServer(options: ServerOptions) {
           userAgent: c.req.header('user-agent') ?? undefined,
           replacing: existing ?? undefined,
         })
+        // The same identity report as the GitHub callback, for the same reason.
+        options.agentrail?.identifyUser(result.userId)
         c.header('set-cookie', sessionCookie(issued.token, issued.expiresAt, secure))
         await recordSignIn('email_link', result.userId, result.orgId)
         const base = options.appBaseUrl ?? '/'

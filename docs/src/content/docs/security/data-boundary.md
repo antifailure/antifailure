@@ -398,10 +398,31 @@ receives one and the geography on those dashboards describes a datacenter. It is
 the same site and not the same origin: the marketing site is a static export
 with no server of its own, so the endpoint lives on the control plane.
 
+**Agentrail, for how AI agents find and use the product.** The marketing site
+bundles `agentrail-browser` behind the same switch as PostHog, so a reader who
+sends Global Privacy Control or Do Not Track, or who switched measurement off,
+never loads it. For everybody else it sends a page load's address without its
+query string, the time, the browser identification string, and the method,
+path, status and duration of the site's requests to itself, and it sets one
+cookie, `agentrail_session`, which ends after thirty minutes idle or a day after
+it began. It records no typing, clicks, scrolling or page content. The hosted
+control plane also reports to Agentrail when `AF_AGENTRAIL_SECRET` and
+`AF_AGENTRAIL_HASH_KEY` are set, and only for an allowlist of request paths:
+signing in, the OAuth and device authorization routes, and the hosted MCP
+endpoint. For those it sends the path, status and user agent, a keyed hash of
+the signed in user's id, and an MCP call's method, tool name and client name.
+Never a tool's arguments or results, a request or response body, and never a
+path outside the allowlist, which is where organization and repository names
+live. `web/apps/api/src/analytics/agentrail.ts` holds the allowlist and a test
+holds it to what reaches the collector. A self-hosted control plane sends
+nothing, because nothing sets those variables for it.
+
 **Why that changes nothing about the boundary this page is about.** A person
 reading a web page is not a run. No account, organization, repository, policy,
 run, audit entry, check report, event stream or piece of a customer's production
-data reaches PostHog, because nothing that handles any of those calls it. The
+data reaches PostHog, because nothing that handles any of those calls it, and
+Agentrail receives a keyed hash of who signed in and the name of an MCP tool
+they called, never what the call carried. The
 website and the product share a repository and a domain and nothing else, and
 every claim above about what never leaves your machine is a claim about the
 engine and the runner, neither of which has an analytics client to leave it

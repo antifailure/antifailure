@@ -64,4 +64,11 @@ export const CONDITIONAL_PROCESSORS: ConditionalProcessor[] = [
     module: "web/apps/api/src/boot.ts",
     variables: ["AF_RESEND_API_KEY", "AF_MAIL_FROM"],
   },
+  {
+    // The module that reads both variables and refuses half of them, rather
+    // than boot.ts, which only calls it.
+    vendor: "Agentrail",
+    module: "web/apps/api/src/analytics/agentrail.ts",
+    variables: ["AF_AGENTRAIL_SECRET", "AF_AGENTRAIL_HASH_KEY"],
+  },
 ];

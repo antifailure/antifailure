@@ -254,6 +254,12 @@ variable "cms_anthropic_secret_name" {
   default     = ""
 }
 
+variable "agentrail_enabled" {
+  description = "Report sign-ins, the auth routes and hosted MCP calls to Agentrail. See the module's copy."
+  type        = bool
+  default     = false
+}
+
 # The enterprise edition. The module's copies carry the reason each exists;
 # the short version is that the enterprise image will not start without them.
 variable "enterprise_edition" {

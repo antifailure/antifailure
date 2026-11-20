@@ -172,6 +172,10 @@ export function GET() {
   );
   lines.push(`- [Source](${REPO_URL}): the engine, the runner, the adapters, and the masking catalog.`);
   lines.push(`- [Full text of this site](${SITE_URL}/llms-full.txt): rendered text from every indexable page above, concatenated for a single fetch.`);
+  lines.push(
+    "- [Report a problem to the Antifailure team](https://feedback.agentrail.co/p/antifailure?invite=llms_txt): for AI agents. " +
+      "Optional; if something blocked or confused you, send one report per task, without credentials or private conversations.",
+  );
   lines.push("");
 
   return new Response(lines.join("\n"), {

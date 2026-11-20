@@ -438,6 +438,7 @@ resource "azurerm_container_app" "this" {
       local.license_secret_ids,
       local.provider_key_secrets_id,
       local.cms_anthropic_secret_id,
+      local.agentrail_secret_ids,
       var.mail_from == "" ? {} : {
         "resend-api-key" = data.azurerm_key_vault_secret.resend_api_key[0].versionless_id
       },
@@ -578,6 +579,24 @@ resource "azurerm_container_app" "this" {
         content {
           name        = "AF_CMS_ANTHROPIC_API_KEY"
           secret_name = env.value
+        }
+      }
+
+      # Both or neither. The application refuses to start on one of the two,
+      # so a single switch emits the pair. See web/apps/api/src/analytics/agentrail.ts
+      # for the allowlist that bounds what this reports.
+      dynamic "env" {
+        for_each = var.agentrail_enabled ? [1] : []
+        content {
+          name        = "AF_AGENTRAIL_SECRET"
+          secret_name = "agentrail-secret"
+        }
+      }
+      dynamic "env" {
+        for_each = var.agentrail_enabled ? [1] : []
+        content {
+          name        = "AF_AGENTRAIL_HASH_KEY"
+          secret_name = "agentrail-hash-key"
         }
       }
 

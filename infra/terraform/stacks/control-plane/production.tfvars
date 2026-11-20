@@ -500,6 +500,12 @@ enterprise_edition        = true
 license_org               = "antifailure"
 cms_anthropic_secret_name = "cms-anthropic-api-key"
 
+# Agentrail journeys: sign-ins, the auth routes and hosted MCP calls, and
+# nothing else. The two vault secrets were placed on 2026-11-19 from the
+# Agentrail server source "control plane (app.antifailure.dev)". Production
+# only: staging traffic is ours, and counting it would describe us.
+agentrail_enabled = true
+
 # The same signing key as staging: one key, hosted-2026-09, issues both
 # installations' licences. A public key, not a secret.
 license_public_keys = "hosted-2026-09=FoNrZRWV4hQhMKtPYwCHHvvtpjmOyYb5MEg6C4LBkoA"
