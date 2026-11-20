@@ -43,11 +43,18 @@ func TestAWSSaysWhichPlacesItLookedForCredentials(t *testing.T) {
 	// own leaves them guessing which of four mechanisms was supposed to supply
 	// them, and the answer is usually that the one they configured, a profile
 	// or a web identity token file, is not one this source reads.
+	// No metadata service either, by construction rather than by luck: a
+	// server that has already closed. Left at the real address, a CI runner on
+	// a cloud instance answered it, the chain reported an instance with no
+	// role, and this went red on main at 4e8cd0ffb with nothing changed.
+	closed := httptest.NewServer(http.NotFoundHandler())
+	closed.Close()
 	source, err := NewAWSSecretsManager(AWSConfig{
 		Region: "eu-west-1",
 		// An environment with nothing in it, and no metadata service to reach,
 		// which is what a laptop looks like.
-		Getenv: func(string) string { return "" },
+		Getenv:       func(string) string { return "" },
+		metadataBase: closed.URL,
 	})
 	require.NoError(t, err)
 

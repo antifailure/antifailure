@@ -55,6 +55,9 @@ type AWSConfig struct {
 	// Getenv is injected so a test does not have to mutate the process
 	// environment, and so that af explain can resolve against a different one.
 	Getenv func(string) string
+	// metadataBase points instance metadata somewhere other than the
+	// link-local address. Only a test in this package sets it.
+	metadataBase string
 }
 
 // AWSCredentials are what a request is signed with.
@@ -98,7 +101,11 @@ func newAWSBackend(cfg AWSConfig) *AWSBackend {
 	if cfg.Getenv == nil {
 		cfg.Getenv = os.Getenv
 	}
-	return &AWSBackend{cfg: cfg, chain: cloudauth.NewAWSChain(cfg.Getenv, cfg.Credentials)}
+	chain := cloudauth.NewAWSChain(cfg.Getenv, cfg.Credentials)
+	if cfg.metadataBase != "" {
+		chain = cloudauth.NewAWSChainAt(cfg.Getenv, cfg.Credentials, cfg.metadataBase)
+	}
+	return &AWSBackend{cfg: cfg, chain: chain}
 }
 
 func (a *AWSBackend) Describe() string {

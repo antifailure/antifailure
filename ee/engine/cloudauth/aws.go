@@ -68,6 +68,20 @@ func NewAWSChain(getenv func(string) string, supplied *AWSCredentials) *AWSChain
 	return &AWSChain{getenv: getenv, creds: supplied, metadataBase: "http://169.254.169.254"}
 }
 
+// NewAWSChainAt is NewAWSChain asking for instance metadata at base rather than
+// the link-local address.
+//
+// For a test in another package. A test that means "a machine with no
+// metadata service" cannot get that by not saying where to ask, because the
+// machine it runs on decides: a CI runner on a cloud instance answers the real
+// address, and the chain then reports an instance with no role instead of the
+// message the test is about.
+func NewAWSChainAt(getenv func(string) string, supplied *AWSCredentials, base string) *AWSChain {
+	c := NewAWSChain(getenv, supplied)
+	c.metadataBase = base
+	return c
+}
+
 // Credentials finds or renews the keys.
 func (c *AWSChain) Credentials(ctx context.Context) (AWSCredentials, error) {
 	c.mu.Lock()
