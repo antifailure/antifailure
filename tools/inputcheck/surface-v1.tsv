@@ -201,6 +201,7 @@ terraform:modules/control-plane	output	postgres_server_id	-	-
 terraform:modules/control-plane	output	sealing_key_environment	-	-
 terraform:modules/control-plane	output	usable_connections	-	-
 terraform:modules/control-plane	variable	admin_pool_max	number	optional
+terraform:modules/control-plane	variable	agentrail_enabled	bool	optional
 terraform:modules/control-plane	variable	analytics_enabled	bool	optional
 terraform:modules/control-plane	variable	analytics_operator_org	string	optional
 terraform:modules/control-plane	variable	analytics_retention_days	number	optional
@@ -307,6 +308,7 @@ terraform:stacks/control-plane	output	key_vault_id	-	-
 terraform:stacks/control-plane	output	key_vault_name	-	-
 terraform:stacks/control-plane	output	resource_group	-	-
 terraform:stacks/control-plane	variable	admin_pool_max	number	optional
+terraform:stacks/control-plane	variable	agentrail_enabled	bool	optional
 terraform:stacks/control-plane	variable	alert_emails	list(string)	optional
 terraform:stacks/control-plane	variable	alert_sms_country_code	string	optional
 terraform:stacks/control-plane	variable	alert_sms_number	string	optional
