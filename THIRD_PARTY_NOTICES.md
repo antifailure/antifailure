@@ -720,7 +720,7 @@ says so.
 
 ### npm packages (100)
 
-- `@hono/node-server` 2.1.5, MIT
+- `@hono/node-server` 2.1.6, MIT
 - `@hono/trpc-server` 0.4.2, MIT (declared, no licence file shipped)
 - `@modelcontextprotocol/sdk` 1.32.1, MIT
 - `@posthog/core` 1.59.1, Apache-2.0 AND MIT
@@ -766,7 +766,7 @@ says so.
 - `gopd` 1.2.0, MIT
 - `has-symbols` 1.1.0, MIT
 - `hasown` 2.0.4, MIT
-- `hono` 4.13.13, MIT
+- `hono` 4.13.16, MIT
 - `http-errors` 2.0.1, MIT
 - `iconv-lite` 0.7.3, MIT
 - `inherits` 2.0.4, ISC
@@ -845,12 +845,12 @@ says so.
 - `@tiptap/starter-kit` 3.32.0, MIT
 - `geist` 1.8.1, OFL-1.1
 - `linkifyjs` 4.3.3, MIT
-- `next` 16.4.3, MIT
-- `next/dist/compiled/process` vendored in next 16.4.3, MIT
-- `next/dist/compiled/react` vendored in next 16.4.3, MIT
-- `next/dist/compiled/react-dom` vendored in next 16.4.3, MIT
-- `next/dist/compiled/react-server-dom-turbopack` vendored in next 16.4.3, MIT
-- `next/dist/compiled/scheduler` vendored in next 16.4.3, MIT
+- `next` 16.4.6, MIT
+- `next/dist/compiled/process` vendored in next 16.4.6, MIT
+- `next/dist/compiled/react` vendored in next 16.4.6, MIT
+- `next/dist/compiled/react-dom` vendored in next 16.4.6, MIT
+- `next/dist/compiled/react-server-dom-turbopack` vendored in next 16.4.6, MIT
+- `next/dist/compiled/scheduler` vendored in next 16.4.6, MIT
 - `orderedmap` 2.1.1, MIT
 - `prosemirror-commands` 1.7.2, MIT
 - `prosemirror-dropcursor` 1.8.4, MIT
@@ -876,11 +876,13 @@ only engine/cmd/af, the release workflow builds nothing else, and the
 enterprise image's dockerignore excludes ee/engine, so there are no
 enterprise Go modules to attribute.
 
-### npm packages (7)
+### npm packages (9)
 
+- `@hono/node-server` 2.1.9, MIT
 - `@xmldom/is-dom-node` 1.0.1, MIT
 - `@xmldom/xmldom` 0.8.15, MIT
 - `@xmldom/xmldom` 0.9.12, MIT
+- `hono` 4.13.19, MIT
 - `xml-crypto` 6.4.0, MIT
 - `xpath` 0.0.33, MIT
 - `xpath` 0.0.35, MIT
