@@ -22694,6 +22694,9 @@ anybody can recompute, which is an organization identifier with extra steps.
 | ` + "`" + `AF_SITE_ORIGIN` + "`" + ` | unset | Every origin the marketing site is served from, comma separated, for the endpoints a browser calls cross origin. Unset refuses every beacon rather than reflecting whatever ` + "`" + `Origin` + "`" + ` arrives, which is what a permissive default would do. |
 | ` + "`" + `AF_POSTHOG_REGION` + "`" + ` | unset | ` + "`" + `us` + "`" + ` or ` + "`" + `eu` + "`" + `, and nothing else. Mounts the PostHog proxy at ` + "`" + `/ph` + "`" + `, so the marketing site sends its product analytics to this control plane and this control plane forwards it, and a reader's browser opens no connection to a posthog.com host. Unset mounts nothing, so a site configured to send analytics here is answered 404 rather than quietly reaching a vendor the operator did not choose. The two values select a pair of fixed upstream hosts: there is no setting of any kind that makes this forward to a host outside that pair, which is what stops it being an open forwarder. A PostHog project API key does not carry its region, so read it off the cloud rather than guessing: post the key to ` + "`" + `https://us.i.posthog.com/flags/?v=2` + "`" + ` and to the ` + "`" + `eu` + "`" + ` host beside it, and the one that answers 200 rather than ` + "`" + `authentication_failed` + "`" + ` is the region to set. ` + "`" + `AF_SITE_ORIGIN` + "`" + ` still governs which origins may call it. |
 | ` + "`" + `AF_POSTHOG_PROJECT_KEY` + "`" + ` | unset | The PostHog project API key this process reports its OWN hosted usage under: which hosted MCP tool was called, how it ended, how long it took, and the model, token counts and latency of a model call the control plane brokered. Public by design, like every PostHog project key: it can only write events into one project and reads nothing back. Unset sends nothing, which is the right default for a self-hosted installation, because that installation's usage is its own. Needs ` + "`" + `AF_POSTHOG_REGION` + "`" + ` as well, since a key with no region has nowhere to go and defaulting to a cloud would pick a continent on the operator's behalf. What is never sent: a tool's arguments or results, a prompt, a completion, or an organization identifier. The organization is a pseudonym, the same domain separated HMAC ` + "`" + `AF_ANALYTICS_SURROGATE_SECRET` + "`" + ` computes for this control plane's own analytics, so with that unset nothing is reported at all. |
+| ` + "`" + `AF_AGENTRAIL_SECRET` + "`" + ` | unset | The Agentrail collector secret, from **Journeys**, then **Set up**, then **Your servers**. Needed together with ` + "`" + `AF_AGENTRAIL_HASH_KEY` + "`" + `, and setting one without the other **stops the process at startup** rather than recording nothing while looking configured. What is sent: the method, full path (query dropped) and status of a request to one of a fixed list of routes, meaning ` + "`" + `/mcp` + "`" + `, ` + "`" + `/auth/github` + "`" + `, ` + "`" + `/auth/github/callback` + "`" + `, ` + "`" + `/auth/email` + "`" + `, ` + "`" + `/auth/email/callback` + "`" + `, ` + "`" + `/auth/device/*` + "`" + `, ` + "`" + `/auth/mcp/*` + "`" + ` and the two ` + "`" + `/.well-known/oauth-*` + "`" + ` documents; the outbound ` + "`" + `http` + "`" + ` and ` + "`" + `fetch` + "`" + ` calls this process makes while serving one of those; an identity only as a keyed hash; and, for an MCP call, its method, tool name, the client's self reported name and version, message sizes, JSON-RPC id and error code. What is never sent: the path of any other request, so nothing under ` + "`" + `/v1/` + "`" + `, ` + "`" + `/trpc/` + "`" + `, ` + "`" + `/ph` + "`" + `, ` + "`" + `/console` + "`" + ` or ` + "`" + `/admin` + "`" + ` is recorded and neither are the outbound calls made while serving it; an organization id, slug, repository name or environment id; a request or response body; a header value other than the ` + "`" + `User-Agent` + "`" + `, ` + "`" + `Accept` + "`" + ` and ` + "`" + `Accept-Encoding` + "`" + ` the SDK documents; and an MCP tool's arguments or results, which are off because this integration does not turn on ` + "`" + `capturePayloads` + "`" + `. Unset sends nothing, which is the right default for a self-hosted installation. |
+| ` + "`" + `AF_AGENTRAIL_HASH_KEY` + "`" + ` | unset | The key identities and session identifiers are hashed under before they leave this process, so Agentrail records a keyed hash and cannot read a user id back. Generate it in Agentrail beside the secret and keep it in the server's secrets, never in a page. Needed together with ` + "`" + `AF_AGENTRAIL_SECRET` + "`" + `. |
+| ` + "`" + `AF_AGENTRAIL_ENDPOINT` + "`" + ` | ` + "`" + `https://api.agentrail.co/ingest/otlp` + "`" + ` | Where the OTLP export goes. Change it only to point at a collector of your own, or at a local capture during development. |
 
 ### The PostHog proxy
 
@@ -29097,10 +29100,34 @@ receives one and the geography on those dashboards describes a datacenter. It is
 the same site and not the same origin: the marketing site is a static export
 with no server of its own, so the endpoint lives on the control plane.
 
+**Agentrail, for how AI agents find and use the product.** The marketing site
+bundles ` + "`" + `agentrail-browser` + "`" + ` behind the same switch as PostHog, so a reader who
+sends Global Privacy Control or Do Not Track, or who switched measurement off,
+never loads it. For everybody else it sends a page load's address without its
+query string, the time, the browser identification string, and the method,
+path, status and duration of the site's requests to itself, and it sets one
+cookie, ` + "`" + `agentrail_session` + "`" + `, which ends after thirty minutes idle or a day after
+it began. It records no typing, clicks, scrolling or page content. Unlike the
+counter and PostHog it does not skip a browser driven through WebDriver, because
+an agent driving a browser is what it is for; every signal a person sends still
+stops it. The hosted
+control plane also reports to Agentrail when ` + "`" + `AF_AGENTRAIL_SECRET` + "`" + ` and
+` + "`" + `AF_AGENTRAIL_HASH_KEY` + "`" + ` are set, and only for an allowlist of request paths:
+signing in, the OAuth and device authorization routes, and the hosted MCP
+endpoint. For those it sends the path, status and user agent, a keyed hash of
+the signed in user's id, and an MCP call's method, tool name and client name.
+Never a tool's arguments or results, a request or response body, and never a
+path outside the allowlist, which is where organization and repository names
+live. ` + "`" + `web/apps/api/src/analytics/agentrail.ts` + "`" + ` holds the allowlist and a test
+holds it to what reaches the collector. A self-hosted control plane sends
+nothing, because nothing sets those variables for it.
+
 **Why that changes nothing about the boundary this page is about.** A person
 reading a web page is not a run. No account, organization, repository, policy,
 run, audit entry, check report, event stream or piece of a customer's production
-data reaches PostHog, because nothing that handles any of those calls it. The
+data reaches PostHog, because nothing that handles any of those calls it, and
+Agentrail receives a keyed hash of who signed in and the name of an MCP tool
+they called, never what the call carried. The
 website and the product share a repository and a domain and nothing else, and
 every claim above about what never leaves your machine is a claim about the
 engine and the runner, neither of which has an analytics client to leave it

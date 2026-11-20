@@ -179,6 +179,24 @@ spec:
             - name: AF_POSTHOG_PROJECT_KEY
               value: {{ .Values.config.posthogProjectKey | quote }}
             {{- end }}
+            {{- if or .Values.agentrail.existingSecret (and .Values.agentrail.secret .Values.agentrail.hashKey) }}
+            # Both or neither: the application refuses to start on one of the
+            # two, so they are emitted together.
+            - name: AF_AGENTRAIL_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cp.agentrailSecretName" . }}
+                  key: {{ .Values.agentrail.secretKeys.secret }}
+            - name: AF_AGENTRAIL_HASH_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cp.agentrailSecretName" . }}
+                  key: {{ .Values.agentrail.secretKeys.hashKey }}
+            {{- end }}
+            {{- if .Values.agentrail.endpoint }}
+            - name: AF_AGENTRAIL_ENDPOINT
+              value: {{ .Values.agentrail.endpoint | quote }}
+            {{- end }}
             {{- if .Values.config.signupUrl }}
             - name: AF_SIGNUP_URL
               value: {{ .Values.config.signupUrl | quote }}

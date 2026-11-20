@@ -82,6 +82,10 @@ gets its own, created at a lower hook weight than the Job that needs it.
 {{- default (printf "%s-mail" (include "cp.fullname" .)) .Values.mail.existingSecret -}}
 {{- end -}}
 
+{{- define "cp.agentrailSecretName" -}}
+{{- default (printf "%s-agentrail" (include "cp.fullname" .)) .Values.agentrail.existingSecret -}}
+{{- end -}}
+
 {{- define "cp.stripeSecretName" -}}
 {{- default (printf "%s-stripe" (include "cp.fullname" .)) .Values.stripe.existingSecret -}}
 {{- end -}}

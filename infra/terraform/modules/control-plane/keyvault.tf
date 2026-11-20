@@ -370,6 +370,13 @@ locals {
   cms_anthropic_secret_id = var.cms_anthropic_secret_name == "" ? {} : {
     (var.cms_anthropic_secret_name) = "${trimsuffix(azurerm_key_vault.this.vault_uri, "/")}/secrets/${var.cms_anthropic_secret_name}"
   }
+  # Agentrail's server source secret and the workspace hash key, both minted in
+  # Agentrail and placed in the vault by a person, so the same versionless id
+  # shape applies: no vault read while planning and no value in state.
+  agentrail_secret_ids = var.agentrail_enabled ? {
+    "agentrail-secret"   = "${trimsuffix(azurerm_key_vault.this.vault_uri, "/")}/secrets/agentrail-secret"
+    "agentrail-hash-key" = "${trimsuffix(azurerm_key_vault.this.vault_uri, "/")}/secrets/agentrail-hash-key"
+  } : {}
 }
 
 # Stripe credentials are addressed by their versionless IDs, like the GitHub

@@ -434,6 +434,12 @@ variable "cms_anthropic_secret_name" {
   default     = ""
 }
 
+variable "agentrail_enabled" {
+  description = "Report sign-ins, the auth routes and hosted MCP calls to Agentrail. Needs the vault secrets agentrail-secret and agentrail-hash-key. False reports nothing."
+  type        = bool
+  default     = false
+}
+
 
 variable "database_extensions" {
   type        = list(string)
