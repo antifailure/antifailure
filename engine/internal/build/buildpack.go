@@ -160,7 +160,7 @@ func nodeBuildpack(fs fileSet, dir, command string, port int) (*Buildpack, bool)
 	// once: it copies the package's manifest and the root lockfile into ONE
 	// directory, so pnpm sees a workspace with its members missing and every
 	// file the lockfile names absent (a design partner's first af up died on
-	// ERR_PNPM_PATCH_NOT_FOUND for patches/fastify@5.12.5.patch); it runs the
+	// ERR_PNPM_PATCH_NOT_FOUND on its patch for fastify 5.12.5); it runs the
 	// root's build script rather than the package's; and it starts the
 	// process from the root, where `pnpm run start` is somebody else's start.
 	if dir != "" && dir != "." {
