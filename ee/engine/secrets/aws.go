@@ -50,6 +50,9 @@ type AWSConfig struct {
 	SecretID string
 	// Endpoint overrides the service address, for a VPC endpoint or for a test.
 	Endpoint string
+	// MetadataEndpoint overrides where instance metadata is asked, for a test.
+	// Empty is the link-local address, which is what every real caller wants.
+	MetadataEndpoint string
 	// Credentials supplies the keys directly. When nil they are discovered.
 	Credentials *AWSCredentials
 	// Getenv is injected so a test does not have to mutate the process
@@ -98,7 +101,7 @@ func newAWSBackend(cfg AWSConfig) *AWSBackend {
 	if cfg.Getenv == nil {
 		cfg.Getenv = os.Getenv
 	}
-	return &AWSBackend{cfg: cfg, chain: cloudauth.NewAWSChain(cfg.Getenv, cfg.Credentials)}
+	return &AWSBackend{cfg: cfg, chain: cloudauth.NewAWSChain(cfg.Getenv, cfg.Credentials).WithMetadataBase(cfg.MetadataEndpoint)}
 }
 
 func (a *AWSBackend) Describe() string {

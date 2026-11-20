@@ -16,6 +16,7 @@ package secrets
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -43,11 +44,23 @@ func TestAWSSaysWhichPlacesItLookedForCredentials(t *testing.T) {
 	// own leaves them guessing which of four mechanisms was supposed to supply
 	// them, and the answer is usually that the one they configured, a profile
 	// or a web identity token file, is not one this source reads.
+	//
+	// No metadata service to reach is a closed local port rather than the
+	// link-local address. That address answers on some machines this runs on:
+	// on 2026-11-20 a GitHub hosted runner, which is an Azure VM, answered it,
+	// and the message became "this instance has no role attached", which is
+	// right for that machine and not the message this test is about.
+	closed, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	nothing := "http://" + closed.Addr().String()
+	require.NoError(t, closed.Close())
+
 	source, err := NewAWSSecretsManager(AWSConfig{
 		Region: "eu-west-1",
 		// An environment with nothing in it, and no metadata service to reach,
 		// which is what a laptop looks like.
-		Getenv: func(string) string { return "" },
+		Getenv:           func(string) string { return "" },
+		MetadataEndpoint: nothing,
 	})
 	require.NoError(t, err)
 
