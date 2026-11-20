@@ -386,6 +386,10 @@ type Result struct {
 	// environment on an empty database looks exactly like one on a masked
 	// copy of production to everything except the rows.
 	EmptySource bool
+	// Standing counts what the journal says this environment still holds,
+	// which is exactly what af down removes. Status fills it in; it is how a
+	// failed run's database branch is visible when no service is running.
+	Standing int
 }
 
 // session holds everything Up opens and must close.
@@ -1247,7 +1251,7 @@ func (o *Orchestrator) Runtime(ctx context.Context) (provider.Runtime, error) {
 	return o.newRuntime(ctx)
 }
 
-// Journaled lists what the journal says this environment still holds: every
+// journaled lists what the journal says this environment still holds: every
 // resource created and not yet removed, which is exactly what af down will
 // remove.
 //
@@ -1260,7 +1264,7 @@ func (o *Orchestrator) Runtime(ctx context.Context) (provider.Runtime, error) {
 //
 // No lock, for the reason Status takes none, and no state directory is made
 // for a repository that has never had one: a question must not leave files.
-func (o *Orchestrator) Journaled(ctx context.Context) ([]journal.Record, error) {
+func (o *Orchestrator) journaled(ctx context.Context) ([]journal.Record, error) {
 	dir := filepath.Join(o.opts.Root, StateDir)
 	if _, err := os.Stat(filepath.Join(dir, state.FileName)); err != nil {
 		return nil, nil
@@ -3201,10 +3205,17 @@ func (o *Orchestrator) Status(ctx context.Context) (*Result, error) {
 	// was never going to be there. The manifest is where the author says which
 	// service the product is.
 	o.orderByManifest(env.Services)
-	return &Result{
+	res := &Result{
 		EnvID: o.envID, URL: env.URL(), Services: env.Services,
 		Proxied: env.ProxyReady,
-	}, nil
+	}
+	// Best effort, and never a reason to fail the answer above: a journal
+	// that cannot be read leaves the count at zero, which is what every
+	// release before this one reported.
+	if records, jErr := o.journaled(ctx); jErr == nil {
+		res.Standing = len(records)
+	}
+	return res, nil
 }
 
 // orderByManifest puts running services into the order they were declared in.

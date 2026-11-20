@@ -600,14 +600,14 @@ func reportStanding(ctx context.Context, e *Env, o *env.Orchestrator) {
 			"at it, and 'af logs' reads from it. Remove it with 'af down'.", 2))
 }
 
-// standing counts what the runtime holds for this environment, and how much of
-// it is running. Zero on any failure to ask, for the same reason
-// reportStanding is silent: it runs beside an answer that matters more.
+// standing counts what this environment still holds, and how much of it is
+// running. Zero on any failure to ask, for the same reason reportStanding is
+// silent: it runs beside an answer that matters more.
 //
-// The total is the journal's, which is what af down removes and the only
-// account that includes a database branch; the runtime's inventory, which
-// holds containers and networks only, is the fallback when the journal cannot
-// be read, and is where the running count comes from either way.
+// The total is the journal's, through Status, which is what af down removes
+// and the only account that includes a database branch. The runtime's
+// inventory holds containers and networks only; it is the fallback when the
+// journal cannot be read, and where the running count comes from.
 func standing(ctx context.Context, o *env.Orchestrator) (total, running int) {
 	inventory := 0
 	if rt, err := o.Runtime(ctx); err == nil {
@@ -624,11 +624,11 @@ func standing(ctx context.Context, o *env.Orchestrator) (total, running int) {
 		}
 		_ = rt.Close()
 	}
-	records, err := o.Journaled(ctx)
-	if err != nil {
-		return inventory, running
+	journaled := 0
+	if res, err := o.Status(ctx); err == nil {
+		journaled = res.Standing
 	}
-	return max(len(records), inventory), running
+	return max(journaled, inventory), running
 }
 
 func servicesJSON(services []provider.RunningService) []ServiceJSON {
@@ -855,7 +855,7 @@ func newStatusCommand(e *Env) *cobra.Command {
 			// design partner came to report it as a leak.
 			left := 0
 			if len(res.Services) == 0 {
-				left, _ = standing(cmd.Context(), o)
+				left = res.Standing
 			}
 			if e.Out.Format == FormatJSON {
 				return e.Out.JSON(StatusJSON{

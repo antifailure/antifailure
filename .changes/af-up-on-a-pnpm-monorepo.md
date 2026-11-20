@@ -30,7 +30,8 @@ wanted can run.
 
 `af status` said "Nothing is running" while the database of an `af up` that
 failed in its build was still up. It now says the run left something standing
-and that `af down` removes it, and the JSON carries the count as `standing`.
+and that `af down` removes it, and the JSON carries the count as `standing`. The MCP `describe_environment`
+tool reports the same count and names `teardown_environment`.
 The report on a failed `af up` counts the database too.
 
 `af up` without `af init` left `.antifailure/` showing as untracked in `git
