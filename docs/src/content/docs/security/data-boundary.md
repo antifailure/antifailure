@@ -405,7 +405,10 @@ never loads it. For everybody else it sends a page load's address without its
 query string, the time, the browser identification string, and the method,
 path, status and duration of the site's requests to itself, and it sets one
 cookie, `agentrail_session`, which ends after thirty minutes idle or a day after
-it began. It records no typing, clicks, scrolling or page content. The hosted
+it began. It records no typing, clicks, scrolling or page content. Unlike the
+counter and PostHog it does not skip a browser driven through WebDriver, because
+an agent driving a browser is what it is for; every signal a person sends still
+stops it. The hosted
 control plane also reports to Agentrail when `AF_AGENTRAIL_SECRET` and
 `AF_AGENTRAIL_HASH_KEY` are set, and only for an allowlist of request paths:
 signing in, the OAuth and device authorization routes, and the hosted MCP

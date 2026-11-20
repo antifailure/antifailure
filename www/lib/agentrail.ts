@@ -32,7 +32,7 @@
  * into failed preflights. The sign-in step joins the journey on the server
  * instead.
  */
-import { isWebsitePreview, measurementStatus, onMeasurementChanged } from "@/lib/beacon";
+import { isWebsitePreview, measurementStatus, onMeasurementChanged } from "./beacon";
 
 /** Public by design: it can only send this source's page events. A fork sets
  *  NEXT_PUBLIC_AGENTRAIL_KEY to its own key, or to the empty string for none. */
@@ -57,10 +57,23 @@ function previewContentMounted(): boolean {
     document.querySelector(".af-cms-preview") !== null;
 }
 
-/** Whether this page may start the recorder right now. */
+/**
+ * Whether this page may start the recorder right now.
+ *
+ * ONE REASON THE OTHER TWO STOP FOR DOES NOT STOP THIS ONE. The counter and
+ * PostHog leave out a browser that looks automated, a crawler or anything
+ * driven through WebDriver, because they measure people and an agent in the
+ * numbers is noise. For Agentrail the agent IS the measurement: a browser an
+ * agent drives is the visitor it exists to follow. That reason is a data
+ * quality filter, not anybody's choice, so it is the only one ignored here.
+ * Every reason that is a choice still wins: Global Privacy Control, Do Not
+ * Track, the switch on the privacy page, a draft preview and a build with
+ * measurement off.
+ */
 export function agentrailAllowed(): boolean {
   if (!AGENTRAIL_KEY || !AGENTRAIL_COLLECTOR) return false;
-  if (!measurementStatus().measuring) return false;
+  const status = measurementStatus();
+  if (!status.measuring && status.off !== "automated") return false;
   return !isWebsitePreview() && !previewContentMounted();
 }
 
@@ -115,8 +128,10 @@ export function stopAgentrail(): void {
 export function watchAgentrail(): () => void {
   if (subscribed) return () => {};
   subscribed = true;
-  const unsubscribe = onMeasurementChanged((measuring) => {
-    if (measuring) void startAgentrail();
+  // Asks the predicate rather than reading `measuring`, so the one reason this
+  // recorder ignores is ignored here too.
+  const unsubscribe = onMeasurementChanged(() => {
+    if (agentrailAllowed()) void startAgentrail();
     else stopAgentrail();
   });
   return () => { unsubscribe(); subscribed = false; };

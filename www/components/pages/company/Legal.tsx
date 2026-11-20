@@ -216,7 +216,9 @@ export function PrivacyPage() {
             string, the time, your browser identification string, and the method, path, status and
             duration of this site&rsquo;s requests to itself. Never what you type, click or scroll,
             never the content of the page, and never a recording. Agentrail keeps a keyed hash of
-            your IP address and an approximate location rather than the address itself.
+            your IP address and an approximate location rather than the address itself. Unlike
+            the other two, it also records a browser that software is driving, because an AI agent
+            using this site is what it is there to see.
           </p>
           <p>
             Agentrail sets one cookie, <code>agentrail_session</code>, holding a random identifier
