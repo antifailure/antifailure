@@ -419,3 +419,69 @@ func TestContext_TarDoesNotCopyTheArchive(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, c.Size(), len(body))
 }
+
+func TestContext_LeavesOutAGitWorktreeCheckedOutInside(t *testing.T) {
+	t.Parallel()
+	// The design partner's monorepo: 65 GB under .worktrees and 11 GB under
+	// .claude/worktrees, every one a full checkout of the same repository.
+	root := tree(t, map[string]string{
+		"package.json":                        "{}",
+		".worktrees/fix-login/.git":           "gitdir: /src/argus/.git/worktrees/fix-login\n",
+		".worktrees/fix-login/package.json":   "{}",
+		".claude/worktrees/agent-1/.git":      "gitdir: /src/argus/.git/worktrees/agent-1\n",
+		".claude/worktrees/agent-1/README.md": "copy",
+		".claude/settings.json":               "{}",
+	})
+	c := build(t, root, "")
+	require.Equal(t, []string{".claude/settings.json", "package.json"}, c.Files)
+	require.Equal(t, []string{".claude/worktrees/agent-1", ".worktrees/fix-login"}, c.Worktrees)
+}
+
+func TestContext_KeepsASubmoduleAndAVendoredClone(t *testing.T) {
+	t.Parallel()
+	// A submodule's .git is also a file, and its source belongs to the build.
+	// It points into .git/modules, not .git/worktrees, which is the line.
+	root := tree(t, map[string]string{
+		"vendor/lib/.git":       "gitdir: ../../.git/modules/vendor/lib\n",
+		"vendor/lib/lib.c":      "int x;",
+		"third/clone/.git/HEAD": "ref: refs/heads/main\n",
+		"third/clone/main.go":   "package main",
+	})
+	c := build(t, root, "")
+	require.Contains(t, c.Files, "vendor/lib/lib.c")
+	require.Contains(t, c.Files, "third/clone/main.go")
+	require.Empty(t, c.Worktrees)
+}
+
+func TestContext_ARootThatIsItselfAWorktreeIsBuilt(t *testing.T) {
+	t.Parallel()
+	// CI and every agent lane build from a linked worktree. Its own .git file
+	// says worktrees too, and the walk must not skip the context it was
+	// asked for.
+	root := tree(t, map[string]string{
+		".git":         "gitdir: /src/argus/.git/worktrees/lane\n",
+		"package.json": "{}",
+	})
+	c := build(t, root, "")
+	require.Contains(t, c.Files, "package.json")
+}
+
+func TestIgnore_GeneratedBuildDefaultsLeaveOutGitAndEveryNodeModules(t *testing.T) {
+	t.Parallel()
+	root := tree(t, map[string]string{
+		"package.json":                         "{}",
+		".git/HEAD":                            "ref: refs/heads/main\n",
+		"node_modules/next/index.js":           "x",
+		"apps/web/node_modules/react/index.js": "x",
+		"apps/web/page.tsx":                    "x",
+		"vendor/node_modules/keep/index.js":    "x",
+	})
+	user, err := ParseIgnore(strings.NewReader("!vendor/node_modules\n"))
+	require.NoError(t, err)
+	ig, err := user.With(GeneratedBuildExcludes...)
+	require.NoError(t, err)
+	c, err := NewContext(ContextOptions{Root: root, Ignore: ig, Service: "web"})
+	require.NoError(t, err)
+	// The user's later exception still wins over the default before it.
+	require.Equal(t, []string{"apps/web/page.tsx", "package.json", "vendor/node_modules/keep/index.js"}, c.Files)
+}

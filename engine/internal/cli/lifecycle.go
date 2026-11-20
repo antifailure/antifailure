@@ -73,6 +73,10 @@ type StatusJSON struct {
 	URL      string        `json:"url,omitempty"`
 	Proxied  bool          `json:"proxied"`
 	Services []ServiceJSON `json:"services"`
+	// Standing counts resources a run left behind with no service up: the
+	// database of an af up that failed while building, most often. Zero is
+	// omitted, so a clean branch reads exactly as it always did.
+	Standing int `json:"standing,omitempty"`
 }
 
 // DownJSON is the machine readable form of af down.
@@ -377,6 +381,7 @@ func newUpCommand(e *Env) *cobra.Command {
 	var branch string
 	var rebuild bool
 	var live bool
+	var only []string
 	cmd := &cobra.Command{
 		Use:   "up",
 		Short: "Create an environment for the current branch",
@@ -401,9 +406,26 @@ interrupt at any point leaves something af down can clean up.`),
 			if fork := forkGate(e); fork.Refused {
 				return refuseFork(fork)
 			}
-			o, err := orchestratorWithManifest3(e, lifecycleOptions{
-				branch: branch, rebuild: rebuild, silent: live,
-			})
+			opts := lifecycleOptions{branch: branch, rebuild: rebuild, silent: live}
+			if len(only) > 0 {
+				path, err := manifest.Find(e.WorkDir)
+				if err != nil {
+					return err
+				}
+				m, err := manifest.Load(path)
+				if err != nil {
+					return err
+				}
+				narrowed, kept, err := onlyServices(m, only)
+				if err != nil {
+					return err
+				}
+				opts.manifest, opts.root = narrowed, repoRoot(path)
+				if e.Out.Format != FormatJSON && !live {
+					e.Out.Printf("  Only %s, of %d services.\n", strings.Join(kept, ", "), len(m.Services))
+				}
+			}
+			o, err := orchestratorWithManifest3(e, opts)
 			if err != nil {
 				return err
 			}
@@ -470,7 +492,73 @@ interrupt at any point leaves something af down can clean up.`),
 	cmd.Flags().BoolVar(&rebuild, "rebuild", false, "Build every image again, even when an identical one exists")
 	cmd.Flags().BoolVar(&live, "hud", false,
 		"Watch the run on a live dashboard, or a line per event where there is no terminal")
+	cmd.Flags().StringSliceVar(&only, "only", nil,
+		"Bring up only these services and what they depend on, by name, comma separated or repeated")
 	return cmd
+}
+
+// onlyServices narrows a manifest to the named services and everything they
+// need.
+//
+// What they need is their depends_on, followed all the way down, and the
+// service whose image rebuilds a derived datastore, because af up runs that
+// rebuild and would otherwise fail on a service it was told to leave out. The
+// order of the manifest is kept, because the first service is the one whose
+// address the environment reports.
+//
+// Without this the only way to bring up part of a manifest was to delete the
+// rest of it. A design partner's 23 service monorepo had eleven agent images
+// and a library package in it that could never pass a health check, and every
+// one of them built before the two services anybody wanted were tried.
+func onlyServices(m *schema.Manifest, names []string) (*schema.Manifest, []string, error) {
+	byName := make(map[string]schema.Service, len(m.Services))
+	all := make([]string, 0, len(m.Services))
+	for _, svc := range m.Services {
+		byName[svc.Name] = svc
+		all = append(all, svc.Name)
+	}
+	want := map[string]bool{}
+	var visit func(string)
+	visit = func(name string) {
+		if want[name] {
+			return
+		}
+		want[name] = true
+		for _, dep := range byName[name].DependsOn {
+			visit(dep)
+		}
+	}
+	for _, raw := range names {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
+		}
+		if _, ok := byName[name]; !ok {
+			return nil, nil, fmt.Errorf("up: --only names %q, and the manifest has no service by that name; "+
+				"it has %s", name, strings.Join(all, ", "))
+		}
+		visit(name)
+	}
+	if len(want) == 0 {
+		return nil, nil, fmt.Errorf("up: --only was given no service names; the manifest has %s", strings.Join(all, ", "))
+	}
+	for _, ds := range m.Datastores {
+		if ds.Rebuild != nil && ds.Rebuild.Service != "" {
+			if _, ok := byName[ds.Rebuild.Service]; ok {
+				visit(ds.Rebuild.Service)
+			}
+		}
+	}
+	narrowed := *m
+	narrowed.Services = make([]schema.Service, 0, len(want))
+	kept := make([]string, 0, len(want))
+	for _, svc := range m.Services {
+		if want[svc.Name] {
+			narrowed.Services = append(narrowed.Services, svc)
+			kept = append(kept, svc.Name)
+		}
+	}
+	return &narrowed, kept, nil
 }
 
 // reportStanding says what a failed run left behind and how to remove it.
@@ -492,25 +580,7 @@ interrupt at any point leaves something af down can clean up.`),
 // Silent on every failure of its own. This runs while a command is already
 // failing, and a second error about the reporter would bury the first.
 func reportStanding(ctx context.Context, e *Env, o *env.Orchestrator) {
-	rt, err := o.Runtime(ctx)
-	if err != nil {
-		return
-	}
-	defer func() { _ = rt.Close() }()
-	items, err := rt.Inventory(ctx)
-	if err != nil {
-		return
-	}
-	total, running := 0, 0
-	for _, item := range items {
-		if item.EnvID != o.EnvID() {
-			continue
-		}
-		total++
-		if item.Labels["state"] == "running" {
-			running++
-		}
-	}
+	total, running := standing(ctx, o)
 	if total == 0 {
 		return
 	}
@@ -528,6 +598,37 @@ func reportStanding(ctx context.Context, e *Env, o *env.Orchestrator) {
 	e.Out.Printf("  %s\n", e.Out.Wrap(
 		"That is on purpose: a failed run leaves the environment standing so you can look "+
 			"at it, and 'af logs' reads from it. Remove it with 'af down'.", 2))
+}
+
+// standing counts what the runtime holds for this environment, and how much of
+// it is running. Zero on any failure to ask, for the same reason
+// reportStanding is silent: it runs beside an answer that matters more.
+//
+// The total is the journal's, which is what af down removes and the only
+// account that includes a database branch; the runtime's inventory, which
+// holds containers and networks only, is the fallback when the journal cannot
+// be read, and is where the running count comes from either way.
+func standing(ctx context.Context, o *env.Orchestrator) (total, running int) {
+	inventory := 0
+	if rt, err := o.Runtime(ctx); err == nil {
+		if items, err := rt.Inventory(ctx); err == nil {
+			for _, item := range items {
+				if item.EnvID != o.EnvID() {
+					continue
+				}
+				inventory++
+				if item.Labels["state"] == "running" {
+					running++
+				}
+			}
+		}
+		_ = rt.Close()
+	}
+	records, err := o.Journaled(ctx)
+	if err != nil {
+		return inventory, running
+	}
+	return max(len(records), inventory), running
 }
 
 func servicesJSON(services []provider.RunningService) []ServiceJSON {
@@ -747,10 +848,20 @@ func newStatusCommand(e *Env) *cobra.Command {
 				return err
 			}
 
+			// Nothing running is not the same as nothing there. An af up
+			// that fails while building leaves its database standing on
+			// purpose, and this used to answer "Nothing is running" over a
+			// container the user could see in docker ps, which is how a
+			// design partner came to report it as a leak.
+			left := 0
+			if len(res.Services) == 0 {
+				left, _ = standing(cmd.Context(), o)
+			}
 			if e.Out.Format == FormatJSON {
 				return e.Out.JSON(StatusJSON{
 					EnvID: res.EnvID, Running: len(res.Services) > 0, URL: res.URL,
 					Proxied: res.Proxied, Services: servicesJSON(res.Services),
+					Standing: left,
 				})
 			}
 			// The branch, not only the environment identifier. The identifier
@@ -761,6 +872,17 @@ func newStatusCommand(e *Env) *cobra.Command {
 			// here: it is in the reader's own shell prompt, and an absolute
 			// path is a single unbreakable word that no wrapping can rescue.
 			e.Out.Subject(res.EnvID, "branch "+o.Branch())
+			if len(res.Services) == 0 && left > 0 {
+				noun := "resources are"
+				if left == 1 {
+					noun = "resource is"
+				}
+				e.Out.Printf("  No service is running, but %d %s still up from a run that did not finish.\n", left, noun)
+				e.Out.Printf("  %s\n", e.Out.Wrap(
+					"A failed af up leaves what it made standing so it can be looked at. "+
+						"Remove it with 'af down', or bring the rest up with 'af up'.", 2))
+				return nil
+			}
 			if len(res.Services) == 0 {
 				e.Out.Empty("Nothing is running for this branch.", "Bring it up with", "af up")
 				return nil

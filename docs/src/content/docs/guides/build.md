@@ -62,6 +62,69 @@ appears to.
 Commit a lockfile. It is the difference between an environment that reproduces
 a bug and one that might.
 
+## A package in a workspace
+
+A service whose `path` is a package inside a pnpm, yarn, npm or bun workspace
+is built as a member of that workspace, not as a project of its own. The
+generated Dockerfile copies the whole repository in, runs the frozen install
+once at the root, builds the package, and starts it from its own directory:
+
+```
+web   node   apps/web/package.json and the pnpm workspace at the root put this on Node 22, so the whole workspace installs from pnpm-lock.yaml and the service starts from apps/web.
+```
+
+The whole repository, because a workspace install reads files from all of it:
+every member's `package.json`, the patch files named by
+`patchedDependencies`, `.yarn`, and whatever a member's `postinstall` runs.
+Copying only the package and the lockfile fails on the first of those, often
+as `ERR_PNPM_PATCH_NOT_FOUND`.
+
+The build runs through whatever orders the workspace, so a package that
+imports another package's compiled output finds it built:
+
+- with `turbo.json` and `turbo` in the root `package.json`:
+  `turbo run build --filter=<name>...`
+- with pnpm: `pnpm --filter <name>... run build`, the package and everything
+  it depends on, in dependency order
+- with npm or yarn: the package's own `build` script
+
+A package with its own lockfile is treated as a project that happens to sit in
+a subdirectory, and installs in that directory.
+
+## What a generated build leaves out
+
+A generated Dockerfile is Antifailure's file, so Antifailure decides what it
+reads. Its build context never holds `.git` or any `node_modules`, whatever
+`.dockerignore` says: dependencies are installed inside the image, for Linux,
+and a `node_modules` copied from a Mac afterwards would replace them. A rule in
+`.dockerignore` that re-includes something, such as `!vendor/node_modules`,
+still wins. A Dockerfile you wrote keeps Docker's behaviour, where only your
+`.dockerignore` decides.
+
+Every build, generated or not, leaves out a git worktree checked out inside the
+repository, such as `.worktrees/fix-login` or `.claude/worktrees/agent-1`. Each
+is a second copy of the repository, and coding agents create one per task. The
+build says which it left out:
+
+```
+web: left 2 git worktrees out of the build, checked out inside this repository: .claude/worktrees/agent-1, .worktrees/fix-login
+```
+
+A submodule is kept. Its `.git` points into `.git/modules`, not
+`.git/worktrees`, and its source belongs to the build.
+
+## Bringing up some of the services
+
+```bash
+af up --only web
+```
+
+`--only` brings up the named services and everything they need: their
+`depends_on`, all the way down, and the service a datastore's `rebuild` runs
+in. Name several with commas or by repeating the flag. It is the way to get the
+services you care about running in a large manifest before the rest of it
+builds, without editing the manifest.
+
 ## A build that fails
 
 ```
@@ -104,6 +167,10 @@ which one.
 A generated Dockerfile installs dependencies before copying source, so editing
 a file does not reinstall the dependency graph. If you write your own, do the
 same: it is the difference between a two second rebuild and a two minute one.
+
+The exception is a workspace member, described above. Its install needs the
+whole repository, so it runs after the copy, and a source change reinstalls.
+That is slower to rebuild and it is the version that installs.
 
 ## Builder choice
 

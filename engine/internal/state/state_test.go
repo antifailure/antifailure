@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -376,4 +378,36 @@ func TestVersion_ReportsZeroOnAFreshMigrationTable(t *testing.T) {
 	v, err := db.Version(context.Background())
 	require.NoError(t, err)
 	require.Positive(t, v)
+}
+
+// A repository that never ran af init gets no .gitignore entry, and af up
+// still makes this directory. Asked of git itself, because "the file exists"
+// is not the claim; "git status does not offer it for commit" is.
+func TestOpen_TheStateDirectoryNeverShowsInGitStatus(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	repo := t.TempDir()
+	require.NoError(t, exec.Command("git", "-C", repo, "init", "-q").Run())
+	db, err := state.Open(context.Background(), filepath.Join(repo, state.DirName))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+
+	out, err := exec.Command("git", "-C", repo, "status", "--porcelain", "--untracked-files=all").Output()
+	require.NoError(t, err)
+	require.Empty(t, strings.TrimSpace(string(out)))
+}
+
+func TestOpen_KeepsAGitignoreAlreadyInTheStateDirectory(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), state.DirName)
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("mine\n"), 0o600))
+	db, err := state.Open(context.Background(), dir)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	body, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	require.NoError(t, err)
+	require.Equal(t, "mine\n", string(body))
 }

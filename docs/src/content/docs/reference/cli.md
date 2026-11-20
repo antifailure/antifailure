@@ -2719,6 +2719,7 @@ af up --rebuild --hud
 | --- | --- | --- |
 | `--branch` | - | Branch to create the environment for, defaulting to the checked out one. |
 | `--hud` | `false` | Watch the run on a live dashboard, or a line per event where there is no terminal. |
+| `--only` | - | Bring up only these services and what they depend on, by name, comma separated or repeated. |
 | `--rebuild` | `false` | Build every image again, even when an identical one exists. |
 
 ### `af update`

@@ -52,6 +52,10 @@ type Context struct {
 	// what makes somebody ask; knowing the name is what makes them fix it.
 	Largest      string
 	LargestBytes int64
+	// Worktrees lists the directories left out because each is a git
+	// worktree checked out inside this one: another copy of the repository,
+	// not a part of it.
+	Worktrees []string
 	// tarball holds the built archive.
 	tarball []byte
 }
@@ -161,6 +165,7 @@ func NewContext(opts ContextOptions) (*Context, error) {
 	var entries []entry
 	var total int64
 	excluded := 0
+	var worktrees []string
 
 	walkErr := filepath.WalkDir(absRoot, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -196,6 +201,20 @@ func NewContext(opts ContextOptions) (*Context, error) {
 			return nil
 		}
 		if d.IsDir() {
+			// A git worktree checked out inside the repository is a second
+			// copy of the repository, never a part of it. Agents and editors
+			// create them in .worktrees, .claude/worktrees and the like, one
+			// per task, and they are invisible to the person running the
+			// build because git status does not list them as changes. A
+			// design partner's monorepo carried 76 GB of them, which turned
+			// af up into a refusal at the size limit for a context whose
+			// actual source was a small fraction of that. Docker would send
+			// them; nothing in them can be what the image is built from.
+			if isNestedWorktree(p) {
+				excluded++
+				worktrees = append(worktrees, rel)
+				return fs.SkipDir
+			}
 			return nil
 		}
 
@@ -332,8 +351,38 @@ func NewContext(opts ContextOptions) (*Context, error) {
 		Excluded:     excluded,
 		Largest:      largest,
 		LargestBytes: largestBytes,
+		Worktrees:    worktrees,
 		tarball:      buf.Bytes(),
 	}, nil
+}
+
+// isNestedWorktree reports whether a directory is the top of a linked git
+// worktree.
+//
+// A linked worktree's .git is a FILE holding one line, `gitdir: <common
+// dir>/worktrees/<name>`. A submodule's .git is also a file, and it points
+// into `<superproject>/.git/modules/<name>`, which is source that belongs to
+// the build, so the worktrees segment is what decides and a bare .git file is
+// not enough. A nested .git DIRECTORY is an independent clone, which a
+// repository may vendor on purpose, so it is left alone.
+func isNestedWorktree(dir string) bool {
+	f, err := os.Open(filepath.Join(dir, ".git")) //nolint:gosec // a path inside the context being walked
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	head := make([]byte, 4096)
+	n, _ := io.ReadFull(f, head)
+	line := strings.TrimSpace(string(head[:n]))
+	target, ok := strings.CutPrefix(line, "gitdir:")
+	if !ok {
+		return false
+	}
+	return strings.Contains(filepath.ToSlash(strings.TrimSpace(target)), "/worktrees/")
 }
 
 // Tar returns a reader over the archive to send to the daemon.

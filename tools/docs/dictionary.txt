@@ -107,4 +107,6 @@ vale
 versionless
 vhs
 waitlist
+worktree
+worktrees
 xata

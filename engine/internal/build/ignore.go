@@ -236,6 +236,41 @@ func (r ignoreRule) matchesAncestorOf(p string) bool {
 	return false
 }
 
+// GeneratedBuildExcludes is what a build from a generated Dockerfile never
+// reads, whatever the repository's .dockerignore says.
+//
+// A generated Dockerfile is Antifailure's file, not the user's, so what it
+// needs from the tree is Antifailure's decision too. It installs dependencies
+// itself, inside the image, for Linux. A node_modules copied in from the host
+// after that install replaces Linux binaries with macOS ones and is the
+// heaviest directory in any JavaScript repository; .git is the history, which
+// the build never reads and which in a monorepo is routinely a gigabyte. A
+// design partner's first af up on a pnpm monorepo with no .dockerignore sent
+// both to the builder for every one of 23 services.
+//
+// A Dockerfile the user wrote keeps Docker's own semantics, where only their
+// .dockerignore decides, because it may well read .git on purpose.
+var GeneratedBuildExcludes = []string{".git", "**/node_modules"}
+
+// With returns a copy of the ignore file with extra patterns placed BEFORE its
+// own rules.
+//
+// Before, so the last matching rule still wins the way it does everywhere
+// else: an exception the user wrote, such as `!vendor/node_modules`, is later
+// than the default and keeps working.
+func (ig *Ignore) With(patterns ...string) (*Ignore, error) {
+	out := &Ignore{rules: make([]ignoreRule, 0, len(patterns)+len(ig.rules))}
+	for _, p := range patterns {
+		r, err := compileIgnore(p)
+		if err != nil {
+			return nil, err
+		}
+		out.rules = append(out.rules, r)
+	}
+	out.rules = append(out.rules, ig.rules...)
+	return out, nil
+}
+
 // Patterns returns the rules as written, for af build explain.
 func (ig *Ignore) Patterns() []string {
 	out := make([]string, 0, len(ig.rules))
