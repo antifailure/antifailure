@@ -25,13 +25,13 @@
     "@antifailure/website": "*",
     "@antifailure/db": "*",
     "@antifailure/policy": "*",
-    "@hono/node-server": "^2.1.6",
+    "@hono/node-server": "^2.1.8",
     "@hono/trpc-server": "^0.4.0",
-    "@modelcontextprotocol/sdk": "^1.32.1",
-    "@trpc/server": "^11.19.0",
-    "hono": "^4.13.16",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@trpc/server": "^11.28.3",
+    "hono": "^4.13.19",
     "postgres": "^3.4.9",
-    "posthog-node": "^5.56.1",
+    "posthog-node": "^5.74.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
