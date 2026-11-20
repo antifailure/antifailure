@@ -175,7 +175,83 @@ func TestNodeBuildpack_UsesTheRootLockfileForAMonorepoPackage(t *testing.T) {
 	}
 	bp := detect(t, fs, "packages/web", "", 3000)
 	require.Contains(t, bp.Dockerfile, "pnpm install --frozen-lockfile")
-	require.Contains(t, bp.Dockerfile, "COPY packages/web/package.json pnpm-lock.yaml pnpm-workspace.yaml ./")
+}
+
+// workspaceFS is the shape of the design partner's repository that af up could
+// not build: a pnpm workspace whose root package.json patches a dependency,
+// with the app depending on another member.
+func workspaceFS() mapFS {
+	return mapFS{
+		"package.json":                 `{"name":"root","pnpm":{"patchedDependencies":{"fastify@5.12.5":"patches/fastify@5.12.5.patch"}}}`,
+		"pnpm-lock.yaml":               "x",
+		"pnpm-workspace.yaml":          "packages:\n  - apps/*\n  - packages/*\n",
+		"patches/fastify@5.12.5.patch": "diff",
+		"apps/web/package.json":        `{"name":"@argus/web","scripts":{"build":"next build","start":"next start"},"dependencies":{"@argus/ui":"workspace:*"}}`,
+		"packages/ui/package.json":     `{"name":"@argus/ui","scripts":{"build":"tsc"}}`,
+	}
+}
+
+func TestNodeBuildpack_AWorkspaceMemberInstallsTheWholeWorkspace(t *testing.T) {
+	t.Parallel()
+	// The failure: the app's package.json and the root lockfile copied into
+	// one directory, so pnpm saw a workspace with its members and its patch
+	// files missing and stopped on ERR_PNPM_PATCH_NOT_FOUND.
+	bp := detect(t, workspaceFS(), "apps/web", "", 3000)
+	df := bp.Dockerfile
+	require.NotContains(t, df, "COPY apps/web/package.json", "a member's manifest copied alone flattens the workspace")
+	copyAll := strings.Index(df, "COPY . .")
+	install := strings.Index(df, "pnpm install --frozen-lockfile")
+	require.GreaterOrEqual(t, copyAll, 0, df)
+	require.Greater(t, install, copyAll, "the install must see every member and every patch file:\n%s", df)
+}
+
+func TestNodeBuildpack_AWorkspaceMemberBuildsItsDependenciesFirst(t *testing.T) {
+	t.Parallel()
+	bp := detect(t, workspaceFS(), "apps/web", "", 3000)
+	require.Contains(t, bp.Dockerfile, `RUN pnpm --filter "@argus/web..." run build`)
+
+	turbo := workspaceFS()
+	turbo["turbo.json"] = "{}"
+	turbo["package.json"] = `{"name":"root","devDependencies":{"turbo":"^2"}}`
+	bp = detect(t, turbo, "apps/web", "", 3000)
+	require.Contains(t, bp.Dockerfile, `RUN pnpm exec turbo run build --filter="@argus/web..."`)
+}
+
+func TestNodeBuildpack_AWorkspaceMemberStartsFromItsOwnDirectory(t *testing.T) {
+	t.Parallel()
+	// From the root, `pnpm run start` is the root's start script, or none.
+	bp := detect(t, workspaceFS(), "apps/web", "", 3000)
+	df := bp.Dockerfile
+	workdir := strings.LastIndex(df, "WORKDIR ")
+	require.Equal(t, "WORKDIR /app/apps/web", df[workdir:workdir+len("WORKDIR /app/apps/web")], df)
+	require.Less(t, workdir, strings.Index(df, "CMD "), df)
+	require.Contains(t, df, `CMD ["pnpm", "run", "start"]`)
+	require.Contains(t, df, "USER node")
+}
+
+func TestNodeBuildpack_AnNpmWorkspaceIsRecognisedFromPackageJSON(t *testing.T) {
+	t.Parallel()
+	fs := mapFS{
+		"package.json":          `{"workspaces":["apps/*"]}`,
+		"apps/api/package.json": `{"name":"api","scripts":{"start":"node server.js"}}`,
+	}
+	bp := detect(t, fs, "apps/api", "", 0)
+	require.Contains(t, bp.Dockerfile, "COPY . .\nRUN npm install")
+	require.Contains(t, bp.Dockerfile, "WORKDIR /app/apps/api")
+}
+
+func TestNodeBuildpack_ANestedAppWithItsOwnLockfileInstallsInItsDirectory(t *testing.T) {
+	t.Parallel()
+	fs := mapFS{
+		"tools/site/package.json":      `{"scripts":{"start":"node index.js"}}`,
+		"tools/site/package-lock.json": "x",
+	}
+	bp := detect(t, fs, "tools/site", "", 0)
+	df := bp.Dockerfile
+	require.Contains(t, df, "WORKDIR /app/tools/site\n")
+	require.Contains(t, df, "COPY tools/site/package.json tools/site/package-lock.json ./")
+	require.Contains(t, df, "COPY --from=deps /app/tools/site/node_modules ./tools/site/node_modules")
+	require.Less(t, strings.LastIndex(df, "WORKDIR /app/tools/site"), strings.Index(df, "CMD "))
 }
 
 func TestNodeBuildpack_DoesNotRunAsRoot(t *testing.T) {
@@ -328,4 +404,23 @@ func TestMajorFromRange_TakesTheFloorOfARange(t *testing.T) {
 	require.Equal(t, "", majorFromRange(""))
 	require.Equal(t, "", majorFromRange("latest"))
 	require.Equal(t, "", majorFromRange("4"), "a version before Node had a runtime worth targeting")
+}
+
+func TestNodeBuildpack_ThePackageManagerIsInTheImageForTheUserThatStarts(t *testing.T) {
+	t.Parallel()
+	// Started as node, with egress sealed: a pnpm cached under /root is a
+	// pnpm the start command downloads again and is refused.
+	single := detect(t, mapFS{"package.json": `{"scripts":{"start":"node a.js"}}`, "pnpm-lock.yaml": "x"}, "", "", 0)
+	ws := detect(t, workspaceFS(), "apps/web", "", 0)
+	nested := detect(t, mapFS{"tools/x/package.json": `{}`, "tools/x/yarn.lock": "x"}, "tools/x", "", 0)
+	for name, df := range map[string]string{"single": single.Dockerfile, "workspace": ws.Dockerfile, "nested": nested.Dockerfile} {
+		home := strings.Index(df, "ENV COREPACK_HOME=/opt/corepack")
+		require.GreaterOrEqual(t, home, 0, name)
+		require.Less(t, home, strings.Index(df, " install"), "%s: the install fills the shared copy\n%s", name, df)
+		if name != "workspace" {
+			runtime := strings.Index(df, "AS runtime")
+			require.Greater(t, strings.Index(df, "COPY --from=deps /opt/corepack /opt/corepack"), runtime,
+				"%s: the runtime stage carries the copy\n%s", name, df)
+		}
+	}
 }

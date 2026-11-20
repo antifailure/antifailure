@@ -243,6 +243,25 @@ ALTER TABLE mcp_runs ADD COLUMN owner_host TEXT NOT NULL DEFAULT '';
 	},
 }
 
+// ignoreItself writes a .gitignore inside the state directory that ignores
+// everything in it, the file included.
+//
+// af init adds the directory to the repository's .gitignore, and that only
+// helps somebody who ran af init. A manifest written by hand or by an agent
+// goes straight to af up, which made this directory and left it showing as
+// untracked in git status beside the user's own changes, one `git add .` away
+// from committing a journal that describes another machine's resources. A
+// design partner found it exactly that way. A file inside the directory needs
+// no edit to anything the user owns, and works however the directory came to
+// exist. Best effort: failing to write it is no reason to refuse to start.
+func ignoreItself(dir string) {
+	path := filepath.Join(dir, ".gitignore")
+	if _, err := os.Lstat(path); err == nil {
+		return
+	}
+	_ = os.WriteFile(path, []byte("# Antifailure local state. Never committed.\n*\n"), 0o600) //nolint:gosec // af's own directory
+}
+
 // SchemaVersion is the version a new database is created at.
 func SchemaVersion() int { return migrations[len(migrations)-1].Version }
 
@@ -266,6 +285,7 @@ func Open(ctx context.Context, dir string) (*DB, error) {
 	if err := privatefs.Restrict(dir); err != nil {
 		return nil, aferrors.Wrap(err, aferrors.AFRUN010, "path", dir, "needed", "the state directory, private")
 	}
+	ignoreItself(dir)
 	path := filepath.Join(dir, FileName)
 
 	db, err := open(ctx, path)

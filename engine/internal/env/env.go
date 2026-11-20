@@ -386,6 +386,10 @@ type Result struct {
 	// environment on an empty database looks exactly like one on a masked
 	// copy of production to everything except the rows.
 	EmptySource bool
+	// Standing counts what the journal says this environment still holds,
+	// which is exactly what af down removes. Status fills it in; it is how a
+	// failed run's database branch is visible when no service is running.
+	Standing int
 }
 
 // session holds everything Up opens and must close.
@@ -1245,6 +1249,32 @@ func (o *Orchestrator) lookupForProvider(
 // environment, which need the same selection and are not part of a lifecycle.
 func (o *Orchestrator) Runtime(ctx context.Context) (provider.Runtime, error) {
 	return o.newRuntime(ctx)
+}
+
+// journaled lists what the journal says this environment still holds: every
+// resource created and not yet removed, which is exactly what af down will
+// remove.
+//
+// The journal rather than a runtime's inventory, because the inventory is the
+// container runtime's and a database branch is the database provider's. An af
+// up that failed while building a service has created a database branch and
+// nothing else, and asking the runtime about it answered "nothing", which is
+// what af status then told a design partner while the branch's container sat
+// in docker ps.
+//
+// No lock, for the reason Status takes none, and no state directory is made
+// for a repository that has never had one: a question must not leave files.
+func (o *Orchestrator) journaled(ctx context.Context) ([]journal.Record, error) {
+	dir := filepath.Join(o.opts.Root, StateDir)
+	if _, err := os.Stat(filepath.Join(dir, state.FileName)); err != nil {
+		return nil, nil
+	}
+	db, err := state.Open(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = db.Close() }()
+	return journal.New(db, o.opts.Clock, nil).Pending(ctx, o.envID)
 }
 
 // newKubernetesRuntime builds the cluster runtime, including finding it a
@@ -2810,10 +2840,6 @@ func (o *Orchestrator) buildOneFrom(
 		return svc.Build.Image, true, nil
 	}
 
-	bctx, err := build.NewContext(build.ContextOptions{Root: contextRoot, Ignore: ig, Service: svc.Name})
-	if err != nil {
-		return "", false, err
-	}
 	// Paths in the manifest are relative to the repository; paths in a build
 	// are relative to its context. Where those differ, translate once here
 	// rather than at each of the three places below that needs it.
@@ -2835,6 +2861,34 @@ func (o *Orchestrator) buildOneFrom(
 			return "", false
 		}
 		return rel, true
+	}
+
+	// Whether this build will run a Dockerfile Antifailure writes, decided
+	// before the context is walked, because the answer changes what the walk
+	// leaves out. The same three questions the switch below asks of the
+	// context, asked of the disk with the same ignore file, so the two cannot
+	// disagree about a Dockerfile the ignore file excludes.
+	if generatesDockerfile(contextRoot, svc, dir, ig, inContext) {
+		withDefaults, igErr := ig.With(build.GeneratedBuildExcludes...)
+		if igErr != nil {
+			return "", false, igErr
+		}
+		ig = withDefaults
+	}
+
+	bctx, err := build.NewContext(build.ContextOptions{Root: contextRoot, Ignore: ig, Service: svc.Name})
+	if err != nil {
+		return "", false, err
+	}
+	if n := len(bctx.Worktrees); n > 0 {
+		// Named, a few of them, because a build that silently sends less
+		// than the tree is as confusing as one that sends more.
+		shown := bctx.Worktrees
+		if n > 3 {
+			shown = append(append([]string{}, shown[:3]...), fmt.Sprintf("and %d more", n-3))
+		}
+		o.progress(fmt.Sprintf("%s: left %s out of the build, checked out inside this repository: %s",
+			svc.Name, plural(n, "git worktree", "git worktrees"), strings.Join(shown, ", ")))
 	}
 
 	// A context nobody meant to send. Said out loud, because the whole cost of
@@ -3151,10 +3205,17 @@ func (o *Orchestrator) Status(ctx context.Context) (*Result, error) {
 	// was never going to be there. The manifest is where the author says which
 	// service the product is.
 	o.orderByManifest(env.Services)
-	return &Result{
+	res := &Result{
 		EnvID: o.envID, URL: env.URL(), Services: env.Services,
 		Proxied: env.ProxyReady,
-	}, nil
+	}
+	// Best effort, and never a reason to fail the answer above: a journal
+	// that cannot be read leaves the count at zero, which is what every
+	// release before this one reported.
+	if records, jErr := o.journaled(ctx); jErr == nil {
+		res.Standing = len(records)
+	}
+	return res, nil
 }
 
 // orderByManifest puts running services into the order they were declared in.
@@ -3367,6 +3428,28 @@ func (o *Orchestrator) sidecarRuntime(ctx context.Context) (observingRuntime, er
 
 // serviceDir resolves a file inside a service's directory, as the build
 // context sees it.
+// generatesDockerfile reports whether a service's build will use a Dockerfile
+// Antifailure generates rather than one in the repository.
+func generatesDockerfile(
+	contextRoot string, svc schema.Service, dir string, ig *build.Ignore,
+	inContext func(string) (string, bool),
+) bool {
+	if svc.Build != nil && svc.Build.Dockerfile != "" {
+		return false
+	}
+	present := func(rel string) bool {
+		if drop, _ := ig.Excluded(rel, false); drop {
+			return false
+		}
+		info, err := os.Stat(filepath.Join(contextRoot, filepath.FromSlash(rel)))
+		return err == nil && info.Mode().IsRegular()
+	}
+	if present(serviceDir(inContext, dir, "Dockerfile")) {
+		return false
+	}
+	return dir != "" || !present("Dockerfile")
+}
+
 func serviceDir(inContext func(string) (string, bool), dir, name string) string {
 	rel, ok := inContext(joinPath(dir, name))
 	if !ok {

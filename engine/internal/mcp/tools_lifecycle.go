@@ -442,6 +442,10 @@ type statusResult struct {
 	Unavailable string          `json:"unavailable,omitempty"`
 	Environment *environmentDoc `json:"environment,omitempty"`
 	Metrics     []Metric        `json:"metrics,omitempty"`
+	// Standing counts resources a run left behind with no service up, most
+	// often the database branch of a start that failed while building. They
+	// are what teardown_environment removes.
+	Standing int `json:"standing,omitempty"`
 }
 
 type environmentDoc struct {
@@ -499,7 +503,17 @@ func describeStatus(ctx context.Context, p *Project, status readStatus) (any, *F
 	out.Running = res != nil && len(res.Services) > 0
 	out.Metrics = environmentMetrics(res)
 
+	if !out.Running && res != nil {
+		out.Standing = res.Standing
+	}
+
 	switch {
+	case !out.Running && out.Standing > 0:
+		out.Verdict = VerdictInconclusive
+		out.Summary = fmt.Sprintf(
+			"No service is running for this branch, but %d resources from a start that did "+
+				"not finish are still standing, usually its database branch. Call "+
+				"teardown_environment to remove them, or start_environment to finish.", out.Standing)
 	case !out.Running:
 		out.Verdict = VerdictInconclusive
 		out.Summary = "Nothing is running for this branch, so there is nothing to drive. " +

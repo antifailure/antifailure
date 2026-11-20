@@ -308,6 +308,26 @@ func TestDescribeEnvironment_NothingRunningIsSaidPlainly(t *testing.T) {
 	require.Contains(t, res.Summary, "start_environment")
 }
 
+func TestDescribeEnvironment_AFailedStartsLeftoversAreNotNothing(t *testing.T) {
+	t.Parallel()
+	// A start that failed while building leaves its database branch standing
+	// and no service. "Nothing is running" over a container the caller can see
+	// is how a design partner came to report it as a leak.
+	status := func(context.Context) (*env.Result, bool, error) {
+		return &env.Result{EnvID: "af-shop-main", Standing: 2}, true, nil
+	}
+	out, fault := describeStatus(context.Background(),
+		&Project{ID: "p", Root: t.TempDir()}, status)
+	require.Nil(t, fault)
+
+	res := out.(statusResult)
+	require.False(t, res.Running)
+	require.Equal(t, 2, res.Standing)
+	require.Equal(t, VerdictInconclusive, res.Verdict)
+	require.Contains(t, res.Summary, "teardown_environment")
+	require.NotContains(t, res.Summary, "Nothing is running")
+}
+
 func TestDescribeEnvironment_AServiceThatNeverAnsweredIsNotAPass(t *testing.T) {
 	t.Parallel()
 	// A caller told everything is fine drives an application that is not there
