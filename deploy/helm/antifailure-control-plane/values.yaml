@@ -286,6 +286,22 @@ mail:
   secretKeys:
     resendApiKey: AF_RESEND_API_KEY
 
+# Agentrail, which follows an AI agent from the pages it reads to its sign-in
+# and the MCP calls it makes. Off unless secret and hashKey are both set, and
+# the process refuses to start on one of them. It reports only an allowlist of
+# request paths (signing in, the OAuth and device routes, /mcp) and no outbound
+# call, so no organization or repository name leaves this process. Both come
+# from a server source in your own Agentrail workspace.
+agentrail:
+  secret: ""
+  hashKey: ""
+  # Empty uses Agentrail's own collector.
+  endpoint: ""
+  existingSecret: ""
+  secretKeys:
+    secret: AF_AGENTRAIL_SECRET
+    hashKey: AF_AGENTRAIL_HASH_KEY
+
 # Billing.
 #
 # All three of secretKey, webhookSecret and priceTeam or none of them. The

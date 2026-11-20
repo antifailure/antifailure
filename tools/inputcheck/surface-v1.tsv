@@ -19,6 +19,12 @@
 # Defaults are deliberately absent. They are not promised, they move, and
 # tools/tagsync exists because image_tag's default has to move on every release.
 helm	value	affinity	map	optional
+helm	value	agentrail.endpoint	string	optional
+helm	value	agentrail.existingSecret	string	optional
+helm	value	agentrail.hashKey	string	optional
+helm	value	agentrail.secret	string	optional
+helm	value	agentrail.secretKeys.hashKey	string	optional
+helm	value	agentrail.secretKeys.secret	string	optional
 helm	value	analytics.existingSecret	string	optional
 helm	value	analytics.operatorOrg	string	optional
 helm	value	analytics.retentionDays	string	optional
