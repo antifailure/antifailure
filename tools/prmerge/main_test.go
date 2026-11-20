@@ -140,6 +140,9 @@ type fake struct {
 	checkRuns  string
 	statuses   string
 	commit     string
+	prFiles    string
+	prCommits  string
+	filesErr   error
 	mergeErr   error
 	configErr  error
 	protErr    error
@@ -190,6 +193,13 @@ func (f *fake) run(name string, args ...string) ([]byte, error) {
 		return []byte(f.statuses), nil
 	case name == "gh" && args[0] == "api" && strings.Contains(joined, "/commits/"):
 		return []byte(f.commit), nil
+	case name == "gh" && args[0] == "api" && strings.Contains(joined, "/pulls/") && strings.Contains(joined, "/files"):
+		if f.filesErr != nil {
+			return nil, f.filesErr
+		}
+		return []byte(f.prFiles), nil
+	case name == "gh" && args[0] == "api" && strings.Contains(joined, "/pulls/") && strings.Contains(joined, "/commits?"):
+		return []byte(f.prCommits), nil
 	}
 	return nil, fmt.Errorf("the test was asked to run something it does not answer: %s %s", name, joined)
 }
@@ -1358,5 +1368,62 @@ func TestTheDoubleHyphenRuleExemptsCodeSpansAndStillRefusesProse(t *testing.T) {
 				t.Fatalf("this should have been allowed and was refused as %q: %q", problems[0], c.text)
 			}
 		})
+	}
+}
+
+// The trailer that lived only on a branch commit. #737's commit carried
+// Changelog-None, its pull request passed changecheck, and the squash body was
+// the description, so main went red on a commit nobody can amend.
+func TestABranchsChangelogNoneIsCarriedIntoTheSquash(t *testing.T) {
+	f := ready(green(), "CLEAN")
+	f.prFiles = "ee/engine/secrets/aws_test.go\n"
+	f.prCommits = "ee: a test\n\nChangelog-None: a test that depended on the machine it ran on\n" +
+		"Signed-off-by: Vir Sanghavi <67278851+VirSanghavi@users.noreply.github.com>\n"
+	out, err := attempt(f)
+	if err != nil {
+		t.Fatalf("refused: %v\n%s", err, out)
+	}
+	body, _ := f.argument("--body")
+	want := "Changelog-None: a test that depended on the machine it ran on\n" +
+		"Signed-off-by: Vir Sanghavi <67278851+VirSanghavi@users.noreply.github.com>"
+	if body != want {
+		t.Errorf("the squash body is %q, want %q", body, want)
+	}
+}
+
+func TestAFragmentMeansNoTrailerIsCarried(t *testing.T) {
+	f := ready(green(), "CLEAN")
+	f.prFiles = ".changes/a-thing.md\n"
+	f.prCommits = "x\n\nChangelog-None: an earlier commit said so before the fragment\n"
+	if out, err := attempt(f); err != nil {
+		t.Fatalf("refused: %v\n%s", err, out)
+	}
+	if body, _ := f.argument("--body"); strings.Contains(body, "Changelog-None") {
+		t.Errorf("a pull request that adds a fragment had a trailer carried anyway: %q", body)
+	}
+}
+
+func TestAChangelogNoneAlreadyInTheBodyIsNotDoubled(t *testing.T) {
+	f := ready(green(), "CLEAN")
+	f.prCommits = "x\n\nChangelog-None: a lint fix with no behaviour change\n"
+	var out bytes.Buffer
+	given := "Body.\n\nChangelog-None: a lint fix with no behaviour change"
+	if err := merge(hub{runner: f, repo: "antifailure/antifailure"}, f, 231, given, false, 2, 0, &out); err != nil {
+		t.Fatalf("refused: %v\n%s", err, out.String())
+	}
+	body, _ := f.argument("--body")
+	if n := strings.Count(body, "Changelog-None:"); n != 1 {
+		t.Errorf("the body carries %d Changelog-None lines: %q", n, body)
+	}
+}
+
+func TestUnreadableChangelogEvidenceRefusesTheMerge(t *testing.T) {
+	f := ready(green(), "CLEAN")
+	f.filesErr = errors.New("HTTP 502")
+	if _, err := attempt(f); err == nil || !strings.Contains(err.Error(), "changelog fragment") {
+		t.Fatalf("an unreadable file list merged anyway, err=%v", err)
+	}
+	if f.merged() {
+		t.Error("it issued the merge")
 	}
 }

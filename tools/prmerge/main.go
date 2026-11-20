@@ -519,6 +519,68 @@ func willCarry(args []string, own string) bool {
 // There is no `--delete-branch` here and there must never be one. It deletes
 // the branch even when the merge is REFUSED, and deleting the branch closes the
 // pull request, so a single refusal discards the work.
+// changelogEvidence reads what decides changecheck on the base branch: whether
+// the pull request ADDS a fragment under .changes, and every Changelog-None
+// line its own commits carry.
+func (h hub) changelogEvidence(number int) (fragment bool, trailers []string, err error) {
+	files, err := h.gh("api", "--paginate",
+		fmt.Sprintf("repos/%s/pulls/%d/files?per_page=100", h.repo, number),
+		"--jq", `.[] | select(.status == "added") | .filename`)
+	if err != nil {
+		return false, nil, fmt.Errorf("reading the files of #%d: %w", number, err)
+	}
+	for _, f := range strings.Split(string(files), "\n") {
+		f = strings.TrimSpace(f)
+		if strings.HasPrefix(f, ".changes/") && strings.HasSuffix(f, ".md") {
+			fragment = true
+		}
+	}
+	messages, err := h.gh("api", "--paginate",
+		fmt.Sprintf("repos/%s/pulls/%d/commits?per_page=100", h.repo, number),
+		"--jq", `.[].commit.message`)
+	if err != nil {
+		return false, nil, fmt.Errorf("reading the commits of #%d: %w", number, err)
+	}
+	seen := map[string]bool{}
+	for _, line := range changelogNoneLine.FindAllString(string(messages), -1) {
+		line = strings.TrimRight(line, " \t\r")
+		if !seen[line] {
+			seen[line] = true
+			trailers = append(trailers, line)
+		}
+	}
+	return fragment, trailers, nil
+}
+
+// changelogNoneLine is the escape hatch changecheck accepts, as a line.
+var changelogNoneLine = regexp.MustCompile(`(?m)^Changelog-None: .{10,}$`)
+
+// carryChangelogNone puts a branch's Changelog-None trailer into the squash
+// body when nothing else would satisfy changecheck on the base branch.
+//
+// The pull request's changecheck reads the branch's commits; the base branch's
+// reads the ONE commit the squash makes, whose message is the body passed
+// here, which is usually the pull request's description. A trailer that lived
+// only on a branch commit therefore passed the pull request and vanished in the
+// merge, and main went red on a commit that cannot be amended, with cd.yml
+// deploying nothing. That happened on 2026-09-13, on 2026-09-27, and on
+// 2026-11-20 to #737, which put main red on the commit v1.10.0 was going to be
+// tagged on. Carried before the sign-off, so both stay in the final trailer
+// block.
+func carryChangelogNone(body string, fragment bool, trailers []string, own string) string {
+	if fragment || len(trailers) == 0 || changelogNoneLine.MatchString(body) {
+		return body
+	}
+	block := strings.Join(trailers, "\n")
+	if strings.HasSuffix(body, "\n"+own) {
+		return strings.TrimSuffix(body, own) + block + "\n" + own
+	}
+	if body == own {
+		return block + "\n" + own
+	}
+	return body + "\n" + block
+}
+
 func mergeArgs(repo string, number int, subject, body string) []string {
 	return []string{"pr", "merge", fmt.Sprint(number), "--repo", repo, "--squash",
 		"--subject", subject, "--body", body}
@@ -1322,6 +1384,16 @@ func merge(h hub, r runner, number int, given string, dry bool, attempts int, in
 	body, err := bodyFor(given, own)
 	if err != nil {
 		problems = append(problems, err.Error())
+	}
+	if fragment, trailers, evErr := h.changelogEvidence(number); evErr != nil {
+		// Unknown is a refusal. Merging blind is how a trailer gets lost.
+		problems = append(problems, fmt.Sprintf(
+			"could not read whether #%d adds a changelog fragment or carries Changelog-None, "+
+				"so the squash may put %s red on changecheck: %v", number, p.BaseRefName, evErr))
+	} else if carried := carryChangelogNone(body, fragment, trailers, own); carried != body {
+		body = carried
+		_, _ = fmt.Fprintf(out, "ok  %-40s carried from the branch: %s\n",
+			"the squash carries Changelog-None", strings.Join(trailers, "; "))
 	}
 	problems = append(problems, prose("subject", subject)...)
 	problems = append(problems, prose("body", body)...)
