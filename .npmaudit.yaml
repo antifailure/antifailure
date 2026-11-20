@@ -7,8 +7,8 @@
 # is what keeps the file honest: an exception left behind after the dependency
 # moves reads like protection that is not there.
 #
-# It is empty, and that is the current state rather than a placeholder. Every
-# lockfile here audits clean today, dev dependencies included, so this gate
+# It held nothing until GHSA-3v2p-hm54-8qcq below, and every other
+# advisory is fixed rather than accepted, dev dependencies included, so this gate
 # fires on drift rather than on a backlog.
 #
 # npm audit has no reachability analysis, unlike govulncheck. It cannot tell you
@@ -30,3 +30,19 @@
 #         Why this cannot reach anything we ship, and what would change it.
 
 allow:
+  - id: GHSA-3v2p-hm54-8qcq
+    package: "@opentelemetry/instrumentation-http"
+    expires: 2027-01-15
+    reason: >
+      The fix exists, 0.222.0, and npm 11.6.2 cannot take it here:
+      agentrail-node 0.4.1 pins instrumentation-http to exactly 0.221.0, a
+      root override is ignored while the lockfile entry satisfies the pin,
+      and deleting that entry to force it made npm drop the package from the
+      lockfile outright. The advisory is the inbound query string written
+      verbatim into a server span's url.query. Nothing here exports that
+      attribute: agentrail-node copies a fixed list of span attributes and
+      rebuilds url.full with the query removed, and the control plane runs no
+      other exporter. web/apps/api/test/agentrail.test.ts sends code, state
+      and sig on an allowlisted request and requires none of them to reach the
+      collector; patching the exporter to keep the query turns it red. Ends
+      when agentrail-node releases with instrumentation-http 0.222.0 or later.

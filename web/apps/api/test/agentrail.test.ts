@@ -244,7 +244,13 @@ describe('what leaves the process', () => {
     appPort = await listening(app)
 
     try {
-      const callback = await fetch(`http://127.0.0.1:${appPort}/auth/github/callback`)
+      // A query that carries what an OAuth callback and a signed URL carry.
+      // GHSA-3v2p-hm54-8qcq is instrumentation-http writing an inbound query
+      // verbatim into the server span's url.query; .npmaudit.yaml accepts it on
+      // the strength of these three never reaching the collector.
+      const callback = await fetch(
+        `http://127.0.0.1:${appPort}/auth/github/callback?code=QUERY-SECRET-CODE&state=QUERY-SECRET-STATE&sig=QUERY-SECRET-SIG`,
+      )
       assert.equal(callback.status, 200)
 
       const client = new Client({ name: 'agentrail-test', version: '1.0.0' })
@@ -276,6 +282,9 @@ describe('what leaves the process', () => {
       'acme-node-org',
       'acme-secret-repo',
       'RESULT-SECRET-TOKEN',
+      'QUERY-SECRET-CODE',
+      'QUERY-SECRET-STATE',
+      'QUERY-SECRET-SIG',
     ]) {
       assert.ok(!body.includes(customerName), `${customerName} reached the collector`)
     }

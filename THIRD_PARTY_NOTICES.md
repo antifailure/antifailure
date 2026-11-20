@@ -718,21 +718,40 @@ identical to. A licence is read from the text a package ships, and a
 package that ships no licence text is attributed from its declaration and
 says so.
 
-### npm packages (100)
+### npm packages (124)
 
 - `@hono/node-server` 2.1.6, MIT
 - `@hono/trpc-server` 0.4.2, MIT (declared, no licence file shipped)
 - `@modelcontextprotocol/sdk` 1.32.1, MIT
+- `@opentelemetry/api` 1.9.1, Apache-2.0
+- `@opentelemetry/api-logs` 0.221.0, Apache-2.0
+- `@opentelemetry/context-async-hooks` 2.10.0, Apache-2.0
+- `@opentelemetry/core` 2.10.0, Apache-2.0
+- `@opentelemetry/exporter-logs-otlp-proto` 0.221.0, Apache-2.0
+- `@opentelemetry/exporter-trace-otlp-proto` 0.221.0, Apache-2.0
+- `@opentelemetry/instrumentation` 0.221.0, Apache-2.0
+- `@opentelemetry/instrumentation-http` 0.221.0, Apache-2.0
+- `@opentelemetry/instrumentation-undici` 0.31.0, Apache-2.0
+- `@opentelemetry/otlp-exporter-base` 0.221.0, Apache-2.0
+- `@opentelemetry/otlp-transformer` 0.221.0, Apache-2.0
+- `@opentelemetry/resources` 2.10.0, Apache-2.0
+- `@opentelemetry/sdk-logs` 0.221.0, Apache-2.0
+- `@opentelemetry/sdk-metrics` 2.10.0, Apache-2.0
+- `@opentelemetry/sdk-trace` 2.10.0, Apache-2.0
+- `@opentelemetry/semantic-conventions` 1.45.0, Apache-2.0
 - `@posthog/core` 1.59.1, Apache-2.0 AND MIT
 - `@posthog/types` 1.416.0, Apache-2.0 AND MIT
 - `@trpc/server` 11.19.0, MIT
 - `accepts` 2.0.0, MIT
+- `agentrail-core` 0.4.1, Apache-2.0
+- `agentrail-node` 0.4.1, Apache-2.0
 - `ajv` 8.20.0, MIT
 - `ajv-formats` 3.0.1, MIT
 - `body-parser` 2.4.0, MIT
 - `bytes` 3.1.2, MIT
 - `call-bind-apply-helpers` 1.0.2, MIT
 - `call-bound` 1.0.4, MIT
+- `cjs-module-lexer` 2.3.0, MIT
 - `content-disposition` 1.1.0, MIT
 - `content-type` 1.0.5, MIT
 - `content-type` 2.1.0, MIT
@@ -748,6 +767,7 @@ says so.
 - `encodeurl` 2.0.0, MIT
 - `es-define-property` 1.0.1, MIT
 - `es-errors` 1.3.0, MIT
+- `es-module-lexer` 3.0.5, MIT
 - `es-object-atoms` 1.1.2, MIT
 - `escape-html` 1.0.3, MIT
 - `etag` 1.8.1, MIT
@@ -759,6 +779,7 @@ says so.
 - `fast-uri` 3.1.9, BSD-3-Clause
 - `finalhandler` 2.1.1, MIT
 - `forwarded` 0.2.0, MIT
+- `forwarded-parse` 2.1.2, MIT
 - `fresh` 2.0.0, MIT
 - `function-bind` 1.1.2, MIT
 - `get-intrinsic` 1.3.0, MIT
@@ -769,6 +790,7 @@ says so.
 - `hono` 4.13.16, MIT
 - `http-errors` 2.0.1, MIT
 - `iconv-lite` 0.7.3, MIT
+- `import-in-the-middle` 3.6.0, Apache-2.0
 - `inherits` 2.0.4, ISC
 - `ip-address` 10.7.5, MIT
 - `ipaddr.js` 1.9.1, MIT
@@ -782,6 +804,7 @@ says so.
 - `merge-descriptors` 2.0.0, MIT
 - `mime-db` 1.54.0, MIT
 - `mime-types` 3.0.2, MIT
+- `module-details-from-path` 1.0.4, MIT
 - `ms` 2.1.3, MIT
 - `negotiator` 1.1.0, MIT
 - `object-assign` 4.1.1, MIT
@@ -799,6 +822,7 @@ says so.
 - `range-parser` 1.3.0, MIT
 - `raw-body` 3.0.2, MIT
 - `require-from-string` 2.0.2, MIT
+- `require-in-the-middle` 8.0.1, MIT
 - `router` 2.2.0, MIT
 - `safer-buffer` 2.1.2, MIT
 - `send` 1.2.1, MIT
@@ -865,6 +889,47 @@ says so.
 - `rope-sequence` 1.3.4, MIT
 - `use-sync-external-store` 1.7.0, MIT
 - `w3c-keyname` 2.2.8, MIT
+
+### Notices the packages ship
+
+#### `import-in-the-middle` NOTICE
+
+```text
+import-in-the-middle is licensed for use as follows:
+
+Copyright 2024 Node.js contributors. All rights reserved.
+
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+This license applies to parts of import-in-the-middle originating from the
+https://github.com/DataDog/import-in-the-middle repository:
+
+    This product includes software developed at Datadog (https://www.datadoghq.com/).
+
+    Copyright 2021 Datadog, Inc.
+
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+```
 
 ## The enterprise control plane image, in addition
 
